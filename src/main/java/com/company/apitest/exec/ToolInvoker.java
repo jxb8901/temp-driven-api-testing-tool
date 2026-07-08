@@ -60,10 +60,12 @@ public class ToolInvoker {
         Path parsedFile = invocationDir.resolve("parsed-output.yaml");
         Path injectionFile = invocationDir.resolve("context-injection.yaml");
 
+        // Call-site input is resolved first; config-level arguments can normalize or enrich that input.
         Map<String, Object> resolvedInput = resolveMap(input, context);
         resolvedInput.putAll(resolveToolArguments(tool.arguments(), resolvedInput, context));
         Files.write(inputFile, new Yaml().dump(resolvedInput).getBytes(StandardCharsets.UTF_8));
 
+        // The command sees only file paths and resolved TOOL.input values, keeping scripts reusable.
         Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
         flatten("TOOL.input", resolvedInput, renderContext);
         renderContext.put("TOOL.inputFile", inputFile.toString());
@@ -86,6 +88,7 @@ public class ToolInvoker {
         Object parsed = parseOutput(outputFile, tool.output());
         Files.write(parsedFile, new Yaml().dump(parsed).getBytes(StandardCharsets.UTF_8));
 
+        // Store both parsed data and raw file paths so later templates can use either form via TOOLS.name[index].
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
         invocation.put("input", resolvedInput);
         invocation.put("output", parsed);
@@ -93,6 +96,7 @@ public class ToolInvoker {
         invocation.put("outputFile", outputFile.toString());
         context.addToolInvocation(toolName, invocation);
 
+        // Tool injection is the sanctioned way for one tool to publish named values to following steps.
         Map<String, Object> injection = new LinkedHashMap<String, Object>();
         Map<String, Object> injectContext = new LinkedHashMap<String, Object>(context.values());
         flatten("TOOL.input", resolvedInput, injectContext);

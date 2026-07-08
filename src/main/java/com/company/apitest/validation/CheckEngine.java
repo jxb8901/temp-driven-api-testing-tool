@@ -7,7 +7,6 @@ package com.company.apitest.validation;
 import com.company.apitest.core.CaseRuntimeContext;
 import com.company.apitest.core.ResultStatus;
 import com.company.apitest.core.ValidationResult;
-import com.company.apitest.exec.ToolInvocationResult;
 import com.company.apitest.template.UnifiedTemplateEngine;
 
 import java.util.ArrayList;
@@ -143,6 +142,7 @@ public class CheckEngine {
         }
 
         private String readOperand() {
+            // Rendered tool output may be unquoted text with spaces, so operands are read until an operator boundary.
             StringBuilder operand = new StringBuilder();
             while (position < tokens.size() && !isBoundary(tokens.get(position))) {
                 if (operand.length() > 0) {

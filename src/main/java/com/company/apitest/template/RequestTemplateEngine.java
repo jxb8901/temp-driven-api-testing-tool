@@ -33,6 +33,7 @@ public class RequestTemplateEngine {
     }
 
     public Path renderArtifact(String templateName, CaseRuntimeContext context) throws Exception {
+        // Rendering is internal, but it is recorded like a tool invocation so request XML follows V1.1 artifact rules.
         int sequence = context.nextToolSequence("renderRequestTemplate");
         Path caseDir = java.nio.file.Paths.get(String.valueOf(context.resolve("PATH.caseOutputDir")));
         Path invocationDir = caseDir.resolve("tools").resolve(String.format("%03d_%s", sequence, "renderRequestTemplate"));
@@ -55,6 +56,7 @@ public class RequestTemplateEngine {
         Files.write(stderrFile, new byte[0]);
         Files.write(outputFile, render(templateName, context).getBytes(StandardCharsets.UTF_8));
 
+        // Keep the parsed output lightweight; XML content remains available through outputFile.
         Map<String, Object> parsed = new LinkedHashMap<String, Object>();
         parsed.put("xmlFile", outputFile.toString());
         Files.write(parsedFile, new Yaml().dump(parsed).getBytes(StandardCharsets.UTF_8));

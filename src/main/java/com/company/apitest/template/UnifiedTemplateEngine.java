@@ -70,6 +70,7 @@ public class UnifiedTemplateEngine {
     }
 
     private int findToolEnd(String text, int bodyStart) {
+        // Tool calls may contain ${...} arguments, so a plain "next }" search would stop too early.
         int nestedValueDepth = 0;
         for (int i = bodyStart; i < text.length(); i++) {
             char ch = text.charAt(i);
@@ -98,6 +99,7 @@ public class UnifiedTemplateEngine {
         String args = body.substring(open + 1, body.lastIndexOf(')')).trim();
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         if (!args.isEmpty()) {
+            // Dotted argument names become nested YAML input, for example txn.ref -> {txn: {ref: ...}}.
             for (String pair : args.split(",")) {
                 int eq = pair.indexOf('=');
                 if (eq > 0) {
