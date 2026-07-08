@@ -5,27 +5,28 @@
 package com.company.apitest.core;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * Per-case runtime context used by all V1.1 templates and tool invocations.
+ * Per-case runtime context used by V1.2 stage actions and tool invocations.
  */
 public class CaseRuntimeContext {
     private final Map<String, Object> values = new LinkedHashMap<String, Object>();
-    private final Map<String, List<Map<String, Object>>> tools = new LinkedHashMap<String, List<Map<String, Object>>>();
+    private final Map<String, Map<String, Object>> tools = new LinkedHashMap<String, Map<String, Object>>();
     private int toolSequence = 0;
 
-    public CaseRuntimeContext(TestCase testCase, Path caseOutputDir) {
+    public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         values.putAll(testCase.fixedValues());
-        values.putAll(testCase.requestData());
+        values.putAll(testCase.caseData());
         values.putAll(testCase.expectedPrecheckData());
         values.putAll(testCase.expectedPostcheckData());
         values.put("CaseID", testCase.caseId());
         values.put("caseId", testCase.caseId());
         values.put("PATH.caseOutputDir", caseOutputDir.toString());
+        values.put("RUN.runId", runId);
+        values.put("RUN.runDirectory", runDirectory.toString());
+        values.put("RUN.caseLog", caseLog.toString());
     }
 
     public Object resolve(String path) {
@@ -41,7 +42,7 @@ public class CaseRuntimeContext {
         if (path.startsWith("TOOLS.")) {
             return resolveToolPath(path.substring("TOOLS.".length()));
         }
-        return null;
+        return getPath(values, path);
     }
 
     public void put(String key, Object value) {
@@ -57,32 +58,26 @@ public class CaseRuntimeContext {
         return toolSequence;
     }
 
-    public void addToolInvocation(String toolName, Map<String, Object> invocation) {
-        List<Map<String, Object>> invocations = tools.get(toolName);
-        if (invocations == null) {
-            invocations = new ArrayList<Map<String, Object>>();
-            tools.put(toolName, invocations);
+    public String nextInvocationId(String base) {
+        int sequence = nextToolSequence(base);
+        return base + "_" + String.format("%03d", sequence);
+    }
+
+    public void addToolInvocation(String invocationId, Map<String, Object> invocation) {
+        if (tools.containsKey(invocationId)) {
+            throw new IllegalArgumentException("Duplicate invocation id: " + invocationId);
         }
-        invocations.add(invocation);
+        tools.put(invocationId, invocation);
     }
 
     private Object resolveToolPath(String path) {
-        int bracket = path.indexOf('[');
-        int close = path.indexOf(']');
-        if (bracket <= 0 || close <= bracket) {
+        int dot = path.indexOf('.');
+        String id = dot < 0 ? path : path.substring(0, dot);
+        Map<String, Object> invocation = tools.get(id);
+        if (invocation == null) {
             return null;
         }
-        String tool = path.substring(0, bracket);
-        int index = Integer.parseInt(path.substring(bracket + 1, close));
-        List<Map<String, Object>> invocations = tools.get(tool);
-        if (invocations == null || index < 0 || index >= invocations.size()) {
-            return null;
-        }
-        String remainder = path.substring(close + 1);
-        if (remainder.startsWith(".")) {
-            remainder = remainder.substring(1);
-        }
-        return getPath(invocations.get(index), remainder);
+        return dot < 0 ? invocation : getPath(invocation, path.substring(dot + 1));
     }
 
     @SuppressWarnings("unchecked")

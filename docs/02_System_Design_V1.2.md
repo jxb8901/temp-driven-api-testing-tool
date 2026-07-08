@@ -83,7 +83,7 @@ A Tool Invocation Template may:
 - Render XML, YAML, SQL, text, JSON, or any other payload
 - Invoke one or more configured tools
 - Evaluate assertions
-- Inject values into the Case Runtime Context
+- Expose each action result through `TOOLS.<InvocationId>` in the Case Runtime Context
 - Produce actual results for reporting
 
 Each Tool Invocation Template is made of ordered Template Actions.
@@ -804,7 +804,7 @@ For Each Action
   ├── Render payload if needed
   ├── Execute tool if needed
   ├── Evaluate assertion if needed
-  ├── Inject context if needed
+  ├── Record action result under TOOLS.<InvocationId>
   └── Append details to case log
   │
   ▼
@@ -1096,6 +1096,43 @@ Run with an explicit run ID:
 
 ```sh
 ./att.sh --suite testcase/payment_regression.xlsx --run-id SIT-20260709-01
+```
+
+## 11.5 Release Package
+
+ATT should provide a self-contained release package so users do not need a Maven project checkout.
+
+Recommended package layout:
+
+```text
+att-v1.2/
+  att.sh
+  classes/
+  lib/
+  config/
+  templates/
+  tools/
+  testcase/
+  docs/
+  README.md
+  CHANGELOG.md
+  RELEASE_MANIFEST.txt
+```
+
+`att.sh` should first look for packaged `classes/` and `lib/*.jar`.
+
+If they exist, ATT runs from the package directory and writes output under that package unless `--output-dir` is specified.
+
+The source repository may provide a build script such as:
+
+```sh
+scripts/build-release.sh
+```
+
+The script should compile classes for Java 8 compatibility, copy runtime dependency jars, copy configuration/templates/tool scripts, and create an archive such as:
+
+```text
+dist/att-v1.2.tar.gz
 ```
 
 ---
@@ -1447,6 +1484,8 @@ V1.2 design is considered complete when the following statements are true:
 - Report columns are configured in `config.yaml`.
 - No separate `report/` directory is required.
 - `att.sh` is documented as the user-facing CLI.
+- A release package can be built with compiled classes, dependency jars, config, templates, scripts, testcase examples, and docs.
+- Downloaded or extracted release packages can run `./att.sh` without requiring Maven or source compilation.
 - CLI examples cover suite file, suite directory, include tag, exclude tag, rerun failed, run ID override, and dry-run.
 - Run ID defaults to timestamp `yyyyMMdd-HHmmss` and can be specified by `att.sh --run-id`.
 - Rerun failed is based on machine-readable run history.

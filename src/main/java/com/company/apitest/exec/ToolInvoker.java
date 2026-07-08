@@ -6,6 +6,7 @@ package com.company.apitest.exec;
 
 import com.company.apitest.config.FrameworkConfig;
 import com.company.apitest.config.ToolConfig;
+import com.company.apitest.core.CaseExecutionLog;
 import com.company.apitest.core.CaseRuntimeContext;
 import com.company.apitest.template.TemplateRenderer;
 import org.w3c.dom.Document;
@@ -19,13 +20,13 @@ import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Executes configured tools and persists every invocation artifact.
+ * Executes configured tools and records each invocation into the case log.
  */
 public class ToolInvoker {
     private final Path projectRoot;
@@ -42,23 +43,15 @@ public class ToolInvoker {
         this.commandRunner = commandRunner;
     }
 
-    public ToolInvocationResult invoke(String toolName, Map<String, Object> input, CaseRuntimeContext context) throws Exception {
+    public ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         ToolConfig tool = config.tool(toolName);
         if (tool == null) {
             throw new IllegalArgumentException("Unknown tool: " + toolName);
         }
-        int sequence = context.nextToolSequence(toolName);
-        Path caseDir = Paths.get(String.valueOf(context.resolve("PATH.caseOutputDir")));
-        Path invocationDir = caseDir.resolve("tools").resolve(String.format("%03d_%s", sequence, toolName));
-        Files.createDirectories(invocationDir);
-
-        Path inputFile = invocationDir.resolve("input.yaml");
-        Path outputFile = invocationDir.resolve("output." + extension(tool.output()));
-        Path commandFile = invocationDir.resolve("command.txt");
-        Path stdoutFile = invocationDir.resolve("stdout.txt");
-        Path stderrFile = invocationDir.resolve("stderr.txt");
-        Path parsedFile = invocationDir.resolve("parsed-output.yaml");
-        Path injectionFile = invocationDir.resolve("context-injection.yaml");
+        String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
+        Instant started = Instant.now();
+        Path inputFile = Files.createTempFile("att-" + id + "-", ".input.yaml");
+        Path outputFile = Files.createTempFile("att-" + id + "-", "." + extension(tool.output()));
 
         // Call-site input is resolved first; config-level arguments can normalize or enrich that input.
         Map<String, Object> resolvedInput = resolveMap(input, context);
@@ -71,45 +64,38 @@ public class ToolInvoker {
         renderContext.put("TOOL.inputFile", inputFile.toString());
         renderContext.put("TOOL.outputFile", outputFile.toString());
         String command = TemplateRenderer.render(tool.command(), renderContext);
-        Files.write(commandFile, command.getBytes(StandardCharsets.UTF_8));
         CommandResult commandResult = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()));
-        Files.write(stdoutFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
-        Files.write(stderrFile, commandResult.stderr().getBytes(StandardCharsets.UTF_8));
+        if (!Files.exists(outputFile)) {
+            Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
+        }
+
+        String rawOutput = new String(Files.readAllBytes(outputFile), StandardCharsets.UTF_8).trim();
+        Object parsed = commandResult.exitCode() == 0 && !commandResult.timedOut() ? parseOutput(rawOutput, tool.output()) : rawOutput;
+
+        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation.put("type", "tool");
+        invocation.put("tool", toolName);
+        invocation.put("input", resolvedInput);
+        invocation.put("output", parsed);
+        invocation.put("rawOutput", rawOutput);
+        invocation.put("stdout", commandResult.stdout());
+        invocation.put("stderr", commandResult.stderr());
+        invocation.put("command", command);
+        invocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 ? "PASS" : "ERROR"));
+        invocation.put("durationMs", Duration.between(started, Instant.now()).toMillis());
+        invocation.put("exitCode", commandResult.exitCode());
+        context.addToolInvocation(id, invocation);
+        context.put("TOOL.input", resolvedInput);
+        context.put("TOOL.output", parsed);
+        log.append("ACTION " + id, invocation);
+
         if (commandResult.timedOut()) {
             throw new IllegalStateException("Tool timed out: " + toolName);
         }
         if (commandResult.exitCode() != 0) {
             throw new IllegalStateException("Tool failed: " + toolName + ", exitCode=" + commandResult.exitCode());
         }
-        if (!Files.exists(outputFile)) {
-            Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
-        }
-
-        Object parsed = parseOutput(outputFile, tool.output());
-        Files.write(parsedFile, new Yaml().dump(parsed).getBytes(StandardCharsets.UTF_8));
-
-        // Store both parsed data and raw file paths so later templates can use either form via TOOLS.name[index].
-        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
-        invocation.put("input", resolvedInput);
-        invocation.put("output", parsed);
-        invocation.put("inputFile", inputFile.toString());
-        invocation.put("outputFile", outputFile.toString());
-        context.addToolInvocation(toolName, invocation);
-
-        // Tool injection is the sanctioned way for one tool to publish named values to following steps.
-        Map<String, Object> injection = new LinkedHashMap<String, Object>();
-        Map<String, Object> injectContext = new LinkedHashMap<String, Object>(context.values());
-        flatten("TOOL.input", resolvedInput, injectContext);
-        flatten("TOOL.output", parsed, injectContext);
-        injectContext.put("TOOL.output", parsed);
-        for (Map.Entry<String, String> entry : tool.inject().entrySet()) {
-            String value = TemplateRenderer.render(entry.getValue(), injectContext);
-            context.put(entry.getKey(), value);
-            injection.put(entry.getKey(), value);
-        }
-        Files.write(injectionFile, new Yaml().dump(injection).getBytes(StandardCharsets.UTF_8));
-
-        return new ToolInvocationResult(toolName, parsed, outputFile, invocation);
+        return new ToolInvocationResult(toolName, id, parsed, invocation);
     }
 
     @SuppressWarnings("unchecked")
@@ -155,8 +141,7 @@ public class ToolInvoker {
         }
     }
 
-    private Object parseOutput(Path outputFile, String outputType) throws Exception {
-        String text = new String(Files.readAllBytes(outputFile), StandardCharsets.UTF_8).trim();
+    public Object parseOutput(String text, String outputType) throws Exception {
         if ("yaml".equalsIgnoreCase(outputType)) {
             Object loaded = new Yaml().load(text);
             return loaded == null ? new LinkedHashMap<String, Object>() : loaded;

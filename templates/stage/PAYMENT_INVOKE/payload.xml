@@ -1,0 +1,10 @@
+<PaymentTransferRequest>
+  <CaseId>${CaseID}</CaseId>
+  <TxnSeq>${TOOLS.getAcDate.output}${TOOLS.getSeq.output}</TxnSeq>
+  <EndToEndId>${TOOLS.genEndToEndId.output}</EndToEndId>
+  <DebitAccount>${Debit Account}</DebitAccount>
+  <CreditAccount>${Credit Account}</CreditAccount>
+  <Amount>${Amount}</Amount>
+  <Currency>${Currency}</Currency>
+  <Channel>${channel}</Channel>
+</PaymentTransferRequest>

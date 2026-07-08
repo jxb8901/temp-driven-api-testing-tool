@@ -1,0 +1,27 @@
+name: PAYMENT_VERIFY
+description: Verify payment API response, CT records and logs
+
+actions:
+  checkAPIResult:
+    type: assert
+    expression: "${TOOLS.invokeApi.output.Response.Status} == '${expected.status}'"
+
+  checkRejectCode:
+    type: assert
+    expression: "${TOOLS.invokeApi.output.Response.RejectCode} == '${expected.rejectCode}'"
+
+  selectTxn:
+    type: tool
+    call: "#{selectCtxn(txn.ref=${CaseID})}"
+
+  checkCtxRecords:
+    type: assert
+    expression: "${TOOLS.selectTxn.output.effectRows} >= '${expected.effectRows}' and ${TOOLS.selectTxn.output.record.status} like '%${expected.txnStatus}%'"
+
+  getLogs:
+    type: tool
+    call: "#{getAppLogs(caseId=${CaseID})}"
+
+  checkLogs:
+    type: assert
+    expression: "${TOOLS.getLogs.output} like '%${expected.keyword1}%${expected.keyword2}%'"

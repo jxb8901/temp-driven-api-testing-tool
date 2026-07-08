@@ -1,26 +1,53 @@
 # ATT - Automated Testing Tool
 
-V1.1 configuration and sample assets for the framework described in `docs/02_System_Design_v1.1.md`.
+ATT V1.2 runs Excel-driven API test suites through configurable stages and Tool Invocation Templates.
 
-## Run
+## Run From Source
 
-Requires JDK 8 and Maven.
+Requires JDK 8 or JDK 11. Maven is optional for development builds.
 
 ```sh
-mvn test
-mvn exec:java -Dexec.args="--config config/config.yaml --suite testcase/payment_regression.xlsx"
+./att.sh --config config/config.yaml --suite testcase/payment_regression.xlsx
 ```
 
-The repository includes a sample suite at `testcase/payment_regression.xlsx`.
+Useful selectors:
 
-## V1.1 Scope
+```sh
+./att.sh --suite-dir testcase
+./att.sh --tag smoke --exclude-tag slow
+./att.sh --case-id TC001
+./att.sh --rerun-failed
+./att.sh --dry-run
+```
 
-- Excel-based test suite loading with columns defined in `config/config.yaml`.
-- Request XML generation from `templates/request/<name>/template.xml`.
-- API invocation definition from `templates/request/<name>/api.invocation.yaml`.
-- External tool invocation through `tools` entries in `config/config.yaml`.
-- Request-template tool calls using `#{toolName}`.
-- Check templates under `templates/check/<name>/template.yaml`.
-- PreCheck and PostCheck execution using the same check-template format.
-- Sequential execution only.
-- Excel report generation.
+## Build Release Package
+
+The release package contains `att.sh`, compiled classes, dependency jars, config, templates, tools, testcase examples, and docs.
+
+```sh
+scripts/build-release.sh
+```
+
+The package is generated under `dist/`, for example:
+
+```text
+dist/att-v1.2.tar.gz
+```
+
+After download or copy:
+
+```sh
+tar -xzf att-v1.2.tar.gz
+cd att-v1.2
+./att.sh --suite testcase/payment_regression.xlsx
+```
+
+## V1.2 Scope
+
+- Excel case loading with configured stage template columns.
+- Unified Tool Invocation Templates under `templates/stage/`.
+- `${...}` context references and `#{...}` tool calls.
+- Action outputs referenced by invocation ID, for example `${TOOLS.invokeApi.output.Response.Status}`.
+- Single case execution log under `output/<RunID>/<CaseID>/`.
+- Result workbook generated in the RunID directory.
+- Run history through `run.yaml` and `output/latest-run.yaml`.

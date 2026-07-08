@@ -12,19 +12,19 @@ import java.util.Map;
  */
 public class ToolInvocationResult {
     private final String toolName;
+    private final String invocationId;
     private final Object output;
-    private final Path outputFile;
     private final Map<String, Object> invocation;
 
-    public ToolInvocationResult(String toolName, Object output, Path outputFile, Map<String, Object> invocation) {
+    public ToolInvocationResult(String toolName, String invocationId, Object output, Map<String, Object> invocation) {
         this.toolName = toolName;
+        this.invocationId = invocationId;
         this.output = output;
-        this.outputFile = outputFile;
         this.invocation = invocation;
     }
 
     public String toolName() { return toolName; }
+    public String invocationId() { return invocationId; }
     public Object output() { return output; }
-    public Path outputFile() { return outputFile; }
     public Map<String, Object> invocation() { return invocation; }
 }

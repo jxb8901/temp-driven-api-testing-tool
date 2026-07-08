@@ -1,5 +1,39 @@
 # Changelog
 
+## [V1.2] - 2026-07-09
+
+V1.2 implements the generic Tool Invocation Template model: ATT no longer treats request and check templates as separate framework concepts. Cases now run configured stages made of ordered template actions, and every action result is addressable through `TOOLS.<InvocationId>`.
+
+### Added
+
+- Added V1.2 stage/action runtime with `render`, `tool`, `assert`, and `log` template actions.
+- Added configurable stages in `config/config.yaml`, with default Pre/Main/Post stage columns.
+- Added `templates/stage/` template packages for payment prepare, invoke, and verify flows.
+- Added invocation ID based context references such as `${TOOLS.invokeApi.output.Response.Status}`.
+- Added single case execution log files under `output/<RunID>/<CaseID>/`.
+- Added run history files at `output/<RunID>/run.yaml` and `output/latest-run.yaml`.
+- Added `att.sh` command line entry point with suite, suite-dir, tag, exclude-tag, run-id, dry-run, fail-fast, and rerun-failed options.
+- Added result workbook generation under the run directory, for example `output/<RunID>/payment_regression.result.xlsx`.
+- Added `scripts/build-release.sh` to build a self-contained release package with compiled classes, dependency jars, config, templates, scripts, testcase examples, and docs.
+
+### Changed
+
+- Replaced V1.1 request/check/API template categories with generic Tool Invocation Templates.
+- Replaced per-tool input/output artifact files with ordered sections in the case execution log.
+- Updated Excel testcase configuration to use stage template columns and configurable report result columns.
+- Updated `testcase/payment_regression.xlsx` to 20 V1.2 scenarios.
+- Updated report generation to copy the original Excel workbook and append configured result fields.
+- Updated `att.sh` to run directly from a release package using packaged `classes/` and `lib/*.jar`.
+
+### Removed
+
+- Removed V1.1 context injection from the active V1.2 runtime model; action outputs are read directly from `TOOLS.<InvocationId>`.
+
+### Verified
+
+- Compiled main sources with `javac --release 8`.
+- Ran `testcase/payment_regression.xlsx`: 20 total, 20 passed, 0 failed, 0 error, 0 skipped.
+
 ## [V1.1] - 2026-07-08
 
 V1.1 introduces a unified template runtime for ATT: `${...}` is reserved for context references, `#{...}` is reserved for tool calls, and all request/check/API interactions are represented as ordered tool artifacts.

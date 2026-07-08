@@ -1,8 +1,11 @@
 outputDirectory: output
-reportDirectory: report
-logDirectory: logs
 environment: SIT
 timeoutSeconds: 120
+
+run:
+  id:
+    default: timestamp
+    timestampFormat: yyyyMMdd-HHmmss
 
 testcase:
   sheet: TestCases
@@ -11,19 +14,42 @@ testcase:
     caseName: Case Name
     tags: Tags
     api: API
-    precheckTemplate: PreCheck Template
-    expectedPrecheckResult: Expected PreCheck Result
-    expectedPrecheckData: Expected PreCheck Data
-    requestTemplate: Request Template
+    stagePre: Pre Stage Template
+    stageMain: Main Stage Template
+    stagePost: Post Stage Template
     debitAccount: Debit Account
     creditAccount: Credit Account
     amount: Amount
     currency: Currency
-    requestData: Request Data
-    postcheckTemplate: PostCheck Template
-    expectedPostcheckResult: Expected PostCheck Result
-    expectedPostcheckData: Expected PostCheck Data
+    data: Case Data
     remarks: Remarks
+
+stages:
+  - key: stagePre
+    name: Pre
+    required: false
+    onFailure: stop
+  - key: stageMain
+    name: Main
+    required: true
+    onFailure: stop
+  - key: stagePost
+    name: Post
+    required: false
+    onFailure: stop
+
+templates:
+  root: templates/stage
+
+report:
+  mode: append-to-copy
+  fileNamePattern: "${suiteName}.result.xlsx"
+  columns:
+    result: Test Result
+    durationMs: Duration(ms)
+    actualResult: Actual Result
+    caseLog: Case Log
+    runTime: Run Time
 
 tools:
   invokeOutwardService:
@@ -79,8 +105,6 @@ tools:
     output: txt
     arguments:
       caseId: "${CaseID}"
-    inject:
-      EndToEndId: "${TOOL.output}"
   getAcDate:
     name: Get account date
     command: "./tools/get_ac_date.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"

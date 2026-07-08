@@ -22,6 +22,8 @@ public class TestCase {
     private final String requestTemplate;
     private final String postcheckTemplate;
     private final String expectedPostcheckResult;
+    private final Map<String, String> stageTemplates;
+    private final Map<String, Object> caseData;
     private final Map<String, String> fixedValues;
     private final Map<String, Object> requestData;
     private final Map<String, Object> expectedPrecheckData;
@@ -44,6 +46,8 @@ public class TestCase {
         this.requestTemplate = requestTemplate;
         this.postcheckTemplate = postcheckTemplate;
         this.expectedPostcheckResult = expectedPostcheckResult;
+        this.stageTemplates = fixedValues == null ? java.util.Collections.<String, String>emptyMap() : stageTemplatesFrom(fixedValues);
+        this.caseData = requestData == null ? java.util.Collections.<String, Object>emptyMap() : requestData;
         this.fixedValues = fixedValues;
         this.requestData = requestData;
         this.expectedPrecheckData = expectedPrecheckData;
@@ -66,9 +70,21 @@ public class TestCase {
     public String requestTemplate() { return requestTemplate; }
     public String postcheckTemplate() { return postcheckTemplate; }
     public String expectedPostcheckResult() { return expectedPostcheckResult; }
+    public Map<String, String> stageTemplates() { return stageTemplates; }
+    public Map<String, Object> caseData() { return caseData; }
     public Map<String, String> fixedValues() { return fixedValues; }
     public Map<String, Object> requestData() { return requestData; }
     public Map<String, Object> expectedPrecheckData() { return expectedPrecheckData; }
     public Map<String, Object> expectedPostcheckData() { return expectedPostcheckData; }
     public String invalidReason() { return invalidReason; }
+
+    private Map<String, String> stageTemplatesFrom(Map<String, String> fixedValues) {
+        Map<String, String> stages = new java.util.LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> entry : fixedValues.entrySet()) {
+            if (entry.getKey().startsWith("stage") && entry.getValue() != null && !entry.getValue().trim().isEmpty()) {
+                stages.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return stages;
+    }
 }

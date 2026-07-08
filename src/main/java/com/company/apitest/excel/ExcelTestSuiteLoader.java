@@ -6,6 +6,7 @@ package com.company.apitest.excel;
 
 import com.company.apitest.core.TestCase;
 import com.company.apitest.config.FrameworkConfig;
+import com.company.apitest.config.StageConfig;
 import org.apache.poi.ss.usermodel.*;
 import org.yaml.snakeyaml.Yaml;
 
@@ -96,7 +97,7 @@ public class ExcelTestSuiteLoader {
         Map<String, Object> expectedPrecheckData = Collections.emptyMap();
         Map<String, Object> expectedPostcheckData = Collections.emptyMap();
         try {
-            requestData = parseYamlMap(fixed.get("requestData"));
+            requestData = parseYamlMap(firstPresent(fixed, "data", "requestData"));
             expectedPrecheckData = parseYamlMap(fixed.get("expectedPrecheckData"));
             expectedPostcheckData = parseYamlMap(fixed.get("expectedPostcheckData"));
         } catch (RuntimeException e) {
@@ -124,7 +125,19 @@ public class ExcelTestSuiteLoader {
     }
 
     private List<String> requiredKeys() {
-        return Arrays.asList("caseId", "api", "requestTemplate", "postcheckTemplate");
+        List<String> required = new ArrayList<String>();
+        required.add("caseId");
+        for (StageConfig stage : config.stages()) {
+            if (stage.required()) {
+                required.add(stage.key());
+            }
+        }
+        return required;
+    }
+
+    private String firstPresent(Map<String, String> values, String first, String second) {
+        String value = values.get(first);
+        return empty(value) ? values.get(second) : value;
     }
 
     private boolean blank(Row row, Map<String, Integer> columns) {

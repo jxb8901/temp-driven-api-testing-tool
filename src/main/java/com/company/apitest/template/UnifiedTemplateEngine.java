@@ -5,6 +5,7 @@
 package com.company.apitest.template;
 
 import com.company.apitest.core.CaseRuntimeContext;
+import com.company.apitest.core.CaseExecutionLog;
 import com.company.apitest.exec.ToolInvoker;
 
 import java.util.LinkedHashMap;
@@ -24,7 +25,11 @@ public class UnifiedTemplateEngine {
     }
 
     public String render(String text, CaseRuntimeContext context) throws Exception {
-        String afterTools = renderTools(text, context);
+        return render(text, context, null);
+    }
+
+    public String render(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        String afterTools = renderTools(text, context, log);
         return renderValues(afterTools, context);
     }
 
@@ -40,15 +45,22 @@ public class UnifiedTemplateEngine {
     }
 
     public Object executeCall(String call, CaseRuntimeContext context) throws Exception {
+        return executeCall(call, context, null, null);
+    }
+
+    public Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId) throws Exception {
         String body = call.trim();
         if (body.startsWith("#{") && body.endsWith("}")) {
             body = body.substring(2, body.length() - 1);
         }
         ToolCall parsed = parseCall(body, context);
-        return toolInvoker.invoke(parsed.name, parsed.input, context).output();
+        if (log == null) {
+            throw new IllegalStateException("Case execution log is required for tool invocation");
+        }
+        return toolInvoker.invoke(invocationId, parsed.name, parsed.input, context, log).output();
     }
 
-    private String renderTools(String text, CaseRuntimeContext context) throws Exception {
+    private String renderTools(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         StringBuilder output = new StringBuilder();
         int index = 0;
         while (index < text.length()) {
@@ -62,7 +74,7 @@ public class UnifiedTemplateEngine {
             if (end < 0) {
                 throw new IllegalArgumentException("Unclosed tool call: " + text.substring(start));
             }
-            Object value = executeCall(text.substring(start, end + 1), context);
+            Object value = executeCall(text.substring(start, end + 1), context, log, null);
             output.append(value == null ? "" : String.valueOf(value));
             index = end + 1;
         }

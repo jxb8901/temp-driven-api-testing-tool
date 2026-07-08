@@ -18,17 +18,17 @@ public class TestResult {
     private final Duration duration;
     private final String expected;
     private final String actual;
-    private final Path outputXml;
+    private final Path caseLogPath;
     private final List<ValidationResult> validations;
 
-    public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path outputXml, List<ValidationResult> validations) {
+    public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath, List<ValidationResult> validations) {
         this.caseId = caseId;
         this.caseName = caseName;
         this.status = status;
         this.duration = duration;
         this.expected = expected;
         this.actual = actual;
-        this.outputXml = outputXml;
+        this.caseLogPath = caseLogPath;
         this.validations = validations;
     }
 
@@ -38,6 +38,7 @@ public class TestResult {
     public Duration duration() { return duration; }
     public String expected() { return expected; }
     public String actual() { return actual; }
-    public Path outputXml() { return outputXml; }
+    public Path caseLogPath() { return caseLogPath; }
+    public Path outputXml() { return caseLogPath; }
     public List<ValidationResult> validations() { return validations; }
 }
