@@ -1,6 +1,8 @@
 # Changelog
 
-## 2026-07-08
+## [V1.1] - 2026-07-08
+
+V1.1 introduces a unified template runtime for ATT: `${...}` is reserved for context references, `#{...}` is reserved for tool calls, and all request/check/API interactions are represented as ordered tool artifacts.
 
 ### Added
 
@@ -12,6 +14,7 @@
 - Added check template execution using the same tool invocation and context model as request templates.
 - Expanded `testcase/payment_regression.xlsx` to 20 executable payment scenarios.
 - Added example shell scripts for tool execution and artifact persistence.
+- Added `TOOLS.toolName[index]` history references so later templates can consume earlier tool outputs or raw output files.
 
 ### Changed
 
@@ -20,6 +23,7 @@
 - Updated Excel loading to honor `testcase.columns` from `config.yaml`; unconfigured columns are ignored.
 - Updated reports to point to the case artifact directory instead of a single output XML file.
 - Updated V1.1 design documentation to reflect the tool-artifact request/response flow.
+- Moved API execution selection out of Excel cases and into request-template-owned `api.invocation.yaml`.
 
 ### Removed
 
