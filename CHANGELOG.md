@@ -35,7 +35,7 @@ V1.1 introduces a unified template runtime for ATT: `${...}` is reserved for con
 - Ran `testcase/payment_regression.xlsx`: 20 total, 20 passed, 0 failed, 0 error, 0 skipped.
 - Ran `git diff --check`.
 
-## [V1] - 2026-07-08
+## [V1] - 2026-07-07
 
 V1 delivers the first executable ATT framework: Excel test cases drive request XML generation, API execution, validation, and Excel report output.
 
