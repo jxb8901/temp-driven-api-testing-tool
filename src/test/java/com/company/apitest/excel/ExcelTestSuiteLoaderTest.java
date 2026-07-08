@@ -4,6 +4,7 @@
 
 package com.company.apitest.excel;
 
+import com.company.apitest.config.FrameworkConfig;
 import com.company.apitest.core.TestCase;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -15,7 +16,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,14 +36,27 @@ class ExcelTestSuiteLoaderTest {
         Path workbook = tempDir.resolve("suite.xlsx");
         writeWorkbook(workbook);
 
-        List<TestCase> cases = new ExcelTestSuiteLoader().load(workbook);
+        List<TestCase> cases = new ExcelTestSuiteLoader(config()).load(workbook);
 
         assertEquals(1, cases.size());
         TestCase testCase = cases.get(0);
         assertTrue(testCase.enabled());
         assertEquals("TC001", testCase.caseId());
         assertEquals("ATM", testCase.requestData().get("channel"));
-        assertEquals("POSTED", testCase.expectedData().get("expectedLedgerStatus"));
+        assertEquals("POSTED", testCase.expectedPostcheckData().get("expectedLedgerStatus"));
+    }
+
+    private FrameworkConfig config() {
+        Map<String, String> columns = new LinkedHashMap<String, String>();
+        columns.put("caseId", "Case ID");
+        columns.put("caseName", "Case Name");
+        columns.put("tags", "Tags");
+        columns.put("api", "API");
+        columns.put("requestTemplate", "Request Template");
+        columns.put("postcheckTemplate", "Expected Template");
+        columns.put("requestData", "Request Data");
+        columns.put("expectedPostcheckData", "Expected Data");
+        return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30, "TestCases", columns, new LinkedHashMap<String, com.company.apitest.config.ToolConfig>());
     }
 
     private void writeWorkbook(Path path) throws Exception {

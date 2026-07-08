@@ -36,7 +36,7 @@ public class RunSummary {
     }
 
     public long failed() {
-        return count(ResultStatus.FAIL);
+        return count(ResultStatus.FAIL) + count(ResultStatus.PRECHECK_FAILED) + count(ResultStatus.POSTCHECK_FAILED);
     }
 
     public long error() {

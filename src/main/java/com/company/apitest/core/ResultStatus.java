@@ -10,6 +10,8 @@ package com.company.apitest.core;
 public enum ResultStatus {
     PASS,
     FAIL,
+    PRECHECK_FAILED,
+    POSTCHECK_FAILED,
     ERROR,
     SKIPPED
 }

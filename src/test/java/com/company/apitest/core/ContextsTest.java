@@ -30,7 +30,8 @@ class ContextsTest {
         expectedData.put("expectedLedgerStatus", "POSTED");
 
         TestCase testCase = new TestCase(2, true, "TC001", "Payment", Arrays.asList("smoke"), "PAYMENT",
-                "PAYMENT_TRANSFER", "PAYMENT_SUCCESS", fixed, requestData, expectedData, null);
+                "PAYMENT_PRECHECK", "PASS", "PAYMENT_TRANSFER", "PAYMENT_POSTCHECK", "PASS",
+                fixed, requestData, expectedData, expectedData, null);
 
         assertTrue(Contexts.requestContext(testCase).containsKey("channel"));
         assertFalse(Contexts.requestContext(testCase).containsKey("expectedLedgerStatus"));

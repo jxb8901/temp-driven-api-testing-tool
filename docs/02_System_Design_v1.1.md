@@ -230,9 +230,7 @@ Case Runtime Context
 │   └── Expected PostCheck Data
 │
 ├── PATH
-│   ├── caseOutputDir
-│   ├── requestXml
-│   └── responseXml
+│   └── caseOutputDir
 │
 ├── TOOL
 │   ├── input
@@ -265,13 +263,13 @@ Recommended explicit forms:
 |------|---------|
 | `${CaseID}` | Short form for a case value |
 | `${CASE.CaseID}` | Explicit case value |
-| `${PATH.requestXml}` | Generated request XML path |
-| `${PATH.responseXml}` | Expected response XML path |
+| `${PATH.caseOutputDir}` | Case output directory |
 | `${TOOL.input.a.b.c}` | Current tool input value |
 | `${TOOL.output.a.b.c}` | Current parsed tool output value |
 | `${TOOL.inputFile}` | Current invocation input file path |
 | `${TOOL.outputFile}` | Current invocation raw output file path |
 | `${TOOLS.toolName[0].output.a.b.c}` | Output from a previous tool invocation |
+| `${TOOLS.toolName[0].outputFile}` | Raw output file from a previous tool invocation |
 
 Short form should be used for common case fields.
 
@@ -387,7 +385,7 @@ output/${CaseID}/tools/
     context-injection.yaml
 ```
 
-The final generated request XML is still saved, but it is not the only artifact. ATT must also save each tool's resolved input and raw output.
+The generated request XML is saved as the `output.xml` artifact of the built-in `renderRequestTemplate` invocation. ATT does not create separate V1-style `output/${CaseID}/request.xml` or `output/${CaseID}/response.xml` files; API responses are the raw output files of API tools.
 
 ---
 
@@ -404,8 +402,7 @@ tools:
     command: "./tools/invoke_outward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: xml
     arguments:
-      requestXml: "${PATH.requestXml}"
-      responseXml: "${PATH.responseXml}"
+      requestXml: "${TOOL.input.requestXml}"
       environment: "${environment}"
   invokeInwardService:
     name: Invoke Inward Service
@@ -544,14 +541,14 @@ Example:
 ```yaml
 invokePaymentApi:
   description: Invoke payment API after request XML generation
-  call: "#{invokePaymentApi(requestXml=${PATH.requestXml}, responseXml=${PATH.responseXml})}"
+  call: "#{invokePaymentApi(requestXml=${TOOLS.renderRequestTemplate[0].outputFile})}"
 ```
 
 ATT behavior:
 
 - Load `api.invocation.yaml` from the request template package
 - Resolve and execute the configured `call` expression using the unified template syntax
-- Persist the configured output file under `output/${CaseID}/`
+- Persist each invocation under `output/${CaseID}/tools/${sequence}_${toolName}/`
 - Treat the API tool as a black box
 
 The API tool may invoke one or more APIs internally. ATT does not inspect or control the internal flow of that tool.
@@ -578,12 +575,12 @@ checkCtxRecords:
 
 checkAPIResult:
   description: Check API result
-  call: "#{getAPIResponse(responseXml=${PATH.responseXml})}"
+  call: "#{getAPIResponse(responseXml=${TOOLS.invokePaymentApi[0].outputFile})}"
   expected: "${TOOL.output.Response.Status} != '${expectedStatus}'"
 
 checkTxnAmt:
   description: Check txn amt
-  call: "#{getAPIResponse(responseXml=${PATH.responseXml})}"
+  call: "#{getAPIResponse(responseXml=${TOOLS.invokePaymentApi[0].outputFile})}"
   expected: "${TOOL.output.Response.Amt} >= '${ExpectedMinAmt}'"
 
 checkAppLog:

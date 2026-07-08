@@ -5,6 +5,7 @@
 package com.company.apitest.excel;
 
 import com.company.apitest.core.TestCase;
+import com.company.apitest.config.FrameworkConfig;
 import org.apache.poi.ss.usermodel.*;
 import org.yaml.snakeyaml.Yaml;
 
@@ -18,24 +19,28 @@ import java.util.*;
  * Reads the TestCases worksheet and converts each populated row into an executable test case.
  */
 public class ExcelTestSuiteLoader {
-    private static final List<String> REQUIRED_COLUMNS = Arrays.asList("Enable", "Case ID", "API", "Request Template", "Expected Template");
     private final DataFormatter formatter = new DataFormatter();
+    private final FrameworkConfig config;
+
+    public ExcelTestSuiteLoader(FrameworkConfig config) {
+        this.config = config;
+    }
 
     public List<TestCase> load(Path suitePath) throws IOException {
         try (InputStream input = Files.newInputStream(suitePath); Workbook workbook = WorkbookFactory.create(input)) {
-            Sheet sheet = workbook.getSheet("TestCases");
+            Sheet sheet = workbook.getSheet(config.testcaseSheet());
             if (sheet == null) {
-                throw new IllegalArgumentException("Missing required sheet: TestCases");
+                throw new IllegalArgumentException("Missing required sheet: " + config.testcaseSheet());
             }
             Row header = sheet.getRow(0);
             if (header == null) {
                 throw new IllegalArgumentException("TestCases sheet must contain a header row");
             }
             Map<String, Integer> columns = columns(header);
-            // Required columns are suite-level validation errors because the framework cannot interpret rows without them.
-            for (String required : REQUIRED_COLUMNS) {
-                if (!columns.containsKey(required)) {
-                    throw new IllegalArgumentException("Missing required column: " + required);
+            for (String requiredKey : requiredKeys()) {
+                String columnName = config.testcaseColumns().get(requiredKey);
+                if (columnName == null || !columns.containsKey(columnName)) {
+                    throw new IllegalArgumentException("Missing required configured column: " + requiredKey + " -> " + columnName);
                 }
             }
 
@@ -68,27 +73,32 @@ public class ExcelTestSuiteLoader {
 
     private TestCase toTestCase(Row row, Map<String, Integer> columns) {
         Map<String, String> fixed = new LinkedHashMap<String, String>();
-        for (Map.Entry<String, Integer> entry : columns.entrySet()) {
-            fixed.put(entry.getKey(), cell(row, entry.getValue()));
+        for (Map.Entry<String, String> configured : config.testcaseColumns().entrySet()) {
+            Integer index = columns.get(configured.getValue());
+            if (index != null) {
+                fixed.put(configured.getValue(), cell(row, index));
+                fixed.put(configured.getKey(), cell(row, index));
+            }
         }
 
-        boolean enabled = parseEnabled(fixed.get("Enable"));
+        boolean enabled = true;
         String invalid = null;
         if (enabled) {
-            // Enabled rows are validated strictly; disabled rows can remain as draft or negative examples.
-            for (String required : REQUIRED_COLUMNS) {
-                if (empty(fixed.get(required))) {
-                    invalid = "Missing required value: " + required;
+            for (String requiredKey : requiredKeys()) {
+                if (empty(fixed.get(requiredKey))) {
+                    invalid = "Missing required value: " + requiredKey;
                     break;
                 }
             }
         }
 
         Map<String, Object> requestData = Collections.emptyMap();
-        Map<String, Object> expectedData = Collections.emptyMap();
+        Map<String, Object> expectedPrecheckData = Collections.emptyMap();
+        Map<String, Object> expectedPostcheckData = Collections.emptyMap();
         try {
-            requestData = parseYamlMap(fixed.get("Request Data"));
-            expectedData = parseYamlMap(fixed.get("Expected Data"));
+            requestData = parseYamlMap(fixed.get("requestData"));
+            expectedPrecheckData = parseYamlMap(fixed.get("expectedPrecheckData"));
+            expectedPostcheckData = parseYamlMap(fixed.get("expectedPostcheckData"));
         } catch (RuntimeException e) {
             invalid = "Invalid YAML: " + e.getMessage();
         }
@@ -96,17 +106,25 @@ public class ExcelTestSuiteLoader {
         return new TestCase(
                 row.getRowNum() + 1,
                 enabled,
-                fixed.get("Case ID"),
-                fixed.get("Case Name"),
-                parseTags(fixed.get("Tags")),
-                fixed.get("API"),
-                fixed.get("Request Template"),
-                fixed.get("Expected Template"),
+                fixed.get("caseId"),
+                fixed.get("caseName"),
+                parseTags(fixed.get("tags")),
+                fixed.get("api"),
+                fixed.get("precheckTemplate"),
+                fixed.get("expectedPrecheckResult"),
+                fixed.get("requestTemplate"),
+                fixed.get("postcheckTemplate"),
+                fixed.get("expectedPostcheckResult"),
                 fixed,
                 requestData,
-                expectedData,
+                expectedPrecheckData,
+                expectedPostcheckData,
                 invalid
         );
+    }
+
+    private List<String> requiredKeys() {
+        return Arrays.asList("caseId", "api", "requestTemplate", "postcheckTemplate");
     }
 
     private boolean blank(Row row, Map<String, Integer> columns) {

@@ -25,8 +25,13 @@ if [ -z "$output" ]; then
 fi
 
 mkdir -p "$(dirname "$output")"
+response_xml=""
 if [ -n "$input" ] && [ -f "$input" ]; then
-  cat "$input" > "$output"
+  response_xml="$(sed -n 's/^responseXml:[[:space:]]*//p' "$input" | head -1)"
+fi
+
+if [ -n "$response_xml" ] && [ -f "$response_xml" ]; then
+  cat "$response_xml" > "$output"
 else
   cat > "$output" <<XML
 <Response>

@@ -25,8 +25,9 @@ public final class Contexts {
 
     public static Map<String, Object> expectedContext(TestCase testCase) {
         Map<String, Object> context = new LinkedHashMap<>(testCase.fixedValues());
-        // Expected Data is validation-only and is not exposed to request template rendering.
-        context.putAll(testCase.expectedData());
+        // Expected data is validation-only and is not exposed to request template rendering.
+        context.putAll(testCase.expectedPrecheckData());
+        context.putAll(testCase.expectedPostcheckData());
         context.put("api", testCase.api());
         context.put("Case ID", testCase.caseId());
         return context;

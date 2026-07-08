@@ -1,11 +1,11 @@
 checkAPIResult:
   description: Check API response status
-  call: "#{getAPIResponse(responseXml=${PATH.responseXml})}"
+  call: "#{getAPIResponse(responseXml=${TOOLS.invokePaymentApi[0].outputFile})}"
   expected: "${TOOL.output.Response.Status} == '${expectedStatus}'"
 
 checkRejectCode:
   description: Check API response reject code
-  call: "#{getAPIResponse(responseXml=${PATH.responseXml})}"
+  call: "#{getAPIResponse(responseXml=${TOOLS.invokePaymentApi[0].outputFile})}"
   expected: "${TOOL.output.Response.RejectCode} == '${expectedRejectCode}'"
 
 checkCtxRecords:

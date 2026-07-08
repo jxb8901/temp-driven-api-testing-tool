@@ -17,10 +17,10 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * Writes the V1 execution report workbook consumed by developers after a run.
+ * Writes the V1.1 execution report workbook consumed by developers after a run.
  */
 public class ExcelReportWriter {
-    private static final String[] HEADERS = {"Case ID", "Case Name", "Result", "Duration", "Expected", "Actual", "Output XML"};
+    private static final String[] HEADERS = {"Case ID", "Case Name", "Result", "Duration", "Expected", "Actual", "Artifact Directory"};
 
     public void write(Path reportPath, List<TestResult> results) throws IOException {
         Files.createDirectories(reportPath.getParent());

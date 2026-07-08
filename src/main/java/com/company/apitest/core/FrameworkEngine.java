@@ -7,14 +7,16 @@ package com.company.apitest.core;
 import com.company.apitest.config.FrameworkConfig;
 import com.company.apitest.excel.ExcelReportWriter;
 import com.company.apitest.excel.ExcelTestSuiteLoader;
-import com.company.apitest.exec.ApiExecutor;
+import com.company.apitest.exec.ToolInvoker;
 import com.company.apitest.template.RequestTemplateEngine;
-import com.company.apitest.validation.ExpectedTemplateLoader;
-import com.company.apitest.validation.ValidationEngine;
+import com.company.apitest.template.UnifiedTemplateEngine;
+import com.company.apitest.validation.CheckAction;
+import com.company.apitest.validation.CheckEngine;
+import com.company.apitest.validation.CheckTemplateLoader;
+import org.yaml.snakeyaml.Yaml;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -23,10 +25,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Collections;
 import java.util.Map;
+import java.io.Reader;
 
 /**
- * Coordinates the V1 sequential execution flow: load Excel cases, render XML,
- * delegate API execution, validate outputs and write the Excel report.
+ * Coordinates the V1.1 sequential execution flow.
  */
 public class FrameworkEngine {
     private final Path projectRoot;
@@ -42,12 +44,13 @@ public class FrameworkEngine {
         Files.createDirectories(resolve(config.reportDirectory()));
         Files.createDirectories(resolve(config.logDirectory()));
 
-        List<TestCase> cases = new ExcelTestSuiteLoader().load(resolve(options.suitePath()));
+        List<TestCase> cases = new ExcelTestSuiteLoader(config).load(resolve(options.suitePath()));
         List<TestResult> results = new ArrayList<>();
-        RequestTemplateEngine requestTemplateEngine = new RequestTemplateEngine(projectRoot);
-        ApiExecutor apiExecutor = new ApiExecutor(projectRoot, config);
-        ExpectedTemplateLoader expectedTemplateLoader = new ExpectedTemplateLoader(projectRoot);
-        ValidationEngine validationEngine = new ValidationEngine(projectRoot);
+        ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
+        UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker);
+        RequestTemplateEngine requestTemplateEngine = new RequestTemplateEngine(projectRoot, unifiedTemplateEngine);
+        CheckTemplateLoader checkTemplateLoader = new CheckTemplateLoader(projectRoot);
+        CheckEngine checkEngine = new CheckEngine(unifiedTemplateEngine);
 
         for (TestCase testCase : cases) {
             if (!testCase.enabled() || !options.matches(testCase)) {
@@ -60,28 +63,23 @@ public class FrameworkEngine {
             }
 
             Instant started = Instant.now();
-            Path requestXml = caseArtifact(testCase.caseId(), "request.xml");
-            Path responseXml = caseArtifact(testCase.caseId(), "response.xml");
+            Path caseOutputDir = caseOutputDir(testCase.caseId());
             try {
-                // Keep request and expected contexts separate so validation-only data cannot alter the API request.
-                Map<String, Object> requestContext = Contexts.requestContext(testCase);
-                Map<String, Object> expectedContext = Contexts.expectedContext(testCase);
-                Files.write(requestXml, requestTemplateEngine.render(testCase.requestTemplate(), requestContext).getBytes(StandardCharsets.UTF_8));
+                CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir);
+                context.put("environment", config.environment());
 
-                ApiExecutor.ExecutorResult executorResult = apiExecutor.execute(testCase, requestXml, responseXml);
-                if (!executorResult.success()) {
-                    results.add(error(testCase, executorResult.message(), responseXml, Duration.between(started, Instant.now())));
+                List<ValidationResult> precheck = checkEngine.execute("PreCheck", checkTemplateLoader.load(testCase.precheckTemplate()), context);
+                if (hasFailure(precheck)) {
+                    results.add(new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.PRECHECK_FAILED,
+                            Duration.between(started, Instant.now()), joinExpected(precheck), joinActual(precheck), caseOutputDir, precheck));
                     continue;
                 }
 
-                List<ValidationResult> validations = validationEngine.validate(
-                        expectedTemplateLoader.load(testCase.expectedTemplate()),
-                        expectedContext,
-                        responseXml
-                );
-                ResultStatus status = validations.stream().allMatch(v -> v.status() == ResultStatus.PASS)
-                        ? ResultStatus.PASS
-                        : ResultStatus.FAIL;
+                requestTemplateEngine.renderArtifact(testCase.requestTemplate(), context);
+                executeApiInvocation(testCase, unifiedTemplateEngine, context);
+
+                List<ValidationResult> validations = checkEngine.execute("PostCheck", checkTemplateLoader.load(testCase.postcheckTemplate()), context);
+                ResultStatus status = hasFailure(validations) ? ResultStatus.POSTCHECK_FAILED : ResultStatus.PASS;
                 results.add(new TestResult(
                         testCase.caseId(),
                         testCase.caseName(),
@@ -89,11 +87,11 @@ public class FrameworkEngine {
                         Duration.between(started, Instant.now()),
                         joinExpected(validations),
                         joinActual(validations),
-                        responseXml,
+                        caseOutputDir,
                         validations
                 ));
             } catch (Exception e) {
-                results.add(error(testCase, e.getMessage(), responseXml, Duration.between(started, Instant.now())));
+                results.add(error(testCase, e.getMessage(), caseOutputDir, Duration.between(started, Instant.now())));
             }
         }
 
@@ -102,10 +100,36 @@ public class FrameworkEngine {
         return new RunSummary(results, report);
     }
 
-    private Path caseArtifact(String caseId, String name) throws Exception {
+    private void executeApiInvocation(TestCase testCase, UnifiedTemplateEngine templateEngine, CaseRuntimeContext context) throws Exception {
+        Path path = projectRoot.resolve("templates/request").resolve(testCase.requestTemplate()).resolve("api.invocation.yaml");
+        try (Reader reader = Files.newBufferedReader(path)) {
+            Object loaded = new Yaml().load(reader);
+            if (loaded instanceof Map) {
+                for (Object value : ((Map<?, ?>) loaded).values()) {
+                    if (value instanceof Map) {
+                        Object call = ((Map<?, ?>) value).get("call");
+                        if (call != null) {
+                            templateEngine.executeCall(String.valueOf(call), context);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean hasFailure(List<ValidationResult> results) {
+        for (ValidationResult result : results) {
+            if (result.status() != ResultStatus.PASS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Path caseOutputDir(String caseId) throws Exception {
         Path dir = resolve(config.outputDirectory()).resolve(caseId);
         Files.createDirectories(dir);
-        return dir.resolve(name);
+        return dir;
     }
 
     private Path resolve(Path path) {

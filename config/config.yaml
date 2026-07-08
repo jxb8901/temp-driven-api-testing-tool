@@ -31,16 +31,14 @@ tools:
     command: "./tools/invoke_outward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: xml
     arguments:
-      requestXml: "${PATH.requestXml}"
-      responseXml: "${PATH.responseXml}"
+      requestXml: "${TOOL.input.requestXml}"
       environment: "${environment}"
   invokeInwardService:
     name: Invoke Inward Service
     command: "./tools/invoke_inward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: xml
     arguments:
-      requestXml: "${PATH.requestXml}"
-      responseXml: "${PATH.responseXml}"
+      requestXml: "${TOOL.input.requestXml}"
       environment: "${environment}"
   invokePaymentApi:
     name: Invoke Payment API
@@ -48,7 +46,6 @@ tools:
     output: xml
     arguments:
       requestXml: "${TOOL.input.requestXml}"
-      responseXml: "${TOOL.input.responseXml}"
       environment: "${environment}"
   getAPIResponse:
     name: Get API Response
