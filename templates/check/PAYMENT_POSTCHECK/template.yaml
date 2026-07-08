@@ -1,0 +1,19 @@
+checkAPIResult:
+  description: Check API response status
+  call: "#{getAPIResponse(responseXml=${PATH.responseXml})}"
+  expected: "${TOOL.output.Response.Status} == '${expectedStatus}'"
+
+checkRejectCode:
+  description: Check API response reject code
+  call: "#{getAPIResponse(responseXml=${PATH.responseXml})}"
+  expected: "${TOOL.output.Response.RejectCode} == '${expectedRejectCode}'"
+
+checkCtxRecords:
+  description: Check CT records
+  call: "#{selectCtxn(txn.ref=${CaseID})}"
+  expected: "${TOOL.output.effectRows} >= '${effectedRows}' and ${TOOL.output.record.status} like '%${status}%'"
+
+checkAppLog:
+  description: Check application log
+  call: "#{getAppLogs(keyword1=${Keyword1}, keyword2=${Keyword2})}"
+  expected: "${TOOL.output} like '%${Keyword1}%${Keyword2}%'"

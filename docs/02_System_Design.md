@@ -596,6 +596,8 @@ The architecture reserves the following future capabilities without affecting Ve
 
 Primary implementation language: Java
 
+Target runtime: JDK 8
+
 Rationale:
 
 - Team familiarity

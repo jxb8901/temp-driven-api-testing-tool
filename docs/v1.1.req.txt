@@ -1,0 +1,122 @@
+```markdown
+# V1.1 需求
+
+## # 0. 總體調整
+- 整個工具名稱簡稱為 `ATT` (自動化測試工具)
+- 預期結果 `Expected` 檢查調整為後檢查 `PostCheck`，`Expected Template` 調整為 `PostCheck Template`
+- 案例執行前增加預檢查步驟，預檢查不通則無需調用API，直接標記案例預檢查失敗
+- 預檢查與後檢查使用相同模組配置及執行，對ATT來說只有執行時點不同
+- 預檢查與後檢查共享同一套模版
+- 預檢查、調用API及後檢查都涉及調用外部工具，外部工具在`config.yaml`中統一配置
+- 調用API的工具直接在測試案例Excel中定義，調用API工具有可能會調用多次API，ATT無需關心工具實現流程及細節
+- 預檢查與後檢查涉及的工具在檢查模版中定義，一個檢查模版可以定義多次順序的工具調用及預期結果檢查
+- 案例執行過程中的產生的所有信息放在`output/${CaseID}`目錄
+
+## # 1. 測試案例模版
+- 測試案例Excel支持如下欄位：
+  - Case ID, Case Name, Tags, API,
+  - Precheck Template, Expected Precheck Result, Expected Precheck Data,
+  - API Tool, Request Template, Debit Account, Credit Account, Amount, Currency, Request Data,
+  - Expected Template, Expected Result, Expected Data,
+  - Remarks
+- 測試案例模版可以有自定義格式（字體、顏色、邊框等），ATT讀取並執行案例時不應受這些格式影響
+
+## # 2. 外部工具
+- `config.yaml`支持如下格式的工具配置，工具輸出支持格式：xml yaml txt
+```yaml
+tools:
+  invokeOutwardService:
+    name: Invoke Outward Service
+    command: "invoke_outward_service.sh"
+    output: xml
+  invokeInwardService:
+    name: Invoke Inward Service
+    command: "mghelper.sh --sync --att-mode --fromid1"
+    output: xml
+  getAPIResponse:
+    name: Get API Response
+    command: "cat_api_response.sh"
+    output: xml
+  selectCtxn:
+    name: select CT records
+    command: "/att/tools/select_ct_txn.sh"
+    output: yaml
+  grepFromAppLogs:
+    name: grep keywords from application logs
+    command: "tools/grep_from_app_logs.sh"
+    output: yaml
+  getAppLogs:
+    name: get application logs
+    command: "./tools/get_app_logs.sh"
+    output: txt
+  genEndToEndId:
+    name: generate a unique end2end ID
+    command: "./tools/gen_e2e_id.sh"
+    output: txt
+  getAcDate:
+    name: get account date
+    command: "./tools/get_ac_date.sh"
+    output: txt
+  getSeq:
+    name: get a new sequence
+    command: "./tools/get_seq.sh"
+    output: txt
+```
+- 工具輸出存放在`output/${CaseId}/${tool}.[yaml|xml|txt]`
+
+## # 3. API 請求模版
+- 支持使用 `${tool}` 工具調用，例如：
+```xml
+
+  ${CaseId}
+  ${getAcDate}#${getSeq}
+  ${genEndToEndId}
+  ${DebitAccount}
+  ${CreditAccount}
+  ${Amount}
+  ${Currency}
+  ${channel}
+
+```
+
+## # 3. 檢查模版
+- 支持工具定義及檢查條件定義，例子如下：
+```yaml
+checkCtxRecords:
+  description: Check CT records
+  tool: selectCtxn
+  expected: "TOOL_OUTPUT.effectRows != '${effectedRows}'
+            and (TOOL_OUTPUT.record.amount > '${ExpectedAmount}'
+            or TOOL_OUTPUT.record.status like '%${status}%')"
+
+checkAPIResult:
+  description: Check API result
+  tool: getAPIResponse
+  expected: "TOOL_OUTPUT.Response.Status != '${expectedStatus}'"
+
+checkTxnAmt:
+  description: Check txn amt
+  tool: getAPIResponse
+  expected: "TOOL_OUTPUT.Response.Amt >= '${ExpectedMinAmt}'"
+
+checkAppLog:
+  description: Check app log
+  tool: getAppLogs
+  expected: "TOOL_OUTPUT like '%${Keyword1}%${Keyword2}%'"
+```
+- 檢查條件採用類SQL的條件表達式語法，支持如下操作符
+  - 比較操作符：`> >= < <= == !=`
+  - 比較操作符自動識別純數字及字串的比較
+  - 邏輯操作符：`and or not`
+  - 模糊匹配：`like`（支持 `% _` 等SQL模糊匹配運算符）
+  - 空判斷：`is null` `is not null`
+  - 支持括號
+  - 字串 `${TOOL_OUTPUT}` 表示工具輸出
+  - 表達式 `TOOL_OUTPUT.a.b.c` 可用於獲取xml/yaml中的數據
+- 檢查模版中的多個檢查動作按順序執行，前一個動作執行失敗不影響下一個動作的執行
+- 一個工具調用失敗（shell script返回非0值）則整個動作失敗，無需執行檢查表達式
+- 工具調用返回格式不符合定義或解析失敗，等同於工具調用失敗
+- 全部檢查動作成功才表示整個測試案例成功，任何一個失敗則表示整個檢查失敗
+```
+
+**Note**: The Markdown above is a cleaned transcription of the document in the image. Some minor OCR-like errors were manually corrected for readability and accuracy based on the visible text. The structure follows the original document's sections and formatting.

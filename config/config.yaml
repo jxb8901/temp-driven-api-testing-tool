@@ -1,0 +1,96 @@
+outputDirectory: output
+reportDirectory: report
+logDirectory: logs
+environment: SIT
+timeoutSeconds: 120
+
+testcase:
+  sheet: TestCases
+  columns:
+    caseId: Case ID
+    caseName: Case Name
+    tags: Tags
+    api: API
+    precheckTemplate: PreCheck Template
+    expectedPrecheckResult: Expected PreCheck Result
+    expectedPrecheckData: Expected PreCheck Data
+    requestTemplate: Request Template
+    debitAccount: Debit Account
+    creditAccount: Credit Account
+    amount: Amount
+    currency: Currency
+    requestData: Request Data
+    postcheckTemplate: PostCheck Template
+    expectedPostcheckResult: Expected PostCheck Result
+    expectedPostcheckData: Expected PostCheck Data
+    remarks: Remarks
+
+tools:
+  invokeOutwardService:
+    name: Invoke Outward Service
+    command: "./tools/invoke_outward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: xml
+    arguments:
+      requestXml: "${PATH.requestXml}"
+      responseXml: "${PATH.responseXml}"
+      environment: "${environment}"
+  invokeInwardService:
+    name: Invoke Inward Service
+    command: "./tools/invoke_inward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: xml
+    arguments:
+      requestXml: "${PATH.requestXml}"
+      responseXml: "${PATH.responseXml}"
+      environment: "${environment}"
+  invokePaymentApi:
+    name: Invoke Payment API
+    command: "./tools/invoke_payment_api.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: xml
+    arguments:
+      requestXml: "${TOOL.input.requestXml}"
+      responseXml: "${TOOL.input.responseXml}"
+      environment: "${environment}"
+  getAPIResponse:
+    name: Get API Response
+    command: "./tools/cat_api_response.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: xml
+    arguments:
+      responseXml: "${TOOL.input.responseXml}"
+  selectCtxn:
+    name: Select CT records
+    command: "./tools/select_ct_txn.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: yaml
+    arguments:
+      caseId: "${CaseID}"
+      txnRef: "${TOOL.input.txn.ref}"
+  grepFromAppLogs:
+    name: Grep keywords from application logs
+    command: "./tools/grep_from_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: yaml
+    arguments:
+      keyword1: "${TOOL.input.keyword1}"
+      keyword2: "${TOOL.input.keyword2}"
+  getAppLogs:
+    name: Get application logs
+    command: "./tools/get_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: txt
+    arguments:
+      caseId: "${CaseID}"
+  genEndToEndId:
+    name: Generate a unique end-to-end ID
+    command: "./tools/gen_e2e_id.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: txt
+    arguments:
+      caseId: "${CaseID}"
+    inject:
+      EndToEndId: "${TOOL.output}"
+  getAcDate:
+    name: Get account date
+    command: "./tools/get_ac_date.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: txt
+  getSeq:
+    name: Get a new sequence
+    command: "./tools/get_seq.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    output: txt
+    arguments:
+      caseId: "${CaseID}"

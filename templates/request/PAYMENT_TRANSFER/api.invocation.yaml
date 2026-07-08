@@ -1,0 +1,3 @@
+invokePaymentApi:
+  description: Invoke payment API after request XML generation
+  call: "#{invokePaymentApi(requestXml=${PATH.requestXml}, responseXml=${PATH.responseXml})}"

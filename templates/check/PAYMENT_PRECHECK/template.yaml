@@ -1,0 +1,4 @@
+checkDebitAccount:
+  description: Check debit account is ready before API invocation
+  call: "#{selectCtxn(txn.ref=${Debit Account})}"
+  expected: "${TOOL.output.effectRows} >= '${minAccountRows}'"
