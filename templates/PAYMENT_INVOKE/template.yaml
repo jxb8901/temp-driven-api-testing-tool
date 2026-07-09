@@ -1,0 +1,23 @@
+name: PAYMENT_INVOKE
+description: Render payment request XML to a file and invoke the payment API.
+
+actionDefaults:
+  onFailure: stop
+
+actions:
+  invoke.renderRequest:
+    type: render
+    payload: payload.xml
+    saveAs: request.xml
+
+  invoke.logRequest:
+    type: log
+    level: INFO
+    message: "Rendered request for ${CaseID}"
+    fields:
+      requestFile: "${ACTIONS.invoke.renderRequest.outputFile}"
+      requestSha256: "${ACTIONS.invoke.renderRequest.outputSha256}"
+
+  invoke.callApi:
+    type: tool
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.invoke.renderRequest.outputFile})}"

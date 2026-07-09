@@ -1,0 +1,44 @@
+name: PAYMENT_VERIFY
+description: Verify payment API response, CT records and application logs.
+
+actionDefaults:
+  onFailure: stop
+
+actions:
+  verify.checkAPIResult:
+    type: assert
+    expression: "${ACTIONS.invoke.callApi.output.Response.Status} == '${expected.status}'"
+
+  verify.checkRejectCode:
+    type: assert
+    expression: "${ACTIONS.invoke.callApi.output.Response.RejectCode} == '${expected.rejectCode}'"
+
+  verify.selectTxn:
+    type: tool
+    call: "#{selectCtxn(txn.ref=${CaseID})}"
+
+  verify.checkCtxRecords:
+    type: assert
+    expression: "${ACTIONS.verify.selectTxn.output.effectRows} >= '${expected.effectRows}' and ${ACTIONS.verify.selectTxn.output.record.status} like '%${expected.txnStatus}%'"
+
+  verify.getLogs:
+    type: tool
+    call: "#{getAppLogs(caseId=${CaseID})}"
+
+  verify.grepLogs:
+    type: tool
+    call: "#{grepFromAppLogs(keyword1=${expected.keyword1}, keyword2=${expected.keyword2})}"
+    onFailure: continue
+
+  verify.checkLogs:
+    type: assert
+    expression: "${ACTIONS.verify.getLogs.output} like '%${expected.keyword1}%${expected.keyword2}%'"
+
+  verify.logSummary:
+    type: log
+    level: INFO
+    message: "Verified payment result for ${CaseID}"
+    fields:
+      apiStatus: "${ACTIONS.invoke.callApi.output.Response.Status}"
+      rejectCode: "${ACTIONS.invoke.callApi.output.Response.RejectCode}"
+      txnStatus: "${ACTIONS.verify.selectTxn.output.record.status}"

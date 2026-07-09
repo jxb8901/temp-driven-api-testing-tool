@@ -4,17 +4,19 @@
 
 package com.company.apitest.template;
 
+import com.company.apitest.config.StageConfig;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Loads V1.2 Tool Invocation Template packages from templates/stage.
+ * Loads V1.3 stage template packages.
  */
 public class StageTemplateLoader {
     private final Path projectRoot;
@@ -28,6 +30,27 @@ public class StageTemplateLoader {
     public StageTemplate load(String templateName) throws Exception {
         Path root = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot).normalize();
         Path directory = root.resolve(templateName);
+        if (!Files.exists(directory.resolve("template.yaml"))) {
+            Path legacy = root.resolve("stage").resolve(templateName);
+            if (Files.exists(legacy.resolve("template.yaml"))) {
+                directory = legacy;
+            }
+        }
+        return loadDirectory(templateName, directory);
+    }
+
+    public StageTemplate load(StageConfig stage) throws Exception {
+        if (stage.templatePath() != null && !stage.templatePath().trim().isEmpty()) {
+            Path directory = Paths.get(stage.templatePath());
+            if (!directory.isAbsolute()) {
+                directory = projectRoot.resolve(directory).normalize();
+            }
+            return loadDirectory(stage.key(), directory);
+        }
+        return load(stage.template());
+    }
+
+    private StageTemplate loadDirectory(String templateName, Path directory) throws Exception {
         Path file = directory.resolve("template.yaml");
         try (Reader reader = Files.newBufferedReader(file)) {
             Object loaded = new Yaml().load(reader);
@@ -44,8 +67,15 @@ public class StageTemplateLoader {
                     }
                 }
             }
-            return new StageTemplate(text(map.get("name"), templateName), directory, actions);
+            return new StageTemplate(text(map.get("name"), templateName), directory, actions, objectMapValue(map.get("actionDefaults")));
         }
+    }
+
+    private Map<String, Object> objectMapValue(Object value) {
+        if (!(value instanceof Map)) {
+            return new java.util.LinkedHashMap<String, Object>();
+        }
+        return objectMap((Map<?, ?>) value);
     }
 
     private Map<String, Object> objectMap(Map<?, ?> input) {

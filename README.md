@@ -1,6 +1,6 @@
 # ATT - Automated Testing Tool
 
-ATT V1.2 runs Excel-driven API test suites through configurable stages and Tool Invocation Templates.
+ATT V1.3 runs Excel-driven API test suites through suite-local configuration, reusable Test Case Templates, and ordered Template Actions.
 
 ## Run From Source
 
@@ -31,23 +31,26 @@ scripts/build-release.sh
 The package is generated under `dist/`, for example:
 
 ```text
-dist/att-v1.2.tar.gz
+dist/att-v1.3.tar.gz
 ```
 
 After download or copy:
 
 ```sh
-tar -xzf att-v1.2.tar.gz
-cd att-v1.2
+tar -xzf att-v1.3.tar.gz
+cd att-v1.3
 ./att.sh --suite testcase/payment_regression.xlsx
 ```
 
-## V1.2 Scope
+## V1.3 Scope
 
-- Excel case loading with configured stage template columns.
-- Unified Tool Invocation Templates under `templates/stage/`.
+- Suite-local config beside Excel workbooks, for example `testcase/payment_regression.yaml`.
+- Test Case Template defaults under `templates/testcase/<templateId>/template.yaml`.
+- Shared stage templates under `templates/<template>/`, with `templates/stage/<template>/` kept as a compatibility fallback.
 - `${...}` context references and `#{...}` tool calls.
-- Action outputs referenced by invocation ID, for example `${TOOLS.invokeApi.output.Response.Status}`.
+- Action outputs referenced by Action ID, for example `${ACTIONS.invoke.callApi.output.Response.Status}`.
+- Render actions can save long output to files, for example `${ACTIONS.invoke.renderRequest.outputFile}`.
+- Tool definitions support named arguments plus optional variadic `argv`.
 - Single case execution log under `output/<RunID>/<CaseID>/`.
 - Result workbook generated in the RunID directory.
 - Run history through `run.yaml` and `output/latest-run.yaml`.

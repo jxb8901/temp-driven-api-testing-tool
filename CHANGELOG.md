@@ -1,5 +1,32 @@
 # Changelog
 
+## [V1.3] - 2026-07-09
+
+V1.3 implements suite-local testcase configuration, Test Case Template defaults, Action ID based context, file-based action outputs, and variadic tool arguments.
+
+### Added
+
+- Added suite sidecar config loading from `<suiteName>.yaml` beside each Excel workbook.
+- Added Test Case Template defaults under `templates/testcase/<templateId>/template.yaml`.
+- Added V1.3 stage template resolution from `templates/<template>/template.yaml`, with `templates/stage/<template>/template.yaml` retained as a compatibility fallback.
+- Added `ACTIONS.<ActionID>` context references, while keeping `TOOLS.<ActionID>` as a compatibility alias.
+- Added render action `saveAs` support so long payloads can be written under `output/<RunID>/<CaseID>/<ActionID>/`.
+- Added persisted action input/output files under each action directory.
+- Added `log` action examples for checkpoints and selected context fields.
+- Added tool `argv` support for variadic CLI arguments.
+- Added `testcase/payment_regression.yaml` and `templates/testcase/payment_transfer_cases/template.yaml` as V1.3 examples.
+
+### Changed
+
+- Updated sample payment flow to use shared V1.3 stage templates under `templates/PAYMENT_PREPARE`, `templates/PAYMENT_INVOKE`, and `templates/PAYMENT_VERIFY`.
+- Updated payment invocation to pass the rendered XML file path instead of embedding long XML in the tool input.
+- Updated release package default version to `v1.3`.
+
+### Verified
+
+- Compiled main sources with `javac --release 8` through `scripts/build-release.sh`.
+- Ran `testcase/payment_regression.xlsx`: 20 total, 20 passed, 0 failed, 0 error, 0 skipped.
+
 ## [V1.2] - 2026-07-09
 
 V1.2 implements the generic Tool Invocation Template model: ATT no longer treats request and check templates as separate framework concepts. Cases now run configured stages made of ordered template actions, and every action result is addressable through `TOOLS.<InvocationId>`.

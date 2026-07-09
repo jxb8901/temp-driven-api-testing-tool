@@ -6,7 +6,6 @@ package com.company.apitest.excel;
 
 import com.company.apitest.core.TestCase;
 import com.company.apitest.config.FrameworkConfig;
-import com.company.apitest.config.StageConfig;
 import org.apache.poi.ss.usermodel.*;
 import org.yaml.snakeyaml.Yaml;
 
@@ -127,11 +126,6 @@ public class ExcelTestSuiteLoader {
     private List<String> requiredKeys() {
         List<String> required = new ArrayList<String>();
         required.add("caseId");
-        for (StageConfig stage : config.stages()) {
-            if (stage.required()) {
-                required.add(stage.key());
-            }
-        }
         return required;
     }
 

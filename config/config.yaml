@@ -14,9 +14,6 @@ testcase:
     caseName: Case Name
     tags: Tags
     api: API
-    stagePre: Pre Stage Template
-    stageMain: Main Stage Template
-    stagePost: Post Stage Template
     debitAccount: Debit Account
     creditAccount: Credit Account
     amount: Amount
@@ -25,21 +22,25 @@ testcase:
     remarks: Remarks
 
 stages:
-  - key: stagePre
-    name: Pre
+  - key: prepare
+    name: Prepare
+    template: PAYMENT_PREPARE
     required: false
     onFailure: stop
-  - key: stageMain
-    name: Main
+  - key: invoke
+    name: Invoke
+    template: PAYMENT_INVOKE
     required: true
     onFailure: stop
-  - key: stagePost
-    name: Post
-    required: false
+  - key: verify
+    name: Verify
+    template: PAYMENT_VERIFY
+    required: true
     onFailure: stop
 
 templates:
-  root: templates/stage
+  root: templates
+  defaultTestCaseTemplate: payment_transfer_cases
 
 report:
   mode: append-to-copy
@@ -72,6 +73,7 @@ tools:
     output: xml
     arguments:
       requestXml: "${TOOL.input.requestXml}"
+      requestFile: "${TOOL.input.requestFile}"
       environment: "${environment}"
   getAPIResponse:
     name: Get API Response
@@ -88,11 +90,16 @@ tools:
       txnRef: "${TOOL.input.txn.ref}"
   grepFromAppLogs:
     name: Grep keywords from application logs
-    command: "./tools/grep_from_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/grep_from_app_logs.sh ${TOOL.argv} --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: yaml
     arguments:
       keyword1: "${TOOL.input.keyword1}"
       keyword2: "${TOOL.input.keyword2}"
+    argv:
+      - "--keyword"
+      - "${TOOL.input.keyword1}"
+      - "--keyword"
+      - "${TOOL.input.keyword2}"
   getAppLogs:
     name: Get application logs
     command: "./tools/get_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"

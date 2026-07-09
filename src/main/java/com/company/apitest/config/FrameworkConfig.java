@@ -25,6 +25,7 @@ public class FrameworkConfig {
     private final Map<String, String> testcaseColumns;
     private final List<StageConfig> stages;
     private final Path templatesRoot;
+    private final String defaultTestCaseTemplate;
     private final Map<String, ToolConfig> tools;
     private final ReportConfig report;
     private final RunConfig run;
@@ -32,12 +33,19 @@ public class FrameworkConfig {
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment, int timeoutSeconds,
                            String testcaseSheet, Map<String, String> testcaseColumns, Map<String, ToolConfig> tools) {
         this(outputDirectory, reportDirectory, logDirectory, environment, timeoutSeconds, testcaseSheet, testcaseColumns,
-                defaultStages(), Paths.get("templates/stage"), tools, defaultReport(), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
+                defaultStages(), Paths.get("templates"), "", tools, defaultReport(), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
     }
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment, int timeoutSeconds,
                            String testcaseSheet, Map<String, String> testcaseColumns, List<StageConfig> stages,
                            Path templatesRoot, Map<String, ToolConfig> tools, ReportConfig report, RunConfig run) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutSeconds, testcaseSheet, testcaseColumns,
+                stages, templatesRoot, "", tools, report, run);
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment, int timeoutSeconds,
+                           String testcaseSheet, Map<String, String> testcaseColumns, List<StageConfig> stages,
+                           Path templatesRoot, String defaultTestCaseTemplate, Map<String, ToolConfig> tools, ReportConfig report, RunConfig run) {
         this.outputDirectory = outputDirectory;
         this.reportDirectory = reportDirectory;
         this.logDirectory = logDirectory;
@@ -46,7 +54,8 @@ public class FrameworkConfig {
         this.testcaseSheet = testcaseSheet;
         this.testcaseColumns = testcaseColumns == null ? Collections.<String, String>emptyMap() : new LinkedHashMap<String, String>(testcaseColumns);
         this.stages = stages == null ? defaultStages() : new ArrayList<StageConfig>(stages);
-        this.templatesRoot = templatesRoot == null ? Paths.get("templates/stage") : templatesRoot;
+        this.templatesRoot = templatesRoot == null ? Paths.get("templates") : templatesRoot;
+        this.defaultTestCaseTemplate = defaultTestCaseTemplate == null ? "" : defaultTestCaseTemplate;
         this.tools = tools == null ? Collections.<String, ToolConfig>emptyMap() : new LinkedHashMap<String, ToolConfig>(tools);
         this.report = report == null ? defaultReport() : report;
         this.run = run == null ? new RunConfig("timestamp", "yyyyMMdd-HHmmss") : run;
@@ -76,6 +85,7 @@ public class FrameworkConfig {
     public Map<String, String> testcaseColumns() { return testcaseColumns; }
     public List<StageConfig> stages() { return stages; }
     public Path templatesRoot() { return templatesRoot; }
+    public String defaultTestCaseTemplate() { return defaultTestCaseTemplate; }
     public Map<String, ToolConfig> tools() { return tools; }
     public ToolConfig tool(String key) { return tools.get(key); }
     public ReportConfig report() { return report; }

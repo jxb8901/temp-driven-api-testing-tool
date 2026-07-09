@@ -6,6 +6,7 @@ package com.company.apitest.core;
 
 import com.company.apitest.config.FrameworkConfig;
 import com.company.apitest.config.StageConfig;
+import com.company.apitest.config.SuiteConfigResolver;
 import com.company.apitest.excel.ExcelReportWriter;
 import com.company.apitest.excel.ExcelTestSuiteLoader;
 import com.company.apitest.exec.ToolInvoker;
@@ -30,7 +31,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Coordinates the V1.2 run, stage and action execution flow.
+ * Coordinates the V1.3 run, stage and action execution flow.
  */
 public class FrameworkEngine {
     private final Path projectRoot;
@@ -53,17 +54,19 @@ public class FrameworkEngine {
         List<Path> suites = suites(options);
         Set<String> failedCaseIds = options.rerunFailed() ? latestFailedCaseIds(outputRoot) : Collections.<String>emptySet();
         List<TestResult> results = new ArrayList<>();
-        ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
-        UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker);
-        StageTemplateLoader templateLoader = new StageTemplateLoader(projectRoot, config.templatesRoot());
-        StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
-        ExcelReportWriter reportWriter = new ExcelReportWriter(config);
+        SuiteConfigResolver suiteConfigResolver = new SuiteConfigResolver(projectRoot, config);
 
         for (Path suite : suites) {
-            List<TestCase> cases = new ExcelTestSuiteLoader(config).load(resolve(suite));
+            FrameworkConfig suiteConfig = suiteConfigResolver.resolve(resolve(suite));
+            ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
+            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker);
+            StageTemplateLoader templateLoader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
+            StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
+            ExcelReportWriter reportWriter = new ExcelReportWriter(suiteConfig);
+            List<TestCase> cases = new ExcelTestSuiteLoader(suiteConfig).load(resolve(suite));
             List<TestResult> suiteResults = new ArrayList<TestResult>();
             for (TestCase testCase : cases) {
-                TestResult result = runCase(testCase, options, failedCaseIds, runId, runDirectory, templateLoader, templateRunner);
+                TestResult result = runCase(testCase, suiteConfig, options, failedCaseIds, runId, runDirectory, templateLoader, templateRunner);
                 results.add(result);
                 suiteResults.add(result);
                 if (options.failFast() && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR)) {
@@ -76,7 +79,7 @@ public class FrameworkEngine {
         return new RunSummary(results, runDirectory);
     }
 
-    private TestResult runCase(TestCase testCase, ExecutionOptions options, Set<String> failedCaseIds, String runId, Path runDirectory,
+    private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, Set<String> failedCaseIds, String runId, Path runDirectory,
                                StageTemplateLoader templateLoader, StageTemplateRunner templateRunner) throws Exception {
         if (!testCase.enabled() || !options.matches(testCase)) {
             return skipped(testCase, "Case disabled or not selected");
@@ -93,25 +96,31 @@ public class FrameworkEngine {
         Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
         CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, runId, runDirectory, caseLogPath);
-        context.put("environment", config.environment());
+        context.put("environment", suiteConfig.environment());
         caseLog.append("CASE", testCase.fixedValues());
         List<ValidationResult> validations = new ArrayList<ValidationResult>();
         try {
             if (!options.dryRun()) {
-                for (StageConfig stage : config.stages()) {
-                    String templateName = testCase.stageTemplates().get(stage.key());
-                    if ((templateName == null || templateName.trim().isEmpty()) && stage.required()) {
-                        throw new IllegalArgumentException("Missing required stage template: " + stage.key());
-                    }
-                    if (templateName == null || templateName.trim().isEmpty()) {
+                boolean stoppedByFailure = false;
+                for (StageConfig stage : suiteConfig.stages()) {
+                    if (!shouldRunStage(stage, stoppedByFailure)) {
                         continue;
                     }
-                    StageTemplate template = templateLoader.load(templateName);
-                    caseLog.append("STAGE " + stage.name(), "template: " + templateName);
+                    String templateName = stage.template();
+                    boolean missingTemplate = (templateName == null || templateName.trim().isEmpty())
+                            && (stage.templatePath() == null || stage.templatePath().trim().isEmpty());
+                    if (missingTemplate && stage.required()) {
+                        throw new IllegalArgumentException("Missing required stage template: " + stage.key());
+                    }
+                    if (missingTemplate) {
+                        continue;
+                    }
+                    StageTemplate template = templateLoader.load(stage);
+                    caseLog.append("STAGE " + stage.name(), "template: " + (stage.templatePath().isEmpty() ? templateName : stage.templatePath()));
                     List<ValidationResult> stageResults = templateRunner.execute(stage.name(), template, context, caseLog);
                     validations.addAll(stageResults);
                     if (hasFailure(stageResults) && "stop".equalsIgnoreCase(stage.onFailure())) {
-                        break;
+                        stoppedByFailure = true;
                     }
                 }
             }
@@ -122,6 +131,17 @@ public class FrameworkEngine {
             caseLog.append("ERROR", e.getMessage());
             return error(testCase, e.getMessage(), caseLogPath, Duration.between(started, Instant.now()));
         }
+    }
+
+    private boolean shouldRunStage(StageConfig stage, boolean stoppedByFailure) {
+        String runWhen = stage.runWhen();
+        if ("always".equalsIgnoreCase(runWhen)) {
+            return true;
+        }
+        if ("failure".equalsIgnoreCase(runWhen) || "failed".equalsIgnoreCase(runWhen)) {
+            return stoppedByFailure;
+        }
+        return !stoppedByFailure;
     }
 
     private boolean hasFailure(List<ValidationResult> results) {

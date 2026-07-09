@@ -1,0 +1,27 @@
+name: PAYMENT_PREPARE
+description: Prepare payment request identifiers.
+
+actionDefaults:
+  onFailure: stop
+
+actions:
+  prepare.getAcDate:
+    type: tool
+    call: "#{getAcDate()}"
+
+  prepare.getSeq:
+    type: tool
+    call: "#{getSeq(caseId=${CaseID})}"
+
+  prepare.genEndToEndId:
+    type: tool
+    call: "#{genEndToEndId(caseId=${CaseID})}"
+
+  prepare.logIds:
+    type: log
+    level: INFO
+    message: "Prepared IDs for ${CaseID}"
+    fields:
+      acDate: "${ACTIONS.prepare.getAcDate.output}"
+      sequence: "${ACTIONS.prepare.getSeq.output}"
+      endToEndId: "${ACTIONS.prepare.genEndToEndId.output}"

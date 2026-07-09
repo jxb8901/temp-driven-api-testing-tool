@@ -9,14 +9,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Per-case runtime context used by V1.2 stage actions and tool invocations.
+ * Per-case runtime context used by V1.3 stage actions and tool invocations.
  */
 public class CaseRuntimeContext {
     private final Map<String, Object> values = new LinkedHashMap<String, Object>();
-    private final Map<String, Map<String, Object>> tools = new LinkedHashMap<String, Map<String, Object>>();
+    private final Map<String, Map<String, Object>> actions = new LinkedHashMap<String, Map<String, Object>>();
+    private final Path caseOutputDir;
     private int toolSequence = 0;
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
+        this.caseOutputDir = caseOutputDir;
         values.putAll(testCase.fixedValues());
         values.putAll(testCase.caseData());
         values.putAll(testCase.expectedPrecheckData());
@@ -40,7 +42,10 @@ public class CaseRuntimeContext {
             return getPath(values.get("TOOL.output"), path.substring("TOOL.output.".length()));
         }
         if (path.startsWith("TOOLS.")) {
-            return resolveToolPath(path.substring("TOOLS.".length()));
+            return resolveActionPath(path.substring("TOOLS.".length()));
+        }
+        if (path.startsWith("ACTIONS.")) {
+            return resolveActionPath(path.substring("ACTIONS.".length()));
         }
         return getPath(values, path);
     }
@@ -64,20 +69,38 @@ public class CaseRuntimeContext {
     }
 
     public void addToolInvocation(String invocationId, Map<String, Object> invocation) {
-        if (tools.containsKey(invocationId)) {
-            throw new IllegalArgumentException("Duplicate invocation id: " + invocationId);
-        }
-        tools.put(invocationId, invocation);
+        addAction(invocationId, invocation);
     }
 
-    private Object resolveToolPath(String path) {
-        int dot = path.indexOf('.');
-        String id = dot < 0 ? path : path.substring(0, dot);
-        Map<String, Object> invocation = tools.get(id);
-        if (invocation == null) {
+    public void addAction(String actionId, Map<String, Object> action) {
+        if (actions.containsKey(actionId)) {
+            throw new IllegalArgumentException("Duplicate action id: " + actionId);
+        }
+        actions.put(actionId, action);
+    }
+
+    public Path actionOutputDir(String actionId) {
+        Path directory = caseOutputDir.resolve(actionId).normalize();
+        if (!directory.startsWith(caseOutputDir.normalize())) {
+            throw new IllegalArgumentException("Action output directory must stay under case output directory: " + actionId);
+        }
+        return directory;
+    }
+
+    private Object resolveActionPath(String path) {
+        String id = null;
+        for (String candidate : actions.keySet()) {
+            if (path.equals(candidate) || path.startsWith(candidate + ".")) {
+                if (id == null || candidate.length() > id.length()) {
+                    id = candidate;
+                }
+            }
+        }
+        if (id == null) {
             return null;
         }
-        return dot < 0 ? invocation : getPath(invocation, path.substring(dot + 1));
+        Map<String, Object> action = actions.get(id);
+        return path.equals(id) ? action : getPath(action, path.substring(id.length() + 1));
     }
 
     @SuppressWarnings("unchecked")

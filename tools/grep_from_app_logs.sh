@@ -2,8 +2,13 @@
 set -eu
 
 output=""
+keywords=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --keyword)
+      keywords="${keywords}${keywords:+,}$2"
+      shift 2
+      ;;
     --output)
       output="$2"
       shift 2
@@ -23,6 +28,5 @@ mkdir -p "$(dirname "$output")"
 cat > "$output" <<YAML
 matched: true
 keywords:
-  - PAYMENT
-  - POSTED
+$(printf '%s\n' "$keywords" | awk -F',' '{for (i=1; i<=NF; i++) if ($i != "") print "  - " $i}')
 YAML

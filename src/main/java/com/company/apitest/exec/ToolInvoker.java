@@ -22,13 +22,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Executes configured tools and records each invocation into the case log.
  */
 public class ToolInvoker {
+    private static final Pattern VALUE = Pattern.compile("\\$\\{([^}]+)}");
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final CommandRunner commandRunner;
@@ -50,19 +55,23 @@ public class ToolInvoker {
         }
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
-        Path inputFile = Files.createTempFile("att-" + id + "-", ".input.yaml");
-        Path outputFile = Files.createTempFile("att-" + id + "-", "." + extension(tool.output()));
+        Path actionDir = context.actionOutputDir(id);
+        Files.createDirectories(actionDir);
+        Path inputFile = actionDir.resolve("input.yaml");
+        Path outputFile = actionDir.resolve("output." + extension(tool.output()));
 
         // Call-site input is resolved first; config-level arguments can normalize or enrich that input.
         Map<String, Object> resolvedInput = resolveMap(input, context);
         resolvedInput.putAll(resolveToolArguments(tool.arguments(), resolvedInput, context));
         Files.write(inputFile, new Yaml().dump(resolvedInput).getBytes(StandardCharsets.UTF_8));
+        List<String> argv = resolveArgv(tool.argv(), resolvedInput, context);
 
         // The command sees only file paths and resolved TOOL.input values, keeping scripts reusable.
         Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
         flatten("TOOL.input", resolvedInput, renderContext);
         renderContext.put("TOOL.inputFile", inputFile.toString());
         renderContext.put("TOOL.outputFile", outputFile.toString());
+        renderContext.put("TOOL.argv", shellArgs(argv));
         String command = TemplateRenderer.render(tool.command(), renderContext);
         CommandResult commandResult = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()));
         if (!Files.exists(outputFile)) {
@@ -76,15 +85,18 @@ public class ToolInvoker {
         invocation.put("type", "tool");
         invocation.put("tool", toolName);
         invocation.put("input", resolvedInput);
+        invocation.put("inputFile", inputFile.toString());
         invocation.put("output", parsed);
+        invocation.put("outputFile", outputFile.toString());
         invocation.put("rawOutput", rawOutput);
+        invocation.put("argv", argv);
         invocation.put("stdout", commandResult.stdout());
         invocation.put("stderr", commandResult.stderr());
         invocation.put("command", command);
         invocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 ? "PASS" : "ERROR"));
         invocation.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         invocation.put("exitCode", commandResult.exitCode());
-        context.addToolInvocation(id, invocation);
+        context.addAction(id, invocation);
         context.put("TOOL.input", resolvedInput);
         context.put("TOOL.output", parsed);
         log.append("ACTION " + id, invocation);
@@ -106,7 +118,7 @@ public class ToolInvoker {
             if (entry.getValue() instanceof Map) {
                 resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue(), context));
             } else {
-                resolved.put(entry.getKey(), TemplateRenderer.render(String.valueOf(entry.getValue()), renderContext));
+                resolved.put(entry.getKey(), renderValue(String.valueOf(entry.getValue()), context));
             }
         }
         return resolved;
@@ -125,7 +137,7 @@ public class ToolInvoker {
             if (entry.getValue() instanceof Map) {
                 resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue(), renderContext));
             } else {
-                resolved.put(entry.getKey(), TemplateRenderer.render(String.valueOf(entry.getValue()), renderContext));
+                resolved.put(entry.getKey(), renderValue(String.valueOf(entry.getValue()), renderContext));
             }
         }
         return resolved;
@@ -139,6 +151,53 @@ public class ToolInvoker {
                 flatten(prefix + "." + entry.getKey(), entry.getValue(), output);
             }
         }
+    }
+
+    private List<String> resolveArgv(List<Object> argv, Map<String, Object> callInput, CaseRuntimeContext context) {
+        Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
+        flatten("TOOL.input", callInput, renderContext);
+        List<String> resolved = new ArrayList<String>();
+        for (Object item : argv) {
+            resolved.add(renderValue(String.valueOf(item), renderContext));
+        }
+        return resolved;
+    }
+
+    private String shellArgs(List<String> argv) {
+        StringBuilder output = new StringBuilder();
+        for (String item : argv) {
+            if (output.length() > 0) {
+                output.append(' ');
+            }
+            output.append(shellQuote(item));
+        }
+        return output.toString();
+    }
+
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private String renderValue(String template, CaseRuntimeContext context) {
+        Matcher matcher = VALUE.matcher(template);
+        StringBuffer output = new StringBuffer();
+        while (matcher.find()) {
+            Object value = context.resolve(matcher.group(1));
+            matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+        }
+        matcher.appendTail(output);
+        return output.toString();
+    }
+
+    private String renderValue(String template, Map<String, Object> renderContext) {
+        Matcher matcher = VALUE.matcher(template);
+        StringBuffer output = new StringBuffer();
+        while (matcher.find()) {
+            Object value = renderContext.get(matcher.group(1));
+            matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+        }
+        matcher.appendTail(output);
+        return output.toString();
     }
 
     public Object parseOutput(String text, String outputType) throws Exception {

@@ -3,6 +3,7 @@ set -eu
 
 input=""
 output=""
+request_file=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --input)
@@ -11,6 +12,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --output)
       output="$2"
+      shift 2
+      ;;
+    --request-file)
+      request_file="$2"
       shift 2
       ;;
     *)
@@ -25,10 +30,15 @@ if [ -z "$output" ]; then
 fi
 
 mkdir -p "$(dirname "$output")"
+if [ -z "$request_file" ] && [ -n "$input" ]; then
+  request_file="$(sed -n 's/.*requestFile: \([^,}]*\).*/\1/p' "$input" 2>/dev/null | head -1)"
+fi
+request_file="${request_file:-$input}"
 cat > "$output" <<XML
 <Response>
   <Status>SUCCESS</Status>
   <RejectCode>0000</RejectCode>
   <InputFile>${input}</InputFile>
+  <RequestFile>${request_file}</RequestFile>
 </Response>
 XML

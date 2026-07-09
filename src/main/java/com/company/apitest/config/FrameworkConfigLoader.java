@@ -37,6 +37,7 @@ public class FrameworkConfigLoader {
                     testcaseColumns(map),
                     stages(map),
                     templatesRoot(map),
+                    defaultTestCaseTemplate(map),
                     tools(map),
                     report(map),
                     run(map)
@@ -66,7 +67,8 @@ public class FrameworkConfigLoader {
                 Map<?, ?> value = (Map<?, ?>) item;
                 String key = text(value.get("key"), "");
                 if (!key.isEmpty()) {
-                    stages.add(new StageConfig(key, text(value.get("name"), key), bool(value.get("required"), false),
+                    stages.add(new StageConfig(key, text(value.get("name"), key), text(value.get("template"), ""),
+                            text(value.get("templatePath"), ""), bool(value.get("required"), false),
                             text(value.get("onFailure"), "stop"), text(value.get("runWhen"), "normal")));
                 }
             }
@@ -87,7 +89,18 @@ public class FrameworkConfigLoader {
                 return Paths.get(String.valueOf(root));
             }
         }
-        return Paths.get("templates/stage");
+        return Paths.get("templates");
+    }
+
+    private static String defaultTestCaseTemplate(Map<?, ?> map) {
+        Object configured = map.get("templates");
+        if (configured instanceof Map) {
+            Object value = ((Map<?, ?>) configured).get("defaultTestCaseTemplate");
+            if (value != null) {
+                return String.valueOf(value);
+            }
+        }
+        return "";
     }
 
     private static Map<String, String> testcaseColumns(Map<?, ?> map) {
@@ -123,10 +136,21 @@ public class FrameworkConfigLoader {
                     text(value.get("command"), ""),
                     text(value.get("output"), "txt"),
                     objectMap(value.get("arguments")),
+                    objectList(value.get("argv")),
                     new LinkedHashMap<String, String>()
             ));
         }
         return tools;
+    }
+
+    private static List<Object> objectList(Object value) {
+        List<Object> result = new ArrayList<Object>();
+        if (value instanceof Iterable) {
+            for (Object item : (Iterable<?>) value) {
+                result.add(item);
+            }
+        }
+        return result;
     }
 
     private static ReportConfig report(Map<?, ?> map) {
