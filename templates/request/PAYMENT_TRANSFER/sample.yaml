@@ -1,6 +1,0 @@
-CaseID: TC001
-Debit Account: "111111"
-Credit Account: "222222"
-Amount: "100"
-Currency: "HKD"
-channel: ATM

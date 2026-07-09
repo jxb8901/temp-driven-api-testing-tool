@@ -1,3 +1,0 @@
-invokePaymentApi:
-  description: Invoke payment API after request XML generation
-  call: "#{invokePaymentApi(requestXml=${TOOLS.renderRequestTemplate[0].outputFile})}"
