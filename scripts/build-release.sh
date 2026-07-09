@@ -3,10 +3,12 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-VERSION="${ATT_VERSION:-v1.2}"
+VERSION="${ATT_VERSION:-v1.3}"
 PACKAGE_NAME="att-${VERSION}"
+SOURCE_PACKAGE_NAME="att-${VERSION}-src"
 BUILD_DIR="$ROOT_DIR/target/release"
 PACKAGE_DIR="$BUILD_DIR/$PACKAGE_NAME"
+SOURCE_PACKAGE_DIR="$BUILD_DIR/$SOURCE_PACKAGE_NAME"
 DIST_DIR="$ROOT_DIR/dist"
 M2_REPO="${M2_REPO:-$HOME/.m2/repository}"
 
@@ -32,6 +34,8 @@ if ! command -v javac >/dev/null 2>&1; then
 fi
 
 rm -rf "$PACKAGE_DIR"
+rm -rf "$SOURCE_PACKAGE_DIR"
+rm -f "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz"
 mkdir -p "$PACKAGE_DIR/classes" "$PACKAGE_DIR/lib" "$DIST_DIR"
 
 CP=""
@@ -82,4 +86,44 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 } > "$PACKAGE_DIR/RELEASE_MANIFEST.txt"
 
 (cd "$BUILD_DIR" && tar -czf "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$PACKAGE_NAME")
+
+mkdir -p "$SOURCE_PACKAGE_DIR"
+cp "$ROOT_DIR/att.sh" "$SOURCE_PACKAGE_DIR/att.sh"
+cp "$ROOT_DIR/README.md" "$SOURCE_PACKAGE_DIR/README.md"
+cp "$ROOT_DIR/CHANGELOG.md" "$SOURCE_PACKAGE_DIR/CHANGELOG.md"
+cp "$ROOT_DIR/pom.xml" "$SOURCE_PACKAGE_DIR/pom.xml"
+cp -R "$ROOT_DIR/config" "$SOURCE_PACKAGE_DIR/config"
+cp -R "$ROOT_DIR/templates" "$SOURCE_PACKAGE_DIR/templates"
+cp -R "$ROOT_DIR/tools" "$SOURCE_PACKAGE_DIR/tools"
+cp -R "$ROOT_DIR/testcase" "$SOURCE_PACKAGE_DIR/testcase"
+cp -R "$ROOT_DIR/docs" "$SOURCE_PACKAGE_DIR/docs"
+cp -R "$ROOT_DIR/scripts" "$SOURCE_PACKAGE_DIR/scripts"
+cp -R "$ROOT_DIR/src" "$SOURCE_PACKAGE_DIR/src"
+cp "$ROOT_DIR/.gitignore" "$SOURCE_PACKAGE_DIR/.gitignore"
+mkdir -p "$SOURCE_PACKAGE_DIR/output" "$SOURCE_PACKAGE_DIR/report" "$SOURCE_PACKAGE_DIR/logs"
+find "$SOURCE_PACKAGE_DIR" -name '.DS_Store' -delete
+
+chmod +x "$SOURCE_PACKAGE_DIR/att.sh"
+find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
+find "$SOURCE_PACKAGE_DIR/scripts" -type f -name '*.sh' -exec chmod +x {} \;
+
+{
+  echo "name: $SOURCE_PACKAGE_NAME"
+  echo "main: att.sh"
+  echo "contents:"
+  echo "  - src/"
+  echo "  - templates/"
+  echo "  - tools/"
+  echo "  - testcase/"
+  echo "  - config/"
+  echo "  - docs/"
+  echo "  - scripts/"
+  echo "  - README.md"
+  echo "  - CHANGELOG.md"
+  echo "  - pom.xml"
+  echo "  - att.sh"
+} > "$SOURCE_PACKAGE_DIR/RELEASE_MANIFEST.txt"
+
+(cd "$BUILD_DIR" && tar -czf "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz" "$SOURCE_PACKAGE_NAME")
 echo "$DIST_DIR/$PACKAGE_NAME.tar.gz"
+echo "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz"
