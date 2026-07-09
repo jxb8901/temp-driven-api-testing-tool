@@ -32,7 +32,7 @@ ATT 以三層配置為核心：
 
 - 全局配置 `config.yaml`
 - 套件配置 `testcase/<suite>.yaml`
-- 模板配置 `templates/<template>/...`
+- 模板配置由全局 `templatePaths` 指定的搜索路徑提供
 
 執行時，資料會進入 Context，然後由模板與工具一步步消化。
 
@@ -56,11 +56,10 @@ project/
     payment_regression.xlsx
     payment_regression.yaml
   templates/
-    payment_transfer_cases/
-      invoke/
-        standard.yaml
-      verify/
-        success.yaml
+    shared/
+      payment_transfer.yaml
+    common/
+      success_check.yaml
   output/
 ```
 
@@ -68,9 +67,10 @@ project/
 
 - `att.sh` 是執行入口
 - `config.yaml` 定義工具和全局默認值
+- `config.yaml` 也定義模板搜索路徑
 - `testcase/*.xlsx` 是案例資料
 - `testcase/*.yaml` 是 sidecar 配置
-- `templates/` 是模板庫
+- `templates/` 是默認模板搜索路徑
 - `output/` 是執行結果
 
 ---
@@ -138,8 +138,8 @@ stages:
 例如：
 
 ```text
-templates/payment_transfer_cases/invoke/standard.yaml
-templates/payment_transfer_cases/verify/success.yaml
+templates/shared/payment_transfer.yaml
+shared-templates/common/success_check.yaml
 ```
 
 模板單元格內容是 YAML，最少包含：
@@ -150,15 +150,16 @@ name: 中文支付調用模板
 
 這裡要特別注意：
 
-- `templates/payment_transfer_cases/invoke/standard.yaml` 是檔案路徑示例
+- `templates/shared/payment_transfer.yaml` 是檔案路徑示例
+- `shared-templates/common/success_check.yaml` 也是檔案路徑示例
 - `name: 中文支付調用模板` 是模板的邏輯名稱
 - `template.name` 不直接等於檔案路徑
-- ATT 會先進入對應 stage 的模板目錄，再用 `name` 去匹配實際模板內容
+- ATT 會按 `templatePaths` 的順序搜索模板文件，再用 `name` 去匹配實際模板內容
 
 也就是說，`template.name` 用來「找模板」，不是用來「拼檔名」。
 
-如果同一個 stage 目錄下只有一份模板，檔名可以只是慣用命名。
 如果有多份模板，則以 YAML 內的 `name` 作為唯一識別更安全。
+模板可以在不同 stage 或不同 testcase 間共享，路徑不需要和 stage/testcase 綁定。
 
 ## 4.4 第四步：執行
 
@@ -192,15 +193,22 @@ environment:
 
 logLevel: INFO
 
+templatePaths:
+  - templates
+  - shared-templates
+
 tools:
   invokePaymentApi:
     command: "./tools/invoke_payment_api.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: xml
     arguments: "requestFile*, environment='SIT', traceId"
+    script: "./scripts/invoke_payment_api.sh"
     retry:
       count: 2
       exitCode: [1, 2]
 ```
+
+工具 script 可放在任何位置，只要 `command` 能正確執行即可，不需要跟模板目錄或 testcase 目錄綁定。
 
 ## 5.1 什麼放這裡
 
@@ -210,6 +218,7 @@ tools:
 - 共用環境資訊
 - 全局 log level
 - 一般執行默認行為
+- 模板搜索路徑
 
 ## 5.2 什麼不要放這裡
 
@@ -219,6 +228,8 @@ tools:
 - stage 定義
 - suite 專屬報表欄位
 - suite 專屬解析規則
+- 模板內容本體
+- 工具 script 放置目錄約束
 
 這些屬於 sidecar。
 
@@ -571,7 +582,8 @@ YAML 欄位必須是合法 YAML。
 
 - `templateColumn` 的值是否正確
 - 模板 `name` 是否一致
-- 模板目錄是否符合約定
+- `templatePaths` 是否包含實際模板所在目錄
+- 模板內容是否在配置的搜索路徑中
 
 ## 14.2 YAML 解析失敗
 
@@ -617,10 +629,11 @@ YAML 欄位必須是合法 YAML。
 4. `columns` 是否對應到實際欄位名
 5. `yamlColumns` 是否是合法 YAML
 6. stage 的 `templateColumn` 是否有值
-7. 模板 `name` 是否能找到
-8. tool command 是否可執行
-9. retry exit code 是否合理
-10. log level 是否太低，導致看不到足夠資訊
+7. `templatePaths` 是否包含實際模板目錄
+8. 模板 `name` 是否能找到
+9. tool command 是否可執行
+10. retry exit code 是否合理
+11. log level 是否太低，導致看不到足夠資訊
 
 ---
 
@@ -678,6 +691,8 @@ tools:
 - `testcase.yamlColumns` 用 YAML 欄位
 - `stages.<stage>.templateColumn` 必填
 - 模板 cell 用 YAML，`name` 是關鍵
+- 模板由 `templatePaths` 搜索，不綁 stage/testcase
+- 工具 script 不綁模板或 testcase 目錄
 - 資料都進 Context
 - `arguments` 是開放式參數約定
 - `retry` 只看 exit code

@@ -17,8 +17,12 @@ The core runtime model remains:
 
 - Excel suites drive case execution.
 - Suite sidecar config defines how one workbook is parsed and executed.
-- Stages are executed in configured order.
-- Stage templates contain ordered actions.
+- Test case owns stages.
+- Stage is an ordered unit inside a testcase.
+- Template is a directory selected by a stage template cell.
+- Template contains ordered actions.
+- Action is an ordered unit inside a template.
+- Tool is invoked by an action.
 - `${...}` references runtime context values.
 - `#{...}` invokes tools.
 - Tool execution remains external shell-script based.
@@ -26,17 +30,28 @@ The core runtime model remains:
 V1.4 tightens the configuration boundary:
 
 - `config.yaml` configures tools and optional global defaults such as environment, global log level, and common execution defaults.
+- `config.yaml` also configures an ordered list of template search paths, with `templates` as the default.
 - Testcase, stage, and report mapping live in the suite sidecar config.
 - Every Excel suite must have a sidecar config.
-- The sidecar config must define the Test Case Template, stages, report column mapping, and other suite-specific report settings.
+- The sidecar config must define stages, report column mapping, and other suite-specific report settings.
 
 V1.4 also clarifies workbook parsing and authoring support:
 
 - Multi-row Excel headers are supported through `testcase.headerRows`.
 - Human-entered invisible spaces are trimmed where they can break matching.
-- Template cells are YAML objects.
+- Template directories are only recognized when they contain `template.yaml`.
+- Template cells are YAML objects inside `template.yaml`.
 - Chinese and mixed-language template names are supported.
 - Case author reference manuals can be generated from configured testcase, template, and tool metadata.
+- ATT can package the latest run output, including reports and per-case logs.
+- ATT can generate HTML test reports.
+- ATT can generate a newcomer handbook and a full user manual.
+
+Relationship model:
+
+```text
+testcase 1:n stage 1:n template 1:n action 1:n tool
+```
 
 ---
 
@@ -55,9 +70,8 @@ The sidecar config owns:
 - testcase and stage YAML columns
 - report columns
 - suite log level
-- Test Case Template binding
 
-Global `config.yaml` may define tools, environment information, global log level, and other common default behavior.
+Global `config.yaml` may define tools, environment information, global log level, other common default behavior, and template search paths.
 
 Global `config.yaml` should not define testcase columns, stages, or suite-specific report column mapping.
 
@@ -107,7 +121,7 @@ The manual should be generated from configured testcase fields, stage fields, te
 |------|------|------|
 | Global config | May provide testcase/stage/report defaults | Tools, environment, global log level, and common defaults |
 | Suite sidecar | Recommended | Required |
-| Stage model | Test Case Template owns stage list | Suite sidecar config owns stage columns and required rules |
+| Stage model | Test case owns stage list | Suite sidecar config owns stage columns and required rules |
 | Stage template cell | Template name string | YAML object with `name` |
 | Stage data | Per-case data plus optional stage-specific data | Stage YAML columns become stage-scoped Context data sources |
 | Testcase columns | Mapped into fixed values/context | Simplified list syntax; values become Context data |
@@ -125,13 +139,15 @@ The manual should be generated from configured testcase fields, stage fields, te
 |------|---------|
 | Test Suite | One Excel workbook containing test cases |
 | Test Suite Config | Sidecar YAML file beside the Excel workbook |
-| Test Case Template | Reusable suite model selected by the sidecar |
+| Test Case | One executable workbook case set |
 | Testcase Column | Ordinary workbook column exposed in Context |
-| Template Column | Stage-specific workbook column containing YAML template cell data |
+| Template Column | Stage-specific workbook column containing template selection data |
 | YAML Column | Workbook column whose cell value is parsed as YAML and exposed in Context |
-| Stage | Named execution step configured in the sidecar |
-| Stage Template | Template package selected by stage template cell `name` |
-| Template Cell | YAML object in a stage template column |
+| Stage | Ordered testcase sub-step that selects template count and order |
+| Stage Template | Reusable template directory selected by name from the configured template search paths |
+| Template Cell | YAML object in `template.yaml` inside a template directory |
+| Template | Directory that contains `template.yaml` and optional request/render files |
+| Action | Ordered template sub-step that selects tool invocation and/or render flow |
 | Context | Runtime data tree used by `${...}` expressions |
 | Action ID | Stable identifier for a template action and its runtime context record |
 | Tool Argument Contract | Lightweight declaration of common supported named parameters |
@@ -156,7 +172,6 @@ The sidecar config is required.
 
 The sidecar must configure:
 
-- `testCaseTemplate`
 - `testcase`
 - `testcase.report`
 - `stages`
@@ -164,8 +179,6 @@ The sidecar must configure:
 Example:
 
 ```yaml
-testCaseTemplate: payment_transfer_cases
-
 testcase:
   sheet: 測試案例
   headerRows: 2
@@ -204,6 +217,7 @@ It may configure:
 - environment information
 - global log level
 - common execution defaults
+- template search paths
 
 It should not configure:
 
@@ -213,6 +227,20 @@ It should not configure:
 - suite-specific report mapping
 
 Those settings belong to the suite sidecar.
+
+Template search path example:
+
+```yaml
+templatePaths:
+  - templates
+  - shared-templates
+```
+
+If omitted, ATT searches `templates` by default.
+
+Template paths are searched in order until a matching template is found.
+
+Tool script paths are independent and do not need to live under a specific template or testcase directory.
 
 ## 5.3 Excel Workbook Model
 
@@ -227,7 +255,19 @@ Examples:
 
 Workbook display labels are matched exactly after necessary trimming.
 
-## 5.4 Multi-Row Header Model
+## 5.4 Stage Ordering Model
+
+`stage` belongs to `testcase`.
+
+It only defines the number and order of template invocations inside that testcase.
+
+It does not own business logic beyond:
+
+- template count and order
+- required/optional execution
+- stage-level YAML columns
+
+## 5.5 Multi-Row Header Model
 
 `testcase.headerRows` defines how many top rows are treated as headers.
 
@@ -260,7 +300,7 @@ Effective labels:
 - `調用模板`
 - `驗證模板`
 
-## 5.5 Whitespace Normalization
+## 5.6 Whitespace Normalization
 
 ATT should trim necessary whitespace during parsing to avoid failures caused by invisible user-entered spaces.
 
@@ -277,7 +317,7 @@ Trim should apply to matching-oriented values:
 
 ATT should not blindly trim intentional business text inside YAML scalar values unless that value is used as an identifier or matching key.
 
-## 5.6 Testcase Columns
+## 5.7 Testcase Columns
 
 `testcase.columns` defines ordinary testcase data columns.
 
@@ -327,7 +367,7 @@ They do not need to be repeated in `testcase.columns`.
 
 If a project intentionally also maps those columns under `testcase.columns`, they are treated as ordinary Context data columns and duplicate-key warning rules still apply.
 
-## 5.7 Testcase YAML Columns
+## 5.8 Testcase YAML Columns
 
 `testcase.yamlColumns` is optional.
 
@@ -377,7 +417,7 @@ ${更多測試數據.risk.level}
 
 YAML comments and Chinese keys/values are supported.
 
-## 5.8 Duplicate Context Keys
+## 5.9 Duplicate Context Keys
 
 When multiple sources write the same key, later values override earlier values and ATT must emit a warning.
 
@@ -391,9 +431,9 @@ Typical sources:
 
 Warnings should be visible in diagnostics and, depending on log level, in the case log.
 
-## 5.9 Stage Column Model
+## 5.10 Stage Column Model
 
-`stages.<stage>` defines where a stage reads its template and optional data.
+`stages.<stage>` defines the fixed execution order and optional data for that stage.
 
 Each stage must configure:
 
@@ -428,7 +468,7 @@ If the stage is required, these empty values should fail the case with a clear m
 
 If the stage is not required, these empty values may skip the stage.
 
-## 5.10 Stage YAML Columns
+## 5.11 Stage YAML Columns
 
 `stages.<stage>.yamlColumns` is optional.
 
@@ -453,7 +493,7 @@ expected:
 
 The resulting data participates in normal Context lookup while the stage is executing.
 
-## 5.11 Report Configuration
+## 5.12 Report Configuration
 
 Report configuration is defined in the testcase sidecar config.
 
@@ -480,13 +520,19 @@ Suite-specific report configuration should not be defined in `config.yaml`.
 
 # 6. Template Cell Model
 
-Stage template cells are YAML.
+Stage template cells are YAML and live in `template.yaml` inside a template directory.
 
 The minimum shape is:
 
 ```yaml
 name: PAYMENT_PRECHECK
 ```
+
+`template.yaml` is mandatory. A directory without `template.yaml` is not a template.
+
+The complete template name is its relative directory path under one of the configured `templatePaths`, for example `payment/local/CT001`.
+
+`template.yaml` may define a `name` field as a friendly lookup name, and the stage template cell may reference either the friendly name or the complete name.
 
 With Chinese name and remark:
 
@@ -513,6 +559,8 @@ Because the template cell is YAML, it naturally supports:
 
 All parsed template cell data may be injected into context and may be emitted into the case log.
 
+Template directories may also contain one or more `request.tmp.xml`, `request.tmp.json`, or `request.tmp.yaml` files for render outputs and tool input files.
+
 Recommended context shape:
 
 ```text
@@ -530,7 +578,7 @@ The runtime context contains:
 - testcase column values
 - testcase YAML column values
 - current stage YAML column values
-- stage template cell data
+- stage template directory data
 - current stage metadata
 - action outputs
 - tool inputs and outputs
@@ -562,7 +610,7 @@ Typical Context data sources are:
 - ordinary cells configured by `testcase.columns`
 - YAML cells configured by `testcase.yamlColumns`
 - YAML cells configured by `stages.<stage>.yamlColumns`
-- parsed stage template cell metadata
+- parsed template directory metadata from `template.yaml`
 - action outputs
 - tool inputs and outputs
 - run and case metadata
@@ -636,7 +684,11 @@ payment:
 
 The suite sidecar config defines the stage keys and stage columns.
 
-The Excel row decides which stage template to use through the stage `templateColumn`.
+The Excel row decides which template name to use through the stage `templateColumn`.
+
+Template lookup does not depend on the stage or testcase itself.
+
+ATT resolves template names by searching the configured template paths in order.
 
 Execution flow:
 
@@ -647,10 +699,14 @@ Load suite sidecar
   -> Parse testcase yamlColumns into Context
   -> For each configured stage
        -> Read templateColumn
-       -> Parse template cell YAML
+       -> Resolve template directory by complete template name or friendly template name
+       -> Read template.yaml
+       -> Load optional request.tmp.* files
        -> Parse optional stage yamlColumns into Context
-       -> Resolve stage template by template.name
        -> Execute ordered actions
+            -> Render request.tmp.*
+            -> Invoke tool
+            -> Record outputs
 ```
 
 If a required stage has an empty template cell, the case should fail with a clear error.
@@ -669,8 +725,8 @@ Example:
 actions:
   renderRequest:
     type: render
-    payload: request.xml
-    saveAs: request.xml
+    input: request.tmp.xml
+    output: request.xml
 
   callApi:
     type: tool
@@ -682,6 +738,16 @@ actions:
 ```
 
 Action IDs remain stable context keys.
+
+An action belongs to a template and only defines the order of renders, tool calls, assertions, and logging inside that template.
+
+Common action types include:
+
+- `render`
+- `tool`
+- `assert`
+- `log`
+- `assign`
 
 ---
 
@@ -705,6 +771,10 @@ tools:
       count: 2
       exitCode: [1, 2]
 ```
+
+Tools are independent from testcase, stage, and template layout.
+
+Tool script paths may live anywhere on disk as long as the command can execute them.
 
 ## 11.1 Tool Arguments
 
@@ -836,9 +906,49 @@ output/<RunID>/run.yaml
 output/latest-run.yaml
 ```
 
+`att.sh` should support packaging the latest run output, including:
+
+- test report
+- per-case execution logs
+- run metadata
+- render outputs and tool outputs needed for traceability
+
+ATT should also be able to generate an HTML test report that includes:
+
+- testcase index list
+- testcase descriptions
+- basic information
+- execution status
+- case detail execution logs
+
 ---
 
-# 14. Author Reference Manual Generation
+# 14. Newcomer Handbook Generation
+
+`att.sh` should generate a newcomer handbook that introduces:
+
+- core concepts
+- a full example
+- testcase/template/tool usage
+- testcase execution
+- report viewing and packaging
+
+---
+
+# 15. Full User Manual Generation
+
+`att.sh` should generate a full user manual that introduces:
+
+- core concepts
+- complete configuration items
+- a complex advanced example
+- best practices
+- common questions
+- debugging and troubleshooting
+
+---
+
+# 16. Author Reference Manual Generation
 
 `att.sh` should provide a command to generate a reference manual for case authors.
 
@@ -877,7 +987,7 @@ It should not be required for runtime execution.
 
 ---
 
-# 15. Migration From V1.3
+# 17. Migration From V1.3
 
 Recommended migration steps:
 
@@ -896,11 +1006,10 @@ Recommended migration steps:
 
 ---
 
-# 16. Acceptance Criteria
+# 18. Acceptance Criteria
 
 - `config.yaml` configures tools and optional global defaults such as environment and global log level.
 - Every Excel suite has a sidecar config.
-- Every sidecar declares `testCaseTemplate`.
 - Every sidecar defines `stages`.
 - Every stage defines `templateColumn`.
 - Stage `yamlColumns` is optional.
@@ -913,9 +1022,12 @@ Recommended migration steps:
 - Necessary whitespace is trimmed for matching-oriented values.
 - `testcase.headerRows` defaults to `1`.
 - Multi-row header resolution uses the last non-empty header cell per column.
+- Template directories are only valid when they contain `template.yaml`.
 - Template cells are YAML and use `name` as the actual template name.
 - Template cell YAML supports Chinese name, remark, comments, and metadata.
 - Stage template cell data is available in context and can be written to case log.
+- Stage only defines the number and order of template invocations inside testcase.
+- Template only defines the number and order of actions inside template.
 - Context lookup order defines how testcase data, stage YAML data, template metadata, action output, and tool output are resolved.
 - Report columns are configured in the suite sidecar.
 - Log level may be configured globally, in suite sidecar, in template action config, or through `att.sh`.
@@ -924,4 +1036,8 @@ Recommended migration steps:
 - Tool retry supports tool default and action override.
 - Retry is scoped to tool execution attempts only.
 - `att.sh` can generate an author reference manual from configured testcase/template/tools metadata.
+- `att.sh` can package the latest run output.
+- `att.sh` can generate an HTML test report.
+- `att.sh` can generate a newcomer handbook.
+- `att.sh` can generate a full user manual.
 - V1.4 design does not claim runtime implementation is already complete.

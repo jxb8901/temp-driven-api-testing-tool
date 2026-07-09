@@ -16,7 +16,7 @@
 
 - `xxx.xlsx`：測試案例本體
 - `xxx.yaml`：同名 sidecar 配置
-- `templates/`：模板與工具配置
+- `templates/`：默認模板搜索路徑
 
 ---
 
@@ -30,11 +30,10 @@ testcase/
   payment_regression.yaml
 
 templates/
-  payment_transfer_cases/
-    invoke/
-      standard.yaml
-    verify/
-      success.yaml
+  shared/
+    payment_transfer.yaml
+  common/
+    success_check.yaml
 
 config.yaml
 ```
@@ -43,7 +42,7 @@ config.yaml
 
 - Excel 裡的案例資料
 - 同名 `payment_regression.yaml`
-- `templates/` 裡的模板
+- `templates/` 或其他模板搜索路徑裡的模板
 
 ---
 
@@ -89,6 +88,8 @@ stages:
 - `yamlColumns` 是 YAML 欄位，可以有多個
 - `templateColumn` 是每個 stage 對應的模板欄位
 - `required: true` 表示該 stage 不能空
+- 模板路徑由全局 `templatePaths` 決定，預設是 `templates`
+- 模板可以在多個 stage 或 testcase 中共享
 
 ---
 
@@ -229,6 +230,14 @@ remark: |
 - `name` 是真正要找的模板名稱
 - `remark` 是給人看的註解
 
+模板檔案放在哪裡，取決於全局 `templatePaths` 的搜索順序，不取決於 stage 或 testcase。
+
+例如：
+
+- `templatePaths: [templates, shared-templates]`
+- 模板可能在 `templates/shared/payment_transfer.yaml`
+- 也可能在 `shared-templates/payment/success_check.yaml`
+
 ---
 
 # 8. Context 怎麼引用
@@ -254,6 +263,8 @@ ${ACTIONS.renderRequest.outputFile}
 ```
 
 如果兩個來源有同名欄位，後面的來源可能覆蓋前面的來源，ATT 會給 warning。
+
+stage 只負責固定執行順序，不負責模板路徑決策。
 
 ---
 
