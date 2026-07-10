@@ -1,7 +1,4 @@
-/*
- * Author: Jeffrey + ChatGPT
- */
-
+/* Author: Jeffrey + ChatGPT */
 package com.company.apitest.config;
 
 import org.yaml.snakeyaml.Yaml;
@@ -9,16 +6,15 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-/**
- * Builds the effective V1.3 configuration for one Excel suite.
- */
-public class SuiteConfigResolver {
+/** Resolves the mandatory V2 sidecar for one Excel workbook. */
+public final class SuiteConfigResolver {
     private final Path projectRoot;
     private final FrameworkConfig global;
 
@@ -28,144 +24,91 @@ public class SuiteConfigResolver {
     }
 
     public FrameworkConfig resolve(Path suitePath) throws Exception {
-        Map<String, Object> sidecar = loadIfExists(sidecarPath(suitePath));
-        String templateId = testCaseTemplateId(sidecar, global.defaultTestCaseTemplate());
-        Map<String, Object> template = templateId.isEmpty() ? new LinkedHashMap<String, Object>() : loadIfExists(testCaseTemplatePath(templateId));
+        Path sidecar = sidecarPath(suitePath);
+        if (!Files.exists(sidecar)) throw new IllegalArgumentException("Missing mandatory V2 sidecar: " + sidecar);
+        Map<String, Object> map = load(sidecar);
+        if (map.containsKey("testcase")) throw new IllegalArgumentException("V2 sidecar must use excel, not testcase: " + sidecar);
+        Object excelValue = map.get("excel");
+        if (!(excelValue instanceof Map)) throw new IllegalArgumentException("excel is required in sidecar: " + sidecar);
+        Map<?, ?> excel = (Map<?, ?>) excelValue;
+        String sheet = required(excel, "sheet");
+        String caseId = required(excel, "caseId");
+        String tags = required(excel, "tags");
+        List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(text(excel.get("dataColumns"), ""));
+        rejectReserved(dataColumns, new String[]{"caseId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "STAGES"}, "excel.dataColumns");
+        List<StageConfig> stages = stages(map.get("stages"));
+        if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
-        String sheet = firstText(nested(sidecar, "testcase", "sheet"), nested(template, "testcase", "sheet"), global.testcaseSheet());
-        Map<String, String> columns = new LinkedHashMap<String, String>(global.testcaseColumns());
-        columns.putAll(stringMap(nested(template, "testcase", "columns")));
-        columns.putAll(stringMap(nested(sidecar, "testcase", "columns")));
-
-        List<StageConfig> stages = stages(sidecar);
-        if (stages.isEmpty()) {
-            stages = stages(template);
-        }
-        if (stages.isEmpty()) {
-            stages = global.stages();
-        }
-
-        ReportConfig report = report(template, sidecar);
-        int timeout = intValue(sidecar.get("timeoutSeconds"), global.timeoutSeconds());
-
+        ReportConfig report = mergeReport(map.get("report"));
         return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
-                global.environment(), timeout, sheet, columns, stages, global.templatesRoot(), templateId,
-                global.tools(), report, global.run());
+                global.environment(), integer(map.get("timeoutSeconds"), global.timeoutSeconds()), global.templatesRoot(),
+                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages);
     }
 
-    private Path sidecarPath(Path suitePath) {
-        String name = suitePath.getFileName().toString().replaceFirst("\\.xlsx$", ".yaml");
-        Path parent = suitePath.getParent();
-        return parent == null ? Paths.get(name) : parent.resolve(name);
-    }
-
-    private Path testCaseTemplatePath(String templateId) {
-        Path root = global.templatesRoot().isAbsolute() ? global.templatesRoot() : projectRoot.resolve(global.templatesRoot()).normalize();
-        return root.resolve("testcase").resolve(templateId).resolve("template.yaml");
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> loadIfExists(Path path) throws Exception {
-        Path resolved = path.isAbsolute() ? path : projectRoot.resolve(path).normalize();
-        if (!Files.exists(resolved)) {
-            return new LinkedHashMap<String, Object>();
-        }
-        try (Reader reader = Files.newBufferedReader(resolved)) {
-            Object loaded = new Yaml().load(reader);
-            if (loaded == null) {
-                return new LinkedHashMap<String, Object>();
+    private List<StageConfig> stages(Object value) {
+        if (!(value instanceof Iterable)) throw new IllegalArgumentException("stages must be a list");
+        List<StageConfig> result = new ArrayList<StageConfig>();
+        Set<String> keys = new LinkedHashSet<String>();
+        for (Object item : (Iterable<?>) value) {
+            if (!(item instanceof Map)) throw new IllegalArgumentException("Each stage must be a map");
+            Map<?, ?> stage = (Map<?, ?>) item;
+            if (stage.containsKey("name") || stage.containsKey("templateColumn") || stage.containsKey("templatePath")) {
+                throw new IllegalArgumentException("V2 stage supports key/template/dataColumns/required/onFailure/runWhen only");
             }
-            if (!(loaded instanceof Map)) {
-                throw new IllegalArgumentException("YAML config must be a map: " + resolved);
-            }
-            Map<String, Object> result = new LinkedHashMap<String, Object>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) loaded).entrySet()) {
-                result.put(String.valueOf(entry.getKey()), entry.getValue());
-            }
-            return result;
-        }
-    }
-
-    private String testCaseTemplateId(Map<String, Object> sidecar, String defaultValue) {
-        Object configured = sidecar.get("testCaseTemplate");
-        if (configured instanceof Map) {
-            Object id = ((Map<?, ?>) configured).get("id");
-            return id == null ? defaultValue : String.valueOf(id);
-        }
-        return configured == null ? defaultValue : String.valueOf(configured);
-    }
-
-    private List<StageConfig> stages(Map<String, Object> map) {
-        List<StageConfig> stages = new ArrayList<StageConfig>();
-        Object configured = map.get("stages");
-        if (configured instanceof Iterable) {
-            for (Object item : (Iterable<?>) configured) {
-                if (!(item instanceof Map)) {
-                    continue;
-                }
-                Map<?, ?> value = (Map<?, ?>) item;
-                String key = text(value.get("key"), "");
-                if (!key.isEmpty()) {
-                    stages.add(new StageConfig(key, text(value.get("name"), key), text(value.get("template"), ""),
-                            text(value.get("templatePath"), ""), bool(value.get("required"), false),
-                            text(value.get("onFailure"), "stop"), text(value.get("runWhen"), "normal")));
-                }
-            }
-        }
-        return stages;
-    }
-
-    private ReportConfig report(Map<String, Object> template, Map<String, Object> sidecar) {
-        Map<String, String> columns = new LinkedHashMap<String, String>(global.report().columns());
-        columns.putAll(stringMap(nested(template, "report", "columns")));
-        columns.putAll(stringMap(nested(sidecar, "report", "columns")));
-        String mode = firstText(nested(sidecar, "report", "mode"), nested(template, "report", "mode"), global.report().mode());
-        String fileName = firstText(nested(sidecar, "report", "fileNamePattern"), nested(template, "report", "fileNamePattern"), global.report().fileNamePattern());
-        return new ReportConfig(mode, fileName, columns);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, String> stringMap(Object value) {
-        Map<String, String> result = new LinkedHashMap<String, String>();
-        if (value instanceof Map) {
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                result.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
-            }
+            String key = required(stage, "key");
+            validateContextKey(key, "stage key");
+            if (!keys.add(key)) throw new IllegalArgumentException("Duplicate stage key: " + key);
+            String onFailure = text(stage.get("onFailure"), "stop");
+            String runWhen = text(stage.get("runWhen"), "normal");
+            if (!("stop".equals(onFailure) || "continue".equals(onFailure))) throw new IllegalArgumentException("Invalid onFailure for stage " + key + ": " + onFailure);
+            if (!("normal".equals(runWhen) || "onSuccess".equals(runWhen) || "onFailure".equals(runWhen) || "always".equals(runWhen))) throw new IllegalArgumentException("Invalid runWhen for stage " + key + ": " + runWhen);
+            List<DataColumnConfig> stageColumns = ColumnSpecParser.dataColumns(text(stage.get("dataColumns"), ""));
+            rejectReserved(stageColumns, new String[]{"key", "status", "startedAt", "durationMs", "TEMPLATE"}, "stages." + key + ".dataColumns");
+            result.add(new StageConfig(key, required(stage, "template"), stageColumns,
+                    bool(stage.get("required"), false), onFailure, runWhen));
         }
         return result;
     }
 
+    private ReportConfig mergeReport(Object value) {
+        if (!(value instanceof Map)) return global.report();
+        Map<?, ?> map = (Map<?, ?>) value;
+        Map<String, String> columns = new LinkedHashMap<String, String>(global.report().columns());
+        Object configured = map.get("columns");
+        if (configured instanceof Map) for (Map.Entry<?, ?> e : ((Map<?, ?>) configured).entrySet()) columns.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+        return new ReportConfig(text(map.get("mode"), global.report().mode()), text(map.get("fileNamePattern"), global.report().fileNamePattern()), columns);
+    }
+
+    private Path sidecarPath(Path suitePath) {
+        String file = suitePath.getFileName().toString();
+        String yaml = file.replaceFirst("(?i)\\.xlsx$", ".yaml");
+        return suitePath.resolveSibling(yaml);
+    }
+
     @SuppressWarnings("unchecked")
-    private Object nested(Map<String, Object> map, String first, String second) {
-        Object value = map.get(first);
-        if (value instanceof Map) {
-            return ((Map<String, Object>) value).get(second);
+    private Map<String, Object> load(Path path) throws Exception {
+        try (Reader reader = Files.newBufferedReader(path)) {
+            Object loaded = YamlSupport.parser().load(reader);
+            if (!(loaded instanceof Map)) throw new IllegalArgumentException("Sidecar must be a YAML map: " + path);
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> e : ((Map<?, ?>) loaded).entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());
+            return result;
         }
-        return null;
     }
 
-    private String firstText(Object first, Object second, String fallback) {
-        if (first != null && !String.valueOf(first).trim().isEmpty()) {
-            return String.valueOf(first);
-        }
-        if (second != null && !String.valueOf(second).trim().isEmpty()) {
-            return String.valueOf(second);
-        }
-        return fallback;
+    private static String required(Map<?, ?> map, String key) {
+        String value = text(map.get(key), "");
+        if (value.trim().isEmpty()) throw new IllegalArgumentException(key + " is required");
+        return value;
     }
-
-    private String text(Object value, String defaultValue) {
-        return value == null ? defaultValue : String.valueOf(value);
+    private static String text(Object value, String fallback) { return value == null ? fallback : String.valueOf(value); }
+    private static int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
+    private static boolean bool(Object value, boolean fallback) { return value == null ? fallback : Boolean.parseBoolean(String.valueOf(value)); }
+    private static void rejectReserved(List<DataColumnConfig> columns, String[] reserved, String owner) {
+        java.util.Set<String> names = new java.util.HashSet<String>(java.util.Arrays.asList(reserved));
+        for (DataColumnConfig column : columns) if (names.contains(column.key())) throw new IllegalArgumentException("Reserved key '" + column.key() + "' cannot be used in " + owner);
     }
-
-    private boolean bool(Object value, boolean defaultValue) {
-        return value == null ? defaultValue : Boolean.parseBoolean(String.valueOf(value));
-    }
-
-    private int intValue(Object value, int defaultValue) {
-        if (value == null) {
-            return defaultValue;
-        }
-        return Integer.parseInt(String.valueOf(value));
+    private static void validateContextKey(String value, String owner) {
+        if (value.contains(".")) throw new IllegalArgumentException(owner + " must not contain '.': " + value);
     }
 }

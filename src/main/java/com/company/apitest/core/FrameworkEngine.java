@@ -14,6 +14,7 @@ import com.company.apitest.template.StageTemplate;
 import com.company.apitest.template.StageTemplateLoader;
 import com.company.apitest.template.StageTemplateRunner;
 import com.company.apitest.template.UnifiedTemplateEngine;
+import com.company.apitest.report.HtmlReportGenerator;
 import org.yaml.snakeyaml.Yaml;
 
 import java.nio.file.Files;
@@ -31,7 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Coordinates the V1.3 run, stage and action execution flow.
+ * Coordinates the V2 run, stage and action execution flow.
  */
 public class FrameworkEngine {
     private final Path projectRoot;
@@ -43,6 +44,7 @@ public class FrameworkEngine {
     }
 
     public RunSummary run(ExecutionOptions options) throws Exception {
+        Instant runStarted = Instant.now();
         String runId = runId(options);
         Path outputRoot = options.outputDirectory() == null ? resolve(config.outputDirectory()) : resolve(options.outputDirectory());
         Path runDirectory = outputRoot.resolve(runId);
@@ -55,6 +57,7 @@ public class FrameworkEngine {
         Set<String> failedCaseIds = options.rerunFailed() ? latestFailedCaseIds(outputRoot) : Collections.<String>emptySet();
         List<TestResult> results = new ArrayList<>();
         SuiteConfigResolver suiteConfigResolver = new SuiteConfigResolver(projectRoot, config);
+        boolean stopRun = false;
 
         for (Path suite : suites) {
             FrameworkConfig suiteConfig = suiteConfigResolver.resolve(resolve(suite));
@@ -66,27 +69,30 @@ public class FrameworkEngine {
             List<TestCase> cases = new ExcelTestSuiteLoader(suiteConfig).load(resolve(suite));
             List<TestResult> suiteResults = new ArrayList<TestResult>();
             for (TestCase testCase : cases) {
+                if (!options.matches(testCase)) continue;
+                if (options.rerunFailed() && !failedCaseIds.contains(testCase.caseId())) continue;
                 TestResult result = runCase(testCase, suiteConfig, options, failedCaseIds, runId, runDirectory, templateLoader, templateRunner);
                 results.add(result);
                 suiteResults.add(result);
+                appendEvent(runDirectory, runId, result);
                 if (options.failFast() && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR)) {
+                    stopRun = true;
                     break;
                 }
             }
             reportWriter.write(resolve(suite), runDirectory, suiteResults);
+            if (stopRun) break;
         }
-        writeHistory(outputRoot, runDirectory, runId, results);
-        return new RunSummary(results, runDirectory);
+        if (results.isEmpty()) throw new IllegalArgumentException("Case selection is empty after rerun-failed filtering");
+        Instant runEnded = Instant.now();
+        RunSummary summary = new RunSummary(results, runDirectory);
+        Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded);
+        writeHistory(outputRoot, runDirectory, runId, results, runStarted, runEnded, html);
+        return new RunSummary(results, html);
     }
 
     private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, Set<String> failedCaseIds, String runId, Path runDirectory,
                                StageTemplateLoader templateLoader, StageTemplateRunner templateRunner) throws Exception {
-        if (!testCase.enabled() || !options.matches(testCase)) {
-            return skipped(testCase, "Case disabled or not selected");
-        }
-        if (options.rerunFailed() && !failedCaseIds.contains(testCase.caseId())) {
-            return skipped(testCase, "Case was not failed in latest run");
-        }
         if (!testCase.valid()) {
             return error(testCase, testCase.invalidReason(), null, Duration.ZERO);
         }
@@ -96,51 +102,61 @@ public class FrameworkEngine {
         Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
         CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, runId, runDirectory, caseLogPath);
-        context.put("environment", suiteConfig.environment());
-        caseLog.append("CASE", testCase.fixedValues());
+        context.put("CASE.environment", suiteConfig.environment());
+        caseLog.append("CASE", context.caseTree());
         List<ValidationResult> validations = new ArrayList<ValidationResult>();
         try {
             if (!options.dryRun()) {
+                boolean hasPriorFailure = false;
                 boolean stoppedByFailure = false;
                 for (StageConfig stage : suiteConfig.stages()) {
-                    if (!shouldRunStage(stage, stoppedByFailure)) {
+                    if (!shouldRunStage(stage, hasPriorFailure, stoppedByFailure)) {
                         continue;
                     }
-                    String templateName = stage.template();
-                    boolean missingTemplate = (templateName == null || templateName.trim().isEmpty())
-                            && (stage.templatePath() == null || stage.templatePath().trim().isEmpty());
-                    if (missingTemplate && stage.required()) {
-                        throw new IllegalArgumentException("Missing required stage template: " + stage.key());
-                    }
-                    if (missingTemplate) {
+                    StageCaseData stageData = testCase.stage(stage.key());
+                    if (stageData == null) {
+                        if (stage.required()) throw new IllegalArgumentException("Missing required stage data: " + stage.key());
                         continue;
                     }
-                    StageTemplate template = templateLoader.load(stage);
-                    caseLog.append("STAGE " + stage.name(), "template: " + (stage.templatePath().isEmpty() ? templateName : stage.templatePath()));
-                    List<ValidationResult> stageResults = templateRunner.execute(stage.name(), template, context, caseLog);
+                    StageTemplate template = templateLoader.load(stageData.templateName());
+                    context.beginStage(stageData, template.name(), template.directory());
+                    caseLog.append("STAGE " + stage.key(), "template: " + stageData.templateName());
+                    Instant stageStarted = Instant.now();
+                    List<ValidationResult> stageResults = templateRunner.execute(stage.key(), template, context, caseLog);
+                    context.finishStage(hasFailure(stageResults) ? "FAIL" : "PASS", Duration.between(stageStarted, Instant.now()).toMillis());
                     validations.addAll(stageResults);
-                    if (hasFailure(stageResults) && "stop".equalsIgnoreCase(stage.onFailure())) {
-                        stoppedByFailure = true;
+                    if (hasFailure(stageResults)) {
+                        hasPriorFailure = true;
+                        if ("stop".equalsIgnoreCase(stage.onFailure())) stoppedByFailure = true;
                     }
                 }
             }
             ResultStatus status = hasFailure(validations) ? ResultStatus.FAIL : ResultStatus.PASS;
-            return new TestResult(testCase.caseId(), testCase.caseName(), options.dryRun() ? ResultStatus.SKIPPED : status,
+            ResultStatus finalStatus = options.dryRun() ? ResultStatus.SKIPPED : status;
+            context.put("CASE.status", finalStatus.name());
+            context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
+            writeCaseTree(caseOutputDir, context);
+            return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations);
         } catch (Exception e) {
             caseLog.append("ERROR", e.getMessage());
+            context.put("CASE.status", ResultStatus.ERROR.name());
+            context.put("CASE.error", e.getMessage());
+            context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
+            writeCaseTree(caseOutputDir, context);
             return error(testCase, e.getMessage(), caseLogPath, Duration.between(started, Instant.now()));
         }
     }
 
-    private boolean shouldRunStage(StageConfig stage, boolean stoppedByFailure) {
+    private boolean shouldRunStage(StageConfig stage, boolean hasPriorFailure, boolean stoppedByFailure) {
         String runWhen = stage.runWhen();
         if ("always".equalsIgnoreCase(runWhen)) {
             return true;
         }
-        if ("failure".equalsIgnoreCase(runWhen) || "failed".equalsIgnoreCase(runWhen)) {
-            return stoppedByFailure;
+        if ("onFailure".equalsIgnoreCase(runWhen) || "failure".equalsIgnoreCase(runWhen) || "failed".equalsIgnoreCase(runWhen)) {
+            return hasPriorFailure;
         }
+        if ("onSuccess".equalsIgnoreCase(runWhen)) return !hasPriorFailure;
         return !stoppedByFailure;
     }
 
@@ -171,7 +187,7 @@ public class FrameworkEngine {
                 paths.filter(path -> path.getFileName().toString().endsWith(".xlsx")).sorted().forEach(suites::add);
             }
         } else {
-            suites.add(options.suitePath());
+            suites.addAll(options.suitePaths());
         }
         return suites;
     }
@@ -203,10 +219,15 @@ public class FrameworkEngine {
         return failed;
     }
 
-    private void writeHistory(Path outputRoot, Path runDirectory, String runId, List<TestResult> results) throws Exception {
+    private void writeHistory(Path outputRoot, Path runDirectory, String runId, List<TestResult> results, Instant startedAt, Instant endedAt, Path reportPath) throws Exception {
         Map<String, Object> history = new LinkedHashMap<String, Object>();
         history.put("runId", runId);
         history.put("runDirectory", runDirectory.toString());
+        history.put("status", "COMPLETE");
+        history.put("startedAt", startedAt.toString());
+        history.put("endedAt", endedAt.toString());
+        history.put("reportPath", reportPath.toString());
+        history.put("workbooksDirectory", runDirectory.resolve("workbooks").toString());
         Map<String, Object> summary = new LinkedHashMap<String, Object>();
         RunSummary runSummary = new RunSummary(results, runDirectory);
         summary.put("total", runSummary.total());
@@ -214,20 +235,46 @@ public class FrameworkEngine {
         summary.put("failed", runSummary.failed());
         summary.put("error", runSummary.error());
         summary.put("skipped", runSummary.skipped());
+        summary.put("invalid", runSummary.invalid());
         history.put("summary", summary);
         List<Map<String, Object>> cases = new ArrayList<Map<String, Object>>();
         for (TestResult result : results) {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("caseId", result.caseId());
+            item.put("caseName", result.caseName());
             item.put("status", result.status().name());
+            item.put("durationMs", result.duration().toMillis());
+            item.put("expected", result.expected());
+            item.put("actual", result.actual());
             item.put("caseLog", result.caseLogPath() == null ? "" : result.caseLogPath().toString());
             cases.add(item);
         }
         history.put("cases", cases);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Files.write(runDirectory.resolve("run.yaml"), bytes);
-        Files.write(outputRoot.resolve("latest-run.yaml"), bytes);
+        Path latest = outputRoot.resolve("latest-run.yaml");
+        Path temporary = outputRoot.resolve("latest-run.yaml.tmp");
+        Files.write(temporary, bytes);
+        try {
+            Files.move(temporary, latest, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(temporary, latest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
+
+    private void writeCaseTree(Path caseDirectory, CaseRuntimeContext context) throws Exception {
+        Files.write(caseDirectory.resolve("case.yaml"), new Yaml().dump(context.caseTree()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private void appendEvent(Path runDirectory, String runId, TestResult result) throws Exception {
+        String json = "{\"runId\":\"" + json(runId) + "\",\"caseId\":\"" + json(result.caseId())
+                + "\",\"status\":\"" + result.status().name() + "\",\"durationMs\":" + result.duration().toMillis()
+                + ",\"caseLog\":\"" + json(result.caseLogPath() == null ? "" : result.caseLogPath().toString()) + "\"}\n";
+        Files.write(runDirectory.resolve("events.jsonl"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+    }
+
+    private String json(String value) { return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r"); }
 
     private static TestResult skipped(TestCase testCase, String message) {
         return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.SKIPPED, Duration.ZERO, message, "", null, Collections.<ValidationResult>emptyList());

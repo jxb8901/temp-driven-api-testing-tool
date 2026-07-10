@@ -5,40 +5,39 @@ actionDefaults:
   onFailure: stop
 
 actions:
-  verify.checkAPIResult:
+  checkAPIResult:
     type: assert
-    expression: "${ACTIONS.invoke.callApi.output.Response.Status} == '${expected.status}'"
+    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.Status} == '${CASE.預期結果.status}'"
 
-  verify.checkRejectCode:
+  checkRejectCode:
     type: assert
-    expression: "${ACTIONS.invoke.callApi.output.Response.RejectCode} == '${expected.rejectCode}'"
+    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.RejectCode} == '${CASE.預期結果.rejectCode}'"
 
-  verify.selectTxn:
+  selectTxn:
     type: tool
-    call: "#{selectCtxn(txn.ref=${CaseID})}"
+    call: "#{selectCtxn(caseId=${CASE.caseId})}"
 
-  verify.checkCtxRecords:
+  checkCtxRecords:
     type: assert
-    expression: "${ACTIONS.verify.selectTxn.output.effectRows} >= '${expected.effectRows}' and ${ACTIONS.verify.selectTxn.output.record.status} like '%${expected.txnStatus}%'"
+    expression: "${ACTIONS.selectTxn.output.effectRows} >= '${CASE.預期結果.effectRows}' and ${ACTIONS.selectTxn.output.record.status} like '%${CASE.預期結果.txnStatus}%'"
 
-  verify.getLogs:
+  getLogs:
     type: tool
-    call: "#{getAppLogs(caseId=${CaseID})}"
+    call: "#{getAppLogs(caseId=${CASE.caseId})}"
 
-  verify.grepLogs:
+  grepLogs:
     type: tool
-    call: "#{grepFromAppLogs(keyword1=${expected.keyword1}, keyword2=${expected.keyword2})}"
+    call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.outputFile}, keywords=${CASE.預期結果.keywords})}"
     onFailure: continue
 
-  verify.checkLogs:
+  checkLogs:
     type: assert
-    expression: "${ACTIONS.verify.getLogs.output} like '%${expected.keyword1}%${expected.keyword2}%'"
+    expression: "${ACTIONS.getLogs.output} like '%PAYMENT%POSTED%'"
 
-  verify.logSummary:
+  logSummary:
     type: log
     level: INFO
-    message: "Verified payment result for ${CaseID}"
+    message: "Verified payment result for ${CASE.caseId}"
     fields:
-      apiStatus: "${ACTIONS.invoke.callApi.output.Response.Status}"
-      rejectCode: "${ACTIONS.invoke.callApi.output.Response.RejectCode}"
-      txnStatus: "${ACTIONS.verify.selectTxn.output.record.status}"
+      apiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.Status}"
+      txnStatus: "${ACTIONS.selectTxn.output.record.status}"

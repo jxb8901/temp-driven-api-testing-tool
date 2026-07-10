@@ -1,90 +1,48 @@
-/*
- * Author: Jeffrey + ChatGPT
- */
-
+/* Author: Jeffrey + ChatGPT */
 package com.company.apitest.core;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Represents one row from the Excel TestCases sheet after parsing and validation.
- */
-public class TestCase {
+/** One V2 testcase row with a group-qualified Case ID. */
+public final class TestCase {
     private final int rowNumber;
-    private final boolean enabled;
+    private final String groupId;
+    private final String sheetName;
+    private final String rowCaseId;
     private final String caseId;
-    private final String caseName;
     private final List<String> tags;
-    private final String api;
-    private final String precheckTemplate;
-    private final String expectedPrecheckResult;
-    private final String requestTemplate;
-    private final String postcheckTemplate;
-    private final String expectedPostcheckResult;
-    private final Map<String, String> stageTemplates;
     private final Map<String, Object> caseData;
-    private final Map<String, String> fixedValues;
-    private final Map<String, Object> requestData;
-    private final Map<String, Object> expectedPrecheckData;
-    private final Map<String, Object> expectedPostcheckData;
+    private final Map<String, StageCaseData> stages;
     private final String invalidReason;
 
-    public TestCase(int rowNumber, boolean enabled, String caseId, String caseName, List<String> tags, String api,
-                    String precheckTemplate, String expectedPrecheckResult, String requestTemplate,
-                    String postcheckTemplate, String expectedPostcheckResult, Map<String, String> fixedValues,
-                    Map<String, Object> requestData, Map<String, Object> expectedPrecheckData,
-                    Map<String, Object> expectedPostcheckData, String invalidReason) {
+    public TestCase(int rowNumber, String groupId, String sheetName, String rowCaseId, List<String> tags,
+                    Map<String, Object> caseData, Map<String, StageCaseData> stages, String invalidReason) {
         this.rowNumber = rowNumber;
-        this.enabled = enabled;
-        this.caseId = caseId;
-        this.caseName = caseName;
-        this.tags = tags;
-        this.api = api;
-        this.precheckTemplate = precheckTemplate;
-        this.expectedPrecheckResult = expectedPrecheckResult;
-        this.requestTemplate = requestTemplate;
-        this.postcheckTemplate = postcheckTemplate;
-        this.expectedPostcheckResult = expectedPostcheckResult;
-        this.stageTemplates = fixedValues == null ? java.util.Collections.<String, String>emptyMap() : stageTemplatesFrom(fixedValues);
-        this.caseData = requestData == null ? java.util.Collections.<String, Object>emptyMap() : requestData;
-        this.fixedValues = fixedValues;
-        this.requestData = requestData;
-        this.expectedPrecheckData = expectedPrecheckData;
-        this.expectedPostcheckData = expectedPostcheckData;
+        this.groupId = groupId;
+        this.sheetName = sheetName;
+        this.rowCaseId = rowCaseId;
+        this.caseId = groupId + "." + rowCaseId;
+        this.tags = tags == null ? Collections.<String>emptyList() : new ArrayList<String>(tags);
+        this.caseData = caseData == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(caseData);
+        this.stages = stages == null ? Collections.<String, StageCaseData>emptyMap() : new LinkedHashMap<String, StageCaseData>(stages);
         this.invalidReason = invalidReason;
     }
 
-    public boolean valid() {
-        return invalidReason == null || invalidReason.trim().isEmpty();
-    }
-
+    public boolean valid() { return invalidReason == null || invalidReason.trim().isEmpty(); }
+    public boolean enabled() { return true; }
     public int rowNumber() { return rowNumber; }
-    public boolean enabled() { return enabled; }
+    public String groupId() { return groupId; }
+    public String sheetName() { return sheetName; }
+    public String rowCaseId() { return rowCaseId; }
     public String caseId() { return caseId; }
-    public String caseName() { return caseName; }
-    public List<String> tags() { return tags; }
-    public String api() { return api; }
-    public String precheckTemplate() { return precheckTemplate; }
-    public String expectedPrecheckResult() { return expectedPrecheckResult; }
-    public String requestTemplate() { return requestTemplate; }
-    public String postcheckTemplate() { return postcheckTemplate; }
-    public String expectedPostcheckResult() { return expectedPostcheckResult; }
-    public Map<String, String> stageTemplates() { return stageTemplates; }
-    public Map<String, Object> caseData() { return caseData; }
-    public Map<String, String> fixedValues() { return fixedValues; }
-    public Map<String, Object> requestData() { return requestData; }
-    public Map<String, Object> expectedPrecheckData() { return expectedPrecheckData; }
-    public Map<String, Object> expectedPostcheckData() { return expectedPostcheckData; }
+    public String caseName() { Object value = caseData.get("caseName"); return value == null ? caseId : String.valueOf(value); }
+    public List<String> tags() { return Collections.unmodifiableList(tags); }
+    public Map<String, Object> caseData() { return Collections.unmodifiableMap(caseData); }
+    public Map<String, StageCaseData> stages() { return Collections.unmodifiableMap(stages); }
+    public StageCaseData stage(String key) { return stages.get(key); }
     public String invalidReason() { return invalidReason; }
-
-    private Map<String, String> stageTemplatesFrom(Map<String, String> fixedValues) {
-        Map<String, String> stages = new java.util.LinkedHashMap<String, String>();
-        for (Map.Entry<String, String> entry : fixedValues.entrySet()) {
-            if (entry.getKey().startsWith("stage") && entry.getValue() != null && !entry.getValue().trim().isEmpty()) {
-                stages.put(entry.getKey(), entry.getValue());
-            }
-        }
-        return stages;
-    }
 }

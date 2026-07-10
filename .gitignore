@@ -1,7 +1,8 @@
 target/
 dist/
 output/
-report/
+build/
+/report/
 logs/
 *.log
 .DS_Store

@@ -1,0 +1,9 @@
+name: PAYMENT_CLEANUP
+description: Always-run cleanup example which records completion without external mutation.
+actions:
+  cleanupSummary:
+    type: log
+    level: INFO
+    message: "Cleanup completed for ${CASE.caseId}"
+    fields:
+      finalApiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.Status}"

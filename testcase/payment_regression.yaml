@@ -2,36 +2,40 @@ testCaseTemplate:
   id: payment_transfer_cases
   name: Payment Transfer Cases
 
-testcase:
-  sheet: TestCases
-  columns:
-    caseId: Case ID
-    caseName: Case Name
-    tags: Tags
-    api: API
-    debitAccount: Debit Account
-    creditAccount: Credit Account
-    amount: Amount
-    currency: Currency
-    data: Case Data
-    remarks: Remarks
+excel:
+  sheet: payment=支付測試案例集, batch=批量測試案例集
+  caseId: 案例編號
+  tags: 標籤
+  dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, creditAccount=入賬帳號, amount=金額, currency=幣別, 預期結果(yaml)
 
 stages:
   - key: prepare
-    name: Prepare
-    template: PAYMENT_PREPARE
+    template: 準備模板
     required: false
     onFailure: stop
+    runWhen: normal
   - key: invoke
-    name: Invoke
-    template: PAYMENT_INVOKE
+    template: 執行模板
+    dataColumns: channel=渠道, 執行參數(yaml)
     required: true
     onFailure: stop
+    runWhen: normal
   - key: verify
-    name: Verify
-    template: PAYMENT_VERIFY
+    template: 驗證模板
+    dataColumns: 驗證參數(yaml)
     required: true
     onFailure: stop
+    runWhen: onSuccess
+  - key: rollback
+    template: 回滾模板
+    required: false
+    onFailure: continue
+    runWhen: onFailure
+  - key: cleanup
+    template: 清理模板
+    required: false
+    onFailure: continue
+    runWhen: always
 
 actionDefaults:
   onFailure: stop
@@ -39,8 +43,9 @@ actionDefaults:
 
 report:
   columns:
-    result: Test Result
-    durationMs: Duration(ms)
-    actualResult: Actual Result
-    caseLog: Case Log
-    runTime: Run Time
+    result: 測試結果
+    durationMs: 耗時毫秒
+    actualResult: 實際結果
+    caseLog: 案例日誌
+    reportLink: 詳細報告
+    runTime: 執行時間

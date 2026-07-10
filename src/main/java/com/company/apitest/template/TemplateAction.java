@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * One ordered V1.3 action inside a stage template.
+ * One ordered V2 action inside a template.
  */
 public class TemplateAction {
     private final String key;

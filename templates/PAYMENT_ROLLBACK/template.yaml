@@ -1,0 +1,9 @@
+name: PAYMENT_ROLLBACK
+description: Failure-only compensation example used by cases that opt in to rollback.
+actions:
+  rollbackSummary:
+    type: log
+    level: WARN
+    message: "Rollback requested for ${CASE.caseId}"
+    fields:
+      previousStatus: "${CASE.status}"

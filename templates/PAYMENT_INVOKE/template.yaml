@@ -5,19 +5,19 @@ actionDefaults:
   onFailure: stop
 
 actions:
-  invoke.renderRequest:
+  renderRequest:
     type: render
     payload: payload.xml
     saveAs: request.xml
 
-  invoke.logRequest:
+  logRequest:
     type: log
     level: INFO
-    message: "Rendered request for ${CaseID}"
+    message: "Rendered request for ${CASE.caseId}"
     fields:
-      requestFile: "${ACTIONS.invoke.renderRequest.outputFile}"
-      requestSha256: "${ACTIONS.invoke.renderRequest.outputSha256}"
+      requestFile: "${ACTIONS.renderRequest.outputFile}"
+      requestSha256: "${ACTIONS.renderRequest.outputSha256}"
 
-  invoke.callApi:
+  callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.invoke.renderRequest.outputFile})}"
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"

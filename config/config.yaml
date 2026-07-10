@@ -7,40 +7,8 @@ run:
     default: timestamp
     timestampFormat: yyyyMMdd-HHmmss
 
-testcase:
-  sheet: TestCases
-  columns:
-    caseId: Case ID
-    caseName: Case Name
-    tags: Tags
-    api: API
-    debitAccount: Debit Account
-    creditAccount: Credit Account
-    amount: Amount
-    currency: Currency
-    data: Case Data
-    remarks: Remarks
-
-stages:
-  - key: prepare
-    name: Prepare
-    template: PAYMENT_PREPARE
-    required: false
-    onFailure: stop
-  - key: invoke
-    name: Invoke
-    template: PAYMENT_INVOKE
-    required: true
-    onFailure: stop
-  - key: verify
-    name: Verify
-    template: PAYMENT_VERIFY
-    required: true
-    onFailure: stop
-
 templates:
   root: templates
-  defaultTestCaseTemplate: payment_transfer_cases
 
 report:
   mode: append-to-copy
@@ -53,72 +21,82 @@ report:
     runTime: Run Time
 
 tools:
-  invokeOutwardService:
-    name: Invoke Outward Service
-    command: "./tools/invoke_outward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
-    output: xml
-    arguments:
-      requestXml: "${TOOL.input.requestXml}"
-      environment: "${environment}"
-  invokeInwardService:
-    name: Invoke Inward Service
-    command: "./tools/invoke_inward_service.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
-    output: xml
-    arguments:
-      requestXml: "${TOOL.input.requestXml}"
-      environment: "${environment}"
   invokePaymentApi:
     name: Invoke Payment API
+    description: Invoke the payment API with a rendered request file
     command: "./tools/invoke_payment_api.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: xml
     arguments:
-      requestXml: "${TOOL.input.requestXml}"
-      requestFile: "${TOOL.input.requestFile}"
-      environment: "${environment}"
-  getAPIResponse:
-    name: Get API Response
-    command: "./tools/cat_api_response.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
-    output: xml
-    arguments:
-      responseXml: "${TOOL.input.responseXml}"
+      requestFile:
+        name: Request File
+        description: Rendered payment request XML file
+        required: true
+      environment:
+        name: Environment
+        description: Target execution environment
+        required: true
   selectCtxn:
     name: Select CT records
+    description: Query transaction records
     command: "./tools/select_ct_txn.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: yaml
     arguments:
-      caseId: "${CaseID}"
-      txnRef: "${TOOL.input.txn.ref}"
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true
+      txnRef:
+        name: Transaction Reference
+        description: Optional transaction reference
+        required: false
   grepFromAppLogs:
-    name: Grep keywords from application logs
-    command: "./tools/grep_from_app_logs.sh ${TOOL.argv} --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    name: Grep application logs
+    description: Find one or more keywords in application logs
+    command: "./tools/grep_from_app_logs.sh ${TOOL.input.keywords} --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: yaml
     arguments:
-      keyword1: "${TOOL.input.keyword1}"
-      keyword2: "${TOOL.input.keyword2}"
-    argv:
-      - "--keyword"
-      - "${TOOL.input.keyword1}"
-      - "--keyword"
-      - "${TOOL.input.keyword2}"
+      logFile:
+        name: Log File
+        description: Application log file to search
+        required: true
+      keywords:
+        name: Keywords
+        description: Comma-delimited keywords expanded as the final argument array
+        required: true
+        delimit: ","
   getAppLogs:
     name: Get application logs
+    description: Collect application logs for a case
     command: "./tools/get_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: txt
     arguments:
-      caseId: "${CaseID}"
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true
   genEndToEndId:
-    name: Generate a unique end-to-end ID
+    name: Generate end-to-end ID
+    description: Generate a unique end-to-end identifier
     command: "./tools/gen_e2e_id.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: txt
     arguments:
-      caseId: "${CaseID}"
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true
   getAcDate:
     name: Get account date
+    description: Return the current account date
     command: "./tools/get_ac_date.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: txt
+    arguments: {}
   getSeq:
-    name: Get a new sequence
+    name: Get sequence
+    description: Generate a new sequence value
     command: "./tools/get_seq.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
     output: txt
     arguments:
-      caseId: "${CaseID}"
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true

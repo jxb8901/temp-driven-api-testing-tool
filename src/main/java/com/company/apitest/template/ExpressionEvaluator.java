@@ -6,13 +6,53 @@ package com.company.apitest.template;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import com.company.apitest.core.CaseRuntimeContext;
 
 /**
  * Evaluates the small SQL-like boolean expression subset used by template assertions.
  */
 public class ExpressionEvaluator {
+    private static final Pattern CONTEXT = Pattern.compile("\\$\\{([^}]+)}");
     public boolean evaluate(String expression) {
         return new Parser(expression).parse();
+    }
+
+    /** Resolves Context values as typed expression literals before parsing. */
+    public boolean evaluate(String expression, CaseRuntimeContext context) {
+        Matcher matcher = CONTEXT.matcher(expression);
+        StringBuffer rendered = new StringBuffer();
+        while (matcher.find()) {
+            Object value = context.resolve(matcher.group(1));
+            char activeQuote = activeQuote(expression, matcher.start());
+            String replacement = activeQuote != 0 ? escapeInside(value, activeQuote) : literal(value);
+            matcher.appendReplacement(rendered, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(rendered);
+        return evaluate(rendered.toString());
+    }
+
+    private static String literal(Object value) {
+        if (value == null) return "null";
+        if (value instanceof Number || value instanceof Boolean) return String.valueOf(value);
+        return "'" + escapeInside(value, '\'') + "'";
+    }
+
+    private static String escapeInside(Object value, char quote) {
+        String text = value == null ? "" : String.valueOf(value);
+        return text.replace("\\", "\\\\").replace(String.valueOf(quote), "\\" + quote);
+    }
+
+    private static char activeQuote(String expression, int end) {
+        char quote = 0;
+        for (int i = 0; i < end; i++) {
+            char ch = expression.charAt(i);
+            if ((ch == '\'' || ch == '"') && (i == 0 || expression.charAt(i - 1) != '\\')) {
+                if (quote == 0) quote = ch; else if (quote == ch) quote = 0;
+            }
+        }
+        return quote;
     }
 
     private static class Parser {
@@ -33,13 +73,19 @@ public class ExpressionEvaluator {
 
         private boolean parseOr() {
             boolean value = parseAnd();
-            while (matchIgnoreCase("or")) value = value || parseAnd();
+            while (matchIgnoreCase("or")) {
+                boolean right = parseAnd(); // Always parse RHS even when Java could short-circuit.
+                value = value || right;
+            }
             return value;
         }
 
         private boolean parseAnd() {
             boolean value = parseNot();
-            while (matchIgnoreCase("and")) value = value && parseNot();
+            while (matchIgnoreCase("and")) {
+                boolean right = parseNot();
+                value = value && right;
+            }
             return value;
         }
 
@@ -54,6 +100,12 @@ public class ExpressionEvaluator {
                 return value;
             }
             String left = readOperand();
+            // A literal is a complete expression too: true, false, 'text' is not.
+            if (position >= tokens.size() || ")".equals(tokens.get(position)) || "and".equalsIgnoreCase(tokens.get(position)) || "or".equalsIgnoreCase(tokens.get(position))) {
+                Boolean literal = bool(strip(left));
+                if (literal == null) throw new IllegalArgumentException("Expected comparison after operand: " + left);
+                return literal.booleanValue();
+            }
             if (matchIgnoreCase("is")) {
                 boolean negate = matchIgnoreCase("not");
                 expectIgnoreCase("null");
@@ -114,6 +166,13 @@ public class ExpressionEvaluator {
         }
 
         private static boolean compare(String left, String right, String op) {
+            Boolean lbool = bool(left);
+            Boolean rbool = bool(right);
+            if (lbool != null && rbool != null) {
+                if ("==".equals(op)) return lbool.equals(rbool);
+                if ("!=".equals(op)) return !lbool.equals(rbool);
+                throw new IllegalArgumentException("Boolean literals only support == and !=");
+            }
             Double l = number(left);
             Double r = number(right);
             int cmp = l != null && r != null ? Double.compare(l, r) : left.compareTo(right);
@@ -134,10 +193,17 @@ public class ExpressionEvaluator {
             }
         }
 
+        private static Boolean bool(String value) {
+            if ("true".equalsIgnoreCase(value)) return Boolean.TRUE;
+            if ("false".equalsIgnoreCase(value)) return Boolean.FALSE;
+            return null;
+        }
+
         private static String strip(String value) {
             String text = value.trim();
             if ((text.startsWith("'") && text.endsWith("'")) || (text.startsWith("\"") && text.endsWith("\""))) {
-                return text.substring(1, text.length() - 1);
+                char quote = text.charAt(0);
+                return text.substring(1, text.length() - 1).replace("\\" + quote, String.valueOf(quote)).replace("\\\\", "\\");
             }
             return text;
         }
@@ -151,7 +217,7 @@ public class ExpressionEvaluator {
                 char ch = expression.charAt(i);
                 if (quoted) {
                     current.append(ch);
-                    if (ch == quote) {
+                    if (ch == quote && (i == 0 || expression.charAt(i - 1) != '\\')) {
                         tokens.add(current.toString());
                         current.setLength(0);
                         quoted = false;
@@ -177,6 +243,7 @@ public class ExpressionEvaluator {
                     current.append(ch);
                 }
             }
+            if (quoted) throw new IllegalArgumentException("Unclosed quoted literal in expression");
             flush(current, tokens);
             return tokens;
         }

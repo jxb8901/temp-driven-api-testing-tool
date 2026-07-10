@@ -3,7 +3,7 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-VERSION="${ATT_VERSION:-v1.3}"
+VERSION="${ATT_VERSION:-v2.0}"
 PACKAGE_NAME="att-${VERSION}"
 SOURCE_PACKAGE_NAME="att-${VERSION}-src"
 BUILD_DIR="$ROOT_DIR/target/release"

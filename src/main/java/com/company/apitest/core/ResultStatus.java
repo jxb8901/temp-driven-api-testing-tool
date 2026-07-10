@@ -13,5 +13,6 @@ public enum ResultStatus {
     PRECHECK_FAILED,
     POSTCHECK_FAILED,
     ERROR,
+    INVALID,
     SKIPPED
 }

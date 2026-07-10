@@ -47,6 +47,8 @@ public class RunSummary {
         return count(ResultStatus.SKIPPED);
     }
 
+    public long invalid() { return count(ResultStatus.INVALID); }
+
     private long count(ResultStatus status) {
         return results.stream().filter(result -> result.status() == status).count();
     }

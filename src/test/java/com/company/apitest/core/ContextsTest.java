@@ -1,40 +1,45 @@
-/*
- * Author: Jeffrey + ChatGPT
- */
-
+/* Author: Jeffrey + ChatGPT */
 package com.company.apitest.core;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
-/**
- * Verifies request and expected contexts stay isolated.
- */
 class ContextsTest {
+    @TempDir Path tempDir;
+
     @Test
-    void requestContextDoesNotIncludeExpectedData() {
-        Map<String, String> fixed = new HashMap<String, String>();
-        fixed.put("Case ID", "TC001");
-        fixed.put("Amount", "100");
+    void buildsUppercaseConceptTreeWithCamelCaseProperties() {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("amount", "100");
+        Map<String, Object> stageValues = new LinkedHashMap<String, Object>();
+        stageValues.put("name", "PAYMENT_INVOKE");
+        stageValues.put("channel", "MOBILE");
+        StageCaseData stage = new StageCaseData("invoke", "PAYMENT_INVOKE", stageValues);
+        TestCase testCase = new TestCase(2, "payment", "支付測試案例集", "TC001", Arrays.asList("smoke"), data,
+                Collections.singletonMap("invoke", stage), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(testCase, tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
+        context.beginStage(stage, "PAYMENT_INVOKE", tempDir.resolve("templates/PAYMENT_INVOKE"));
 
-        Map<String, Object> requestData = new HashMap<String, Object>();
-        requestData.put("channel", "ATM");
+        assertEquals("payment.TC001", context.resolve("CASE.caseId"));
+        assertEquals("100", context.resolve("CASE.amount"));
+        assertEquals("MOBILE", context.resolve("CASE.STAGES.invoke.channel"));
+    }
 
-        Map<String, Object> expectedData = new HashMap<String, Object>();
-        expectedData.put("expectedLedgerStatus", "POSTED");
-
-        TestCase testCase = new TestCase(2, true, "TC001", "Payment", Arrays.asList("smoke"), "PAYMENT",
-                "PAYMENT_PRECHECK", "PASS", "PAYMENT_TRANSFER", "PAYMENT_POSTCHECK", "PASS",
-                fixed, requestData, expectedData, expectedData, null);
-
-        assertTrue(Contexts.requestContext(testCase).containsKey("channel"));
-        assertFalse(Contexts.requestContext(testCase).containsKey("expectedLedgerStatus"));
-        assertTrue(Contexts.expectedContext(testCase).containsKey("expectedLedgerStatus"));
+    @Test void resolvesNestedMapsAndListIndexes() {
+        LinkedHashMap<String,Object> row = new LinkedHashMap<String,Object>();
+        row.put("items", Arrays.asList(Collections.singletonMap("status", "FIRST"), Collections.singletonMap("status", "SECOND")));
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),row,Collections.emptyMap(),null), tempDir,"R",tempDir,tempDir.resolve("case.log"));
+        assertEquals("FIRST", context.resolve("CASE.items[0].status"));
+        assertEquals("SECOND", context.resolve("CASE.items.1.status"));
+        assertNull(context.resolve("CASE.items[9].status"));
     }
 }

@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Executes V1.3 template actions and records action outcomes in the case context.
+ * Executes V2 template actions and records outcomes in the CASE tree.
  */
 public class StageTemplateRunner {
     private final UnifiedTemplateEngine templateEngine;
@@ -31,12 +31,14 @@ public class StageTemplateRunner {
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         List<ValidationResult> results = new ArrayList<ValidationResult>();
-        context.put("STAGE.name", stageName);
-        context.put("STAGE.template", template.name());
         for (TemplateAction action : template.actions()) {
             try {
                 if ("render".equalsIgnoreCase(action.type())) {
-                    String content = new String(Files.readAllBytes(template.directory().resolve(action.payload())), StandardCharsets.UTF_8);
+                    Path payload = template.directory().resolve(action.payload()).normalize();
+                    if (!payload.startsWith(template.directory().normalize()) || !Files.isRegularFile(payload)) {
+                        throw new IllegalArgumentException("Render payload must stay inside template directory: " + action.payload());
+                    }
+                    String content = new String(Files.readAllBytes(payload), StandardCharsets.UTF_8);
                     String rendered = templateEngine.render(content, context, log);
                     Map<String, Object> invocation = renderRecord(action, rendered, context);
                     context.addAction(action.id(), invocation);
@@ -47,7 +49,7 @@ public class StageTemplateRunner {
                     results.add(new ValidationResult(stageName, action.id(), ResultStatus.PASS, action.call(), String.valueOf(output), ""));
                 } else if ("assert".equalsIgnoreCase(action.type())) {
                     String rendered = templateEngine.renderValues(action.expression(), context);
-                    boolean passed = evaluator.evaluate(rendered);
+                    boolean passed = evaluator.evaluate(action.expression(), context);
                     Map<String, Object> invocation = record(action, rendered, rendered, passed ? "PASS" : "FAIL");
                     context.addAction(action.id(), invocation);
                     log.append("ACTION " + action.id(), invocation);
@@ -101,7 +103,7 @@ public class StageTemplateRunner {
 
     private Map<String, Object> record(TemplateAction action, Object output, String rawOutput, String status) {
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
-        invocation.put("actionId", action.id());
+        invocation.put("id", action.id());
         invocation.put("type", action.type());
         invocation.put("output", output);
         invocation.put("rawOutput", rawOutput);

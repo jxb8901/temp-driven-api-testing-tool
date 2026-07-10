@@ -14,15 +14,6 @@ if [ -d "$ROOT_DIR/classes" ]; then
   exec java -cp "$CP" com.company.apitest.FrameworkRunner "$@"
 fi
 
-if [ ! -d "$ROOT_DIR/target/classes" ]; then
-  if command -v mvn >/dev/null 2>&1; then
-    (cd "$ROOT_DIR" && mvn -q -DskipTests compile)
-  else
-    echo "target/classes not found. Build classes first, or run scripts/build-release.sh to create a release package." >&2
-    exit 2
-  fi
-fi
-
 CP="$ROOT_DIR/target/classes:$ROOT_DIR/target/test-classes"
 
 for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
@@ -40,5 +31,26 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
   "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-core/2.21.1/log4j-core-2.21.1.jar; do
   CP="$CP:$jar"
 done
+
+NEEDS_BUILD=false
+if [ ! -d "$ROOT_DIR/target/classes" ]; then
+  NEEDS_BUILD=true
+elif find "$ROOT_DIR/src/main/java" -name '*.java' -newer "$ROOT_DIR/target/classes" -print -quit | grep -q .; then
+  NEEDS_BUILD=true
+fi
+
+if [ "$NEEDS_BUILD" = true ]; then
+  echo "Compiling ATT V2 sources..."
+  if command -v mvn >/dev/null 2>&1; then
+    (cd "$ROOT_DIR" && mvn -q -DskipTests compile)
+  elif command -v javac >/dev/null 2>&1; then
+    mkdir -p "$ROOT_DIR/target/classes"
+    # shellcheck disable=SC2046
+    javac -source 8 -target 8 -cp "$CP" -d "$ROOT_DIR/target/classes" $(find "$ROOT_DIR/src/main/java" -name '*.java')
+  else
+    echo "Neither Maven nor javac is available. Build a release package first." >&2
+    exit 2
+  fi
+fi
 
 exec java -cp "$CP" com.company.apitest.FrameworkRunner "$@"

@@ -5,23 +5,23 @@ actionDefaults:
   onFailure: stop
 
 actions:
-  prepare.getAcDate:
+  getAcDate:
     type: tool
     call: "#{getAcDate()}"
 
-  prepare.getSeq:
+  getSeq:
     type: tool
-    call: "#{getSeq(caseId=${CaseID})}"
+    call: "#{getSeq(caseId=${CASE.caseId})}"
 
-  prepare.genEndToEndId:
+  genEndToEndId:
     type: tool
-    call: "#{genEndToEndId(caseId=${CaseID})}"
+    call: "#{genEndToEndId(caseId=${CASE.caseId})}"
 
-  prepare.logIds:
+  logIds:
     type: log
     level: INFO
-    message: "Prepared IDs for ${CaseID}"
+    message: "Prepared IDs for ${CASE.caseId}"
     fields:
-      acDate: "${ACTIONS.prepare.getAcDate.output}"
-      sequence: "${ACTIONS.prepare.getSeq.output}"
-      endToEndId: "${ACTIONS.prepare.genEndToEndId.output}"
+      acDate: "${ACTIONS.getAcDate.output}"
+      sequence: "${ACTIONS.getSeq.output}"
+      endToEndId: "${ACTIONS.genEndToEndId.output}"

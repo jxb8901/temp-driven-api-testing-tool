@@ -1,5 +1,23 @@
 # Changelog
 
+## [V2.0] - 2026-07-10
+
+V2 implements the grouped Excel → stage → template → action → tool model defined by the V2 System Design.
+
+### Added
+
+- Mandatory V2 workbook sidecars with multi-sheet `groupId=sheetName`, required `caseId`/`tags`, and compact case/stage `dataColumns` parsing.
+- Full Case IDs such as `payment.TC001`, Chinese workbook fixtures, YAML stage template cells, blank-marker normalization, and the persisted `CASE.STAGES.TEMPLATE.ACTIONS` tree.
+- Strict template indexing by symbolic name or full path and pre-run package/template/tool contract validation.
+- Tool argument documentation contracts with final-argument `delimit` expansion; V2 rejects `argv`.
+- Offline HTML run summaries, detailed case logs/artifact links, package documentation, `case.yaml`, `events.jsonl`, report regeneration, and latest-run tar.gz archives with hashes.
+- V2 CLI commands: `run`, `validate`, `docs`, `report`, `build`, `version`, and `help`, including explicit `--all` and JSON output.
+
+### Verified
+
+- Java 8-target compilation and six automated tests pass.
+- The Chinese two-sheet example executes 2 cases with 2 PASS, generates HTML/Excel reports, regenerates the report, and builds a readable completed-run archive.
+
 ## [V1.3] - 2026-07-09
 
 V1.3 implements suite-local testcase configuration, Test Case Template defaults, Action ID based context, file-based action outputs, and variadic tool arguments.

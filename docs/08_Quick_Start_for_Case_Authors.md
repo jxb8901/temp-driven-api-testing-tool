@@ -1,352 +1,106 @@
-# ATT 測試案例編寫快速上手
+# ATT V2 Test Case Development Guide
 
-**Version:** Draft
-**Status:** Draft
-**Last Updated:** 2026-07-09
+**Author: Jeffrey + ChatGPT**
 
----
+This guide is for people who add or change test cases without changing framework code.
 
-# 1. 這份文檔是什麼
+## Start with the sample
 
-這份快速上手是給測試案例編寫者看的。它只回答一個問題：
+`testcase/payment_regression.xlsx` is the canonical example. It contains 22 passing cases across `支付測試案例集` and `批量測試案例集`. Copy it with its sidecar YAML, then rename both files together.
 
-> 我要怎樣把一個 Excel 測試案例寫成 ATT 可以執行的格式？
+```sh
+cp testcase/payment_regression.xlsx testcase/my_feature.xlsx
+cp testcase/payment_regression.yaml testcase/my_feature.yaml
+./att.sh validate --suite testcase/my_feature.xlsx
+```
 
-你只需要記住三個檔案：
+## Add a row safely
 
-- `xxx.xlsx`：測試案例本體
-- `xxx.yaml`：同名 sidecar 配置
-- `templates/`：默認模板搜索路徑
+1. Keep headers exactly as declared in the sidecar.
+2. Make the row Case ID unique within its sheet; ATT prefixes it with the group ID.
+3. Put YAML in columns whose sidecar declaration ends in `(yaml)`; the physical Excel header has no `(yaml)` suffix.
+4. Set every required stage template cell to a YAML map with `name`.
+5. Run `validate` before a test run.
 
----
+| Column | Example value |
+|---|---|
+| 案例編號 | `TC012` |
+| 案例名稱 | `Refund with decimal amount` |
+| 標籤 | `refund,edge,decimal` |
+| 預期結果 | `status: SUCCESS\nrejectCode: '0000'` |
+| 執行模板 | `name: PAYMENT_INVOKE` |
+| 驗證模板 | `name: PAYMENT_VERIFY` |
 
-# 2. 最小目錄結構
+`N/A`, `NA`, `NULL`, and `NONE` become blank. Optional stage cells may be blank; required stages may not.
 
-一個典型案例套件長這樣：
+## Use stages and templates deliberately
+
+`runWhen: onSuccess` runs only while prior stop-on-failure stages pass; `always` is suitable for cleanup; `onFailure` is for diagnostics or compensation. Use `onFailure: continue` only for evidence gathering that must not block a later useful assertion.
+
+Place `template.yaml` and its payload files together under `templates/<name>/`. Use stable action IDs: current-stage output is `${ACTIONS.<action-id>.output}` and persisted cross-stage output is `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<action-id>}`.
+
+Use a `render` action for large XML/JSON/text payloads rather than duplicating them in Excel.
+
+## Write reliable assertions
+
+Quote literal strings; leave numeric and boolean literals unquoted when type matters.
+
+```yaml
+expression: "${ACTIONS.callApi.output.Response.Status} == 'SUCCESS'"
+expression: "${ACTIONS.selectTxn.output.effectRows} >= 1 and true"
+expression: "${ACTIONS.getLogs.output} like '%PAYMENT%POSTED%'"
+```
+
+For simple transformations, use built-ins instead of a new shell script:
 
 ```text
-testcase/
-  payment_regression.xlsx
-  payment_regression.yaml
-
-templates/
-  shared/
-    payment_transfer.yaml
-  common/
-    success_check.yaml
-
-config.yaml
+#{upper(value=${CASE.currency})}
+#{coalesce(${CASE.optionalReference}, 'NO-REFERENCE')}
+#{boolean(yes)}
 ```
 
-你主要編輯的是：
+Use configured tools only for external systems or commands. Keep inputs named, validate them in `config/config.yaml`, and prefer deterministic outputs in samples.
 
-- Excel 裡的案例資料
-- 同名 `payment_regression.yaml`
-- `templates/` 或其他模板搜索路徑裡的模板
+## Review checklist
 
----
+- Workbook and sidecar basenames match.
+- IDs, tags, and template names are meaningful and unique.
+- YAML cells parse and do not duplicate a stage data key in their template map.
+- Assertions cover the intended normal or edge behavior.
+- Sensitive values are absent from samples and log messages.
+- `./att.sh validate --suite ...` and the selected run pass.
 
-# 3. 先看 sidecar
+## Reference: capability recipes
 
-每個 Excel 套件都需要一份 sidecar YAML。
-
-最小範例如下：
+Use a full template path when symbolic names are inappropriate:
 
 ```yaml
-testCaseTemplate: payment_transfer_cases
-
-testcase:
-  sheet: 測試案例
-  headerRows: 2
-  columns: 案例編號, 案例名稱, 標籤, 金額, 扣帳帳號, 幣種, creditAcNo=入帳帳號
-  yamlColumns: data=其它測試數據, 更多測試數據
-  report:
-    columns:
-      result: 測試結果
-      durationMs: 耗時(ms)
-      actualResult: 實際結果
-      caseLog: 案例日誌
-
-stages:
-  prepare:
-    templateColumn: 準備模板
-    yamlColumns: 準備資料
-    required: false
-  invoke:
-    templateColumn: 調用模板
-    yamlColumns: 調用資料
-    required: true
-  verify:
-    templateColumn: 驗證模板
-    yamlColumns: 驗證資料
-    required: true
+name: 付款/本地付款
 ```
 
-你可以先抓住這幾個重點：
+All other keys in that YAML cell become stage-private data. Do not repeat a key supplied by `stages[].dataColumns`.
 
-- `columns` 是普通欄位，寫成簡單清單
-- `yamlColumns` 是 YAML 欄位，可以有多個
-- `templateColumn` 是每個 stage 對應的模板欄位
-- `required: true` 表示該 stage 不能空
-- 模板路徑由全局 `templatePaths` 決定，預設是 `templates`
-- 模板可以在多個 stage 或 testcase 中共享
-
----
-
-# 4. `columns` 怎麼寫
-
-`testcase.columns` 不需要寫傳統 mapping。
-
-你可以直接寫：
+Use lifecycle stages in sidecar order:
 
 ```yaml
-columns: 案例編號, 金額, 扣帳帳號, 幣種, creditAcNo=入帳帳號
+- {key: invoke, template: 執行模板, required: true, runWhen: normal, onFailure: stop}
+- {key: rollback, template: 回滾模板, required: false, runWhen: onFailure, onFailure: continue}
+- {key: cleanup, template: 清理模板, required: false, runWhen: always, onFailure: continue}
 ```
 
-意思是：
-
-- `案例編號`、`金額`、`扣帳帳號`、`幣種` 這些欄位會直接進入 Context
-- `creditAcNo=入帳帳號` 表示這個單元格同時可以用兩個名字引用
-
-例如同一個單元格可以這樣引用：
+Tool-call literals are typed and quoted commas are safe:
 
 ```text
-${creditAcNo}
-${入帳帳號}
+#{someTool(message='Hello, payment', retry=3, enabled=true)}
 ```
 
-兩者指向同一份數據。
+Only configured external tools accept named arguments validated by `config.yaml`. The optional `delimit` metadata may appear only on the final argument and converts one cell value such as `PAYMENT,POSTED` to ordered process arguments.
 
----
+Generate both documentation layouts while reviewing a package:
 
-# 5. `yamlColumns` 怎麼寫
-
-`yamlColumns` 用來放 YAML 格式的欄位。
-
-例如：
-
-```yaml
-yamlColumns: data=其它測試數據, 更多測試數據
+```sh
+./att.sh docs
+./att.sh docs --single-page
 ```
 
-這代表有兩個 YAML 欄位：
-
-- `其它測試數據`，同時也可以用別名 `data`
-- `更多測試數據`
-
-如果單元格內容是：
-
-```yaml
-payment:
-  channel: ATM
-  expected:
-    status: SUCCESS
-```
-
-你可以這樣引用：
-
-```text
-${Case.data.payment.channel}
-${Case.data.payment.expected.status}
-${更多測試數據.payment.channel}
-```
-
-YAML 欄位支持：
-
-- 中文 key
-- 多行內容
-- 註解
-- 巢狀結構
-
----
-
-# 6. Stage 怎麼用
-
-每個 stage 都有自己的 `templateColumn`。
-
-常見的 stage 例子是：
-
-- `prepare`
-- `invoke`
-- `verify`
-- `cleanup`
-- `rollback`
-
-例如：
-
-```yaml
-stages:
-  prepare:
-    templateColumn: 準備模板
-    yamlColumns: 準備資料
-    required: false
-  invoke:
-    templateColumn: 調用模板
-    yamlColumns: 調用資料
-    required: true
-  verify:
-    templateColumn: 驗證模板
-    yamlColumns: 驗證資料
-    required: true
-  cleanup:
-    templateColumn: 清理模板
-    required: false
-  rollback:
-    templateColumn: 回滾模板
-    required: false
-```
-
-你可以這樣理解：
-
-- `templateColumn` 決定這一列要用哪個模板
-- `yamlColumns` 提供這個 stage 需要的額外 YAML 數據
-- `required` 決定這個 stage 能不能空
-
-如果某個 required stage 的模板欄位是空白、`NA` 或 `N/A`，ATT 會視為空值並報錯。
-
----
-
-# 7. 模板單元格怎麼寫
-
-stage 對應的模板欄位內容本身就是 YAML。
-
-最簡單的模板單元格：
-
-```yaml
-name: PAYMENT_PRECHECK
-```
-
-帶 remark 的寫法：
-
-```yaml
-name: 中文支付調用模板
-remark: |
-  第一行備註
-  第二行備註
-```
-
-你可以把它理解成：
-
-- `name` 是真正要找的模板名稱
-- `remark` 是給人看的註解
-
-模板檔案放在哪裡，取決於全局 `templatePaths` 的搜索順序，不取決於 stage 或 testcase。
-
-例如：
-
-- `templatePaths: [templates, shared-templates]`
-- 模板可能在 `templates/shared/payment_transfer.yaml`
-- 也可能在 `shared-templates/payment/success_check.yaml`
-
----
-
-# 8. Context 怎麼引用
-
-ATT 不再要求你去分辨什麼是 Shared Case Data、什麼是 Stage Data。
-
-你只要記住：
-
-- `columns` 的值進 Context
-- `yamlColumns` 的 YAML 也進 Context
-- stage 模板資訊也進 Context
-- action 的輸出也進 Context
-
-常見引用方式：
-
-```text
-${CaseID}
-${金額}
-${creditAcNo}
-${Case.data.payment.channel}
-${STAGES.invoke.template.name}
-${ACTIONS.renderRequest.outputFile}
-```
-
-如果兩個來源有同名欄位，後面的來源可能覆蓋前面的來源，ATT 會給 warning。
-
-stage 只負責固定執行順序，不負責模板路徑決策。
-
----
-
-# 9. 一個完整範例
-
-下面是一個很小但完整的想法示例。
-
-## 9.1 Excel 欄位
-
-| 案例編號 | 案例名稱 | 金額 | 扣帳帳號 | 入帳帳號 | 調用模板 | 調用資料 |
-|----------|----------|------|----------|----------|----------|----------|
-| TC001 | 轉帳成功 | 100 | 123456789 | 987654321 | `name: 中文支付調用模板` | `payment:\n  channel: ATM` |
-
-## 9.2 sidecar
-
-```yaml
-testCaseTemplate: payment_transfer_cases
-
-testcase:
-  sheet: 測試案例
-  headerRows: 1
-  columns: 案例編號, 案例名稱, 金額, 扣帳帳號, creditAcNo=入帳帳號
-  yamlColumns: data=調用資料
-  report:
-    columns:
-      result: 測試結果
-      durationMs: 耗時(ms)
-      actualResult: 實際結果
-
-stages:
-  invoke:
-    templateColumn: 調用模板
-    yamlColumns: 調用資料
-    required: true
-```
-
-## 9.3 這筆資料可怎麼用
-
-```text
-${案例編號}
-${creditAcNo}
-${入帳帳號}
-${Case.data.payment.channel}
-```
-
----
-
-# 10. 寫案例時的建議
-
-- 普通文字欄位放 `columns`
-- 需要 YAML 結構的欄位放 `yamlColumns`
-- 同一個值如果想用不同名字引用，就用 `alias=columnLabel`
-- 模板名稱盡量穩定，不要隨便改
-- `required: true` 的 stage 不要留空
-- `remark` 放給人看的說明，不要塞業務邏輯
-
----
-
-# 11. 常見問題
-
-## 11.1 `columns` 一定要寫 mapping 嗎？
-
-不用。現在可以直接寫清單。
-
-## 11.2 `yamlColumns` 可以有幾個？
-
-可以有多個。
-
-## 11.3 `NA`、`N/A` 算什麼？
-
-算空值，不算模板名稱。
-
-## 11.4 模板欄位能不能寫中文？
-
-可以。
-
-## 11.5 報表會怎麼輸出？
-
-sidecar 的 `testcase.report.columns` 會決定報表欄位名稱。
-
----
-
-# 12. 一句話版
-
-把 Excel 裡的普通欄位、YAML 欄位、stage 模板、stage 參數都寫清楚，ATT 會幫你把它們放進 Context，然後按模板一步一步執行。
+The first is navigable JavaDoc-style multi-page documentation; the second is a searchable portable HTML file.

@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * Result of one V1.1 tool invocation.
+ * Immutable result of one V2 tool invocation.
  */
 public class ToolInvocationResult {
     private final String toolName;

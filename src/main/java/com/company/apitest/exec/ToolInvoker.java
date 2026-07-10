@@ -6,6 +6,8 @@ package com.company.apitest.exec;
 
 import com.company.apitest.config.FrameworkConfig;
 import com.company.apitest.config.ToolConfig;
+import com.company.apitest.config.ToolArgumentConfig;
+import com.company.apitest.config.YamlSupport;
 import com.company.apitest.core.CaseExecutionLog;
 import com.company.apitest.core.CaseRuntimeContext;
 import com.company.apitest.template.TemplateRenderer;
@@ -60,20 +62,22 @@ public class ToolInvoker {
         Path inputFile = actionDir.resolve("input.yaml");
         Path outputFile = actionDir.resolve("output." + extension(tool.output()));
 
-        // Call-site input is resolved first; config-level arguments can normalize or enrich that input.
         Map<String, Object> resolvedInput = resolveMap(input, context);
-        resolvedInput.putAll(resolveToolArguments(tool.arguments(), resolvedInput, context));
+        validateArguments(tool, resolvedInput);
+        expandDelimitedArgument(tool, resolvedInput);
         Files.write(inputFile, new Yaml().dump(resolvedInput).getBytes(StandardCharsets.UTF_8));
-        List<String> argv = resolveArgv(tool.argv(), resolvedInput, context);
 
-        // The command sees only file paths and resolved TOOL.input values, keeping scripts reusable.
         Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
         flatten("TOOL.input", resolvedInput, renderContext);
         renderContext.put("TOOL.inputFile", inputFile.toString());
         renderContext.put("TOOL.outputFile", outputFile.toString());
-        renderContext.put("TOOL.argv", shellArgs(argv));
+        ToolArgumentConfig last = lastArgument(tool);
+        if (last != null && last.multiValue()) {
+            Object value = resolvedInput.get(last.key());
+            renderContext.put("TOOL.input." + last.key(), value instanceof List ? shellArgs(stringList((List<?>) value)) : "");
+        }
         String command = TemplateRenderer.render(tool.command(), renderContext);
-        CommandResult commandResult = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()));
+        CommandResult commandResult = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()), projectRoot);
         if (!Files.exists(outputFile)) {
             Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
         }
@@ -82,6 +86,7 @@ public class ToolInvoker {
         Object parsed = commandResult.exitCode() == 0 && !commandResult.timedOut() ? parseOutput(rawOutput, tool.output()) : rawOutput;
 
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation.put("id", id);
         invocation.put("type", "tool");
         invocation.put("tool", toolName);
         invocation.put("input", resolvedInput);
@@ -89,7 +94,6 @@ public class ToolInvoker {
         invocation.put("output", parsed);
         invocation.put("outputFile", outputFile.toString());
         invocation.put("rawOutput", rawOutput);
-        invocation.put("argv", argv);
         invocation.put("stdout", commandResult.stdout());
         invocation.put("stderr", commandResult.stderr());
         invocation.put("command", command);
@@ -117,17 +121,13 @@ public class ToolInvoker {
         for (Map.Entry<String, Object> entry : input.entrySet()) {
             if (entry.getValue() instanceof Map) {
                 resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue(), context));
+            } else if (entry.getValue() instanceof String) {
+                resolved.put(entry.getKey(), com.company.apitest.core.ValueNormalizer.normalize(renderValue((String) entry.getValue(), context)));
             } else {
-                resolved.put(entry.getKey(), renderValue(String.valueOf(entry.getValue()), context));
+                resolved.put(entry.getKey(), entry.getValue());
             }
         }
         return resolved;
-    }
-
-    private Map<String, Object> resolveToolArguments(Map<String, Object> arguments, Map<String, Object> callInput, CaseRuntimeContext context) {
-        Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
-        flatten("TOOL.input", callInput, renderContext);
-        return resolveMap(arguments, renderContext);
     }
 
     @SuppressWarnings("unchecked")
@@ -136,8 +136,10 @@ public class ToolInvoker {
         for (Map.Entry<String, Object> entry : input.entrySet()) {
             if (entry.getValue() instanceof Map) {
                 resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue(), renderContext));
+            } else if (entry.getValue() instanceof String) {
+                resolved.put(entry.getKey(), com.company.apitest.core.ValueNormalizer.normalize(renderValue((String) entry.getValue(), renderContext)));
             } else {
-                resolved.put(entry.getKey(), renderValue(String.valueOf(entry.getValue()), renderContext));
+                resolved.put(entry.getKey(), entry.getValue());
             }
         }
         return resolved;
@@ -153,19 +155,45 @@ public class ToolInvoker {
         }
     }
 
-    private List<String> resolveArgv(List<Object> argv, Map<String, Object> callInput, CaseRuntimeContext context) {
-        Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
-        flatten("TOOL.input", callInput, renderContext);
-        List<String> resolved = new ArrayList<String>();
-        for (Object item : argv) {
-            resolved.add(renderValue(String.valueOf(item), renderContext));
+    private void validateArguments(ToolConfig tool, Map<String, Object> input) {
+        for (String supplied : input.keySet()) {
+            if (!tool.arguments().containsKey(supplied)) throw new IllegalArgumentException("Unknown argument '" + supplied + "' for tool " + tool.key());
         }
-        return resolved;
+        for (ToolArgumentConfig argument : tool.arguments().values()) {
+            if (argument.required() && (!input.containsKey(argument.key()) || blank(input.get(argument.key())))) {
+                throw new IllegalArgumentException("Missing required argument '" + argument.key() + "' for tool " + tool.key());
+            }
+        }
     }
 
-    private String shellArgs(List<String> argv) {
+    private void expandDelimitedArgument(ToolConfig tool, Map<String, Object> input) {
+        ToolArgumentConfig last = lastArgument(tool);
+        if (last == null || !last.multiValue() || !input.containsKey(last.key())) return;
+        String raw = input.get(last.key()) == null ? "" : String.valueOf(input.get(last.key()));
+        List<String> values = new ArrayList<String>();
+        if (!raw.isEmpty()) {
+            for (String item : raw.split(Pattern.quote(last.delimit()), -1)) values.add(com.company.apitest.core.ValueNormalizer.normalize(item));
+        }
+        input.put(last.key(), values);
+    }
+
+    private ToolArgumentConfig lastArgument(ToolConfig tool) {
+        ToolArgumentConfig last = null;
+        for (ToolArgumentConfig value : tool.arguments().values()) last = value;
+        return last;
+    }
+
+    private boolean blank(Object value) { return value == null || com.company.apitest.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty(); }
+
+    private List<String> stringList(List<?> values) {
+        List<String> result = new ArrayList<String>();
+        for (Object value : values) result.add(value == null ? "" : String.valueOf(value));
+        return result;
+    }
+
+    private String shellArgs(List<String> values) {
         StringBuilder output = new StringBuilder();
-        for (String item : argv) {
+        for (String item : values) {
             if (output.length() > 0) {
                 output.append(' ');
             }
@@ -202,7 +230,7 @@ public class ToolInvoker {
 
     public Object parseOutput(String text, String outputType) throws Exception {
         if ("yaml".equalsIgnoreCase(outputType)) {
-            Object loaded = new Yaml().load(text);
+            Object loaded = YamlSupport.parser().load(text);
             return loaded == null ? new LinkedHashMap<String, Object>() : loaded;
         }
         if ("xml".equalsIgnoreCase(outputType)) {
@@ -214,6 +242,11 @@ public class ToolInvoker {
     private Map<String, Object> xmlToMap(String xml) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
         Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put(document.getDocumentElement().getNodeName(), elementToMap(document.getDocumentElement()));

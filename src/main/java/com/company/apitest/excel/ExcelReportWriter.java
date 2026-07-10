@@ -5,6 +5,7 @@
 package com.company.apitest.excel;
 
 import com.company.apitest.config.FrameworkConfig;
+import com.company.apitest.config.SheetGroupConfig;
 import com.company.apitest.core.TestResult;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
@@ -22,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Writes V1.2 results by copying the source workbook and appending result columns.
+ * Writes V2 results to every configured testcase group sheet.
  */
 public class ExcelReportWriter {
     private final FrameworkConfig config;
@@ -34,35 +35,33 @@ public class ExcelReportWriter {
     public Path write(Path suitePath, Path runDirectory, List<TestResult> results) throws IOException {
         Files.createDirectories(runDirectory);
         String suiteName = suitePath.getFileName().toString().replaceFirst("\\.xlsx$", "");
-        Path reportPath = runDirectory.resolve(config.report().fileNamePattern().replace("${suiteName}", suiteName));
+        Path workbookDirectory = runDirectory.resolve("workbooks");
+        Files.createDirectories(workbookDirectory);
+        Path reportPath = workbookDirectory.resolve(config.report().fileNamePattern().replace("${suiteName}", suiteName));
         Map<String, TestResult> byCaseId = new LinkedHashMap<String, TestResult>();
         for (TestResult result : results) {
             byCaseId.put(result.caseId(), result);
         }
 
         try (InputStream input = Files.newInputStream(suitePath); Workbook workbook = WorkbookFactory.create(input); OutputStream output = Files.newOutputStream(reportPath)) {
-            Sheet sheet = workbook.getSheet(config.testcaseSheet());
-            Row header = sheet.getRow(0);
-            int start = resultColumnStart(header);
-            int offset = 0;
-            for (String headerName : config.report().columns().values()) {
-                header.createCell(start + offset).setCellValue(headerName);
-                offset++;
-            }
-            for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
-                Row row = sheet.getRow(rowIndex);
-                if (row == null) {
-                    continue;
+            for (SheetGroupConfig group : config.sheetGroups()) {
+                Sheet sheet = workbook.getSheet(group.sheetName());
+                Row header = sheet.getRow(0);
+                int start = Math.max(0, header.getLastCellNum());
+                int offset = 0;
+                for (String headerName : config.report().columns().values()) {
+                    header.createCell(start + offset).setCellValue(headerName);
+                    offset++;
                 }
-                Cell caseCell = row.getCell(columnIndex(header, config.testcaseColumns().get("caseId")));
-                if (caseCell == null) {
-                    continue;
+                int caseColumn = columnIndex(header, config.caseIdColumn());
+                for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                    Row row = sheet.getRow(rowIndex);
+                    if (row == null) continue;
+                    Cell caseCell = row.getCell(caseColumn);
+                    if (caseCell == null) continue;
+                    TestResult result = byCaseId.get(group.id() + "." + caseCell.toString().trim());
+                    if (result != null) writeResult(row, start, result);
                 }
-                TestResult result = byCaseId.get(caseCell.toString().trim());
-                if (result == null) {
-                    continue;
-                }
-                writeResult(row, start, result);
             }
             workbook.write(output);
         }
@@ -72,7 +71,15 @@ public class ExcelReportWriter {
     private void writeResult(Row row, int start, TestResult result) {
         int offset = 0;
         for (String field : config.report().columns().keySet()) {
-            row.createCell(start + offset).setCellValue(value(field, result));
+            Cell cell = row.createCell(start + offset);
+            String text = value(field, result);
+            cell.setCellValue(text);
+            if ("reportLink".equals(field)) {
+                org.apache.poi.ss.usermodel.Hyperlink link = row.getSheet().getWorkbook().getCreationHelper()
+                        .createHyperlink(org.apache.poi.common.usermodel.HyperlinkType.FILE);
+                link.setAddress(text);
+                cell.setHyperlink(link);
+            }
             offset++;
         }
     }
@@ -82,6 +89,7 @@ public class ExcelReportWriter {
         if ("durationMs".equals(field)) return String.valueOf(result.duration().toMillis());
         if ("actualResult".equals(field)) return result.actual();
         if ("caseLog".equals(field)) return result.caseLogPath() == null ? "" : result.caseLogPath().toString();
+        if ("reportLink".equals(field)) return "../report/cases/" + result.caseId().replaceAll("[^A-Za-z0-9._-]", "_") + ".html";
         if ("runTime".equals(field)) return java.time.LocalDateTime.now().toString();
         return "";
     }
@@ -95,14 +103,4 @@ public class ExcelReportWriter {
         return 0;
     }
 
-    private int resultColumnStart(Row header) {
-        int maxConfiguredColumn = -1;
-        for (String configuredHeader : config.testcaseColumns().values()) {
-            int index = columnIndex(header, configuredHeader);
-            if (index > maxConfiguredColumn) {
-                maxConfiguredColumn = index;
-            }
-        }
-        return maxConfiguredColumn + 1;
-    }
 }

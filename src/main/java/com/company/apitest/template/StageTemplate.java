@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Loaded V1.3 stage template package.
+ * Loaded V2 template directory.
  */
 public class StageTemplate {
     private final String name;

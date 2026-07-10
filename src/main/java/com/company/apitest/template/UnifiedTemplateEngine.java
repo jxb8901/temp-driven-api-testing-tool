@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 public class UnifiedTemplateEngine {
     private static final Pattern VALUE = Pattern.compile("\\$\\{([^}]+)}");
     private final ToolInvoker toolInvoker;
+    private final ToolCallParser callParser = new ToolCallParser();
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker) {
         this.toolInvoker = toolInvoker;
@@ -53,11 +54,14 @@ public class UnifiedTemplateEngine {
         if (body.startsWith("#{") && body.endsWith("}")) {
             body = body.substring(2, body.length() - 1);
         }
-        ToolCall parsed = parseCall(body, context);
+        ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
+        Map<String, Object> input = resolveArguments(parsed, context);
+        Object builtIn = builtIn(parsed.name(), input);
+        if (builtIn != null) return builtIn;
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for tool invocation");
         }
-        return toolInvoker.invoke(invocationId, parsed.name, parsed.input, context, log).output();
+        return toolInvoker.invoke(invocationId, parsed.name(), input, context, log).output();
     }
 
     private String renderTools(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
@@ -102,25 +106,51 @@ public class UnifiedTemplateEngine {
         return -1;
     }
 
-    private ToolCall parseCall(String body, CaseRuntimeContext context) {
-        int open = body.indexOf('(');
-        if (open < 0) {
-            return new ToolCall(body.trim(), new LinkedHashMap<String, Object>());
-        }
-        String name = body.substring(0, open).trim();
-        String args = body.substring(open + 1, body.lastIndexOf(')')).trim();
+    private Map<String, Object> resolveArguments(ToolCallParser.ParsedCall call, CaseRuntimeContext context) {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
-        if (!args.isEmpty()) {
-            // Dotted argument names become nested YAML input, for example txn.ref -> {txn: {ref: ...}}.
-            for (String pair : args.split(",")) {
-                int eq = pair.indexOf('=');
-                if (eq > 0) {
-                    putNested(input, pair.substring(0, eq).trim(), renderValues(pair.substring(eq + 1).trim(), context));
-                }
-            }
+        for (ToolCallParser.Argument argument : call.arguments()) {
+            String expression = argument.expression().trim();
+            Matcher exact = VALUE.matcher(expression);
+            Object value = exact.matches() ? context.resolve(exact.group(1)) : callParser.literal(renderValues(expression, context));
+            putNested(input, argument.key(), value == null ? "" : value);
         }
-        return new ToolCall(name, input);
+        return input;
     }
+
+    /** Built-ins keep ordinary transforms in templates without creating a shell tool. */
+    private Object builtIn(String name, Map<String, Object> input) {
+        String value = value(input, "value", "arg0");
+        if ("upper".equalsIgnoreCase(name)) return value.toUpperCase(java.util.Locale.ROOT);
+        if ("lower".equalsIgnoreCase(name)) return value.toLowerCase(java.util.Locale.ROOT);
+        if ("trim".equalsIgnoreCase(name)) return value.trim();
+        if ("string".equalsIgnoreCase(name)) return value;
+        if ("number".equalsIgnoreCase(name)) {
+            try { return new java.math.BigDecimal(value.trim()).stripTrailingZeros().toPlainString(); }
+            catch (NumberFormatException e) { throw new IllegalArgumentException("number() requires a Number literal: " + value); }
+        }
+        if ("boolean".equalsIgnoreCase(name)) {
+            if ("true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value)) return "true";
+            if ("false".equalsIgnoreCase(value) || "0".equals(value) || "no".equalsIgnoreCase(value)) return "false";
+            throw new IllegalArgumentException("boolean() requires true/false, yes/no, or 1/0: " + value);
+        }
+        if ("length".equalsIgnoreCase(name)) return String.valueOf(value.length());
+        if ("concat".equalsIgnoreCase(name)) {
+            StringBuilder result = new StringBuilder();
+            for (Object item : input.values()) result.append(item == null ? "" : item);
+            return result.toString();
+        }
+        if ("coalesce".equalsIgnoreCase(name)) {
+            for (Object item : input.values()) if (item != null && !String.valueOf(item).trim().isEmpty()) return item;
+            return "";
+        }
+        return null;
+    }
+
+    private String value(Map<String, Object> input, String preferred, String fallback) {
+        Object item = input.containsKey(preferred) ? input.get(preferred) : input.get(fallback);
+        return item == null ? "" : String.valueOf(item);
+    }
+
 
     @SuppressWarnings("unchecked")
     private void putNested(Map<String, Object> target, String path, Object value) {
@@ -137,13 +167,4 @@ public class UnifiedTemplateEngine {
         current.put(parts[parts.length - 1], value);
     }
 
-    private static class ToolCall {
-        private final String name;
-        private final Map<String, Object> input;
-
-        private ToolCall(String name, Map<String, Object> input) {
-            this.name = name;
-            this.input = input;
-        }
-    }
 }

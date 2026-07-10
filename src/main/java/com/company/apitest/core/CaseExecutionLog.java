@@ -12,7 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Appends ordered V1.2 case, stage and action diagnostics into one case log file.
+ * Appends ordered V2 case, stage and action diagnostics into one UTF-8 case log.
  */
 public class CaseExecutionLog {
     private final Path path;
