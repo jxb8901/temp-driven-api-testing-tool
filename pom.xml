@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.company</groupId>
+    <groupId>att</groupId>
     <artifactId>template-driven-api-testing-tool</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <name>Template-driven API Test Framework</name>
@@ -58,7 +58,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.3.0</version>
                 <configuration>
-                    <mainClass>com.company.apitest.FrameworkRunner</mainClass>
+                    <mainClass>att.FrameworkRunner</mainClass>
                 </configuration>
             </plugin>
         </plugins>

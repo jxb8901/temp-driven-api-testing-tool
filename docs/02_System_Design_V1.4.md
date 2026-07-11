@@ -1,9 +1,9 @@
 # ATT System Design V1.4
 
 **Version:** V1.4
-**Status:** Draft
+**Status:** Deprecated
 **Source:** V1.4 roadmap and user review comments
-**Last Updated:** 2026-07-09
+**Last Updated:** 2026-07-10
 
 ---
 
@@ -15,79 +15,76 @@ V1.4 is a stabilization release on top of the V1.3 execution model.
 
 The core runtime model remains:
 
-- Excel suites drive case execution.
-- Suite sidecar config defines how one workbook is parsed and executed.
-- Test case owns stages.
-- Stage is an ordered unit inside a testcase.
-- Template is a directory selected by a stage template cell.
-- Template contains ordered actions.
-- Action is an ordered unit inside a template.
-- Tool is invoked by an action.
+- Excel workbooks drive case execution.
+- Each workbook must have a sidecar YAML file beside it.
+- The sidecar defines how the workbook is parsed and executed.
+- Test cases are organized into ordered stages.
+- Stages select reusable templates.
+- Templates contain ordered actions.
+- Actions invoke tools or render data.
 - `${...}` references runtime context values.
 - `#{...}` invokes tools.
-- Tool execution remains external shell-script based.
+- Tool execution remains external and shell-script based.
 
-V1.4 tightens the configuration boundary:
+V1.4 tightens the configuration boundary and workbook parsing rules:
 
-- `config.yaml` configures tools and optional global defaults such as environment, global log level, and common execution defaults.
-- `config.yaml` also configures an ordered list of template search paths, with `templates` as the default.
-- Testcase, stage, and report mapping live in the suite sidecar config.
-- Every Excel suite must have a sidecar config.
-- The sidecar config must define stages, report column mapping, and other suite-specific report settings.
-
-V1.4 also clarifies workbook parsing and authoring support:
-
-- Multi-row Excel headers are supported through `testcase.headerRows`.
-- Human-entered invisible spaces are trimmed where they can break matching.
-- Template directories are only recognized when they contain `template.yaml`.
-- Template cells are YAML objects inside `template.yaml`.
-- Chinese and mixed-language template names are supported.
-- Case author reference manuals can be generated from configured testcase, template, and tool metadata.
-- ATT can package the latest run output, including reports and per-case logs.
-- ATT can generate HTML test reports.
-- ATT can generate a newcomer handbook and a full user manual.
+- `config.yaml` configures global behavior only, such as tools, environment, log defaults, and shared execution defaults.
+- `config.yaml` does not define workbook-specific testcase columns, stages, or report column mappings.
+- Workbook-specific testcase parsing, stage parsing, and report mapping live in the workbook sidecar.
+- Every Excel workbook must have a sidecar config with an explicit Test Case Template binding.
+- V1.4 supports Chinese and mixed-language workbook names, sheet names, and column headers.
+- `testcase.columns` mapping must accept Chinese source headers and Chinese display names without assuming English field names.
 
 Relationship model:
 
 ```text
-testcase 1:n stage 1:n template 1:n action 1:n tool
+testcase <1:n stage 1:m> template <1:n action m:1> tool
 ```
 
 ---
 
-# 2. V1.4 Design Goals
+# 2. Design Goals
 
-## 2.1 Make Suite Configuration Self-Contained
+## 2.1 Make Workbook Configuration Self-Contained
 
 Each workbook should be understandable by reading the workbook and its sidecar config.
 
 The sidecar config owns:
 
+- selected Test Case Template
 - sheet name
-- header rows
-- testcase data columns
-- stage template columns
-- testcase and stage YAML columns
-- report columns
+- header row count
+- testcase column mapping
+- stage column mapping
+- report column mapping
+- suite-level execution defaults
 - suite log level
 
-Global `config.yaml` may define tools, environment information, global log level, other common default behavior, and template search paths.
+## 2.2 Support Localized Workbook Naming
 
-Global `config.yaml` should not define testcase columns, stages, or suite-specific report column mapping.
+V1.4 must support Chinese or mixed-language workbook metadata.
 
-## 2.2 Reduce Authoring Mistakes
+Supported at the workbook boundary:
 
-Excel files often contain spaces that humans do not notice.
+- workbook file name
+- worksheet name
+- header labels
+- display names in sidecar mappings
+- template names shown to users
 
-V1.4 requires necessary whitespace normalization to reduce failures caused by invisible spaces.
+The framework should keep stable logical keys internally while accepting localized display labels at the workbook boundary.
 
-The goal is not to alter intentional business text, but to trim values used for matching and identifiers.
+## 2.3 Reduce Authoring Mistakes
 
-## 2.3 Keep Template Cells Structured
+Excel files often contain spaces or formatting artifacts that humans do not notice.
 
-Stage template cell values are YAML.
+V1.4 should normalize necessary whitespace for matching and identifiers, while preserving intentional business text.
 
-This naturally supports:
+## 2.4 Keep Template Cells Structured
+
+Stage template cells are YAML values.
+
+This supports:
 
 - Chinese template names
 - remarks
@@ -95,497 +92,290 @@ This naturally supports:
 - extra metadata
 - multi-line text
 
-## 2.4 Clarify Context Data Composition
+## 2.5 Clarify Context Composition
 
-Case data is made available through the runtime Context.
+All case-related values are exposed through the runtime context.
 
-V1.4 treats all case-related values as Context data sources instead of introducing separate per-case or per-stage data objects.
+Ordinary testcase columns, testcase YAML columns, stage YAML columns, template cell metadata, action outputs, and tool outputs are all context data sources.
 
-Ordinary testcase columns, testcase YAML columns, stage YAML columns, template cell metadata, action outputs, and tool outputs are all Context data sources.
+Duplicate keys are allowed, but overwrite behavior must be explicit and should warn.
 
-Expressions resolve data through a defined Context lookup order.
+## 2.6 Preserve Compatibility Where It Helps
 
-Duplicate keys are allowed but must produce warnings when overwritten.
+V1.4 keeps the `ACTIONS.<ActionID>` model and retains `TOOLS.<ActionID>` as a legacy alias.
 
-## 2.5 Improve Tool Discoverability
-
-`att.sh` should provide a command to generate a reference manual for case authors.
-
-The manual should be generated from configured testcase fields, stage fields, template metadata, and tool metadata.
+V1.4 also keeps the V1.3 output layout so existing run history remains recognizable.
 
 ---
 
-# 3. Changes From V1.3
+# 3. Configuration Boundary
 
-| Area | V1.3 | V1.4 |
-|------|------|------|
-| Global config | May provide testcase/stage/report defaults | Tools, environment, global log level, and common defaults |
-| Suite sidecar | Recommended | Required |
-| Stage model | Test case owns stage list | Suite sidecar config owns stage columns and required rules |
-| Stage template cell | Template name string | YAML object with `name` |
-| Stage data | Per-case data plus optional stage-specific data | Stage YAML columns become stage-scoped Context data sources |
-| Testcase columns | Mapped into fixed values/context | Simplified list syntax; values become Context data |
-| Template/data columns | Could be ordinary columns | Stage parsing settings; normally not repeated in `testcase.columns` |
-| Report columns | Global or template defaults possible | Suite sidecar testcase config |
-| Log level | General design concept | Global config, suite sidecar, stage/action config, or `att.sh` override |
-| Tool arguments | Lightweight contract | Kept as lightweight open syntax |
-| Retry | Tool default plus action override | Kept, scoped to tool execution |
+## 3.1 Global Config
 
----
+`config.yaml` should configure:
 
-# 4. Terminology
+- tools
+- environment information
+- global log defaults
+- common execution defaults
+- template search paths
 
-| Term | Meaning |
-|------|---------|
-| Test Suite | One Excel workbook containing test cases |
-| Test Suite Config | Sidecar YAML file beside the Excel workbook |
-| Test Case | One executable workbook case set |
-| Testcase Column | Ordinary workbook column exposed in Context |
-| Template Column | Stage-specific workbook column containing template selection data |
-| YAML Column | Workbook column whose cell value is parsed as YAML and exposed in Context |
-| Stage | Ordered testcase sub-step that selects template count and order |
-| Stage Template | Reusable template directory selected by name from the configured template search paths |
-| Template Cell | YAML object in `template.yaml` inside a template directory |
-| Template | Directory that contains `template.yaml` and optional request/render files |
-| Action | Ordered template sub-step that selects tool invocation and/or render flow |
-| Context | Runtime data tree used by `${...}` expressions |
-| Action ID | Stable identifier for a template action and its runtime context record |
-| Tool Argument Contract | Lightweight declaration of common supported named parameters |
-| Tool Retry Policy | Retry count and retryable exit codes for one tool execution |
+`config.yaml` should not configure:
 
----
+- testcase columns
+- stage lists
+- report columns
+- workbook-specific template selection
 
-# 5. Test Suite And Sidecar Configuration
+## 3.2 Workbook Sidecar
 
-V1.4 centers testcase parsing and stage execution around the suite sidecar config.
+Every Excel workbook must have a sidecar YAML file beside it.
 
-Example files:
+Example:
 
 ```text
 testcase/payment_regression.xlsx
 testcase/payment_regression.yaml
 ```
 
-The sidecar config is required.
+The sidecar is required.
 
-## 5.1 Required Shape
+The sidecar must explicitly declare:
 
-The sidecar must configure:
-
+- `testCaseTemplate`
 - `testcase`
-- `testcase.report`
 - `stages`
+- `report`
+
+Optional sidecar settings may include:
+
+- `headerRows`
+- suite log level
+- execution defaults
+- stage-specific parsing settings
+
+## 3.3 Sidecar Ownership Rules
+
+The sidecar owns workbook-specific concerns:
+
+- testcase column mapping
+- stage column mapping
+- report column mapping
+- workbook-level template binding
+- suite-level log level
+- suite-level execution defaults
+
+This avoids a hidden dependency on global defaults and makes workbook behavior easier to reason about.
+
+---
+
+# 4. Workbook Parsing Model
+
+## 4.1 Workbook Identity
+
+The workbook file name identifies the suite.
+
+The sidecar file name must match the workbook base name.
 
 Example:
 
-```yaml
-testcase:
-  sheet: 測試案例
-  headerRows: 2
-  yamlColumns: data=案例資料, 更多測試數據
-  logLevel: INFO
-  columns: 案例編號, 案例名稱, 標籤, 金額, 扣帳帳號, 幣種, creditAcNo=入帳帳號
-  report:
-    columns:
-      result: 測試結果
-      durationMs: 耗時(ms)
-      actualResult: 實際結果
-      caseLog: 案例日誌
+- `payment_regression.xlsx`
+- `payment_regression.yaml`
 
-stages:
-  prepare:
-    templateColumn: 準備模板
-    yamlColumns: 準備資料
-    required: false
-  invoke:
-    templateColumn: 調用模板
-    yamlColumns: 調用資料
-    required: true
-  verify:
-    templateColumn: 驗證模板
-    yamlColumns: 驗證資料
-    required: true
-```
+## 4.2 Header Resolution
 
-## 5.2 Config Ownership
+V1.4 supports one-row and multi-row headers.
 
-`config.yaml` should configure tools and optional global defaults.
+`testcase.headerRows` controls how many top rows are treated as header rows.
 
-It may configure:
+Header resolution rules:
 
-- tool definitions
-- environment information
-- global log level
-- common execution defaults
-- template search paths
+- empty cells are ignored
+- invisible surrounding spaces are trimmed
+- the effective column name is resolved from the last non-empty cell in the header column
+- the resolved header text is matched against configured mappings exactly after normalization
 
-It should not configure:
+## 4.3 Column Mapping Model
 
-- testcase columns
-- stages
-- report columns
-- suite-specific report mapping
+`testcase.columns` maps workbook headers into stable logical field keys.
 
-Those settings belong to the suite sidecar.
+The mapping must support:
 
-Template search path example:
-
-```yaml
-templatePaths:
-  - templates
-  - shared-templates
-```
-
-If omitted, ATT searches `templates` by default.
-
-Template paths are searched in order until a matching template is found.
-
-Tool script paths are independent and do not need to live under a specific template or testcase directory.
-
-## 5.3 Excel Workbook Model
-
-The Excel workbook may use localized names.
+- English headers
+- Chinese headers
+- mixed-language headers
+- explicit aliases such as `creditAcNo=入帳帳號`
 
 Examples:
 
-- workbook `付款回歸測試.xlsx`
-- sheet `測試案例`
-- column `案例編號`
-- template name `中文支付調用模板`
-
-Workbook display labels are matched exactly after necessary trimming.
-
-## 5.4 Stage Ordering Model
-
-`stage` belongs to `testcase`.
-
-It only defines the number and order of template invocations inside that testcase.
-
-It does not own business logic beyond:
-
-- template count and order
-- required/optional execution
-- stage-level YAML columns
-
-## 5.5 Multi-Row Header Model
-
-`testcase.headerRows` defines how many top rows are treated as headers.
-
-Default:
-
 ```yaml
 testcase:
-  headerRows: 1
+  columns:
+    caseId: 案例編號
+    caseName: 案例名稱
+    tags: 標籤
+    amount: 金額
+    creditAccount: creditAcNo=入帳帳號
 ```
 
-For stacked headers:
+Rules:
 
-```yaml
-testcase:
-  headerRows: 2
-```
+- the right-hand side is the workbook header label
+- the left-hand side is the internal logical field key
+- aliases are optional
+- mapping is exact after whitespace normalization
+- untranslated assumptions are not allowed
 
-The effective column label is resolved from the last non-empty cell within each header column.
+## 4.4 YAML Columns
 
-Example:
+Some workbook columns contain YAML text.
 
-| 基本資料 | 基本資料 | 模板資料 | 模板資料 |
-|----------|----------|----------|----------|
-| 案例編號 | 案例名稱 | 調用模板 | 驗證模板 |
-
-Effective labels:
-
-- `案例編號`
-- `案例名稱`
-- `調用模板`
-- `驗證模板`
-
-## 5.6 Whitespace Normalization
-
-ATT should trim necessary whitespace during parsing to avoid failures caused by invisible user-entered spaces.
-
-Trim should apply to matching-oriented values:
-
-- header labels
-- configured column labels
-- stage keys
-- template names
-- tool names
-- argument names
-- action IDs
-- required/optional markers in `arguments`
-
-ATT should not blindly trim intentional business text inside YAML scalar values unless that value is used as an identifier or matching key.
-
-## 5.7 Testcase Columns
-
-`testcase.columns` defines ordinary testcase data columns.
-
-It uses a compact comma-separated syntax.
-
-Each item may be either:
-
-- a workbook column label
-- an alias mapping in the form `contextKey=workbookColumnLabel`
+These should be configured separately from ordinary columns when they need to be parsed as structured data.
 
 Example:
 
 ```yaml
 testcase:
-  columns: 案例編號, 金額, 扣帳帳號, 幣種, creditAcNo=入帳帳號
+  yamlColumns:
+    data: 案例資料
+  stages:
+    invoke:
+      yamlColumns:
+        request: 調用資料
 ```
 
-If the row contains:
+Rules:
 
-| 案例編號 | 金額 | 扣帳帳號 | 幣種 | 入帳帳號 |
-|----------|------|----------|------|----------|
-| TC001 | 100 | 123456789 | HKD | 987654321 |
+- YAML column parsing is explicit
+- YAML columns are still workbook-bound, not global defaults
+- parsed YAML values become context data
 
-Context receives:
+---
 
-```yaml
-案例編號: TC001
-金額: "100"
-扣帳帳號: "123456789"
-幣種: HKD
-入帳帳號: "987654321"
-creditAcNo: "987654321"
-```
+# 5. Test Case Template Model
 
-The same cell may therefore be referenced by either the original column label or the configured alias:
+## 5.1 Workbook-Level Template Binding
+
+The sidecar selects one Test Case Template for the workbook.
+
+That template defines the shared stage flow for all cases in the workbook.
+
+V1.4 does not support selecting different Test Case Templates per case row by default.
+
+## 5.2 Template Purpose
+
+A Test Case Template is a reusable workbook model.
+
+It defines:
+
+- default testcase column semantics
+- stage list
+- stage-to-template binding
+- report defaults
+- execution defaults
+
+## 5.3 Template Resolution
+
+By default, a template resolves from the configured template root:
 
 ```text
-${入帳帳號}
-${creditAcNo}
+templates/testcase/<templateId>/template.yaml
 ```
 
-Both expressions resolve to the same value.
-
-`templateColumn` and `yamlColumns` are parsing settings.
-
-They do not need to be repeated in `testcase.columns`.
-
-If a project intentionally also maps those columns under `testcase.columns`, they are treated as ordinary Context data columns and duplicate-key warning rules still apply.
-
-## 5.8 Testcase YAML Columns
-
-`testcase.yamlColumns` is optional.
-
-It configures one or more workbook columns whose cell values are parsed as YAML.
-
-It uses the same compact syntax as `testcase.columns`.
-
-Each item may be either:
-
-- a workbook column label
-- an alias mapping in the form `contextKey=workbookColumnLabel`
-
-Example:
-
-```yaml
-testcase:
-  yamlColumns: data=其它測試數據, 更多測試數據
-```
-
-Cell `其它測試數據`:
-
-```yaml
-payment:
-  channel: ATM
-  expected:
-    status: SUCCESS
-```
-
-Cell `更多測試數據`:
-
-```yaml
-risk:
-  level: LOW
-```
-
-An aliased YAML column is exposed under `Case.<alias>`.
-
-An unaliased YAML column is exposed by its original column label.
-
-Therefore, the YAML data above may be referenced as:
+Stage templates resolve from the configured stage template root:
 
 ```text
-${Case.data.payment.channel}
-${Case.data.payment.expected.status}
-${更多測試數據.risk.level}
+templates/<template>/template.yaml
 ```
 
-YAML comments and Chinese keys/values are supported.
+Legacy fallback paths may be retained only for compatibility and must be documented explicitly.
 
-## 5.9 Duplicate Context Keys
+## 5.4 Template Naming
 
-When multiple sources write the same key, later values override earlier values and ATT must emit a warning.
+Template display names may be Chinese or mixed-language.
 
-Typical sources:
+Template identifiers should remain stable and machine-friendly.
 
-- `testcase.columns`
-- `testcase.yamlColumns`
-- `stages.<stage>.yamlColumns`
-- stage template cell metadata
-- action output data
+Use display names for humans, and use stable IDs for resolution.
 
-Warnings should be visible in diagnostics and, depending on log level, in the case log.
+---
 
-## 5.10 Stage Column Model
+# 6. Stage Model
 
-`stages.<stage>` defines the fixed execution order and optional data for that stage.
+## 6.1 Stage Ownership
 
-Each stage must configure:
+Stages belong to the workbook-selected Test Case Template.
 
-- `templateColumn`
+All cases in the workbook share the same stage sequence unless the template explicitly defines a different template layout.
 
-Each stage may configure:
+## 6.2 Stage Definition
 
-- `yamlColumns`
-- `required`
-- `logLevel`
+A stage definition should include:
+
+- key
+- display name
+- template name or template path
+- required flag
+- failure behavior
+- optional execution condition
 
 Example:
 
 ```yaml
 stages:
-  invoke:
-    templateColumn: 調用模板
-    yamlColumns: 調用資料
+  - key: prepare
+    name: 準備
+    template: PAYMENT_PREPARE
+    required: false
+    onFailure: stop
+  - key: invoke
+    name: 調用
+    template: PAYMENT_INVOKE
     required: true
-    logLevel: DEBUG
+    onFailure: stop
+  - key: verify
+    name: 驗證
+    template: PAYMENT_VERIFY
+    required: true
+    onFailure: stop
 ```
 
-`templateColumn` must be configured.
+## 6.3 Stage Parsing Settings
 
-`yamlColumns` may be omitted.
+Stage-specific YAML columns and template references are workbook-side concerns.
 
-`required` controls whether the stage template cell must be non-empty.
+They should not be repeated as generic global config values.
 
-Values such as `NA`, `N/A`, `n/a`, and blank strings are treated as empty template cells rather than template names.
-
-If the stage is required, these empty values should fail the case with a clear message.
-
-If the stage is not required, these empty values may skip the stage.
-
-## 5.11 Stage YAML Columns
-
-`stages.<stage>.yamlColumns` is optional.
-
-If configured, each referenced cell value is parsed as YAML and exposed as stage-scoped Context data.
-
-It supports the same compact syntax:
-
-```yaml
-stages:
-  invoke:
-    templateColumn: 調用模板
-    yamlColumns: invokeData=調用資料, 更多調用資料
-```
-
-Example:
-
-```yaml
-timeoutProfile: long
-expected:
-  status: SUCCESS
-```
-
-The resulting data participates in normal Context lookup while the stage is executing.
-
-## 5.12 Report Configuration
-
-Report configuration is defined in the testcase sidecar config.
-
-At minimum, the sidecar should define report column mapping.
-
-It may also define other suite-specific report settings such as report file name pattern, output style, or trace fields.
-
-Example:
-
-```yaml
-testcase:
-  report:
-    fileNamePattern: "${suiteName}.result.xlsx"
-    columns:
-      result: 測試結果
-      durationMs: 耗時(ms)
-      actualResult: 實際結果
-      caseLog: 案例日誌
-```
-
-Suite-specific report configuration should not be defined in `config.yaml`.
+If a stage uses a custom template path, that path takes precedence over template-name resolution.
 
 ---
 
-# 6. Template Cell Model
+# 7. Template And Action Model
 
-Stage template cells are YAML and live in `template.yaml` inside a template directory.
+## 7.1 Template Structure
 
-The minimum shape is:
+A template directory contains `template.yaml` and optional payload or helper files.
 
-```yaml
-name: PAYMENT_PRECHECK
-```
+The directory must be recognized only when `template.yaml` exists.
 
-`template.yaml` is mandatory. A directory without `template.yaml` is not a template.
+## 7.2 Ordered Actions
 
-The complete template name is its relative directory path under one of the configured `templatePaths`, for example `payment/local/CT001`.
+Templates contain ordered actions.
 
-`template.yaml` may define a `name` field as a friendly lookup name, and the stage template cell may reference either the friendly name or the complete name.
+V1.4 keeps the ordered-action model from V1.3.
 
-With Chinese name and remark:
+Each action may:
 
-```yaml
-name: 中文支付調用模板
-remark: |
-  第一行備註
-  第二行備註
-```
+- render payload content
+- call a tool
+- assert a condition
+- log values
 
-Because the template cell is YAML, it naturally supports:
+## 7.3 Action ID
 
-- Chinese template names
-- Chinese remarks
-- YAML comments
-- multi-line remarks
-- extra metadata
+Each action must have a stable Action ID.
 
-`name` is the actual template name.
-
-`name` must be trimmed before lookup.
-
-`remark` is human-facing metadata.
-
-All parsed template cell data may be injected into context and may be emitted into the case log.
-
-Template directories may also contain one or more `request.tmp.xml`, `request.tmp.json`, or `request.tmp.yaml` files for render outputs and tool input files.
-
-Recommended context shape:
-
-```text
-STAGES.<stageKey>.template.name
-STAGES.<stageKey>.template.remark
-STAGES.<stageKey>.template.<metadataKey>
-```
-
----
-
-# 7. Case Runtime Context
-
-The runtime context contains:
-
-- testcase column values
-- testcase YAML column values
-- current stage YAML column values
-- stage template directory data
-- current stage metadata
-- action outputs
-- tool inputs and outputs
-- run paths
-- case log path
-
-Preferred action references remain:
+Preferred context paths:
 
 ```text
 ${ACTIONS.<ActionID>.output}
@@ -593,451 +383,151 @@ ${ACTIONS.<ActionID>.outputFile}
 ${ACTIONS.<ActionID>.rawOutput}
 ```
 
-`TOOLS.<ActionID>` may remain as a legacy alias.
+`TOOLS.<ActionID>` may remain as a compatibility alias.
 
----
+## 7.4 File-Based Outputs
 
-# 8. Context Data Lookup
-
-## 8.1 Data Sources
-
-V1.4 treats all case-related values as Context data sources instead of defining separate per-case or per-stage data objects.
-
-All case-related data is available through Context.
-
-Typical Context data sources are:
-
-- ordinary cells configured by `testcase.columns`
-- YAML cells configured by `testcase.yamlColumns`
-- YAML cells configured by `stages.<stage>.yamlColumns`
-- parsed template directory metadata from `template.yaml`
-- action outputs
-- tool inputs and outputs
-- run and case metadata
-
-Example:
-
-```yaml
-testcase:
-  columns: 案例編號, 金額, creditAcNo=入帳帳號
-  yamlColumns: data=其它測試數據, 更多測試數據
-```
-
-Supported references:
-
-```text
-${案例編號}
-${金額}
-${入帳帳號}
-${creditAcNo}
-${Case.data.a.b.c}
-${更多測試數據.d.e.f}
-```
-
-## 8.2 Lookup Order
-
-Expressions follow a consistent Context lookup order.
-
-Recommended lookup order for unqualified names:
-
-- current stage YAML column data
-- current stage template cell metadata
-- testcase YAML column data
-- testcase ordinary column data
-- run-level metadata
-- global defaults
-
-Fully qualified references are preferred when ambiguity is possible.
-
-Examples:
-
-```text
-${Case.data.payment.expected.status}
-${STAGES.invoke.template.remark}
-${ACTIONS.callApi.output.Response.Status}
-```
-
-When multiple sources expose the same key in the same scope, the later source may overwrite the earlier value and ATT must emit a warning.
-
-## 8.3 YAML Cell Rules
-
-YAML columns support:
-
-- comments
-- Chinese keys and values
-- nested objects
-- lists
-- multi-line scalar values
-
-Example YAML cell:
-
-```yaml
-payment:
-  channel: ATM
-  expected:
-    status: SUCCESS
-```
-
----
-
-# 9. Stage And Template Execution Model
-
-The suite sidecar config defines the stage keys and stage columns.
-
-The Excel row decides which template name to use through the stage `templateColumn`.
-
-Template lookup does not depend on the stage or testcase itself.
-
-ATT resolves template names by searching the configured template paths in order.
-
-Execution flow:
-
-```text
-Load suite sidecar
-  -> Resolve workbook sheet and headers
-  -> Load testcase columns into Context
-  -> Parse testcase yamlColumns into Context
-  -> For each configured stage
-       -> Read templateColumn
-       -> Resolve template directory by complete template name or friendly template name
-       -> Read template.yaml
-       -> Load optional request.tmp.* files
-       -> Parse optional stage yamlColumns into Context
-       -> Execute ordered actions
-            -> Render request.tmp.*
-            -> Invoke tool
-            -> Record outputs
-```
-
-If a required stage has an empty template cell, the case should fail with a clear error.
-
-If a non-required stage has an empty template cell, the stage may be skipped.
-
----
-
-# 10. Template Action Model
-
-V1.4 keeps ordered template actions.
-
-Example:
-
-```yaml
-actions:
-  renderRequest:
-    type: render
-    input: request.tmp.xml
-    output: request.xml
-
-  callApi:
-    type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
-
-  checkStatus:
-    type: assert
-    expression: "${ACTIONS.callApi.output.Response.Status} == '${expected.status}'"
-```
-
-Action IDs remain stable context keys.
-
-An action belongs to a template and only defines the order of renders, tool calls, assertions, and logging inside that template.
-
-Common action types include:
-
-- `render`
-- `tool`
-- `assert`
-- `log`
-- `assign`
-
----
-
-# 11. Tool Configuration Model
-
-`config.yaml` should configure tools and optional global defaults.
-
-It may configure environment information, global log level, and common execution defaults.
-
-It should not configure testcase parsing, stage parsing, or suite-specific report column mapping.
-
-Example:
-
-```yaml
-tools:
-  invokePaymentApi:
-    command: "./tools/invoke_payment_api.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
-    output: xml
-    arguments: "requestFile*, environment='SIT', traceId"
-    retry:
-      count: 2
-      exitCode: [1, 2]
-```
-
-Tools are independent from testcase, stage, and template layout.
-
-Tool script paths may live anywhere on disk as long as the command can execute them.
-
-## 11.1 Tool Arguments
-
-`tools.<toolName>.arguments` is a lightweight, open parameter contract.
-
-It is not a typed schema.
-
-It is not a closed whitelist.
-
-Recommended syntax:
-
-```yaml
-arguments: "requestFile*, environment='SIT', traceId"
-```
-
-Meaning:
-
-| Item | Meaning |
-|------|---------|
-| `requestFile*` | Required known parameter |
-| `environment='SIT'` | Optional known parameter with default value |
-| `traceId` | Optional known parameter |
-
-Undeclared parameters may still appear in template calls.
-
-## 11.2 Tool Retry
-
-Tool retry policy applies only to tool execution attempts.
-
-Retry may be triggered by specific exit codes defined by the runtime.
-
-Minimum fields:
-
-- `count`
-- `exitCode`
-
-Tool definitions may provide defaults.
-
-Action calls may override the retry policy.
-
-Example:
-
-```yaml
-actions:
-  callApi:
-    type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
-    retry:
-      count: 4
-      exitCode: [1, 2]
-```
-
-Retry does not rerun the whole stage or whole case.
-
----
-
-# 12. Log Level Model
-
-V1.4 log levels use a detail-filter model.
-
-There is still one case log path:
-
-```text
-output/<RunID>/<CaseID>/<CaseID>.001.log
-```
-
-`RunID` belongs in the directory layer.
-
-The file name uses `CaseID` plus a sequence number so multiple logs from the same case are easy to order without repeating `RunID`.
-
-Log level controls how much detail is written.
-
-Recommended levels:
-
-| Level | Detail |
-|-------|--------|
-| `ERROR` | Failures, timeout, retry exhaustion, assertion failure |
-| `INFO` | Case/stage/action summary, status, duration, output file paths |
-| `DEBUG` | Full command, input, stdout, stderr, parsed output, context details |
-
-Log level may be configured globally in `config.yaml`.
-
-Log level may also be configured in the suite sidecar at testcase or stage scope.
-
-Action-level log level may be defined in template action config.
-
-`att.sh` may specify log level for one run.
-
-More specific scopes override broader scopes.
-
-Recommended priority:
-
-```text
-att.sh command line
-  > action template config
-  > stage config
-  > testcase sidecar config
-  > global config.yaml
-```
-
----
-
-# 13. Case Execution Output And Report
-
-V1.4 keeps the V1.3 output layout.
-
-Case output:
-
-```text
-output/<RunID>/<CaseID>/
-```
-
-Action output:
+Large action outputs may be stored as files under:
 
 ```text
 output/<RunID>/<CaseID>/<ActionID>/
 ```
 
-Run-level result workbook:
+This is the preferred way to handle long XML, JSON, SQL, and log outputs.
 
-```text
-output/<RunID>/<suiteName>.result.xlsx
-```
+---
 
-Run history:
+# 8. Context Model
 
-```text
-output/<RunID>/run.yaml
-output/latest-run.yaml
-```
+## 8.1 Context Sources
 
-`att.sh` should support packaging the latest run output, including:
+The runtime context is the source of truth for template rendering and tool invocation.
 
-- test report
-- per-case execution logs
+Context may include:
+
+- testcase column values
+- testcase YAML column values
+- stage YAML column values
+- template cell metadata
+- action outputs
+- tool outputs
 - run metadata
-- render outputs and tool outputs needed for traceability
 
-ATT should also be able to generate an HTML test report that includes:
+## 8.2 Lookup Rule
 
-- testcase index list
-- testcase descriptions
-- basic information
-- execution status
-- case detail execution logs
+Expressions should resolve data through a defined context lookup order.
 
----
+The lookup order must be stable and documented.
 
-# 14. Newcomer Handbook Generation
+Where duplicate keys appear, the framework should either:
 
-`att.sh` should generate a newcomer handbook that introduces:
+- preserve the first value and warn on overwrite, or
+- preserve the latest value and warn on overwrite
 
-- core concepts
-- a full example
-- testcase/template/tool usage
-- testcase execution
-- report viewing and packaging
+The chosen rule should be consistent across all context sources.
 
----
+## 8.3 Encoding And Trimming
 
-# 15. Full User Manual Generation
+V1.4 should tolerate Unicode text and whitespace around workbook values.
 
-`att.sh` should generate a full user manual that introduces:
+Normalization should be conservative:
 
-- core concepts
-- complete configuration items
-- a complex advanced example
-- best practices
-- common questions
-- debugging and troubleshooting
+- trim values used for matching
+- preserve meaningful business text
+- do not silently alter payload content
 
 ---
 
-# 16. Author Reference Manual Generation
+# 9. Report And Output Model
 
-`att.sh` should provide a command to generate a reference manual for case authors.
+## 9.1 Result Workbook
 
-The manual should be generated from configured testcase, template, and tool metadata.
+The result workbook remains run-level.
 
-Recommended command shape:
+It should be copied from the source workbook and appended with configured result columns.
 
-```sh
-./att.sh manual
+## 9.2 Run History
+
+Run history remains machine-readable under the run directory.
+
+Typical artifacts:
+
+- `run.yaml`
+- `output/latest-run.yaml`
+- per-case case logs
+- copied result workbook
+
+## 9.3 Report Columns
+
+Report columns are configured in the workbook sidecar.
+
+The report mapping can be localized, just like workbook headers.
+
+Examples:
+
+```yaml
+report:
+  columns:
+    result: 測試結果
+    durationMs: 耗時(ms)
+    actualResult: 實際結果
+    caseLog: 案例日誌
+    runTime: 執行時間
 ```
 
-The manual command should generate the full reference manual in one pass.
+---
 
-It should not require selecting specific suites, templates, or tools.
+# 10. Execution Flow
 
-The generated manual should include:
+## 10.1 High-Level Flow
 
-- workbook sheet name
-- header row count
-- testcase columns
-- testcase YAML columns
-- configured stages
-- stage template columns
-- stage YAML columns
-- required stage rules
-- report columns
-- log level defaults
-- available template names
-- tool names
-- tool `arguments`
-- tool retry settings
+```text
+Load workbook
+  -> Load matching sidecar YAML
+  -> Resolve workbook headers and testcase mappings
+  -> Resolve Test Case Template
+  -> Resolve stages and stage templates
+  -> Build runtime context
+  -> Execute ordered actions
+  -> Record outputs and logs
+  -> Write result workbook and run history
+```
 
-The manual is a documentation aid for case authors.
+## 10.2 Failure Handling
 
-It should not be required for runtime execution.
+If a required sidecar file is missing, execution should fail early.
+
+If a required template cannot be resolved, execution should fail with a clear error.
+
+If a required stage or action is invalid, the framework should stop before running partial business logic.
 
 ---
 
-# 17. Migration From V1.3
+# 11. Migration From V1.3
 
-Recommended migration steps:
+V1.4 is intended to be a small step from V1.3, not a redesign.
+
+Migration priorities:
 
 1. Add a sidecar YAML file beside every Excel workbook.
-2. Move testcase columns, stage columns, and report mappings into the sidecar.
-3. Remove testcase, stage, and suite-specific report examples from `config.yaml`.
-4. Keep tool definitions and optional global defaults in `config.yaml`.
-5. Replace stage template string cells with YAML cells containing `name`.
-6. Move human notes into template cell `remark`.
-7. Ensure `templateColumn` is configured for every stage.
-8. Rename testcase YAML data settings from `dataColumn` to `yamlColumns`.
-9. Convert `testcase.columns` mapping definitions to compact list syntax, using `alias=columnLabel` only when an alias is needed.
-10. Avoid repeating `templateColumn` and `yamlColumns` in `testcase.columns` unless the project intentionally wants those raw cells exposed as ordinary Context data.
-11. Review duplicate Context keys and warnings.
-12. Generate an author reference manual for migrated suites.
+2. Move workbook-specific testcase columns, stage mappings, and report mappings into the sidecar.
+3. Declare the Test Case Template explicitly in the sidecar.
+4. Use `ACTIONS.<ActionID>` for new templates.
+5. Keep `TOOLS.<ActionID>` only as a migration alias.
+6. Support Chinese workbook labels and column names through explicit mappings.
+7. Keep the existing output layout and run history structure.
 
 ---
 
-# 18. Acceptance Criteria
+# 12. V1.4 Completion Criteria
 
-- `config.yaml` configures tools and optional global defaults such as environment and global log level.
-- Every Excel suite has a sidecar config.
-- Every sidecar defines `stages`.
-- Every stage defines `templateColumn`.
-- Stage `yamlColumns` is optional.
-- Testcase `yamlColumns` is optional and may configure multiple YAML columns.
-- `testcase.columns` uses compact list syntax and supports `alias=columnLabel`.
-- One cell value may be referenced by both original column label and configured alias.
-- `templateColumn` and `yamlColumns` are parsing settings and do not need to appear in `testcase.columns`.
-- All configured testcase values are available through Context.
-- Duplicate Context keys produce warnings when overwritten.
-- Necessary whitespace is trimmed for matching-oriented values.
-- `testcase.headerRows` defaults to `1`.
-- Multi-row header resolution uses the last non-empty header cell per column.
-- Template directories are only valid when they contain `template.yaml`.
-- Template cells are YAML and use `name` as the actual template name.
-- Template cell YAML supports Chinese name, remark, comments, and metadata.
-- Stage template cell data is available in context and can be written to case log.
-- Stage only defines the number and order of template invocations inside testcase.
-- Template only defines the number and order of actions inside template.
-- Context lookup order defines how testcase data, stage YAML data, template metadata, action output, and tool output are resolved.
-- Report columns are configured in the suite sidecar.
-- Log level may be configured globally, in suite sidecar, in template action config, or through `att.sh`.
-- Tool `arguments` uses lightweight open syntax and does not require types.
-- Undeclared tool parameters may appear in runtime calls.
-- Tool retry supports tool default and action override.
-- Retry is scoped to tool execution attempts only.
-- `att.sh` can generate an author reference manual from configured testcase/template/tools metadata.
-- `att.sh` can package the latest run output.
-- `att.sh` can generate an HTML test report.
-- `att.sh` can generate a newcomer handbook.
-- `att.sh` can generate a full user manual.
-- V1.4 design does not claim runtime implementation is already complete.
+V1.4 is considered complete when the following are true:
+
+- Every Excel workbook has a sidecar config.
+- Every sidecar explicitly declares a Test Case Template.
+- Workbook-specific testcase and report mapping no longer depends on `config.yaml`.
+- Chinese and mixed-language workbook labels are supported at the workbook boundary.
+- `testcase.columns` supports explicit header mapping with Chinese labels.
+- `ACTIONS.<ActionID>` is the preferred context reference.
+- `TOOLS.<ActionID>` remains documented only as a compatibility alias.
+- Output layout and run history remain stable.

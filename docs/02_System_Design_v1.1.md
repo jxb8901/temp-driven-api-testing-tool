@@ -1,7 +1,7 @@
 # ATT System Design V1.1
 
 **Version:** V1.1
-**Status:** Draft
+**Status:** Implemented
 **Source:** `docs/v1.1.req.JPEG`
 **Last Updated:** 2026-07-08
 

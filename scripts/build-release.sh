@@ -11,6 +11,8 @@ PACKAGE_DIR="$BUILD_DIR/$PACKAGE_NAME"
 SOURCE_PACKAGE_DIR="$BUILD_DIR/$SOURCE_PACKAGE_NAME"
 DIST_DIR="$ROOT_DIR/dist"
 M2_REPO="${M2_REPO:-$HOME/.m2/repository}"
+CLASS_DIR="$BUILD_DIR/classes"
+APP_JAR="$PACKAGE_DIR/lib/att-${VERSION}.jar"
 
 DEPS="
 commons-io/commons-io/2.16.1/commons-io-2.16.1.jar
@@ -35,8 +37,10 @@ fi
 
 rm -rf "$PACKAGE_DIR"
 rm -rf "$SOURCE_PACKAGE_DIR"
+rm -rf "$CLASS_DIR"
 rm -f "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz"
-mkdir -p "$PACKAGE_DIR/classes" "$PACKAGE_DIR/lib" "$DIST_DIR"
+mkdir -p "$PACKAGE_DIR/lib" "$DIST_DIR"
+mkdir -p "$CLASS_DIR"
 
 CP=""
 for dep in $DEPS; do
@@ -52,9 +56,16 @@ done
 
 find "$ROOT_DIR/src/main/java" -name '*.java' | sort > "$BUILD_DIR/sources.txt"
 if javac --help 2>&1 | grep -q -- '--release'; then
-  javac --release 8 -cp "$CP" -d "$PACKAGE_DIR/classes" @"$BUILD_DIR/sources.txt"
+  javac --release 8 -cp "$CP" -d "$CLASS_DIR" @"$BUILD_DIR/sources.txt"
 else
-  javac -source 1.8 -target 1.8 -cp "$CP" -d "$PACKAGE_DIR/classes" @"$BUILD_DIR/sources.txt"
+  javac -source 1.8 -target 1.8 -cp "$CP" -d "$CLASS_DIR" @"$BUILD_DIR/sources.txt"
+fi
+
+if command -v jar >/dev/null 2>&1; then
+  jar cf "$APP_JAR" -C "$CLASS_DIR" .
+else
+  echo "jar is required to create the ATT application artifact." >&2
+  exit 2
 fi
 
 cp "$ROOT_DIR/att.sh" "$PACKAGE_DIR/att.sh"
@@ -76,7 +87,7 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
   echo "main: att.sh"
   echo "java: JDK 8+ runtime"
   echo "contents:"
-  echo "  - classes/"
+  echo "  - lib/att-${VERSION}.jar"
   echo "  - lib/"
   echo "  - config/"
   echo "  - templates/"

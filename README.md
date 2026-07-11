@@ -53,4 +53,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2 System Design](docs/02_System_Design_V2.0.md) for the normative specification.
-See the [V2 User Manual](docs/09_ATT_V2_Complete_Manual.md) and [Test Case Development Guide](docs/08_Quick_Start_for_Case_Authors.md) for operation and authoring guidance.
+See the [ATT V2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

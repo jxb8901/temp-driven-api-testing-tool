@@ -5,13 +5,18 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$ROOT_DIR"
 
-if [ -d "$ROOT_DIR/classes" ]; then
-  CP="$ROOT_DIR/classes"
+APP_JAR=""
+for candidate in "$ROOT_DIR"/lib/att-*.jar; do
+  if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi
+done
+if [ -n "$APP_JAR" ]; then
+  CP="$APP_JAR"
   for jar in "$ROOT_DIR"/lib/*.jar; do
     [ -f "$jar" ] || continue
+    [ "$jar" = "$APP_JAR" ] && continue
     CP="$CP:$jar"
   done
-  exec java -cp "$CP" com.company.apitest.FrameworkRunner "$@"
+  exec java -cp "$CP" att.FrameworkRunner "$@"
 fi
 
 CP="$ROOT_DIR/target/classes:$ROOT_DIR/target/test-classes"
@@ -53,4 +58,4 @@ if [ "$NEEDS_BUILD" = true ]; then
   fi
 fi
 
-exec java -cp "$CP" com.company.apitest.FrameworkRunner "$@"
+exec java -cp "$CP" att.FrameworkRunner "$@"

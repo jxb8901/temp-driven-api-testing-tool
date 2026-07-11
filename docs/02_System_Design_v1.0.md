@@ -2,7 +2,7 @@
 # Template-driven API Test Framework
 
 **Version:** V0.1  
-**Status:** Draft  
+**Status:** Implemented
 **Last Updated:** 2026-07-06
 
 ---

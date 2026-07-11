@@ -68,7 +68,7 @@ V1.2 implements the generic Tool Invocation Template model: ATT no longer treats
 - Updated Excel testcase configuration to use stage template columns and configurable report result columns.
 - Updated `testcase/payment_regression.xlsx` to 20 V1.2 scenarios.
 - Updated report generation to copy the original Excel workbook and append configured result fields.
-- Updated `att.sh` to run directly from a release package using packaged `classes/` and `lib/*.jar`.
+- Updated `att.sh` to run directly from a release package using `lib/att-v2.0.jar` and dependency jars.
 
 ### Removed
 
@@ -132,7 +132,7 @@ V1 delivers the first executable ATT framework: Excel test cases drive request X
 ### Changed
 
 - Established the original V1 output contract around per-case `request.xml`, `response.xml`, and report workbook artifacts.
-- Standardized the initial package layout under `com.company.apitest`.
+- Standardized the initial package layout under `att`.
 
 ### Verified
 

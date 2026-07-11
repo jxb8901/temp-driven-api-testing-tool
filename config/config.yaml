@@ -52,7 +52,7 @@ tools:
   grepFromAppLogs:
     name: Grep application logs
     description: Find one or more keywords in application logs
-    command: "./tools/grep_from_app_logs.sh ${TOOL.input.keywords} --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/grep_from_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile} ${TOOL.input.keywords}"
     output: yaml
     arguments:
       logFile:

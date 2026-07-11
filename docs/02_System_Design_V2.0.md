@@ -136,11 +136,12 @@ att-package/
 │   └── README.md
 ├── docs/
 ├── output/
-├── classes/
 └── lib/
+    ├── att-v2.0.jar
+    └── <dependency jars>
 ```
 
-This layout continues the V1 release package structure. `classes/` and `lib/` are used by packaged execution. `output/` MAY be created on first run.
+The release package stores the ATT application as `lib/att-v2.0.jar` alongside dependency jars. `output/` MAY be created on first run.
 
 # 5. Test Suite Sidecar
 
@@ -607,20 +608,15 @@ CASE
                 └── <actionId>
                     ├── id
                     ├── type
-                    ├── tool
                     ├── status
                     ├── startedAt
                     ├── durationMs
-                    ├── command
-                    ├── input
-                    ├── output
-                    ├── outputFile
-                    ├── stdout
-                    ├── stderr
-                    └── error
+                    └── TOOL
+                        └── <toolName>
+                            └── input/output/status/log data
 ```
 
-Only core concept keywords are uppercase: `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and the transient `TOOL` scope. Metadata/result properties keep the existing camelCase style, such as `caseId`, `groupId`, `startedAt`, `durationMs`, and `outputFile`. User-defined case aliases, stage keys, stage data keys, Action IDs, and tool names retain their configured spelling. Metadata and runtime values share the appropriate logical node; V2 does not add artificial `metadata`, `runtime`, `fields`, or `data` wrapper nodes. A tool action stores its tool metadata and result directly under the Action ID; it does not add another persisted `TOOL` node.
+Only core concept keywords are uppercase: `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and `TOOL`. Metadata/result properties keep the existing camelCase style, such as `caseId`, `groupId`, `startedAt`, `durationMs`, and `outputFile`. User-defined case aliases, stage keys, stage data keys, Action IDs, and tool names retain their configured spelling. Metadata and runtime values share the appropriate logical node; V2 does not add artificial `metadata`, `runtime`, `fields`, or `data` wrapper nodes. A tool action stores action metadata under the Action ID and the invoked tool data below `TOOL.<toolName>`.
 
 ## 11.2 Normative references
 
@@ -633,8 +629,8 @@ ${CASE.amount}
 ${CASE.預期結果.status}
 ${CASE.STAGES.invoke.channel}
 ${CASE.STAGES.invoke.TEMPLATE.path}
-${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.status}
-${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output}
+${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.TOOL.invokePaymentApi.status}
+${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.TOOL.invokePaymentApi.output}
 ```
 
 `${CASE...}` is the normative form for case and execution data.
@@ -653,7 +649,7 @@ ATT exposes transient uppercase execution scopes while an action is running:
 | `TOOL.inputFile` | Current generated tool input file |
 | `TOOL.outputFile` | Current allocated tool output file |
 
-These are views over the current nodes in the `CASE` tree, not independent runtime stores. After execution, the authoritative persisted data is under `CASE.STAGES.<key>.TEMPLATE.ACTIONS...`. No lowercase alias for a core concept keyword and no `TOOLS` scope exists in V2.
+These are views over the current nodes in the `CASE` tree, not independent runtime stores. After execution, the authoritative persisted data is under `CASE.STAGES.<key>.TEMPLATE.ACTIONS.<actionId>.TOOL.<toolName>...`. No lowercase alias for a core concept keyword and no `TOOLS` scope exists in V2.
 
 ## 11.4 Expression and invocation grammar
 
@@ -1208,7 +1204,7 @@ tools:
 After `callApi`, the authoritative result is available at:
 
 ```text
-${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output}
+${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.TOOL.invokePaymentApi.output}
 ```
 
 Within the same template, the retained convenience form is:
@@ -1237,7 +1233,7 @@ The V2 System Design is complete when:
 - stage-private data is stored beneath its stage node;
 - the authoritative runtime context is the documented CASE tree without `fields`, `data`, `metadata`, or `runtime` wrapper nodes;
 - core concept Context keywords are uppercase (`CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and transient `TOOL`), while metadata/result properties retain camelCase;
-- tool action metadata and results are stored directly below the Action ID without a persisted `TOOL` wrapper node;
+- tool action metadata is stored below the Action ID and input/output/status/log data is stored below `TOOL.<toolName>`;
 - normative paths include `${CASE.caseId}`, `${CASE.amount}`, `${CASE.STAGES.invoke.channel}`, and the complete action result path;
 - retained `ACTIONS` and `TOOL` scopes are views over the CASE tree rather than separate persisted stores;
 - tool argument metadata contains `name`, `description`, `required`, plus optional `delimit` only for the final argument;
