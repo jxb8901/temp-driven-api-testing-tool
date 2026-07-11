@@ -2,7 +2,7 @@
 # Author: Jeffrey + ChatGPT
 set -eu
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/." && pwd)"
 VERSION="${ATT_VERSION:-v2.0}"
 PACKAGE_NAME="att-${VERSION}"
 SOURCE_PACKAGE_NAME="att-${VERSION}-src"
@@ -108,7 +108,6 @@ cp -R "$ROOT_DIR/templates" "$SOURCE_PACKAGE_DIR/templates"
 cp -R "$ROOT_DIR/tools" "$SOURCE_PACKAGE_DIR/tools"
 cp -R "$ROOT_DIR/testcase" "$SOURCE_PACKAGE_DIR/testcase"
 cp -R "$ROOT_DIR/docs" "$SOURCE_PACKAGE_DIR/docs"
-cp -R "$ROOT_DIR/scripts" "$SOURCE_PACKAGE_DIR/scripts"
 cp -R "$ROOT_DIR/src" "$SOURCE_PACKAGE_DIR/src"
 cp "$ROOT_DIR/.gitignore" "$SOURCE_PACKAGE_DIR/.gitignore"
 mkdir -p "$SOURCE_PACKAGE_DIR/output" "$SOURCE_PACKAGE_DIR/report" "$SOURCE_PACKAGE_DIR/logs"
@@ -116,7 +115,6 @@ find "$SOURCE_PACKAGE_DIR" -name '.DS_Store' -delete
 
 chmod +x "$SOURCE_PACKAGE_DIR/att.sh"
 find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
-find "$SOURCE_PACKAGE_DIR/scripts" -type f -name '*.sh' -exec chmod +x {} \;
 
 {
   echo "name: $SOURCE_PACKAGE_NAME"
@@ -128,7 +126,6 @@ find "$SOURCE_PACKAGE_DIR/scripts" -type f -name '*.sh' -exec chmod +x {} \;
   echo "  - testcase/"
   echo "  - config/"
   echo "  - docs/"
-  echo "  - scripts/"
   echo "  - README.md"
   echo "  - CHANGELOG.md"
   echo "  - pom.xml"
