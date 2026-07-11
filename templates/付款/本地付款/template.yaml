@@ -1,7 +1,5 @@
 name: 中文本地付款
 description: 使用中文目錄及中文符號名稱演示完整模板路徑解析。
-actionDefaults:
-  onFailure: stop
 actions:
   renderRequest:
     type: render

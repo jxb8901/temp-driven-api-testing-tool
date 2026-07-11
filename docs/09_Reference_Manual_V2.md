@@ -57,8 +57,9 @@ A release contains att.sh, config/config.yaml, testcase/, templates/, tools/, ou
     ./att.sh run --all --case payment.TC001 --run-id SIT-001
     ./att.sh run --all --dry-run
     ./att.sh report --run-id SIT-001
-    ./att.sh docs --single-page
+    ./att.sh docs
     ./att.sh build
+    ./att.sh clean
 
 Selection options include --suite, --suite-dir, --all, --case, --tag, and --exclude-tag. Execution options include --run-id, --output-dir, --dry-run, --fail-fast, and --rerun-failed. Output options include --format human|json, --quiet, and --verbose.
 
@@ -75,6 +76,7 @@ Exit codes are 0 for success, 1 for assertion failure, 2 for configuration/valid
 | docs | Generate testcase/template/tool HTML documentation | No |
 | report | Regenerate HTML for a persisted run | No |
 | build | Archive the latest completed run | No |
+| clean | Remove ATT-generated output | No |
 
 ### 2.2 Selection behavior
 
@@ -287,9 +289,44 @@ required: true makes a blank selector an error. A blank selector on an optional 
 | onFailure: stop | Record the failure and stop subsequent normal stages | Default business flow behavior |
 | onFailure: continue | Record the failure and continue where runWhen permits | Non-critical evidence collection |
 
-`onFailure: continue` never turns a failed assertion or tool error into PASS; it only allows later work to proceed. A later `onSuccess` stage still does not run after a prior failure, while an `always` stage does.
+When a stage omits both fields, ATT uses `runWhen: normal` and `onFailure: stop`. These are built-in per-stage defaults; V2 does not define a separate `stageDefaults` configuration block.
 
-### 5.6 Result workbook column overrides
+`onFailure: continue` never turns a failed assertion or tool error into PASS; it only allows later work to proceed. The distinction between `normal` and `onSuccess` after a continued failure is intentional:
+
+| Earlier stage outcome | Later normal stage | Later onSuccess stage | Later onFailure stage | Later always stage |
+|---|---|---|---|---|
+| PASS | Runs | Runs | Skips | Runs |
+| FAIL/ERROR with onFailure: stop | Skips | Skips | Runs | Runs |
+| FAIL/ERROR with onFailure: continue | Runs | Skips | Runs | Runs |
+
+This permits a diagnostic or evidence-collection stage to fail without stopping a later normal cleanup-preparation stage, while still preventing success-only verification from running after any failure.
+
+### 5.6 Recommended scenarios
+
+**Ordinary business flow.** Omit both settings for the main stages. ATT uses normal/stop, so an invoke failure stops later normal work; verification should explicitly use onSuccess.
+
+```yaml
+stages:
+  - {key: prepare, template: 準備模板, required: false}
+  - {key: invoke, template: 執行模板, required: true}
+  - {key: verify, template: 驗證模板, required: true, runWhen: onSuccess}
+```
+
+**Rollback after a failed invocation.** Configure rollback as optional because not every row needs it, and use onFailure so it runs only after an earlier failure. Use continue when rollback evidence is useful but a rollback failure must not prevent final cleanup.
+
+```yaml
+  - {key: rollback, template: 回滾模板, required: false, runWhen: onFailure, onFailure: continue}
+```
+
+**Always cleanup.** Cleanup should normally be optional and always-run. Its onFailure should usually be continue so it records a problem without changing the fact that the original business failure already occurred.
+
+```yaml
+  - {key: cleanup, template: 清理模板, required: false, runWhen: always, onFailure: continue}
+```
+
+**Non-blocking diagnostics.** A log collection stage may use normal/continue. A failure still makes the final case result fail, but later normal stages can continue. Do not use continue merely to hide a business-critical failure.
+
+### 5.7 Result workbook column overrides
 
 The sidecar may override the headings ATT writes to the copied result workbook:
 
@@ -328,21 +365,11 @@ A template is a directory if and only if it directly contains template.yaml. Nes
 
 Supported action types are render, tool, assert, and log. Action IDs are unique within a template and cannot contain a dot. Optional request files request.tmp.xml, request.tmp.json, and request.tmp.yaml live beside template.yaml and are rendered as UTF-8.
 
-### 6.1 Template descriptor fields and defaults
+### 6.1 Template descriptor fields
 
 `name`, `description`, and `actions` are the normal top-level descriptor fields. `name` is optional only when callers always select the template by full path; give reusable templates a globally unique symbolic name. `description` is shown in generated documentation. `actions` must be a non-empty ordered YAML map.
 
-Use `actionDefaults` to set a common failure behavior for actions that do not specify their own value:
-
-```yaml
-name: PAYMENT_VERIFY
-actionDefaults:
-  onFailure: stop
-actions:
-  checkResponse:
-    type: assert
-    expression: "${ACTIONS.callApi.output.Response.Status} == 'SUCCESS'"
-```
+V2 does not support `actionDefaults`. Each action independently owns its optional `onFailure` value, so its behavior is visible at the point where the action is declared.
 
 ### 6.2 Action field reference
 
@@ -352,6 +379,8 @@ actions:
 | tool | type, call | onFailure | `${ACTIONS.<id>.output}` and canonical CASE.TOOL result |
 | assert | type, expression | onFailure | status, expected, actual, error metadata |
 | log | type, message | level, fields, onFailure | message and rendered fields metadata |
+
+For every action type, `onFailure` accepts exactly `stop` or `continue`; if omitted or blank, ATT uses `stop`. `stop` stops later actions in the same template after a FAIL or ERROR. `continue` records the failure and lets later actions run, but never changes the stage or case result to PASS. Values such as `ignore`, `warn`, or a non-string YAML value are rejected when ATT loads the template.
 
 `render.payload` and `render.saveAs` must remain inside the template/action output directory. Prefer `saveAs` for XML, JSON, YAML, SQL, and large text that will be passed to a tool. A tool action calls one configured global tool through `#{toolName(namedArgument=value)}`. An assert action records FAIL when its expression is false and ERROR when expression evaluation itself fails. A log action renders message and fields but does not perform an assertion.
 
@@ -386,7 +415,7 @@ Normative references include ${CASE.caseId}, ${CASE.amount}, ${CASE.STAGES.invok
 
 ### 7.1 Built-in CASE properties
 
-| Property | Meaning |
+| Property | Availability and meaning |
 |---|---|
 | caseId | Full group-qualified Case ID |
 | groupId | Sheet group ID from excel.sheet |
@@ -400,10 +429,82 @@ Normative references include ${CASE.caseId}, ${CASE.amount}, ${CASE.STAGES.invok
 | startedAt | Case start timestamp |
 | durationMs | Measured case duration |
 | error | Runtime error message when present |
+| STAGES | Map of started stage nodes, keyed by configured stage key |
 
 Configured case data keys are stored directly beside these properties. Reserved built-in names cannot be reused as data aliases.
 
-### 7.2 Map and list navigation
+### 7.2 Built-in STAGE properties
+
+Every stage that is selected and started creates `CASE.STAGES.<stageKey>`. A blank optional selector creates no stage node. In addition to the configured `stages[].dataColumns` and every key from the template-selector cell YAML, ATT provides the following properties:
+
+| Property | Availability and meaning |
+|---|---|
+| key | Configured `stages[].key` |
+| status | `RUNNING` while executing; `PASS` or `FAIL` after completion |
+| startedAt | ISO-8601 timestamp captured when the stage starts |
+| durationMs | Elapsed stage duration after completion |
+| TEMPLATE | Child template node described in the next section |
+
+For example, `${CASE.STAGES.invoke.status}` reads the final status of an earlier `invoke` stage, and `${CASE.STAGES.invoke.channel}` reads that stage's row-specific data. Stage data is private to that stage; it is not copied to CASE.
+
+### 7.3 Built-in TEMPLATE properties
+
+Each started stage has exactly one `CASE.STAGES.<stageKey>.TEMPLATE` node. It identifies the resolved template rather than merely repeating the selector value.
+
+| Property | Availability and meaning |
+|---|---|
+| name | Resolved template symbolic `name`; if the descriptor lacks one, the selected reference |
+| path | Normalized filesystem path of the resolved template directory |
+| status | `RUNNING` while actions execute; `PASS` or `FAIL` when the stage completes |
+| startedAt | ISO-8601 timestamp captured when template execution starts |
+| durationMs | Elapsed template duration after completion |
+| ACTIONS | Ordered child map of completed action nodes |
+
+The selector's `name` key, if supplied in the Excel YAML cell, remains stage data at `${CASE.STAGES.<stageKey>.name}`. Do not confuse it with `${CASE.STAGES.<stageKey>.TEMPLATE.name}`, which is the resolved descriptor name.
+
+### 7.4 Built-in ACTION properties
+
+Every successfully recorded action creates `CASE.STAGES.<stageKey>.TEMPLATE.ACTIONS.<actionId>`. The common properties are:
+
+| Property | Availability and meaning |
+|---|---|
+| id | Effective Action ID |
+| type | `render`, `tool`, `assert`, or `log` |
+| status | `PASS` / `FAIL` for assertions; `PASS` for successful render/log; tool status is `PASS`, `ERROR`, or `TIMEOUT` |
+| durationMs | Action duration in milliseconds; tool actions use measured process duration, while local actions currently record `0` |
+| output | Rendered result for in-memory render/assert/log actions; not present on a tool action itself |
+| rawOutput | Unstructured rendered result for in-memory render/assert/log actions |
+| outputFile | Render output path when `saveAs` or file output is used |
+| outputBytes | UTF-8 byte length for a file render |
+| outputSha256 | SHA-256 for a file render |
+| outputPreview | Short single-line preview for a file render |
+| level, message, fields | Present only for a `log` action |
+| TOOL | Present only for a tool action; child map keyed by invoked tool name |
+
+An action that fails before ATT can create its action record may have no node; consult the case log and case `error` in that situation. Within the currently running template, `${ACTIONS.<actionId>...}` is a convenience view of this node. For a tool action it also exposes the first invoked tool's fields, so `${ACTIONS.callApi.output}` is equivalent to the canonical tool output path.
+
+### 7.5 Built-in TOOL properties
+
+A tool action stores the durable record at `CASE.STAGES.<stageKey>.TEMPLATE.ACTIONS.<actionId>.TOOL.<toolKey>`. `<toolKey>` is the key under global `tools`, not the tool's display name. The record contains:
+
+| Property | Availability and meaning |
+|---|---|
+| name | Invoked tool key |
+| input | Fully resolved named input map after blank normalization and any final-argument `delimit` expansion |
+| inputFile | YAML file ATT generated for the tool input |
+| output | Parsed tool output: string for `txt`, structured YAML value for `yaml`, or structured XML map for `xml` |
+| outputFile | Tool output artifact path |
+| rawOutput | Raw UTF-8 tool output before parsing |
+| stdout | Captured process standard output |
+| stderr | Captured process standard error |
+| command | Fully rendered command passed to the process runner |
+| status | `PASS`, `ERROR`, or `TIMEOUT` |
+| durationMs | Measured process duration |
+| exitCode | Process exit code |
+
+While a tool is executing and after its latest invocation, ATT also exposes the transient root `TOOL` scope: `${TOOL.input}`, `${TOOL.output}`, `${TOOL.inputFile}`, and `${TOOL.outputFile}`. These are shortcuts only; use the canonical CASE path for a durable cross-action or cross-stage reference.
+
+### 7.6 Map and list navigation
 
 Dot notation navigates maps. Lists support both bracket and numeric-dot indexes:
 
@@ -415,7 +516,7 @@ ${CASE.items.0.status}
 
 Indexes are zero-based. An unresolved path renders as the empty string in normal template text. In assertions, a missing value behaves as null, so `${CASE.missing} is null` is true. Use validation and explicit assertions to catch misspelled optional paths rather than relying on blank rendering.
 
-### 7.3 Scope and timing
+### 7.7 Scope and timing
 
 An action may read case data, its stage data, and outputs from earlier actions. It cannot read a later action that has not executed. The `ACTIONS` convenience view contains completed actions in the current template only; use the canonical CASE path to read a prior stage. TOOL scope is populated for the current/latest tool invocation and should not be used as long-term cross-stage storage.
 
@@ -505,14 +606,16 @@ Tool output types are txt, yaml, and xml. YAML and XML output become structured 
 | name | Yes | Human-readable name shown in generated documentation |
 | description | Yes | Purpose and operational notes shown to users |
 | command | Yes | Process command template rendered by ATT |
-| output | Yes | txt, yaml, or xml parser selection |
-| arguments | Yes | Ordered map of accepted invocation inputs; may be empty |
+| output | No | txt, yaml, or xml parser selection; default txt |
+| arguments | No | Ordered map of accepted invocation inputs; may be empty |
 | arguments.<key>.name | Yes | Display name for the argument |
 | arguments.<key>.description | Yes | Usage and expected-content description |
 | arguments.<key>.required | Yes | Whether a non-blank value must be supplied |
 | arguments.<key>.delimit | No | Split delimiter; valid only on the final argument |
 
 Tool keys and argument keys are case-sensitive. A template call must use named arguments for configured external tools. Positional arguments are intended for ATT built-ins, not external tool contracts.
+
+ATT validates configuration values before execution: `output` must be exactly `txt`, `yaml`, or `xml`; every argument's `required` must be the YAML boolean `true` or `false`; `delimit` may occur only on the final declared argument; and `timeoutSeconds` must be at least `1`. Invalid values stop validation with a configuration diagnostic instead of being silently coerced.
 
 ### 9.1 Command placeholders and input/output files
 
@@ -647,7 +750,7 @@ For validation, report inspection, generated package documentation, and archivin
 
 Each run contains run.yaml, events.jsonl, result workbooks, one directory per full Case ID, case.yaml, case logs, action files, and report/index.html. The single-page report includes total/pass/fail/error/skip/invalid counts, pass rate, start/end time, wall and aggregate duration, minimum/maximum/average duration, group summaries, filters, the persisted execution tree, detailed logs, and artifact links.
 
-./att.sh docs generates JavaDoc-like testcase/template/tool indexes. ./att.sh docs --single-page also generates a self-contained searchable build/docs/single-page.html. ./att.sh build archives the latest completed run, report, workbooks, case logs, configuration snapshot, and manifest.
+./att.sh docs generates one self-contained searchable `build/docs/index.html` containing testcase, template, and tool references. `--single-page` is not accepted because this is the only documentation format. ./att.sh build archives the latest completed run, report, workbooks, case logs, configuration snapshot, and manifest.
 
 ### 11.1 Navigate a completed run
 
@@ -669,12 +772,14 @@ Open report/index.html directly from disk. Use the case table to filter by statu
 
 | Command | Output | Use it when |
 |---|---|---|
-| `./att.sh docs` | build/docs/index.html and category pages | Browsing testcase/template/tool references locally |
-| `./att.sh docs --single-page` | build/docs/single-page.html | Sharing one searchable offline reference file |
+| `./att.sh docs` | build/docs/index.html | Browsing or sharing one searchable offline testcase/template/tool reference |
 | `./att.sh report --run-id <id>` | Regenerated run report | Refreshing report HTML from persisted run data |
-| `./att.sh build` | Latest-run archive in dist/ | Handing off the report, evidence, and configuration snapshot |
+| `./att.sh build` | Latest-run archive in build/ | Handing off the report, evidence, and configuration snapshot |
+| `./att.sh clean` | Removes generated output directories | Resetting generated output before a clean build/run |
 
 The build archive contains the completed report, workbooks, per-case logs, referenced artifacts, effective configuration/sidecars/template descriptors with configured secrets redacted, and a manifest. It does not execute cases again.
+
+`clean` removes the configured output/report/log directories and the package-local `build/docs`, `build`, and `target` directories. It refuses the package root and any path outside the package, and does not remove source/configuration directories such as `config`, `testcase`, `templates`, `tools`, `docs`, or `lib`.
 
 ### 11.3 Common diagnostics and corrective actions
 
@@ -746,10 +851,10 @@ Tool commands run as local processes with the permissions of the ATT user. Valid
 | `./att.sh run --all --output-dir <dir>` | Override output root |
 | `./att.sh run --all --format json` | Emit machine-readable summary |
 | `./att.sh run --all --quiet` | Suppress normal progress output |
-| `./att.sh docs` | Generate multi-page package documentation |
-| `./att.sh docs --single-page` | Generate/select the single-page reference |
+| `./att.sh docs` | Generate the single-page package reference |
 | `./att.sh report --run-id <id>` | Regenerate a persisted report |
 | `./att.sh build` | Archive the latest completed run |
+| `./att.sh clean` | Remove generated ATT output |
 
 Options requiring a value fail when the value is missing. Unknown commands/options fail rather than being ignored. `run` and `validate` require an explicit selection such as --all, --suite, --case, or --tag.
 

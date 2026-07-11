@@ -51,23 +51,25 @@ class ExcelTestSuiteLoaderTest {
     void resolvesLastNonEmptyCellFromMultiRowHeader() throws Exception {
         Path workbook = tempDir.resolve("multi-header.xlsx");
         writeMultiRowWorkbook(workbook);
-        List<TestCase> cases = new ExcelTestSuiteLoader(config(2)).load(workbook);
+        List<TestCase> cases = new ExcelTestSuiteLoader(config(2, false)).load(workbook);
         assertEquals(1, cases.size());
         assertEquals("payment.TC002", cases.get(0).caseId());
         assertEquals("PAYMENT_INVOKE", cases.get(0).stage("invoke").templateName());
     }
 
     private FrameworkConfig config() {
-        return config(1);
+        return config(1, true);
     }
 
-    private FrameworkConfig config(int headerRows) {
+    private FrameworkConfig config(int headerRows, boolean includeBatch) {
         List<DataColumnConfig> data = Arrays.asList(new DataColumnConfig("caseName", "案例名稱", false), new DataColumnConfig("note", "備註", false));
         List<StageConfig> stages = Collections.singletonList(new StageConfig("invoke", "執行模板",
                 Collections.singletonList(new DataColumnConfig("params", "執行參數", true)), true, "stop", "normal"));
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
                 Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", new LinkedHashMap<String, String>()),
-                new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Arrays.asList(new SheetGroupConfig("payment", "支付測試案例集"), new SheetGroupConfig("batch", "批量測試案例集")),
+                new RunConfig("timestamp", "yyyyMMdd-HHmmss"), includeBatch
+                ? Arrays.asList(new SheetGroupConfig("payment", "支付測試案例集"), new SheetGroupConfig("batch", "批量測試案例集"))
+                : Collections.singletonList(new SheetGroupConfig("payment", "支付測試案例集")),
                 "案例編號", "標籤", data, stages, headerRows);
     }
 

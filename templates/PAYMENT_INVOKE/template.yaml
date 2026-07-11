@@ -1,9 +1,6 @@
 name: PAYMENT_INVOKE
 description: Render payment request XML to a file and invoke the payment API.
 
-actionDefaults:
-  onFailure: stop
-
 actions:
   renderRequest:
     type: render

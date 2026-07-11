@@ -24,7 +24,7 @@ public final class FrameworkConfigLoader {
             return new FrameworkConfig(Paths.get(text(map.get("outputDirectory"), "output")),
                     Paths.get(text(map.get("reportDirectory"), "report")),
                     Paths.get(text(map.get("logDirectory"), "logs")),
-                    text(map.get("environment"), "SIT"), integer(map.get("timeoutSeconds"), 120),
+                    text(map.get("environment"), "SIT"), positiveInteger(map.get("timeoutSeconds"), 120, "timeoutSeconds"),
                     templatesRoot(map), tools(map), report(map), run(map));
         }
     }
@@ -43,8 +43,12 @@ public final class FrameworkConfigLoader {
             String key = String.valueOf(entry.getKey());
             Map<?, ?> tool = (Map<?, ?>) entry.getValue();
             if (tool.containsKey("argv")) throw new IllegalArgumentException("V2 tool does not support argv: " + key);
-            result.put(key, new ToolConfig(key, text(tool.get("name"), key), text(tool.get("description"), ""),
-                    required(tool, "command", "tool " + key), text(tool.get("output"), "txt"), arguments(key, tool.get("arguments"))));
+            String output = text(tool.get("output"), "txt");
+            if (!("txt".equals(output) || "yaml".equals(output) || "xml".equals(output))) {
+                throw new IllegalArgumentException("Tool output must be txt, yaml, or xml: " + key);
+            }
+            result.put(key, new ToolConfig(key, required(tool, "name", "tool " + key), required(tool, "description", "tool " + key),
+                    required(tool, "command", "tool " + key), output, arguments(key, tool.get("arguments"))));
         }
         return result;
     }
@@ -64,7 +68,8 @@ public final class FrameworkConfigLoader {
             String delimit = text(descriptor.get("delimit"), "");
             if (!delimit.isEmpty() && index != size) throw new IllegalArgumentException("delimit is allowed only on the final argument: " + toolKey + "." + key);
             result.put(key, new ToolArgumentConfig(key, required(descriptor, "name", "argument " + key),
-                    required(descriptor, "description", "argument " + key), bool(descriptor.get("required"), false), delimit));
+                    required(descriptor, "description", "argument " + key), booleanValue(descriptor.get("required"), false,
+                    "required for argument " + toolKey + "." + key), delimit));
         }
         return result;
     }
@@ -96,6 +101,14 @@ public final class FrameworkConfigLoader {
         return value;
     }
     private static String text(Object value, String fallback) { return value == null ? fallback : String.valueOf(value); }
-    private static int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
-    private static boolean bool(Object value, boolean fallback) { return value == null ? fallback : Boolean.parseBoolean(String.valueOf(value)); }
+    private static int positiveInteger(Object value, int fallback, String owner) {
+        int result = value == null ? fallback : Integer.parseInt(String.valueOf(value));
+        if (result < 1) throw new IllegalArgumentException(owner + " must be at least 1");
+        return result;
+    }
+    private static boolean booleanValue(Object value, boolean fallback, String owner) {
+        if (value == null) return fallback;
+        if (value instanceof Boolean) return ((Boolean) value).booleanValue();
+        throw new IllegalArgumentException(owner + " must be true or false");
+    }
 }

@@ -1,9 +1,6 @@
 name: PAYMENT_VERIFY
 description: Verify payment API response, CT records and application logs.
 
-actionDefaults:
-  onFailure: stop
-
 actions:
   checkAPIResult:
     type: assert

@@ -133,6 +133,8 @@ sheet: payment=支付測試案例集, batch=批量測試案例集
 
 核心節點 `CASE`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL` 使用大寫；`caseId`、`outputFile` 等 metadata 使用 camelCase。
 
+`CASE`、`STAGE`、`TEMPLATE`、`ACTION`、`TOOL` 的所有內建屬性、適用時機及完整路徑，見 [Reference Manual V2：Runtime Context](09_Reference_Manual_V2.md#7-runtime-context)。
+
 ATT 內置函數包括：
 
 - `upper(value=...)`：轉換為大寫；
@@ -172,15 +174,16 @@ ATT 內置函數包括：
 ```sh
 ./att.sh report --run-id <RunID>
 ./att.sh docs
-./att.sh docs --single-page
 ./att.sh build
+./att.sh clean
 ```
 
 - 單頁測試報告：`output/<RunID>/report/index.html`
-- 多頁套件文件：`build/docs/index.html`
-- 單頁套件文件：`build/docs/single-page.html`
+- 單頁套件文件：`build/docs/index.html`
 - 結果工作簿：`output/<RunID>/workbooks/`
-- 最近完成 run 的 archive：`dist/att-<RunID>.tar.gz`
+- 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
+
+`./att.sh clean` 清除 ATT 生成的 output/report/log、`build/docs`、`build` 和 `target`，不會清除案例、模板、工具、設定或文件。它拒絕清除專案根目錄或專案外路徑。
 
 報告欄位、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V2：Validation, reports, documentation, and packaging](09_Reference_Manual_V2.md#11-validation-reports-documentation-and-packaging)。
 
@@ -217,9 +220,22 @@ ATT 內置函數包括：
 
 ### 10.2 Stage、Template、Action 設計
 
-`runWhen: onSuccess` 適合驗證階段，`onFailure` 適合補償或診斷，`always` 適合清理。`onFailure: continue` 只應用於不阻斷後續流程的證據收集。
+每個 stage 未配置時，ATT 預設 `runWhen: normal`、`onFailure: stop`：主流程失敗後，後續 normal stage 不再執行。`runWhen: onSuccess` 適合驗證；`runWhen: onFailure` 適合補償或診斷；`runWhen: always` 適合清理。`onFailure: continue` 只應用於不阻斷後續流程的證據收集，且不會將案例結果改為 PASS。
+
+例如 invoke 使用預設 normal/stop，verify 使用 onSuccess，rollback 使用 onFailure，cleanup 使用 always：
+
+```yaml
+- {key: invoke, template: 執行模板, required: true}
+- {key: verify, template: 驗證模板, required: true, runWhen: onSuccess}
+- {key: rollback, template: 回滾模板, required: false, runWhen: onFailure, onFailure: continue}
+- {key: cleanup, template: 清理模板, required: false, runWhen: always, onFailure: continue}
+```
+
+完整的判斷表與非阻斷診斷場景見 [Reference Manual V2：Stage execution semantics](09_Reference_Manual_V2.md#55-stage-execution-semantics)。
 
 模板目錄必須直接包含 `template.yaml`。大型 XML、JSON、YAML 或文字內容應放在模板目錄的 request 文件中，由 `render` action 產生輸出。
+
+action 的 `onFailure` 與 stage 的設定獨立：每個 action 只可設為 `stop` 或 `continue`，未設定即為 `stop`。`stop` 停止同一模板後續 action；`continue` 僅容許後續 action 執行，仍會保留失敗結果。詳見 [Reference Manual V2：Action field reference](09_Reference_Manual_V2.md#62-action-field-reference)。
 
 目前模板的結果可用 `${ACTIONS.<actionId>.output}` 讀取；跨 stage 的工具結果使用 `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<actionId>.TOOL.<toolName>.output}`。
 

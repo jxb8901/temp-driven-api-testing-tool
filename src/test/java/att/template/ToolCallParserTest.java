@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ToolCallParserTest {
     @Test void parsesQuotedCommasNestedContextAndTypedLiterals() {
         ToolCallParser parser = new ToolCallParser();
-        ToolCallParser.ParsedCall call = parser.parse("#{send(message='hello, world', count=12.5, enabled=true, ref=${CASE.id})}");
+        ToolCallParser.ParsedCall call = parser.parse("#{send(message='hello, world', count=12.5, enabled=true, ref=${CASE.caseId})}");
         assertEquals("send", call.name());
         assertEquals(4, call.arguments().size());
         assertEquals("'hello, world'", call.arguments().get(0).expression());

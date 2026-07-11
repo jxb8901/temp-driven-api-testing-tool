@@ -208,10 +208,6 @@ stages:
     onFailure: continue
     runWhen: always
 
-actionDefaults:
-  onFailure: stop
-  logOutput: summary
-
 report:
   columns:
     result: 測試結果
@@ -223,7 +219,7 @@ report:
     runTime: 執行時間
 ```
 
-The established `testCaseTemplate`, `actionDefaults`, and `report` concepts remain available. Their V2 definitions are the only accepted definitions.
+The established `testCaseTemplate` and `report` concepts remain available. Their V2 definitions are the only accepted definitions. V2 does not support template or sidecar `actionDefaults`: each action owns its own failure behavior.
 
 # 6. Excel Testcase Groups
 
@@ -447,6 +443,8 @@ The `payload="請求(yaml)"(yaml)` example distinguishes literal parentheses in 
 
 V2 does not define a separate stage display `name` or `templateColumn`. The single `template` field is sufficient.
 
+The defaults are resolved independently for every stage: an omitted `runWhen` is `normal`, and an omitted `onFailure` is `stop`. V2 intentionally does not add a package-level `stageDefaults` configuration layer.
+
 `template` always names an Excel column. A sidecar cannot define a fixed template for a stage. This preserves case-row control over template choice and keeps one resolution rule.
 
 ## 8.2 Template selector cells
@@ -524,10 +522,6 @@ ATT recursively indexes `templates.root`. A template path MUST remain below that
 name: 本地付款
 description: 建立本地付款請求並調用付款 API
 
-config:
-  actionDefaults:
-    onFailure: stop
-
 actions:
   renderRequest:
     type: render
@@ -578,11 +572,15 @@ The default Action ID is the YAML action key. IDs MUST be unique within the temp
 
 ## 10.2 Failure behavior
 
-- Default action failure behavior is `stop`.
+- An action `onFailure` MAY be exactly `stop` or `continue`; omitted or blank is `stop`.
+- Any other `onFailure` value is a template-validation error.
+- `onFailure: stop` records the failure and stops later actions in the same template.
 - `onFailure: continue` records the action failure and continues the template.
 - A failed assertion produces `FAIL`.
 - Rendering, tool execution, parsing, timeout, or framework failures produce `ERROR`.
 - Cleanup and rollback behavior remains controlled by stage `runWhen` and `onFailure`.
+
+For the same reason, configuration parsing does not silently coerce constrained values: tool `output` is exactly `txt`, `yaml`, or `xml`; boolean fields such as `required` are `true` or `false`; and `timeoutSeconds` is at least `1`. Invalid values are configuration errors.
 
 ## 10.3 File outputs
 
@@ -641,7 +639,31 @@ CASE
 
 Only core concept keywords are uppercase: `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and `TOOL`. Metadata/result properties keep the existing camelCase style, such as `caseId`, `groupId`, `startedAt`, `durationMs`, and `outputFile`. User-defined case aliases, stage keys, stage data keys, Action IDs, and tool names retain their configured spelling. Metadata and runtime values share the appropriate logical node; V2 does not add artificial `metadata`, `runtime`, `fields`, or `data` wrapper nodes. A tool action stores action metadata under the Action ID and the invoked tool data below `TOOL.<toolName>`.
 
-## 11.2 Normative references
+## 11.2 Built-in node properties
+
+The following are reserved runtime properties. User case-data aliases and stage-data keys MUST NOT overwrite a built-in property at their corresponding node. A stage node exists only when that stage is selected and starts; an action node exists only when ATT has recorded that action.
+
+| Node | Built-in properties | Notes |
+|---|---|---|
+| `CASE` | `caseId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, `status`, `startedAt`, `durationMs`, `error`, `STAGES` | Case data columns are direct sibling keys. `status` begins `RUNNING`; final status is `PASS`, `FAIL`, `ERROR`, or `SKIPPED`. `error` exists for an execution error. |
+| `CASE.STAGES.<stageKey>` | `key`, `status`, `startedAt`, `durationMs`, `TEMPLATE` | Stage selector-YAML keys and `stages[].dataColumns` are direct sibling keys. Status is `RUNNING`, then `PASS` or `FAIL`. |
+| `...TEMPLATE` | `name`, `path`, `status`, `startedAt`, `durationMs`, `ACTIONS` | `name` is the resolved template symbolic name (or selected reference when unnamed); `path` is the normalized template-directory path. |
+| `...ACTIONS.<actionId>` | `id`, `type`, `status`, `durationMs`; action-type-specific properties; optional `TOOL` | Common action status is `PASS`/`FAIL`; a tool action uses `PASS`/`ERROR`/`TIMEOUT`. Local action duration currently records `0`; tool duration is measured. |
+| `...ACTIONS.<actionId>.TOOL.<toolKey>` | `name`, `input`, `inputFile`, `output`, `outputFile`, `rawOutput`, `stdout`, `stderr`, `command`, `status`, `durationMs`, `exitCode` | `<toolKey>` is the global `tools` key. `output` is parsed according to tool `output`; `status` is `PASS`, `ERROR`, or `TIMEOUT`. |
+
+Action-type-specific properties are fixed as follows:
+
+| Action type | Additional built-in properties |
+|---|---|
+| in-memory `render` | `output`, `rawOutput` |
+| file `render` | `outputFile`, `outputBytes`, `outputSha256`, `outputPreview` |
+| `assert` | `output`, `rawOutput` |
+| `log` | `output`, `rawOutput`, `level`, `message`, `fields` |
+| `tool` | `TOOL` only; parsed output is below `TOOL.<toolKey>.output` |
+
+The transient convenience scopes are deliberately smaller than the persisted tree: `${ACTIONS.<actionId>...}` exposes completed actions in the current template, and `${TOOL.input}`, `${TOOL.output}`, `${TOOL.inputFile}`, `${TOOL.outputFile}` expose the latest tool invocation. Durable references MUST use the canonical `CASE.STAGES...` path.
+
+## 11.3 Normative references
 
 ```text
 ${CASE.caseId}
@@ -660,7 +682,7 @@ ${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.TOOL.invokePaymentApi.output}
 
 Map paths use dot-separated keys. YAML/tool list results additionally support zero-based `${CASE.items[0].status}` and `${CASE.items.0.status}` access. Exact Context values passed to tools retain their original string/number/boolean type; assertion evaluation treats Context values as typed operands rather than reparsing their text as operators.
 
-## 11.3 Current action and tool convenience scopes
+## 11.4 Current action and tool convenience scopes
 
 ATT exposes transient uppercase execution scopes while an action is running:
 
@@ -674,7 +696,7 @@ ATT exposes transient uppercase execution scopes while an action is running:
 
 These are views over the current nodes in the `CASE` tree, not independent runtime stores. After execution, the authoritative persisted data is under `CASE.STAGES.<key>.TEMPLATE.ACTIONS.<actionId>.TOOL.<toolName>...`. No lowercase alias for a core concept keyword and no `TOOLS` scope exists in V2.
 
-## 11.4 Expression and invocation grammar
+## 11.5 Expression and invocation grammar
 
 - `${path}` performs a read-only Context lookup and never invokes a tool.
 - `#{name(...)}` invokes a configured tool or documented built-in function.
@@ -729,7 +751,7 @@ tools:
 | `name` | Human-readable tool name |
 | `description` | Tool documentation |
 | `command` | V2 command template |
-| `output` | Output parser type such as `xml`, `yaml`, `json`, or `txt` |
+| `output` | Output parser type: `xml`, `yaml`, or `txt` (default `txt`) |
 | `arguments` | Parameter contract used for validation and documentation |
 
 `argv` is not a V2 tool field.
@@ -837,6 +859,8 @@ Stage `runWhen` values retain V1 semantics:
 | `onSuccess` | Run only when prior normal stages passed |
 | `onFailure` | Run only after a prior failure or error |
 | `always` | Run regardless of prior status |
+
+`normal` is controlled by whether a prior failure stopped normal flow; `onSuccess` is controlled by whether any prior stage failed. Therefore a failure with `onFailure: continue` permits a later normal stage but still prevents a later `onSuccess` stage. `onFailure` stages run after either a FAIL or ERROR, and `always` stages run in all outcomes. A continued failure remains part of the final case result.
 
 Case statuses are `PASS`, `FAIL`, `ERROR`, `SKIPPED`, and `INVALID`.
 
@@ -949,13 +973,7 @@ ATT generates offline HTML under `build/docs/`:
 
 ```text
 build/docs/
-├── index.html
-├── testcases/index.html
-├── templates/index.html
-├── tools/index.html
-├── search-index.json
-├── single-page.html
-└── assets/
+└── index.html
 ```
 
 Documentation covers:
@@ -967,7 +985,7 @@ Documentation covers:
 - inbound references from tools/templates back to their callers;
 - Unicode-aware search for Chinese names, paths, IDs, tags, and descriptions.
 
-`att.sh docs --single-page` selects the self-contained `single-page.html` entry point; the standard command retains the multi-page JavaDoc-like layout.
+`att.sh docs` always generates one self-contained, searchable `index.html`. V2 does not generate a multi-page documentation variant and does not accept `--single-page`.
 
 # 19. JavaDoc-like HTML Test Report
 
@@ -1005,6 +1023,7 @@ Commands:
   docs             Generate testcase/template/tool HTML documentation
   report           Regenerate HTML report for an existing run
   build            Archive the latest completed run
+  clean            Delete generated ATT output
   version          Print ATT version
   help             Show help
 ```
@@ -1027,6 +1046,8 @@ Key run options:
 | `--quiet` | Show warnings, errors, and final summary only |
 
 `run` never implicitly means all cases. Users must provide `--all`, a suite, a full Case ID, or a filter resolving to an explicit selection.
+
+`clean` removes configured `outputDirectory`, `reportDirectory`, and `logDirectory`, plus `build/docs`, `dist`, and `target`. It only removes paths below the ATT package root and refuses to remove the package root or an external path. It never removes `config`, `testcase`, `templates`, `tools`, `docs`, or `lib`.
 
 Progress example:
 
@@ -1276,7 +1297,7 @@ The V2 System Design is complete when:
 - templates are directories containing `template.yaml` and support nested/Chinese paths and symbolic names;
 - package validation reports testcase, stage, template, action, and tool errors before execution;
 - Chinese workbooks, sheets, mappings, keys, templates, logs, reports, and documentation are covered by tests;
-- `att.sh` provides default help, progress feedback, explicit `--all`, validation, docs, report, and latest-run build commands;
+- `att.sh` provides default help, progress feedback, explicit `--all`, validation, single-page docs/report generation, latest-run build, and safe clean commands;
 - JavaDoc-like package documentation covers testcases, templates, and tools;
 - JavaDoc-like reports include every case, description, result, detailed execution tree, logs, and artifacts;
 - HTML report summaries include total, pass/fail/error/skip/invalid counts, pass rate, start/end time, and elapsed/aggregate/min/max/average durations;

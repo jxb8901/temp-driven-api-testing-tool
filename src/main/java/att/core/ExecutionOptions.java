@@ -27,19 +27,18 @@ public final class ExecutionOptions {
     private final String format;
     private final boolean quiet;
     private final boolean verbose;
-    private final boolean singlePage;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
                             boolean failFast, Path outputDirectory) {
         this("run", configPath, suitePath == null ? Collections.<Path>emptyList() : Collections.singletonList(suitePath), suiteDirectory, caseIds, tags, excludeTags, runId, false,
-                rerunFailed, dryRun, failFast, outputDirectory, "human", false, false, false);
+                rerunFailed, dryRun, failFast, outputDirectory, "human", false, false);
     }
 
     private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
                              Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
                              boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
-                             String format, boolean quiet, boolean verbose, boolean singlePage) {
+                             String format, boolean quiet, boolean verbose) {
         this.command = command;
         this.configPath = configPath;
         this.suitePaths = new ArrayList<Path>(suitePaths);
@@ -56,14 +55,13 @@ public final class ExecutionOptions {
         this.format = format;
         this.quiet = quiet;
         this.verbose = verbose;
-        this.singlePage = singlePage;
     }
 
     public static ExecutionOptions parse(String[] args) {
         if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
         String command = args[0].startsWith("--") ? "run" : args[0];
         int start = args[0].startsWith("--") ? 0 : 1;
-        if (!("run".equals(command) || "validate".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "version".equals(command))) {
+        if (!("run".equals(command) || "validate".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command))) {
             throw new IllegalArgumentException("Unknown command: " + command);
         }
         Path config = Paths.get("config/config.yaml");
@@ -74,7 +72,7 @@ public final class ExecutionOptions {
         Set<String> excludeTags = new LinkedHashSet<String>();
         String runId = "";
         boolean all = false, rerun = false, dry = false, failFast = false;
-        boolean quiet = false, verbose = false, singlePage = false;
+        boolean quiet = false, verbose = false;
         String format = "human";
         Path output = null;
         for (int i = start; i < args.length; i++) {
@@ -94,7 +92,6 @@ public final class ExecutionOptions {
             else if ("--fail-fast".equals(arg)) failFast = true;
             else if ("--quiet".equals(arg)) quiet = true;
             else if ("--verbose".equals(arg)) verbose = true;
-            else if ("--single-page".equals(arg)) singlePage = true;
             else if ("--help".equals(arg)) return empty("help");
             else throw new IllegalArgumentException("Unsupported option: " + arg);
         }
@@ -106,12 +103,12 @@ public final class ExecutionOptions {
         if (suites.isEmpty() && suiteDir == null && (!caseIds.isEmpty() || !tags.isEmpty())) suiteDir = Paths.get("testcase");
         if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
         if (quiet && verbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
-        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, singlePage);
+        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose);
     }
 
     private static ExecutionOptions empty(String command) {
         return new ExecutionOptions(command, Paths.get("config/config.yaml"), Collections.<Path>emptyList(), null, new LinkedHashSet<String>(),
-                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "human", false, false, false);
+                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "human", false, false);
     }
 
     public String command() { return command; }
@@ -131,7 +128,6 @@ public final class ExecutionOptions {
     public String format() { return format; }
     public boolean quiet() { return quiet; }
     public boolean verbose() { return verbose; }
-    public boolean singlePage() { return singlePage; }
 
     public boolean matches(TestCase testCase) {
         boolean caseMatches = caseIds.isEmpty() || caseIds.contains(testCase.caseId());

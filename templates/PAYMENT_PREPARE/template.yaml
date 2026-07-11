@@ -1,9 +1,6 @@
 name: PAYMENT_PREPARE
 description: Prepare payment request identifiers.
 
-actionDefaults:
-  onFailure: stop
-
 actions:
   getAcDate:
     type: tool

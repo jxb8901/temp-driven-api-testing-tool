@@ -1,22 +1,23 @@
 # Changelog
 
-## [V2.0] - 2026-07-10
+## [V2.0] - 2026-07-11
 
 V2 implements the grouped Excel → stage → template → action → tool model defined by the V2 System Design.
 
 ### Added
 
-- Mandatory V2 workbook sidecars with multi-sheet `groupId=sheetName`, required `caseId`/`tags`, and compact case/stage `dataColumns` parsing.
-- Full Case IDs such as `payment.TC001`, Chinese workbook fixtures, YAML stage template cells, blank-marker normalization, and the persisted `CASE.STAGES.TEMPLATE.ACTIONS` tree.
+- Mandatory V2 workbook sidecars with multi-sheet `groupId=sheetName`, multi-row headers, required `caseId`/`tags`, and compact case/stage `dataColumns` parsing.
+- Full Case IDs such as `payment.TC001`, Chinese workbook fixtures, YAML map and scalar-shorthand template selectors, blank-marker normalization, and the persisted `CASE.STAGES.TEMPLATE.ACTIONS.TOOL` tree.
 - Strict template indexing by symbolic name or full path and pre-run package/template/tool contract validation.
-- Tool argument documentation contracts with final-argument `delimit` expansion; V2 rejects `argv`.
-- Offline HTML run summaries, detailed case logs/artifact links, package documentation, `case.yaml`, `events.jsonl`, report regeneration, and latest-run tar.gz archives with hashes.
-- V2 CLI commands: `run`, `validate`, `docs`, `report`, `build`, `version`, and `help`, including explicit `--all` and JSON output.
+- Tool argument documentation contracts with final-argument `delimit` expansion; V2 rejects `argv`; action failure behavior is explicitly `stop` or `continue` with default `stop`.
+- Offline single-page HTML run summaries and package documentation, detailed case logs/artifact links, `case.yaml`, `events.jsonl`, report regeneration, and latest-run tar.gz archives with hashes.
+- V2 CLI commands: `run`, `validate`, `docs`, `report`, `build`, `clean`, `version`, and `help`, including explicit `--all`, JSON output, and safe generated-output cleanup.
+- Built-in CASE/STAGES/TEMPLATE/ACTIONS/TOOL properties are documented and exposed through canonical CASE paths plus transient action/tool convenience scopes.
 
 ### Verified
 
-- Java 8-target compilation and six automated tests pass.
-- The Chinese two-sheet example executes 2 cases with 2 PASS, generates HTML/Excel reports, regenerates the report, and builds a readable completed-run archive.
+- Java 8-target compilation and 43 automated tests pass.
+- `./att.sh validate --all` validates 1 suite, 22 cases, 7 templates, and 7 tools; `./att.sh docs` produces only `build/docs/index.html`.
 
 ## [V1.3] - 2026-07-09
 

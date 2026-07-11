@@ -111,6 +111,8 @@ public class ToolInvoker {
         context.addAction(id, invocation);
         context.put("TOOL.input", resolvedInput);
         context.put("TOOL.output", parsed);
+        context.put("TOOL.inputFile", inputFile.toString());
+        context.put("TOOL.outputFile", outputFile.toString());
         log.append("ACTION " + id, invocation);
 
         if (commandResult.timedOut()) {

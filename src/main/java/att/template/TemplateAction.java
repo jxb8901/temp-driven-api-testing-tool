@@ -35,7 +35,7 @@ public class TemplateAction {
         this.expression = text(data.get("expression"), "");
         this.message = text(data.get("message"), "");
         this.saveAs = text(data.get("saveAs"), "");
-        this.onFailure = text(data.get("onFailure"), "");
+        this.onFailure = failureMode(data.get("onFailure"));
         this.level = text(data.get("level"), "INFO");
         this.fields = map(data.get("fields"));
         this.output = map(data.get("output"));
@@ -56,6 +56,15 @@ public class TemplateAction {
 
     private static String text(Object value, String defaultValue) {
         return value == null ? defaultValue : String.valueOf(value);
+    }
+
+    private static String failureMode(Object value) {
+        String mode = value == null ? "stop" : String.valueOf(value).trim();
+        if (mode.isEmpty()) mode = "stop";
+        if (!("stop".equals(mode) || "continue".equals(mode))) {
+            throw new IllegalArgumentException("Action onFailure must be stop or continue: " + mode);
+        }
+        return mode;
     }
 
     @SuppressWarnings("unchecked")

@@ -18,8 +18,6 @@ public final class CaseRuntimeContext {
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this.caseOutputDir = caseOutputDir;
         caseNode.put("caseId", testCase.caseId());
-        // Short aliases make common expressions readable while preserving the explicit V2 names.
-        caseNode.put("id", testCase.caseId());
         caseNode.put("groupId", testCase.groupId());
         caseNode.put("rowCaseId", testCase.rowCaseId());
         caseNode.put("workbook", testCase.caseData().get("workbook"));

@@ -55,6 +55,9 @@ public final class StageTemplateLoader {
     private StageTemplate loadDirectory(String reference, Path directory) throws Exception {
         if (!directory.normalize().startsWith(root)) throw new IllegalArgumentException("Template escapes root: " + reference);
         Map<String, Object> map = yaml(directory.resolve("template.yaml"));
+        if (map.containsKey("actionDefaults") || (map.get("config") instanceof Map && ((Map<?, ?>) map.get("config")).containsKey("actionDefaults"))) {
+            throw new IllegalArgumentException("V2 template does not support actionDefaults: " + directory);
+        }
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         Object configured = map.get("actions");
         if (!(configured instanceof Map)) throw new IllegalArgumentException("Template actions must be an ordered map: " + directory);
@@ -63,9 +66,7 @@ public final class StageTemplateLoader {
             actions.add(new TemplateAction(String.valueOf(entry.getKey()), objectMap((Map<?, ?>) entry.getValue())));
         }
         if (actions.isEmpty()) throw new IllegalArgumentException("Template must contain at least one action: " + directory);
-        Map<String, Object> defaults = map.get("config") instanceof Map
-                ? objectMapValue(((Map<?, ?>) map.get("config")).get("actionDefaults")) : objectMapValue(map.get("actionDefaults"));
-        return new StageTemplate(text(map.get("name"), reference), directory, actions, defaults);
+        return new StageTemplate(text(map.get("name"), reference), directory, actions);
     }
 
     @SuppressWarnings("unchecked")
@@ -79,7 +80,6 @@ public final class StageTemplateLoader {
         }
     }
 
-    private Map<String, Object> objectMapValue(Object value) { return value instanceof Map ? objectMap((Map<?, ?>) value) : new LinkedHashMap<String, Object>(); }
     private Map<String, Object> objectMap(Map<?, ?> value) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (Map.Entry<?, ?> e : value.entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());

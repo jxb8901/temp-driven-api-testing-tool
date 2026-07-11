@@ -34,16 +34,16 @@ public final class SuiteConfigResolver {
         String sheet = required(excel, "sheet");
         String caseId = required(excel, "caseId");
         String tags = required(excel, "tags");
-        int headerRows = integer(excel.get("headerRows"), 1);
-        if (headerRows < 1) throw new IllegalArgumentException("excel.headerRows must be at least 1: " + sidecar);
+        int headerRows = positiveInteger(excel.get("headerRows"), 1, "excel.headerRows");
         List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(text(excel.get("dataColumns"), ""));
         rejectReserved(dataColumns, new String[]{"caseId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "STAGES"}, "excel.dataColumns");
         List<StageConfig> stages = stages(map.get("stages"));
         if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
         ReportConfig report = mergeReport(map.get("report"));
+        int timeoutSeconds = positiveInteger(map.get("timeoutSeconds"), global.timeoutSeconds(), "timeoutSeconds");
         return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
-                global.environment(), integer(map.get("timeoutSeconds"), global.timeoutSeconds()), global.templatesRoot(),
+                global.environment(), timeoutSeconds, global.templatesRoot(),
                 global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows);
     }
 
@@ -60,14 +60,14 @@ public final class SuiteConfigResolver {
             String key = required(stage, "key");
             validateContextKey(key, "stage key");
             if (!keys.add(key)) throw new IllegalArgumentException("Duplicate stage key: " + key);
-            String onFailure = text(stage.get("onFailure"), "stop");
-            String runWhen = text(stage.get("runWhen"), "normal");
+            String onFailure = defaultedText(stage.get("onFailure"), "stop");
+            String runWhen = defaultedText(stage.get("runWhen"), "normal");
             if (!("stop".equals(onFailure) || "continue".equals(onFailure))) throw new IllegalArgumentException("Invalid onFailure for stage " + key + ": " + onFailure);
             if (!("normal".equals(runWhen) || "onSuccess".equals(runWhen) || "onFailure".equals(runWhen) || "always".equals(runWhen))) throw new IllegalArgumentException("Invalid runWhen for stage " + key + ": " + runWhen);
             List<DataColumnConfig> stageColumns = ColumnSpecParser.dataColumns(text(stage.get("dataColumns"), ""));
             rejectReserved(stageColumns, new String[]{"key", "status", "startedAt", "durationMs", "TEMPLATE"}, "stages." + key + ".dataColumns");
             result.add(new StageConfig(key, required(stage, "template"), stageColumns,
-                    bool(stage.get("required"), false), onFailure, runWhen));
+                    booleanValue(stage.get("required"), false, "required for stage " + key), onFailure, runWhen));
         }
         return result;
     }
@@ -104,8 +104,20 @@ public final class SuiteConfigResolver {
         return value;
     }
     private static String text(Object value, String fallback) { return value == null ? fallback : String.valueOf(value); }
-    private static int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
-    private static boolean bool(Object value, boolean fallback) { return value == null ? fallback : Boolean.parseBoolean(String.valueOf(value)); }
+    private static String defaultedText(Object value, String fallback) {
+        String result = text(value, "").trim();
+        return result.isEmpty() ? fallback : result;
+    }
+    private static int positiveInteger(Object value, int fallback, String owner) {
+        int result = value == null ? fallback : Integer.parseInt(String.valueOf(value));
+        if (result < 1) throw new IllegalArgumentException(owner + " must be at least 1");
+        return result;
+    }
+    private static boolean booleanValue(Object value, boolean fallback, String owner) {
+        if (value == null) return fallback;
+        if (value instanceof Boolean) return ((Boolean) value).booleanValue();
+        throw new IllegalArgumentException(owner + " must be true or false");
+    }
     private static void rejectReserved(List<DataColumnConfig> columns, String[] reserved, String owner) {
         java.util.Set<String> names = new java.util.HashSet<String>(java.util.Arrays.asList(reserved));
         for (DataColumnConfig column : columns) if (names.contains(column.key())) throw new IllegalArgumentException("Reserved key '" + column.key() + "' cannot be used in " + owner);

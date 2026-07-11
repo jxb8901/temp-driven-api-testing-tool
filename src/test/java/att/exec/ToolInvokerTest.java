@@ -35,6 +35,8 @@ class ToolInvokerTest {
         Map<?,?> output=(Map<?,?>)result.output();
         assertEquals("00123",output.get("account")); assertEquals(Integer.valueOf(7),output.get("count")); assertEquals(Boolean.TRUE,output.get("enabled"));
         assertNotNull(context.resolve("CASE.STAGES.invoke.TEMPLATE.ACTIONS.call.TOOL.copyInput"));
+        assertNotNull(context.resolve("TOOL.inputFile"));
+        assertNotNull(context.resolve("TOOL.outputFile"));
     }
 
     @Test void dropsBlankDelimitedValuesFromFinalArray() throws Exception {

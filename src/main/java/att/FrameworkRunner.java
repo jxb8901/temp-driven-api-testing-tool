@@ -7,6 +7,7 @@ import att.core.ExecutionOptions;
 import att.core.FrameworkEngine;
 import att.core.RunSummary;
 import att.report.PackageDocumentationGenerator;
+import att.report.GeneratedOutputCleaner;
 import att.report.RunArchiveBuilder;
 import att.report.ReportRegenerator;
 import att.validation.PackageValidator;
@@ -27,7 +28,12 @@ public final class FrameworkRunner {
             Path root = Paths.get("").toAbsolutePath();
             FrameworkConfig config = new FrameworkConfigLoader().load(options.configPath());
             if ("docs".equals(options.command())) {
-                System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config, options.singlePage()));
+                System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
+                return;
+            }
+            if ("clean".equals(options.command())) {
+                new GeneratedOutputCleaner().clean(root, config);
+                System.out.println("ATT generated output cleaned.");
                 return;
             }
             if ("build".equals(options.command())) {
@@ -71,7 +77,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println("ATT V2.0\nUsage: ./att.sh <command> [options]\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate selected suites without executing tools\n  docs      Generate HTML testcase/template/tool reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <group.caseId> | --tag <tag>\n  --exclude-tag <tag> --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  --format human|json --quiet --verbose --single-page");
+        System.out.println("ATT V2.0\nUsage: ./att.sh <command> [options]\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate selected suites without executing tools\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <group.caseId> | --tag <tag>\n  --exclude-tag <tag> --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  --format human|json --quiet --verbose");
     }
 
     private static String code(String message) {

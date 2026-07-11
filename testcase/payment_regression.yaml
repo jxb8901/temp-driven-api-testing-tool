@@ -37,10 +37,6 @@ stages:
     onFailure: continue
     runWhen: always
 
-actionDefaults:
-  onFailure: stop
-  logOutput: summary
-
 report:
   columns:
     result: 測試結果

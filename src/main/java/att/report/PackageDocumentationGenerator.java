@@ -24,30 +24,19 @@ import java.util.stream.Stream;
 
 /** Generates offline JavaDoc-like testcase/template/tool reference pages. */
 public final class PackageDocumentationGenerator {
+    /** Generates the one self-contained, searchable package reference. */
     public Path generate(Path projectRoot, FrameworkConfig config) throws Exception {
-        return generate(projectRoot, config, false);
-    }
-
-    /** Generates the normal JavaDoc layout and a portable single-page edition. */
-    public Path generate(Path projectRoot, FrameworkConfig config, boolean singlePage) throws Exception {
         Path output = projectRoot.resolve("build/docs");
-        Files.createDirectories(output.resolve("testcases"));
-        Files.createDirectories(output.resolve("templates"));
-        Files.createDirectories(output.resolve("tools"));
-        List<String> search = new ArrayList<String>();
-        write(output.resolve("testcases/index.html"), testcasePage(projectRoot, config, search));
-        write(output.resolve("templates/index.html"), templatePage(projectRoot, config, search));
-        write(output.resolve("tools/index.html"), toolPage(config, search));
-        String index = page("ATT V2 Package Reference", "<h1>ATT V2 Package Reference</h1><ul><li><a href=\"testcases/index.html\">Testcases</a></li><li><a href=\"templates/index.html\">Templates</a></li><li><a href=\"tools/index.html\">Tools</a></li></ul>");
-        write(output.resolve("index.html"), index);
-        write(output.resolve("search-index.json"), "[\"" + joinEscaped(search) + "\"]");
+        GeneratedOutputCleaner.deleteDirectory(output);
+        Files.createDirectories(output);
         String single = page("ATT V2 Single-page Reference", "<header><h1>ATT V2 Package Reference</h1><p>Testcases · Templates · Tools</p></header><nav><input id=\"search\" placeholder=\"Search English or 中文\"></nav>"
                 + section("testcases", testcasePage(projectRoot, config, new ArrayList<String>()))
                 + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
                 + section("tools", toolPage(config, new ArrayList<String>()))
                 + "<script>const q=document.querySelector('#search');q.oninput=()=>document.querySelectorAll('article').forEach(x=>x.hidden=!x.innerText.toLowerCase().includes(q.value.toLowerCase()));</script>");
-        write(output.resolve("single-page.html"), single);
-        return output.resolve(singlePage ? "single-page.html" : "index.html");
+        Path index = output.resolve("index.html");
+        write(index, single);
+        return index;
     }
 
     private String testcasePage(Path root, FrameworkConfig global, List<String> search) throws Exception {

@@ -54,7 +54,7 @@ public class StageTemplateRunner {
                     context.addAction(action.id(), invocation);
                     log.append("ACTION " + action.id(), invocation);
                     results.add(new ValidationResult(stageName, action.id(), passed ? ResultStatus.PASS : ResultStatus.FAIL, action.expression(), rendered, ""));
-                    if (!passed && stopOnFailure(action, template)) {
+                    if (!passed && stopOnFailure(action)) {
                         break;
                     }
                 } else if ("log".equalsIgnoreCase(action.type())) {
@@ -71,7 +71,7 @@ public class StageTemplateRunner {
                 }
             } catch (Exception e) {
                 results.add(new ValidationResult(stageName, action.id(), ResultStatus.ERROR, action.type(), "", e.getMessage()));
-                if (stopOnFailure(action, template)) {
+                if (stopOnFailure(action)) {
                     break;
                 }
             }
@@ -112,13 +112,8 @@ public class StageTemplateRunner {
         return invocation;
     }
 
-    private boolean stopOnFailure(TemplateAction action, StageTemplate template) {
-        String onFailure = action.onFailure();
-        if (onFailure == null || onFailure.trim().isEmpty()) {
-            Object defaultValue = template.actionDefaults().get("onFailure");
-            onFailure = defaultValue == null ? "stop" : String.valueOf(defaultValue);
-        }
-        return !"continue".equalsIgnoreCase(onFailure);
+    private boolean stopOnFailure(TemplateAction action) {
+        return !"continue".equals(action.onFailure());
     }
 
     private Map<String, Object> renderFields(Map<String, Object> fields, UnifiedTemplateEngine engine, CaseRuntimeContext context) {
