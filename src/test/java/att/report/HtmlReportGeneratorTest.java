@@ -32,7 +32,7 @@ class HtmlReportGeneratorTest {
         assertTrue(html.contains("caseSearch"));
         assertTrue(html.contains("aria-label=\"Report index\""));
         assertTrue(html.contains("href=\"#case-details\""));
-        assertTrue(html.contains("href=\"../ci/junit.html\""));
+        assertTrue(html.contains("href=\"junit.html\""));
         assertTrue(html.contains(HtmlSupport.id("payment.TC001")));
         assertFalse(Files.exists(tempDir.resolve("report/cases")));
     }

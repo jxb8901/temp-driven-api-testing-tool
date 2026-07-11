@@ -1,5 +1,7 @@
 # Changelog
 
+- Fixed `run --verbose` so it emits safe run/suite/case/stage/action lifecycle progress; completed the normal `[1/4]` through `[4/4]` progress sequence and made `--quiet` suppress completion output.
+
 ## [V2.1] - 2026-07-11
 
 - Added strict versioned schemas and package-wide/selected validation with structured diagnostics.

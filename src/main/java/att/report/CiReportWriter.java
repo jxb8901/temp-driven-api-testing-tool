@@ -18,7 +18,9 @@ public final class CiReportWriter {
         if (formats.contains("json")) Files.write(ci.resolve("summary.json"), json(runDirectory, runId, environment, summary, started, ended, inputManifestHash, diagnostics).getBytes(StandardCharsets.UTF_8));
         if (formats.contains("junit")) {
             Files.write(ci.resolve("junit.xml"), junit(runDirectory, runId, summary, caseLogThresholdBytes).getBytes(StandardCharsets.UTF_8));
-            Files.write(ci.resolve("junit.html"), junitHtml(runDirectory, runId, summary, caseLogThresholdBytes).getBytes(StandardCharsets.UTF_8));
+            Path report = runDirectory.resolve("report");
+            Files.createDirectories(report);
+            Files.write(report.resolve("junit.html"), junitHtml(runDirectory, runId, summary, caseLogThresholdBytes).getBytes(StandardCharsets.UTF_8));
         }
     }
 
@@ -55,7 +57,7 @@ public final class CiReportWriter {
         return out.append("</testsuite>").toString();
     }
     private String junitHtml(Path runDirectory, String runId, RunSummary summary, int threshold) throws Exception {
-        StringBuilder out = new StringBuilder("<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>JUnit ").append(HtmlSupport.escape(runId)).append("</title><style>body{font:14px/1.5 system-ui;margin:32px;color:#172033}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #d8dee9;text-align:left}th{background:#eef2f7}.PASS{color:#08783e}.FAIL,.ERROR,.INVALID{color:#b42318}.SKIPPED{color:#6941c6}pre{white-space:pre-wrap;max-height:320px;overflow:auto;background:#f6f8fa;padding:10px}a{color:#175cd3}</style></head><body><h1>JUnit Report</h1><p>Run <strong>").append(HtmlSupport.escape(runId)).append("</strong> · Tests ").append(summary.total()).append(" · Failures ").append(summary.failed()).append(" · Errors ").append(summary.error() + summary.invalid()).append(" · Skipped ").append(summary.skipped()).append("</p><p><a href=\"../report/index.html\">Open ATT report</a></p><table><tr><th>Case</th><th>Name</th><th>Status</th><th>Time</th><th>Case log</th></tr>");
+        StringBuilder out = new StringBuilder("<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>JUnit ").append(HtmlSupport.escape(runId)).append("</title><style>body{font:14px/1.5 system-ui;margin:32px;color:#172033}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #d8dee9;text-align:left}th{background:#eef2f7}.PASS{color:#08783e}.FAIL,.ERROR,.INVALID{color:#b42318}.SKIPPED{color:#6941c6}pre{white-space:pre-wrap;max-height:320px;overflow:auto;background:#f6f8fa;padding:10px}a{color:#175cd3}</style></head><body><h1>JUnit Report</h1><p>Run <strong>").append(HtmlSupport.escape(runId)).append("</strong> · Tests ").append(summary.total()).append(" · Failures ").append(summary.failed()).append(" · Errors ").append(summary.error() + summary.invalid()).append(" · Skipped ").append(summary.skipped()).append("</p><p><a href=\"index.html\">Open ATT report</a></p><table><tr><th>Case</th><th>Name</th><th>Status</th><th>Time</th><th>Case log</th></tr>");
         for (TestResult result : summary.results()) {
             out.append("<tr><td>").append(HtmlSupport.escape(result.caseId())).append("</td><td>").append(HtmlSupport.escape(result.caseName())).append("</td><td class=\"").append(result.status()).append("\">").append(result.status()).append("</td><td>").append(result.duration().toMillis()).append(" ms</td><td>");
             if (result.caseLogPath() != null && Files.exists(result.caseLogPath())) {

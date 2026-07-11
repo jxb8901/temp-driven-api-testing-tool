@@ -70,6 +70,7 @@ public class FrameworkEngine {
         List<TestResult> results = new ArrayList<>();
         SuiteConfigResolver suiteConfigResolver = new SuiteConfigResolver(projectRoot, config);
         boolean stopRun = false;
+        verbose(options, "[RUN] id=" + runId + " suites=" + suites.size() + " output=" + portable(outputRoot));
 
         for (Path suite : suites) {
             FrameworkConfig suiteConfig = suiteConfigResolver.resolve(resolve(suite));
@@ -79,11 +80,14 @@ public class FrameworkEngine {
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
             ExcelReportWriter reportWriter = new ExcelReportWriter(suiteConfig);
             List<TestCase> cases = new ExcelTestSuiteLoader(suiteConfig).load(resolve(suite));
+            verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
             List<TestResult> suiteResults = new ArrayList<TestResult>();
             for (TestCase testCase : cases) {
                 if (!options.matches(testCase)) continue;
                 if (options.rerunFailed() && !failedCaseIds.contains(testCase.caseId())) continue;
+                verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
                 TestResult result = runCase(testCase, suiteConfig, options, failedCaseIds, runId, runDirectory, templateLoader, templateRunner);
+                verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
                 results.add(result);
                 suiteResults.add(result);
                 appendEvent(runDirectory, runId, result);
@@ -152,12 +156,17 @@ public class FrameworkEngine {
                         continue;
                     }
                     StageTemplate template = templateLoader.load(stageData.templateName());
+                    verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=START");
                     context.beginStage(stageData, template.name(), template.directory());
                     caseLog.append("STAGE " + stage.key(), "template: " + stageData.templateName());
                     Instant stageStarted = Instant.now();
                     List<ValidationResult> stageResults = templateRunner.execute(stage.key(), template, context, caseLog);
                     ResultStatus stageStatus = aggregate(stageResults);
+                    for (ValidationResult actionResult : stageResults) {
+                        verbose(options, "[ACTION] case=" + testCase.caseId() + " stage=" + stage.key() + " action=" + actionResult.name() + " status=" + actionResult.status());
+                    }
                     context.finishStage(stageStatus.name(), Duration.between(stageStarted, Instant.now()).toMillis());
+                    verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=" + stageStatus + " durationMs=" + Duration.between(stageStarted, Instant.now()).toMillis());
                     validations.addAll(stageResults);
                     if (stageStatus == ResultStatus.FAIL || stageStatus == ResultStatus.ERROR || stageStatus == ResultStatus.INVALID) {
                         hasPriorFailure = true;
@@ -203,6 +212,16 @@ public class FrameworkEngine {
 
     private Path resolve(Path path) {
         return path.isAbsolute() ? path : projectRoot.resolve(path).normalize();
+    }
+
+    private void verbose(ExecutionOptions options, String message) {
+        if (options.verbose() && !options.quiet() && "human".equals(options.format())) System.out.println(message);
+    }
+
+    private String portable(Path path) {
+        Path absolute = path.toAbsolutePath().normalize();
+        Path root = projectRoot.toAbsolutePath().normalize();
+        return absolute.startsWith(root) ? root.relativize(absolute).toString().replace('\\', '/') : absolute.getFileName().toString();
     }
 
     private String runId(ExecutionOptions options) {
@@ -292,7 +311,7 @@ public class FrameworkEngine {
             cases.add(item);
         }
         history.put("cases", cases);
-        Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "ci/junit.html"); } history.put("outputs", outputs);
+        Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); } history.put("outputs", outputs);
         JsonSchemaVerifier.verify(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), history);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Files.write(runDirectory.resolve("run.yaml"), bytes);

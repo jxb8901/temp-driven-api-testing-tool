@@ -297,7 +297,7 @@ ATT 內置函數包括：
 - 結果工作簿：`output/<RunID>/workbooks/`
 - CI JSON：`output/<RunID>/ci/summary.json`
 - CI JUnit XML：`output/<RunID>/ci/junit.xml`
-- CI JUnit HTML：`output/<RunID>/ci/junit.html`（可直接開啟閱讀）
+- JUnit HTML 報告：`output/<RunID>/report/junit.html`（可直接開啟閱讀）
 - 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
 
 Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的非法字符及保留名稱限制。`report --run-id` 只接受合法 Run ID，不接受檔案路徑。
@@ -395,6 +395,6 @@ expression: "${ACTIONS.selectTxn.output.effectRows} >= 1 and true"
 - JSON/XML tool output 選擇正確，並以解析後結構撰寫 assertion。
 - 範例及 log 不包含敏感資料。
 - `./att.sh validate --package` 通過後再執行選定案例。
-- CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`ci/junit.html` 和 run manifest。
+- CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
 完整配置、Context、報告、打包及診斷內容見 [ATT V2.1 Reference Manual](09_Reference_Manual_V2.md)。

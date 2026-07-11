@@ -818,10 +818,10 @@ Each completed run writes:
 
 ```text
 <run>/ci/junit.xml
-<run>/ci/junit.html
+<run>/report/junit.html
 ```
 
-`junit.html` is a human-readable projection of the same `RunSummary` used by `junit.xml`; it does not introduce a second aggregation model. It contains counts, one row per testcase, status, duration, and either embedded case-log content or an external relative link using the same configured threshold as XML.
+`report/junit.html` is a human-readable projection of the same `RunSummary` used by `ci/junit.xml`; it does not introduce a second aggregation model. It is stored beside `report/index.html` and contains counts, one row per testcase, status, duration, and either embedded case-log content or an external relative link using the same configured threshold as XML.
 
 Mapping:
 

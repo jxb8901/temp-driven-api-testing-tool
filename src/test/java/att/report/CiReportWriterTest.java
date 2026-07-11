@@ -18,11 +18,11 @@ class CiReportWriterTest {
         new CiReportWriter().write(run,"R","SIT",summary,Instant.EPOCH,Instant.EPOCH,10,"abc",Collections.<att.validation.Diagnostic>emptyList(),new LinkedHashSet<String>(Arrays.asList("junit","json")));
         String external = new String(Files.readAllBytes(run.resolve("ci/junit.xml")),"UTF-8");
         assertTrue(external.contains("Case log: g.TC1/case.log")); assertFalse(external.contains("0123456789ABCDEF"));
-        String htmlExternal = new String(Files.readAllBytes(run.resolve("ci/junit.html")),"UTF-8");
+        String htmlExternal = new String(Files.readAllBytes(run.resolve("report/junit.html")),"UTF-8");
         assertTrue(htmlExternal.contains("JUnit Report")); assertTrue(htmlExternal.contains("Open log"));
         new CiReportWriter().write(run,"R","SIT",summary,Instant.EPOCH,Instant.EPOCH,100,"abc",Collections.<att.validation.Diagnostic>emptyList(),new LinkedHashSet<String>(Arrays.asList("junit","json")));
         String embedded = new String(Files.readAllBytes(run.resolve("ci/junit.xml")),"UTF-8");
         assertTrue(embedded.contains("0123456789ABCDEF"));
-        assertTrue(new String(Files.readAllBytes(run.resolve("ci/junit.html")),"UTF-8").contains("0123456789ABCDEF"));
+        assertTrue(new String(Files.readAllBytes(run.resolve("report/junit.html")),"UTF-8").contains("0123456789ABCDEF"));
     }
 }

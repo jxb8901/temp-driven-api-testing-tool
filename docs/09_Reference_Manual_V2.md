@@ -95,7 +95,7 @@ Exit codes are 0 for a successful command/run without FAIL, ERROR, or INVALID; 1
 
 `validate --package` is the default and validates the whole package, including unreferenced templates and tools. `validate --selected` validates only the dependency closure of the explicit selection and reports that the rest of the package was not checked. `run` always uses selected-scope validation for its immutable execution plan.
 
-`--dry-run` validates and records selected cases as SKIPPED without invoking tools. `--fail-fast` stops scheduling further cases after the first FAIL or ERROR. `--run-id` overrides the timestamp ID, must pass the ID safety rules in Section 13, and directly becomes the final run-directory name. `--output-dir` overrides the global output root for that command. `--ci-output junit,json` writes the requested CI files below the completed run. `--format json` emits machine-readable command output. `--quiet` suppresses normal progress messages; `--verbose` requests additional feedback. `--quiet` and `--verbose` cannot be combined.
+`--dry-run` validates and records selected cases as SKIPPED without invoking tools. `--fail-fast` stops scheduling further cases after the first FAIL or ERROR. `--run-id` overrides the timestamp ID, must pass the ID safety rules in Section 13, and directly becomes the final run-directory name. `--output-dir` overrides the global output root for that command. `--ci-output junit,json` writes the requested CI files below the completed run. `--format json` emits machine-readable command output. Normal human output reports all four phases: validation, selection, execution, and completion. `--quiet` suppresses these progress and completion messages. `--verbose` additionally reports safe run, suite, case, stage, and action lifecycle metadata including IDs, status, and duration; it never prints payloads, parsed output, commands, arguments, environment variables, stdout, or stderr. `--quiet` and `--verbose` cannot be combined.
 
 For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics are written to stderr. All command options are command-specific: an option that is unknown or not valid for the selected command is an error.
 
@@ -912,7 +912,7 @@ A request file can be:
       <Amount>${CASE.amount}</Amount>
     </PaymentRequest>
 
-Run `./att.sh validate --package` first, execute the selected Case ID, inspect case.yaml, ci/summary.json, ci/junit.xml, ci/junit.html, and the HTML report, then package the latest completed run with ./att.sh build.
+Run `./att.sh validate --package` first, execute the selected Case ID, inspect case.yaml, ci/summary.json, ci/junit.xml, report/junit.html, and the HTML report, then package the latest completed run with ./att.sh build.
 
 ### Failure compensation and cleanup example
 
@@ -970,7 +970,9 @@ output/<RunID>/
 ├── workbooks/              Result workbook copies
 ├── ci/
 │   ├── summary.json         CI JSON summary
-│   ├── junit.xml            CI JUnit XML
+│   └── junit.xml            CI JUnit XML
+├── report/
+│   ├── index.html           Main human report
 │   └── junit.html           Human-readable JUnit result view
 └── <groupId>.<rowCaseId>/
     ├── case.yaml           Persisted CASE runtime tree
@@ -986,7 +988,7 @@ Open report/index.html directly from disk. Use the case table to filter by statu
 
 `--ci-output junit,json` writes the requested files under `<run>/ci/`. JSON summary uses `schemaVersion: att-ci-summary/v2.1` and includes run/ATT IDs, environment, timing, aggregate counts/status, per-case result records, diagnostic counts, report/artifact paths, and input-manifest hash.
 
-JUnit produces both `<run>/ci/junit.xml` and `<run>/ci/junit.html`. The HTML file is a human-readable projection of the same run summary as the XML; it does not perform a second result aggregation. It shows counts plus one row per testcase with status, duration, and embedded case-log content or an external relative artifact link.
+JUnit produces `<run>/ci/junit.xml` and `<run>/report/junit.html`. The HTML file is stored with the other human reports and is a human-readable projection of the same run summary as the XML; it does not perform a second result aggregation. It shows counts plus one row per testcase with status, duration, and embedded case-log content or an external relative artifact link.
 
 JUnit XML maps one ATT case to one `<testcase>`: PASS has no child, FAIL writes `<failure>`, ERROR writes `<error>`, SKIPPED writes `<skipped>`, and INVALID writes `<error type="ATTValidationError">`. Action/stage diagnostics are XML-escaped. Both JUnit formats use `report.junit.caseLogEmbedThresholdBytes` (default 10240 UTF-8 bytes): at or below the threshold the case log is embedded; larger logs are summarized and linked by package-relative artifact path. Set the threshold to 0 to always link externally.
 
@@ -1085,6 +1087,7 @@ ATT first validates and produces an execution plan, then writes only beneath `ou
 | `./att.sh run --all --format json` | Emit machine-readable summary |
 | `./att.sh run --all --ci-output junit,json` | Write JUnit XML, JUnit HTML, and JSON files below the completed run |
 | `./att.sh run --all --quiet` | Suppress normal progress output |
+| `./att.sh run --all --verbose` | Add safe suite/case/stage/action lifecycle progress without payload or command content |
 | `./att.sh docs` | Generate the single-page package reference |
 | `./att.sh report --run-id <id>` | Regenerate a persisted report |
 | `./att.sh build` | Archive the latest completed run |
@@ -1112,7 +1115,7 @@ An assertion that evaluates false is FAIL. Tool non-zero exit, timeout, render/I
 
 ### How do I consume ATT in CI?
 
-Run `./att.sh run --all --ci-output junit,json`. Read `<run>/ci/junit.xml` for standard CI ingestion, open `<run>/ci/junit.html` for a human-readable JUnit view, and use `<run>/ci/summary.json` for structured ATT metadata. Use `./att.sh validate --package --format json` for pre-run validation diagnostics.
+Run `./att.sh run --all --ci-output junit,json`. Read `<run>/ci/junit.xml` for standard CI ingestion, open `<run>/report/junit.html` for a human-readable JUnit view, and use `<run>/ci/summary.json` for structured ATT metadata. Use `./att.sh validate --package --format json` for pre-run validation diagnostics.
 
 ### Why did a tool run more than once?
 

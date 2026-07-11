@@ -57,11 +57,15 @@ public final class FrameworkRunner {
             if (!validation.valid()) throw new IllegalArgumentException(validation.diagnostics.get(0).message());
             printDiagnostics(validation, options);
             if (!options.quiet() && "human".equals(options.format())) System.out.println("[1/4] V" + Version.PRODUCT + " validation PASS: " + validation);
+            if (!options.quiet() && "human".equals(options.format())) {
+                System.out.println("[2/4] Selected: " + validation.cases + " cases from " + validation.suites + " suites");
+                System.out.println("[3/4] Executing cases" + (options.verbose() ? " (verbose)" : ""));
+            }
             RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics);
             if ("json".equals(options.format())) {
                 System.out.printf("{\"total\":%d,\"passed\":%d,\"failed\":%d,\"error\":%d,\"skipped\":%d,\"invalid\":%d,\"report\":\"%s\"}%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid(), summary.reportPath().toString().replace("\\", "\\\\").replace("\"", "\\\""));
-            } else {
+            } else if (!options.quiet()) {
                 System.out.printf("[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
                 System.out.println("Report: " + summary.reportPath());

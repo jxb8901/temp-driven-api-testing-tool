@@ -40,7 +40,7 @@ Every workbook requires a same-basename sidecar. The included example contains 2
 - Result workbooks: `output/<RunID>/workbooks/`
 - CI JSON: `output/<RunID>/ci/summary.json`
 - CI JUnit XML: `output/<RunID>/ci/junit.xml`
-- CI JUnit HTML: `output/<RunID>/ci/junit.html`
+- JUnit HTML report: `output/<RunID>/report/junit.html`
 - Package documentation: `build/docs/index.html`
 - Latest completed-run archive: `build/att-run-<RunID>.tar.gz`
 

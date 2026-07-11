@@ -42,9 +42,23 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
         writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
 
-        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).run(new ExecutionOptions(
-                Paths.get("config/config.yaml"), Paths.get("testcase/payment.xlsx"), null,
-                new HashSet<String>(), new HashSet<String>(), new HashSet<String>(), "TEST-V2", false, false, false, null));
+        ExecutionOptions verboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose"});
+        java.io.ByteArrayOutputStream console = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream previous = System.out;
+        RunSummary summary;
+        try {
+            System.setOut(new java.io.PrintStream(console));
+            summary = new FrameworkEngine(projectRoot, globalConfig()).run(verboseOptions);
+        } finally {
+            System.setOut(previous);
+        }
+        String verbose = console.toString("UTF-8");
+        assertTrue(verbose.contains("[RUN] id=TEST-V2"));
+        assertTrue(verbose.contains("[SUITE]"));
+        assertTrue(verbose.contains("[CASE] id=payment.TC001 status=START"));
+        assertTrue(verbose.contains("[STAGE] case=payment.TC001 stage=invoke"));
+        assertTrue(verbose.contains("[ACTION] case=payment.TC001 stage=invoke action=callApi status=PASS"));
+        assertFalse(verbose.contains("<Response>"));
 
         assertEquals(1, summary.passed());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
@@ -53,6 +67,8 @@ class FrameworkEngineTest {
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/events.jsonl")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/summary.json")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.xml")));
+        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/report/junit.html")));
+        assertFalse(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.html")));
         String manifest = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/run.yaml")), "UTF-8");
         assertTrue(manifest.contains("schemaVersion: att-run/v2.1"));
         assertTrue(manifest.contains("javaVersion:")); assertTrue(manifest.contains("timezone:")); assertTrue(manifest.contains("sha256:"));
