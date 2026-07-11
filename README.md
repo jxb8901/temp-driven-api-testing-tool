@@ -6,19 +6,20 @@ V2.1 retains the V2 Case → Stage → Template → Action → Tool model while 
 
 ## Quick Start
 
-Requires Java 8 or newer. Maven is optional; `att.sh` can compile with `javac` when running from source.
-
 ```sh
-./att.sh validate --all
+./att.sh validate --package
 ./att.sh run --all
 ```
 
 Run one workbook, full Case ID, or tag:
 
 ```sh
+./att.sh validate --selected --case payment.TC001
+./att.sh validate --package --format json
 ./att.sh run --suite testcase/payment_regression.xlsx
 ./att.sh run --all --case payment.TC001
 ./att.sh run --all --tag smoke --exclude-tag slow
+./att.sh run --all --ci-output junit,json
 ```
 
 Every workbook requires a same-basename sidecar. The included example contains 22 cases across Chinese `payment` and `batch` sheets; both may contain row Case ID `TC001`, producing `payment.TC001` and `batch.TC001`.
@@ -27,7 +28,7 @@ Every workbook requires a same-basename sidecar. The included example contains 2
 
 ```sh
 ./att.sh                 # help
-./att.sh validate --all
+./att.sh validate --package
 ./att.sh run --all
 ./att.sh report --run-id <RunID>
 ./att.sh docs
@@ -37,10 +38,22 @@ Every workbook requires a same-basename sidecar. The included example contains 2
 
 - Reports: `output/<RunID>/report/index.html`
 - Result workbooks: `output/<RunID>/workbooks/`
+- CI JSON: `output/<RunID>/ci/summary.json`
+- CI JUnit XML: `output/<RunID>/ci/junit.xml`
+- CI JUnit HTML: `output/<RunID>/ci/junit.html`
 - Package documentation: `build/docs/index.html`
 - Latest completed-run archive: `build/att-run-<RunID>.tar.gz`
 
-`./att.sh docs` always produces one self-contained searchable page at `build/docs/index.html`; `--single-page` is not a supported option. `./att.sh clean` removes end-user output (`output`, `report`, `logs`, `build/docs`, and `build/att-*.tar.gz`) while preserving development `target`/`dist` content. `./build.sh clean` separately removes only `target` and `dist`.
+`./att.sh docs` always produces one self-contained searchable page at `build/docs/index.html`; `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, configuration, and documentation source files.
+
+## V2.1 essentials
+
+- `schemaVersion` is mandatory in global configuration, workbook sidecars, and templates. Unknown non-`x-*` fields are validation errors.
+- `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
+- Timeouts use milliseconds: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence. For example, `120000` is two minutes and `30000` is 30 seconds.
+- Retry is available only on a tool action and only for `retryOn: [EXIT_CODE]`; retries run immediately and timeout is never retried.
+- A valid Run ID and full Case ID are used directly as `output/<RunID>/<CaseID>/` directory names. They must not contain path separators, control characters, or platform-reserved names.
+- Tool commands are tokenized by ATT, not executed by a shell. Put free text, spaces, quotes, and special characters in `${TOOL.inputFile}` rather than interpolating them directly into `command`.
 
 ## V2 Model
 
@@ -59,4 +72,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.1 System Design](docs/02_System_Design_V2.1.md) for the normative specification.
-See the [ATT V2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.1 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.1 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

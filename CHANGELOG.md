@@ -3,8 +3,10 @@
 ## [V2.1] - 2026-07-11
 
 - Added strict versioned schemas and package-wide/selected validation with structured diagnostics.
-- Added identifier/path hardening, atomic run publication, reproducibility manifests, JSON/JUnit CI output, and verified run archives.
-- Corrected FAIL/ERROR aggregation and exit codes, XML repeated-element/attribute handling, bounded tool retry, version sourcing, and clean/build ownership.
+- Added identifier/path hardening, atomic run publication, reproducibility manifests, JSON CI output, JUnit XML, JUnit HTML, and verified run archives.
+- Changed timeouts from `timeoutSeconds` to millisecond `timeoutMs`; timeout precedence is tool action, workbook sidecar, then global configuration.
+- Added tool-action `timeoutMs` override and bounded immediate retry for `retryOn: [EXIT_CODE]`; delay/backoff, timeout retry, parser retry, and assertion retry are outside V2.1.
+- Corrected FAIL/ERROR aggregation and exit codes, XML repeated-element/attribute handling, and end-user generated-output cleanup ownership.
 
 ## [V2.0] - 2026-07-11
 
@@ -22,8 +24,8 @@ V2 implements the grouped Excel → stage → template → action → tool model
 
 ### Verified
 
-- Java 8-target compilation and 43 automated tests pass.
-- `./att.sh validate --all` validates 1 suite, 22 cases, 7 templates, and 7 tools; `./att.sh docs` produces only `build/docs/index.html`.
+- V2.0 release verification recorded Java 8-target compilation and 43 automated tests.
+- The bundled V2.0 sample used `validate --all` for 1 suite, 22 cases, 7 templates, and 7 tools; V2.1 replaces this workflow with `validate --package` / `validate --selected`.
 
 ## [V1.3] - 2026-07-09
 

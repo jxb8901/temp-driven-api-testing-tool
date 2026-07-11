@@ -1001,7 +1001,7 @@ JUnit XML maps one ATT case to one `<testcase>`: PASS has no child, FAIL writes 
 
 The build archive contains the completed report, workbooks, per-case logs, referenced artifacts, effective configuration/sidecars/template descriptors with configured secrets redacted, manifest, and hash information. It does not execute cases again.
 
-`att.sh clean` removes configured output/report/log roots, `build/docs`, and `build/att-*.tar.gz`. It never removes testcase, template, tool, configuration, documentation, schema, or other source files. It canonicalizes paths, rejects package/source roots and external symlink targets, is idempotent, and reports exactly what it removed.
+`att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`. It never removes testcase, template, tool, configuration, documentation, schema, or other source files. It canonicalizes paths, rejects package/source roots and external symlink targets, is idempotent, and reports exactly what it removed.
 
 ### 11.5 Common diagnostics and corrective actions
 

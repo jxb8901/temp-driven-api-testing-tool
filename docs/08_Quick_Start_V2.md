@@ -304,7 +304,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 
 清理只針對 ATT 產生的最終用戶輸出：
 
-- `./att.sh clean`：只清除 end-user 透過 ATT 產生的 output/report/log root、`build/docs` 及 `build/att-*.tar.gz`；不會清除案例、模板、工具、設定或文件。
+- `./att.sh clean`：只清除設定的 `outputDirectory`、`build/docs` 及 `build/att-*.tar.gz`；不會清除案例、模板、工具、設定或文件。
 
 `clean` 拒絕清除專案根目錄、專案外目錄、source/configuration directory 或會跳出專案的 symlink。
 
@@ -316,7 +316,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 - Context 是空值：檢查大寫核心節點及 ID；stage/action ID 不可包含 `.`。
 - Tool 驗證失敗：檢查 unknown、missing required 或 duplicate argument。
 - YAML cell 失敗：確認內容是 map 或 scalar shorthand；檢查重複 key 和未知字段。
-- 中文連結：V2 使用 Unicode-safe anchor，可支援中文 Case ID、模板名及路徑。
+- 中文連結：V2.1 使用 Unicode-safe anchor，可支援中文 Case ID、模板名及路徑。
 - JSON／XML output ERROR：檢查 raw output 和 parser diagnostic；JSON duplicate key、非合法 JSON，以及 XML DTD/外部 entity 都會被拒絕。
 - ERROR 與 FAIL：ERROR 表示執行可靠性問題，優先查看 tool attempt、stdout、stderr、raw output 和 case log；FAIL 表示 assertion 的預期與實際不一致。
 
