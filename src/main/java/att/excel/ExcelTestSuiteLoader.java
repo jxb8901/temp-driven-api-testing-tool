@@ -53,9 +53,8 @@ public final class ExcelTestSuiteLoader {
     private void loadGroup(Workbook workbook, Path suitePath, SheetGroupConfig group, List<TestCase> output, Set<String> ids) {
         Sheet sheet = workbook.getSheet(group.sheetName());
         if (sheet == null) throw new IllegalArgumentException("Missing configured sheet '" + group.sheetName() + "' for group '" + group.id() + "'");
-        Row header = sheet.getRow(0);
-        if (header == null) throw new IllegalArgumentException("Missing header row in sheet: " + group.sheetName());
-        Map<String, Integer> columns = columns(header);
+        if (sheet.getLastRowNum() < config.headerRows() - 1) throw new IllegalArgumentException("Missing header rows in sheet: " + group.sheetName());
+        Map<String, Integer> columns = columns(sheet, config.headerRows());
         requireColumn(columns, config.caseIdColumn(), "excel.caseId", group);
         requireColumn(columns, config.tagsColumn(), "excel.tags", group);
         for (DataColumnConfig column : config.dataColumns()) requireColumn(columns, column.columnName(), "excel.dataColumns." + column.key(), group);
@@ -63,7 +62,7 @@ public final class ExcelTestSuiteLoader {
             requireColumn(columns, stage.template(), "stages." + stage.key() + ".template", group);
             for (DataColumnConfig column : stage.dataColumns()) requireColumn(columns, column.columnName(), "stages." + stage.key() + ".dataColumns." + column.key(), group);
         }
-        for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+        for (int rowIndex = config.headerRows(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
             Row row = sheet.getRow(rowIndex);
             if (row == null || blankRow(row, columns)) continue;
             TestCase testCase = toCase(suitePath, group, row, columns);
@@ -119,8 +118,16 @@ public final class ExcelTestSuiteLoader {
     @SuppressWarnings("unchecked")
     private Map<String, Object> yamlMap(String text, String owner) {
         Object loaded = yaml(text);
-        if (!(loaded instanceof Map)) throw new IllegalArgumentException(owner + " must be a YAML map");
         Map<String, Object> result = new LinkedHashMap<String, Object>();
+        // A scalar selector is shorthand for {name: <selector>}. It preserves
+        // the ordinary name-first, path-second template resolution behavior.
+        if (loaded instanceof String) {
+            String selector = ValueNormalizer.normalize((String) loaded);
+            if (selector.isEmpty()) throw new IllegalArgumentException(owner + " must not be blank");
+            result.put("name", selector);
+            return result;
+        }
+        if (!(loaded instanceof Map)) throw new IllegalArgumentException(owner + " must be a YAML map or scalar template name/path");
         for (Map.Entry<?, ?> e : ((Map<?, ?>) loaded).entrySet()) result.put(String.valueOf(e.getKey()), normalizeYaml(e.getValue()));
         return result;
     }
@@ -141,12 +148,23 @@ public final class ExcelTestSuiteLoader {
         return value;
     }
 
-    private Map<String, Integer> columns(Row header) {
+    private Map<String, Integer> columns(Sheet sheet, int headerRows) {
         Map<String, Integer> result = new LinkedHashMap<String, Integer>();
-        for (Cell cell : header) {
-            String name = ValueNormalizer.normalize(formatter.formatCellValue(cell));
+        int maxColumns = 0;
+        for (int rowIndex = 0; rowIndex < headerRows; rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            if (row != null) maxColumns = Math.max(maxColumns, row.getLastCellNum());
+        }
+        for (int columnIndex = 0; columnIndex < maxColumns; columnIndex++) {
+            String name = "";
+            for (int rowIndex = 0; rowIndex < headerRows; rowIndex++) {
+                Row row = sheet.getRow(rowIndex);
+                Cell cell = row == null ? null : row.getCell(columnIndex);
+                String candidate = ValueNormalizer.normalize(cell == null ? "" : formatter.formatCellValue(cell));
+                if (!candidate.isEmpty()) name = candidate;
+            }
             if (!name.isEmpty()) {
-                if (result.put(name, cell.getColumnIndex()) != null) throw new IllegalArgumentException("Duplicate Excel header: " + name);
+                if (result.put(name, columnIndex) != null) throw new IllegalArgumentException("Duplicate Excel header: " + name);
             }
         }
         return result;

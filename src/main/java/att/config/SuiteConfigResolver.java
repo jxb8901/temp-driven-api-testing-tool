@@ -34,6 +34,8 @@ public final class SuiteConfigResolver {
         String sheet = required(excel, "sheet");
         String caseId = required(excel, "caseId");
         String tags = required(excel, "tags");
+        int headerRows = integer(excel.get("headerRows"), 1);
+        if (headerRows < 1) throw new IllegalArgumentException("excel.headerRows must be at least 1: " + sidecar);
         List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(text(excel.get("dataColumns"), ""));
         rejectReserved(dataColumns, new String[]{"caseId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "STAGES"}, "excel.dataColumns");
         List<StageConfig> stages = stages(map.get("stages"));
@@ -42,7 +44,7 @@ public final class SuiteConfigResolver {
         ReportConfig report = mergeReport(map.get("report"));
         return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
                 global.environment(), integer(map.get("timeoutSeconds"), global.timeoutSeconds()), global.templatesRoot(),
-                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages);
+                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows);
     }
 
     private List<StageConfig> stages(Object value) {

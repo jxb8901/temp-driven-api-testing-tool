@@ -46,7 +46,8 @@ public class ExcelReportWriter {
         try (InputStream input = Files.newInputStream(suitePath); Workbook workbook = WorkbookFactory.create(input); OutputStream output = Files.newOutputStream(reportPath)) {
             for (SheetGroupConfig group : config.sheetGroups()) {
                 Sheet sheet = workbook.getSheet(group.sheetName());
-                Row header = sheet.getRow(0);
+                Row header = sheet.getRow(config.headerRows() - 1);
+                if (header == null) throw new IllegalArgumentException("Missing final header row in sheet: " + group.sheetName());
                 int start = Math.max(0, header.getLastCellNum());
                 int offset = 0;
                 for (String headerName : config.report().columns().values()) {
@@ -54,7 +55,7 @@ public class ExcelReportWriter {
                     offset++;
                 }
                 int caseColumn = columnIndex(header, config.caseIdColumn());
-                for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                for (int rowIndex = config.headerRows(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
                     Row row = sheet.getRow(rowIndex);
                     if (row == null) continue;
                     Cell caseCell = row.getCell(caseColumn);

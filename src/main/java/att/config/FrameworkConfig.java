@@ -25,12 +25,13 @@ public final class FrameworkConfig {
     private final String tagsColumn;
     private final List<DataColumnConfig> dataColumns;
     private final List<StageConfig> stages;
+    private final int headerRows;
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
                            int timeoutSeconds, Path templatesRoot, Map<String, ToolConfig> tools,
                            ReportConfig report, RunConfig run) {
         this(outputDirectory, reportDirectory, logDirectory, environment, timeoutSeconds, templatesRoot, tools,
-                report, run, null, "", "", null, null);
+                report, run, null, "", "", null, null, 1);
     }
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
@@ -38,6 +39,15 @@ public final class FrameworkConfig {
                            ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutSeconds, templatesRoot, tools,
+                report, run, sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, 1);
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
+                           int timeoutSeconds, Path templatesRoot, Map<String, ToolConfig> tools,
+                           ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
+                           String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
+                           List<StageConfig> stages, int headerRows) {
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
@@ -52,6 +62,8 @@ public final class FrameworkConfig {
         this.tagsColumn = tagsColumn == null ? "" : tagsColumn;
         this.dataColumns = dataColumns == null ? Collections.<DataColumnConfig>emptyList() : new ArrayList<DataColumnConfig>(dataColumns);
         this.stages = stages == null ? Collections.<StageConfig>emptyList() : new ArrayList<StageConfig>(stages);
+        if (headerRows < 1) throw new IllegalArgumentException("excel.headerRows must be at least 1");
+        this.headerRows = headerRows;
     }
 
     public Path outputDirectory() { return outputDirectory; }
@@ -69,6 +81,7 @@ public final class FrameworkConfig {
     public String tagsColumn() { return tagsColumn; }
     public List<DataColumnConfig> dataColumns() { return Collections.unmodifiableList(dataColumns); }
     public List<StageConfig> stages() { return Collections.unmodifiableList(stages); }
+    public int headerRows() { return headerRows; }
     public boolean suiteResolved() { return !sheetGroups.isEmpty(); }
 
     private static ReportConfig defaultReport() {

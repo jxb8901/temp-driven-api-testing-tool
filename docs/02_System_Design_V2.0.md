@@ -177,6 +177,7 @@ testCaseTemplate:
 
 excel:
   sheet: payment=支付測試案例集, batch=批量測試案例集
+  headerRows: 2
   caseId: 案例編號
   tags: 標籤
   dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, creditAccount=入賬帳號, amount=金額, currency=幣別, 預期結果(yaml)
@@ -225,6 +226,20 @@ report:
 The established `testCaseTemplate`, `actionDefaults`, and `report` concepts remain available. Their V2 definitions are the only accepted definitions.
 
 # 6. Excel Testcase Groups
+
+## 6.0 Multi-row headers
+
+`excel.headerRows` controls how many rows from the top of each configured sheet are treated as headers. It defaults to `1`. Data rows begin immediately after the configured header rows.
+
+For each column, ATT scans the header rows from top to bottom and uses the last non-empty normalized cell as the effective physical column name. Header cells are not concatenated:
+
+```text
+Row 1: 基本資料 |             | 執行資訊 |             |
+Row 2: 案例編號 | 案例名稱     | 執行模板 | 執行參數     |
+Effective names: 案例編號, 案例名稱, 執行模板, 執行參數
+```
+
+Empty cells in an upper header row are allowed. Duplicate effective names, missing required effective names, or a headerRows value less than 1 are validation errors. The same effective-name resolution is used when writing result columns to the final header row.
 
 ## 6.1 `excel.sheet` grammar
 
@@ -436,7 +451,7 @@ V2 does not define a separate stage display `name` or `templateColumn`. The sing
 
 ## 8.2 Template selector cells
 
-Every non-blank stage template cell MUST be a YAML mapping. Scalar template cells are invalid in V2.
+Every non-blank stage template cell MUST be either a YAML mapping or a YAML scalar string. A scalar is shorthand for a mapping whose `name` is that scalar value.
 
 Symbolic-name example:
 
@@ -451,6 +466,14 @@ Full-path example:
 name: payment/local/CT001
 retry: 2
 ```
+
+Scalar shorthand example:
+
+```yaml
+payment/local/CT001
+```
+
+The scalar form is normalized internally to `name: payment/local/CT001`, so `${CASE.STAGES.invoke.name}` remains available and the same template resolution rule applies.
 
 The `name` key is mandatory and selects the template:
 
@@ -659,6 +682,17 @@ These are views over the current nodes in the `CASE` tree, not independent runti
 - Literals are quoted strings (`'text'` or `"text"`), numbers, and `true`/`false`. Quoted commas remain within one argument.
 - An exact `${path}` tool argument preserves the Context value's original type. A Context reference embedded inside a quoted literal becomes part of that string.
 - Assertions support `==`, `!=`, `>`, `>=`, `<`, `<=`, `like`, `is null`, `is not null`, parentheses, `not`, `and`, and `or`.
+
+### `like` wildcard semantics
+
+`like` performs a whole-string match using SQL-style wildcards:
+
+| Pattern token | Meaning | Example |
+|---|---|---|
+| `%` | Zero or more arbitrary characters | `'PAYMENT_POSTED' like 'PAYMENT%'` is true |
+| `_` | Exactly one arbitrary character | `'ABC' like 'A_C'` is true |
+
+For example, `${ACTIONS.getLogs.output} like '%PAYMENT%POSTED%'` checks that both text fragments occur in order. The current runtime translates `%` to `.*` and `_` to `.` before evaluating the Java regular expression. Therefore regex metacharacters in the pattern, including `.`, `+`, `*`, `[`, `]`, `(`, `)`, `?`, `^`, `$`, `|`, and `\\`, currently retain regular-expression meaning rather than being automatically treated as literal text. Authors SHOULD use `like` only with ordinary literal text plus `%` and `_`; use `==` for an exact comparison. A future strict SQL-LIKE escaping rule may remove this implementation limitation without changing the `%`/`_` contract.
 - Context values are bound as typed operands before expression parsing; their text cannot inject expression operators or alter precedence.
 
 # 12. Tool Configuration
@@ -1228,7 +1262,7 @@ The V2 System Design is complete when:
 - configurable required-column lists are removed;
 - case and stage `dataColumns` use the documented alias/direct/YAML/CSV-quoted grammar;
 - `stages[].template` is the only stage template-column field and fixed sidecar templates are unsupported;
-- every non-blank stage template cell is a YAML mapping with mandatory `name`, and every key-value pair is copied into stage data;
+- every non-blank stage template cell is a YAML mapping with mandatory `name` or a scalar shorthand normalized to `name`; every mapping key-value pair is copied into stage data;
 - `N/A`, `NA`, `NULL`, `NONE`, empty, and whitespace-only values normalize to blank and are passed to tool scripts as `""`;
 - stage-private data is stored beneath its stage node;
 - the authoritative runtime context is the documented CASE tree without `fields`, `data`, `metadata`, or `runtime` wrapper nodes;

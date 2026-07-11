@@ -86,6 +86,7 @@ Excel 表頭：
 ```yaml
 excel:
   sheet: 支付測試案例集
+  headerRows: 2
   caseId: 案例編號
   tags: 標籤
   dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, amount=金額, expected=預期結果(yaml)
@@ -101,7 +102,7 @@ report:
     reportLink: 詳細報告
 ```
 
-模板單元格必須是含 `name` 的 YAML map。`name` 有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。該 map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。詳細規則見 [Reference Manual V2：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
+模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。詳細規則見 [Reference Manual V2：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
 
 多 sheet 使用：
 
@@ -110,6 +111,18 @@ sheet: payment=支付測試案例集, batch=批量測試案例集
 ```
 
 完整 Case ID 分別是 `payment.TC001`、`batch.TC001`。
+
+### 多行表頭
+
+如果 Excel 前兩行是表頭，在 sidecar 的 `excel` 下設定 `headerRows: 2`。ATT 會逐欄由上到下尋找最後一個非空表頭 cell 作為實際欄名，不會把多行文字拼接：
+
+```text
+第 1 行：基本資料 |        | 執行資訊 |        |
+第 2 行：案例編號 | 案例名稱 | 執行模板 | 執行參數 |
+有效欄名：案例編號、案例名稱、執行模板、執行參數
+```
+
+`headerRows` 預設為 `1`；資料從表頭列之後開始。有效欄名重複、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
 
 ## 6. 表達式
 
