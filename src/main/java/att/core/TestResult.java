@@ -41,4 +41,8 @@ public class TestResult {
     public Path caseLogPath() { return caseLogPath; }
     public Path outputXml() { return caseLogPath; }
     public List<ValidationResult> validations() { return validations; }
+    public TestResult relocate(Path from, Path to) {
+        Path relocated = caseLogPath != null && caseLogPath.startsWith(from) ? to.resolve(from.relativize(caseLogPath)) : caseLogPath;
+        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations);
+    }
 }

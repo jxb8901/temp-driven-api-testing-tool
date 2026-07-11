@@ -1,6 +1,9 @@
 /* Author: Jeffrey + ChatGPT */
 package att.template;
 
+import att.Version;
+import att.config.SchemaSupport;
+
 import org.yaml.snakeyaml.Yaml;
 import att.config.YamlSupport;
 
@@ -20,15 +23,34 @@ public final class StageTemplateLoader {
     private final Map<String, Path> byName = new LinkedHashMap<String, Path>();
 
     public StageTemplateLoader(Path projectRoot, Path templatesRoot) throws Exception {
-        this.root = (templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot)).normalize();
+        Path canonicalProject = att.core.IdentifierValidator.canonicalPath(projectRoot, "package root");
+        Path configured = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
+        this.root = att.core.IdentifierValidator.canonicalPath(configured, "templates root");
+        if (!root.startsWith(canonicalProject)) throw new IllegalArgumentException("Templates root escapes package root: " + templatesRoot);
         index();
     }
 
     public StageTemplate load(String reference) throws Exception {
         Path directory = byName.get(reference);
-        if (directory == null) directory = byPath.get(reference.replace('\\', '/'));
+        if (directory == null) {
+            att.core.IdentifierValidator.relativePath(reference, "Template path");
+            directory = byPath.get(reference);
+        }
         if (directory == null) throw new IllegalArgumentException("Unknown template name/path: " + reference);
         return loadDirectory(reference, directory);
+    }
+
+    public List<StageTemplate> all() throws Exception {
+        List<String> paths = new ArrayList<String>(byPath.keySet());
+        java.util.Collections.sort(paths);
+        List<StageTemplate> templates = new ArrayList<StageTemplate>();
+        for (String path : paths) templates.add(loadDirectory(path, byPath.get(path)));
+        return templates;
+    }
+    public List<String> paths() {
+        List<String> paths = new ArrayList<String>(byPath.keySet());
+        java.util.Collections.sort(paths);
+        return java.util.Collections.unmodifiableList(paths);
     }
 
     private void index() throws Exception {
@@ -38,7 +60,7 @@ public final class StageTemplateLoader {
             while (iterator.hasNext()) {
                 Path directory = iterator.next();
                 Path descriptor = directory.resolve("template.yaml");
-                if (!Files.isRegularFile(descriptor)) continue;
+                if (!Files.isRegularFile(descriptor) || Files.isSymbolicLink(descriptor)) continue;
                 String relative = root.relativize(directory).toString().replace('\\', '/');
                 byPath.put(relative, directory);
                 Map<String, Object> yaml = yaml(descriptor);
@@ -55,15 +77,22 @@ public final class StageTemplateLoader {
     private StageTemplate loadDirectory(String reference, Path directory) throws Exception {
         if (!directory.normalize().startsWith(root)) throw new IllegalArgumentException("Template escapes root: " + reference);
         Map<String, Object> map = yaml(directory.resolve("template.yaml"));
-        if (map.containsKey("actionDefaults") || (map.get("config") instanceof Map && ((Map<?, ?>) map.get("config")).containsKey("actionDefaults"))) {
-            throw new IllegalArgumentException("V2 template does not support actionDefaults: " + directory);
-        }
+        SchemaSupport.requireVersion(map, Version.TEMPLATE_SCHEMA, "template");
+        SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
+        SchemaSupport.string(map.get("description"), "template.description", true);
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         Object configured = map.get("actions");
         if (!(configured instanceof Map)) throw new IllegalArgumentException("Template actions must be an ordered map: " + directory);
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Action must be a map: " + entry.getKey());
-            actions.add(new TemplateAction(String.valueOf(entry.getKey()), objectMap((Map<?, ?>) entry.getValue())));
+            String actionKey = String.valueOf(entry.getKey());
+            if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
+            Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
+            SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey, "type", "onFailure", "retry", "description", "payload", "saveAs", "output", "call", "expression", "message", "level", "fields");
+            SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
+            if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
+            for (String mapping : new String[]{"retry", "output", "fields"}) if (actionMap.get(mapping) != null && !(actionMap.get(mapping) instanceof Map)) throw new IllegalArgumentException("actions." + actionKey + "." + mapping + " must be a map");
+            actions.add(new TemplateAction(actionKey, objectMap(actionMap)));
         }
         if (actions.isEmpty()) throw new IllegalArgumentException("Template must contain at least one action: " + directory);
         return new StageTemplate(text(map.get("name"), reference), directory, actions);

@@ -1,6 +1,7 @@
+schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutSeconds: 120
+timeoutMs: 120000
 
 run:
   id:

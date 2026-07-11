@@ -7,10 +7,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 /** Shared escaping and stable Unicode-safe HTML identifiers. */
-final class HtmlSupport {
+public final class HtmlSupport {
     private HtmlSupport() {}
     static String escape(String value) { return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;"); }
-    static String id(String value) {
+    public static String id(String value) {
         String readable = value == null ? "item" : value.replaceAll("[^\\p{L}\\p{N}._-]", "-");
         return readable + "-" + hash(value == null ? "" : value).substring(0, 10);
     }

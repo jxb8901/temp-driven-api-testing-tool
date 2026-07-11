@@ -90,7 +90,7 @@ public class ExcelReportWriter {
         if ("durationMs".equals(field)) return String.valueOf(result.duration().toMillis());
         if ("actualResult".equals(field)) return result.actual();
         if ("caseLog".equals(field)) return result.caseLogPath() == null ? "" : result.caseLogPath().toString();
-        if ("reportLink".equals(field)) return "../report/cases/" + result.caseId().replaceAll("[^A-Za-z0-9._-]", "_") + ".html";
+        if ("reportLink".equals(field)) return "../report/index.html#case-" + att.report.HtmlSupport.id(result.caseId());
         if ("runTime".equals(field)) return java.time.LocalDateTime.now().toString();
         return "";
     }

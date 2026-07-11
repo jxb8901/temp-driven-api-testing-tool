@@ -1,0 +1,13 @@
+schemaVersion: att-diagnostic-catalog/v2.1
+codes:
+  ATT-CLI-001: Invalid command or command option
+  ATT-CFG-001: Invalid global configuration or schema
+  ATT-TC-001: Invalid workbook, sidecar, sheet, row, or testcase
+  ATT-TC-EMPTY: No testcase matches the selected validation plan
+  ATT-TPL-001: Invalid template or action contract
+  ATT-ASSERT-001: Business assertion evaluated to false
+  ATT-TOOL-001: Invalid tool descriptor, executable, or call contract
+  ATT-PATH-001: Unsafe identifier or filesystem path
+  ATT-RUN-001: Runtime or run lifecycle failure
+  ATT-PKG-001: Package integrity, build, or archive failure
+  ATT-PKG-SELECTED: Validation covered only the selected dependency closure

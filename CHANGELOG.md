@@ -1,5 +1,11 @@
 # Changelog
 
+## [V2.1] - 2026-07-11
+
+- Added strict versioned schemas and package-wide/selected validation with structured diagnostics.
+- Added identifier/path hardening, atomic run publication, reproducibility manifests, JSON/JUnit CI output, and verified run archives.
+- Corrected FAIL/ERROR aggregation and exit codes, XML repeated-element/attribute handling, bounded tool retry, version sourcing, and clean/build ownership.
+
 ## [V2.0] - 2026-07-11
 
 V2 implements the grouped Excel → stage → template → action → tool model defined by the V2 System Design.

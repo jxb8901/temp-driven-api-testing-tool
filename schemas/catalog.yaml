@@ -1,0 +1,9 @@
+schemaVersion: att-schema-catalog/v2.1
+schemas:
+  globalConfig: att-config-v2.1.schema.json
+  sidecar: att-sidecar-v2.1.schema.json
+  template: att-template-v2.1.schema.json
+  runManifest: att-run-v2.1.schema.json
+  validation: att-validation-v2.1.schema.json
+  ciSummary: att-ci-summary-v2.1.schema.json
+  junit: att-junit-v2.1.xsd

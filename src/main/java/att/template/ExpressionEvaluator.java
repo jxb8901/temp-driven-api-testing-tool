@@ -19,6 +19,23 @@ public class ExpressionEvaluator {
         return new Parser(expression).parse();
     }
 
+    /** Parses assertion syntax without requiring runtime context values to exist. */
+    public void validateSyntax(String expression) {
+        if (expression == null || expression.trim().isEmpty()) throw new IllegalArgumentException("Assertion expression must not be blank");
+        StringBuilder normalized = new StringBuilder();
+        for (int index = 0; index < expression.length();) {
+            int start = expression.indexOf("${", index);
+            if (start < 0) { normalized.append(expression.substring(index)); break; }
+            normalized.append(expression.substring(index, start));
+            int end = expression.indexOf('}', start + 2);
+            if (end < 0) throw new IllegalArgumentException("Unclosed context reference in expression");
+            String path = expression.substring(start + 2, end);
+            if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid context reference in expression: ${" + path + "}");
+            normalized.append('0'); index = end + 1;
+        }
+        evaluate(normalized.toString());
+    }
+
     /** Resolves Context values as typed expression literals before parsing. */
     public boolean evaluate(String expression, CaseRuntimeContext context) {
         Matcher matcher = CONTEXT.matcher(expression);

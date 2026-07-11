@@ -10,8 +10,6 @@ package att.core;
 public enum ResultStatus {
     PASS,
     FAIL,
-    PRECHECK_FAILED,
-    POSTCHECK_FAILED,
     ERROR,
     INVALID,
     SKIPPED

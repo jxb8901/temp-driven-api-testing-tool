@@ -14,9 +14,36 @@ import java.util.List;
 public final class GeneratedOutputCleaner {
     public void clean(Path projectRoot, FrameworkConfig config) throws IOException {
         Path root = projectRoot.toAbsolutePath().normalize();
+        reportInProgress(resolve(root, config.outputDirectory()));
         List<Path> targets = Arrays.asList(resolve(root, config.outputDirectory()), resolve(root, config.reportDirectory()),
-                resolve(root, config.logDirectory()), root.resolve("build/docs"), root.resolve("build"), root.resolve("target"));
+                resolve(root, config.logDirectory()), root.resolve("build/docs"));
         for (Path target : targets) deleteSafe(root, target);
+        deleteMatchingFiles(root.resolve("build"), "att-", ".tar.gz");
+    }
+
+    private void reportInProgress(Path outputRoot) throws IOException {
+        Path progress = outputRoot.resolve(".in-progress");
+        if (!Files.isDirectory(progress)) return;
+        try (java.util.stream.Stream<Path> entries = Files.list(progress)) {
+            java.util.Iterator<Path> iterator = entries.sorted().iterator();
+            while (iterator.hasNext()) {
+                Path entry = iterator.next();
+                long ageSeconds = Math.max(0, (System.currentTimeMillis() - Files.getLastModifiedTime(entry).toMillis()) / 1000);
+                System.err.println("ATT-CLEAN-STALE: in-progress run age=" + ageSeconds + "s path=" + entry);
+            }
+        }
+    }
+
+    private void deleteMatchingFiles(Path directory, String prefix, String suffix) throws IOException {
+        if (!Files.isDirectory(directory)) return;
+        try (java.util.stream.Stream<Path> files = Files.list(directory)) {
+            java.util.Iterator<Path> iterator = files.iterator();
+            while (iterator.hasNext()) {
+                Path file = iterator.next();
+                String name = file.getFileName().toString();
+                if (Files.isRegularFile(file) && name.startsWith(prefix) && name.endsWith(suffix)) Files.delete(file);
+            }
+        }
     }
 
     private Path resolve(Path root, Path configured) {
@@ -28,7 +55,8 @@ public final class GeneratedOutputCleaner {
         if (!target.startsWith(root) || target.equals(root)) {
             throw new IllegalArgumentException("clean refuses a directory outside the ATT package: " + target);
         }
-        for (String sourceDirectory : new String[]{"config", "testcase", "templates", "tools", "docs", "lib", "src", ".git"}) {
+        if (target.equals(root.resolve("build")) || target.equals(root.resolve("target")) || target.equals(root.resolve("dist"))) throw new IllegalArgumentException("clean refuses a shared build/development directory: " + target);
+        for (String sourceDirectory : new String[]{"config", "testcase", "templates", "tools", "docs", "schemas", "lib", "src", ".git"}) {
             if (target.startsWith(root.resolve(sourceDirectory))) {
                 throw new IllegalArgumentException("clean refuses an ATT source directory: " + target);
             }

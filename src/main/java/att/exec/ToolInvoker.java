@@ -14,10 +14,15 @@ import att.template.TemplateRenderer;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.w3c.dom.NamedNodeMap;
 import org.xml.sax.InputSource;
 import org.yaml.snakeyaml.Yaml;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.XMLConstants;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -51,6 +56,18 @@ public class ToolInvoker {
     }
 
     public ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        return invoke(invocationId, toolName, input, context, log, true);
+    }
+
+    public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
+        return invoke(invocationId, toolName, input, context, log, false, timeoutMs);
+    }
+
+    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction) throws Exception {
+        return invoke(invocationId, toolName, input, context, log, recordAction, null);
+    }
+
+    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs) throws Exception {
         ToolConfig tool = config.tool(toolName);
         if (tool == null) {
             throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -77,13 +94,18 @@ public class ToolInvoker {
             renderContext.put("TOOL.input." + last.key(), value instanceof List ? shellArgs(stringList((List<?>) value)) : "");
         }
         String command = TemplateRenderer.render(tool.command(), renderContext);
-        CommandResult commandResult = commandRunner.run(command, Duration.ofSeconds(config.timeoutSeconds()), projectRoot);
+        CommandResult commandResult;
+        long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
+        try { commandResult = commandRunner.run(command, Duration.ofMillis(timeoutMs), projectRoot); }
+        catch (java.io.IOException e) { Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("id", id); evidence.put("type", "tool"); evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage()); throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e); }
         if (!Files.exists(outputFile)) {
             Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
         }
 
         String rawOutput = new String(Files.readAllBytes(outputFile), StandardCharsets.UTF_8).trim();
-        Object parsed = commandResult.exitCode() == 0 && !commandResult.timedOut() ? parseOutput(rawOutput, tool.output()) : rawOutput;
+        Object parsed = rawOutput;
+        Exception parseFailure = null;
+        if (commandResult.exitCode() == 0 && !commandResult.timedOut()) try { parsed = parseOutput(rawOutput, tool.output()); } catch (Exception e) { parseFailure = e; }
 
         Map<String, Object> toolInvocation = new LinkedHashMap<String, Object>();
         toolInvocation.put("name", toolName);
@@ -95,7 +117,9 @@ public class ToolInvoker {
         toolInvocation.put("stdout", commandResult.stdout());
         toolInvocation.put("stderr", commandResult.stderr());
         toolInvocation.put("command", command);
-        toolInvocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 ? "PASS" : "ERROR"));
+        toolInvocation.put("timeoutMs", timeoutMs);
+        toolInvocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 && parseFailure == null ? "PASS" : "ERROR"));
+        if (parseFailure != null) toolInvocation.put("parserDiagnostic", parseFailure.getMessage());
         toolInvocation.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         toolInvocation.put("exitCode", commandResult.exitCode());
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
@@ -103,12 +127,17 @@ public class ToolInvoker {
         invocation.put("type", "tool");
         invocation.put("status", toolInvocation.get("status"));
         invocation.put("durationMs", toolInvocation.get("durationMs"));
+        invocation.put("input", resolvedInput);
+        invocation.put("output", parsed);
+        invocation.put("inputFile", inputFile.toString());
+        invocation.put("outputFile", outputFile.toString());
+        invocation.put("rawOutput", rawOutput);
         // Keep the action node focused on action metadata while exposing the
         // invoked tool through the V2 uppercase TOOL child node.
         Map<String, Object> toolNode = new LinkedHashMap<String, Object>();
         toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
-        context.addAction(id, invocation);
+        if (recordAction) context.addAction(id, invocation);
         context.put("TOOL.input", resolvedInput);
         context.put("TOOL.output", parsed);
         context.put("TOOL.inputFile", inputFile.toString());
@@ -116,11 +145,12 @@ public class ToolInvoker {
         log.append("ACTION " + id, invocation);
 
         if (commandResult.timedOut()) {
-            throw new IllegalStateException("Tool timed out: " + toolName);
+            throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
         if (commandResult.exitCode() != 0) {
-            throw new IllegalStateException("Tool failed: " + toolName + ", exitCode=" + commandResult.exitCode());
+            throw new ToolExecutionException("EXIT_CODE", "Tool failed: " + toolName + ", exitCode=" + commandResult.exitCode(), invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
+        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation);
     }
 
@@ -251,38 +281,83 @@ public class ToolInvoker {
         if ("xml".equalsIgnoreCase(outputType)) {
             return xmlToMap(text);
         }
+        if ("json".equalsIgnoreCase(outputType)) {
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+            mapper.enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
+            return mapper.readValue(text, Object.class);
+        }
         return text;
     }
 
     private Map<String, Object> xmlToMap(String xml) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
         factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
         factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
         factory.setXIncludeAware(false);
         factory.setExpandEntityReferences(false);
-        Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+        javax.xml.parsers.DocumentBuilder builder = factory.newDocumentBuilder();
+        builder.setErrorHandler(new org.xml.sax.ErrorHandler() {
+            public void warning(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
+            public void error(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
+            public void fatalError(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
+        });
+        Document document = builder.parse(new InputSource(new StringReader(xml)));
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put(document.getDocumentElement().getNodeName(), elementToMap(document.getDocumentElement()));
+        result.put("name", xmlName(document.getDocumentElement()));
+        result.putAll(elementToMap(document.getDocumentElement()));
         return result;
     }
 
-    private Object elementToMap(Node node) {
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> elementToMap(Node node) {
         NodeList children = node.getChildNodes();
         Map<String, Object> map = new LinkedHashMap<String, Object>();
-        boolean hasElement = false;
+        Map<String, Object> attributes = new LinkedHashMap<String, Object>();
+        NamedNodeMap nodeAttributes = node.getAttributes();
+        if (nodeAttributes != null) for (int i = 0; i < nodeAttributes.getLength(); i++) {
+            Node attribute = nodeAttributes.item(i);
+            if (attribute.getNodeName().startsWith("xmlns")) continue;
+            attributes.put(xmlName(attribute), attribute.getNodeValue());
+        }
+        map.put("attributes", attributes);
+        StringBuilder text = new StringBuilder();
+        Map<String, Object> grouped = new LinkedHashMap<String, Object>();
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.ELEMENT_NODE) {
-                hasElement = true;
-                map.put(child.getNodeName(), elementToMap(child));
+                String name = xmlName(child);
+                Map<String, Object> item = new LinkedHashMap<String, Object>();
+                item.put("name", name);
+                item.putAll(elementToMap(child));
+                Object existing = grouped.get(name);
+                if (existing == null) grouped.put(name, item);
+                else if (existing instanceof List) ((List<Object>) existing).add(item);
+                else { List<Object> repeated = new ArrayList<Object>(); repeated.add(existing); repeated.add(item); grouped.put(name, repeated); }
+            } else if (child.getNodeType() == Node.TEXT_NODE || child.getNodeType() == Node.CDATA_SECTION_NODE) {
+                text.append(child.getNodeValue());
             }
         }
-        return hasElement ? map : node.getTextContent().trim();
+        map.put("text", text.toString().trim());
+        map.put("children", grouped);
+        return map;
+    }
+
+    private String xmlName(Node node) {
+        String local = node.getLocalName() == null ? node.getNodeName() : node.getLocalName();
+        if ("ignore".equals(config.xmlNamespaceMode())) return local;
+        String uri = node.getNamespaceURI();
+        return "{" + (uri == null ? "" : uri) + "}" + local;
     }
 
     private String extension(String outputType) {
-        return "xml".equalsIgnoreCase(outputType) ? "xml" : ("yaml".equalsIgnoreCase(outputType) ? "yaml" : "txt");
+        return "xml".equalsIgnoreCase(outputType) ? "xml" : ("yaml".equalsIgnoreCase(outputType) ? "yaml" : ("json".equalsIgnoreCase(outputType) ? "json" : "txt"));
     }
 }

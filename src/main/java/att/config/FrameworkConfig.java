@@ -15,7 +15,7 @@ public final class FrameworkConfig {
     private final Path reportDirectory;
     private final Path logDirectory;
     private final String environment;
-    private final int timeoutSeconds;
+    private final int timeoutMs;
     private final Path templatesRoot;
     private final Map<String, ToolConfig> tools;
     private final ReportConfig report;
@@ -26,33 +26,43 @@ public final class FrameworkConfig {
     private final List<DataColumnConfig> dataColumns;
     private final List<StageConfig> stages;
     private final int headerRows;
+    private final String xmlNamespaceMode;
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
-                           int timeoutSeconds, Path templatesRoot, Map<String, ToolConfig> tools,
+                           int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
                            ReportConfig report, RunConfig run) {
-        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutSeconds, templatesRoot, tools,
-                report, run, null, "", "", null, null, 1);
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, tools,
+                report, run, null, "", "", null, null, 1, "ignore");
     }
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
-                           int timeoutSeconds, Path templatesRoot, Map<String, ToolConfig> tools,
+                           int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
                            ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages) {
-        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutSeconds, templatesRoot, tools,
-                report, run, sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, 1);
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, tools,
+                report, run, sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, 1, "ignore");
     }
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
-                           int timeoutSeconds, Path templatesRoot, Map<String, ToolConfig> tools,
+                           int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
                            ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages, int headerRows) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, tools, report, run,
+                sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, headerRows, "ignore");
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
+                           int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
+                           ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
+                           String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
+                           List<StageConfig> stages, int headerRows, String xmlNamespaceMode) {
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
         this.environment = environment == null ? "SIT" : environment;
-        this.timeoutSeconds = timeoutSeconds;
+        this.timeoutMs = timeoutMs;
         this.templatesRoot = templatesRoot == null ? Paths.get("templates") : templatesRoot;
         this.tools = tools == null ? Collections.<String, ToolConfig>emptyMap() : new LinkedHashMap<String, ToolConfig>(tools);
         this.report = report == null ? defaultReport() : report;
@@ -64,13 +74,15 @@ public final class FrameworkConfig {
         this.stages = stages == null ? Collections.<StageConfig>emptyList() : new ArrayList<StageConfig>(stages);
         if (headerRows < 1) throw new IllegalArgumentException("excel.headerRows must be at least 1");
         this.headerRows = headerRows;
+        this.xmlNamespaceMode = xmlNamespaceMode == null ? "ignore" : xmlNamespaceMode;
+        if (!("ignore".equals(this.xmlNamespaceMode) || "preserve".equals(this.xmlNamespaceMode))) throw new IllegalArgumentException("xml.namespaceMode must be ignore or preserve");
     }
 
     public Path outputDirectory() { return outputDirectory; }
     public Path reportDirectory() { return reportDirectory; }
     public Path logDirectory() { return logDirectory; }
     public String environment() { return environment; }
-    public int timeoutSeconds() { return timeoutSeconds; }
+    public int timeoutMs() { return timeoutMs; }
     public Path templatesRoot() { return templatesRoot; }
     public Map<String, ToolConfig> tools() { return Collections.unmodifiableMap(tools); }
     public ToolConfig tool(String key) { return tools.get(key); }
@@ -82,6 +94,7 @@ public final class FrameworkConfig {
     public List<DataColumnConfig> dataColumns() { return Collections.unmodifiableList(dataColumns); }
     public List<StageConfig> stages() { return Collections.unmodifiableList(stages); }
     public int headerRows() { return headerRows; }
+    public String xmlNamespaceMode() { return xmlNamespaceMode; }
     public boolean suiteResolved() { return !sheetGroups.isEmpty(); }
 
     private static ReportConfig defaultReport() {

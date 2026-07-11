@@ -8,6 +8,7 @@ import att.config.StageConfig;
 import att.config.YamlSupport;
 import att.core.StageCaseData;
 import att.core.TestCase;
+import att.core.IdentifierValidator;
 import att.core.ValueNormalizer;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
@@ -98,6 +99,7 @@ public final class ExcelTestSuiteLoader {
             }
             stages.put(stage.key(), new StageCaseData(stage.key(), ValueNormalizer.normalize(String.valueOf(name)), stageValues));
         }
+        IdentifierValidator.caseId(group.id(), rowCaseId);
         return new TestCase(row.getRowNum() + 1, group.id(), group.sheetName(), rowCaseId, tags, caseData, stages, null);
     }
 

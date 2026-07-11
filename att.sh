@@ -22,6 +22,9 @@ fi
 CP="$ROOT_DIR/target/classes:$ROOT_DIR/target/test-classes"
 
 for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
+  "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.17.2/jackson-annotations-2.17.2.jar \
+  "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar \
+  "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar \
   "$HOME"/.m2/repository/org/apache/commons/commons-compress/1.25.0/commons-compress-1.25.0.jar \
   "$HOME"/.m2/repository/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar \
   "$HOME"/.m2/repository/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar \
@@ -38,14 +41,15 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
 done
 
 NEEDS_BUILD=false
-if [ ! -d "$ROOT_DIR/target/classes" ]; then
+BUILD_MARKER="$ROOT_DIR/target/classes/att-build.properties"
+if [ ! -f "$BUILD_MARKER" ]; then
   NEEDS_BUILD=true
-elif find "$ROOT_DIR/src/main/java" -name '*.java' -newer "$ROOT_DIR/target/classes" -print -quit | grep -q .; then
+elif find "$ROOT_DIR/src/main/java" -name '*.java' -newer "$BUILD_MARKER" -print -quit | grep -q .; then
   NEEDS_BUILD=true
 fi
 
 if [ "$NEEDS_BUILD" = true ]; then
-  echo "Compiling ATT V2 sources..."
+  echo "Compiling ATT sources..."
   if command -v mvn >/dev/null 2>&1; then
     (cd "$ROOT_DIR" && mvn -q -DskipTests compile)
   elif command -v javac >/dev/null 2>&1; then

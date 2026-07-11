@@ -1,8 +1,8 @@
-# ATT V2 - Automated Testing Tool
+# ATT V2.1 - Automated Testing Tool
 
-ATT V2 loads grouped Excel testcases through mandatory sidecar YAML, executes template actions and external tools, and produces result workbooks, offline HTML reports, documentation, logs, and completed-run archives.
+ATT V2.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
-V2.0 is a new configuration model: it does not accept V1 configuration aliases. Every workbook requires an adjacent sidecar, every template is a directory containing `template.yaml`, and external tool contracts are validated before execution.
+V2.1 retains the V2 Case → Stage → Template → Action → Tool model while requiring explicit V2.1 schema versions, rejecting unknown fields, validating identifiers and paths, and distinguishing business FAIL from execution ERROR.
 
 ## Quick Start
 
@@ -38,9 +38,9 @@ Every workbook requires a same-basename sidecar. The included example contains 2
 - Reports: `output/<RunID>/report/index.html`
 - Result workbooks: `output/<RunID>/workbooks/`
 - Package documentation: `build/docs/index.html`
-- Latest completed-run archive: `build/att-<RunID>.tar.gz`
+- Latest completed-run archive: `build/att-run-<RunID>.tar.gz`
 
-`./att.sh docs` always produces one self-contained searchable page at `build/docs/index.html`; `--single-page` is not a supported option. `./att.sh clean` removes generated output (`output`, `report`, `logs`, `build/docs`, `build`, and `target`) while protecting source/configuration directories.
+`./att.sh docs` always produces one self-contained searchable page at `build/docs/index.html`; `--single-page` is not a supported option. `./att.sh clean` removes end-user output (`output`, `report`, `logs`, `build/docs`, and `build/att-*.tar.gz`) while preserving development `target`/`dist` content. `./build.sh clean` separately removes only `target` and `dist`.
 
 ## V2 Model
 
@@ -58,5 +58,5 @@ test case --1:n stage--> template --1:n action--> tool
 - Tool argument descriptors contain `name`, `description`, `required`, and optional final-argument `delimit`.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
-See [V2 System Design](docs/02_System_Design_V2.0.md) for the normative specification.
+See [V2.1 System Design](docs/02_System_Design_V2.1.md) for the normative specification.
 See the [ATT V2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

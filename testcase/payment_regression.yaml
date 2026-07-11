@@ -1,7 +1,4 @@
-testCaseTemplate:
-  id: payment_transfer_cases
-  name: Payment Transfer Cases
-
+schemaVersion: att-sidecar/v2.1
 excel:
   sheet: payment=支付測試案例集, batch=批量測試案例集
   caseId: 案例編號

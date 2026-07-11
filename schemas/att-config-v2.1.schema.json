@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "att-config/v2.1",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {"const": "att-config/v2.1"},
+    "outputDirectory": {"type": "string", "minLength": 1},
+    "environment": {"type": "string", "minLength": 1},
+    "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 86400000},
+    "templates": {"type": "object", "properties": {"root": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "run": {"type": "object", "properties": {"id": {"type": "object", "properties": {"default": {"const": "timestamp"}, "timestampFormat": {"type": "string", "minLength": 1}}, "additionalProperties": false}}, "additionalProperties": false},
+    "report": {"type": "object", "properties": {"mode": {"const": "append-to-copy"}, "fileNamePattern": {"type": "string"}, "columns": {"type": "object", "additionalProperties": {"type": "string"}}, "junit": {"type": "object", "properties": {"caseLogEmbedThresholdBytes": {"type": "integer", "minimum": 0, "maximum": 1048576}}, "additionalProperties": false}}, "additionalProperties": false},
+    "xml": {"type": "object", "properties": {"namespaceMode": {"enum": ["ignore", "preserve"]}}, "additionalProperties": false},
+    "tools": {"type": "object", "additionalProperties": {"$ref": "#/$defs/tool"}}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "argument": {"type": "object", "required": ["name", "description", "required"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "required": {"type": "boolean"}, "delimit": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "tool": {"type": "object", "required": ["name", "description", "command"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "command": {"type": "string", "minLength": 1}, "output": {"enum": ["txt", "yaml", "json", "xml"]}, "arguments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/argument"}}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}
+  }
+}

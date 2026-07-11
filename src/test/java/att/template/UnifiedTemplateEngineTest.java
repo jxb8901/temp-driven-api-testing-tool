@@ -50,7 +50,7 @@ class UnifiedTemplateEngineTest {
 
     private static final class CapturingInvoker extends ToolInvoker {
         private Map<String,Object> input;
-        CapturingInvoker(Path root){super(root,new FrameworkConfig(null,null,null,"SIT",10,null,null,null,null));}
+        CapturingInvoker(Path root){super(root,new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));}
         @Override public ToolInvocationResult invoke(String invocationId,String toolName,Map<String,Object> input,CaseRuntimeContext context,CaseExecutionLog log){this.input=input;return new ToolInvocationResult(toolName,invocationId,"ok",Collections.<String,Object>emptyMap());}
     }
 }

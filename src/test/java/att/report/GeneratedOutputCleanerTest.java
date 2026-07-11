@@ -13,6 +13,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GeneratedOutputCleanerTest {
     @TempDir Path tempDir;
@@ -24,12 +25,18 @@ class GeneratedOutputCleanerTest {
             Files.createDirectories(file.getParent());
             Files.write(file, new byte[]{1});
         }
+        Files.write(tempDir.resolve("build/att-run-R1.tar.gz"), new byte[]{1});
+        Files.write(tempDir.resolve("build/keep.txt"), new byte[]{1});
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
                 Paths.get("templates"), Collections.emptyMap(), null, new RunConfig("timestamp", "yyyyMMdd"));
         new GeneratedOutputCleaner().clean(tempDir, config);
-        for (String directory : new String[]{"output", "report", "logs", "build/docs", "dist", "target"}) {
+        for (String directory : new String[]{"output", "report", "logs", "build/docs"}) {
             assertFalse(Files.exists(tempDir.resolve(directory)));
         }
+        assertTrue(Files.exists(tempDir.resolve("dist")));
+        assertTrue(Files.exists(tempDir.resolve("target")));
+        assertFalse(Files.exists(tempDir.resolve("build/att-run-R1.tar.gz")));
+        assertTrue(Files.exists(tempDir.resolve("build/keep.txt")));
     }
 
     @Test

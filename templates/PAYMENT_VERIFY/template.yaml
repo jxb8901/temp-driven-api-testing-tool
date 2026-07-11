@@ -1,14 +1,15 @@
+schemaVersion: att-template/v2.1
 name: PAYMENT_VERIFY
 description: Verify payment API response, CT records and application logs.
 
 actions:
   checkAPIResult:
     type: assert
-    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.Status} == '${CASE.預期結果.status}'"
+    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.children.Status.text} == '${CASE.預期結果.status}'"
 
   checkRejectCode:
     type: assert
-    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.RejectCode} == '${CASE.預期結果.rejectCode}'"
+    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.children.RejectCode.text} == '${CASE.預期結果.rejectCode}'"
 
   selectTxn:
     type: tool
@@ -36,5 +37,5 @@ actions:
     level: INFO
     message: "Verified payment result for ${CASE.caseId}"
     fields:
-      apiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.Status}"
+      apiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.children.Status.text}"
       txnStatus: "${ACTIONS.selectTxn.output.record.status}"

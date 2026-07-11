@@ -1,6 +1,9 @@
 /* Author: Jeffrey + ChatGPT */
 package att.report;
 
+import att.core.IdentifierValidator;
+import att.config.YamlSupport;
+import att.Version;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.InputStream;
@@ -22,30 +25,55 @@ public final class RunArchiveBuilder {
     public Path build(Path projectRoot, Path outputRoot) throws Exception {
         Path latest = outputRoot.resolve("latest-run.yaml");
         if (!Files.exists(latest)) throw new IllegalArgumentException("Latest run does not exist: " + latest);
-        Object loaded = new Yaml().load(new String(Files.readAllBytes(latest), "UTF-8"));
-        if (!(loaded instanceof Map) || !"COMPLETE".equals(String.valueOf(((Map<?, ?>) loaded).get("status")))) throw new IllegalArgumentException("Latest run is not COMPLETE");
+        Object loaded = YamlSupport.parser().load(new String(Files.readAllBytes(latest), "UTF-8"));
+        if (!(loaded instanceof Map) || !"att-latest-run/v2.1".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid latest run pointer");
         String runId = String.valueOf(((Map<?, ?>) loaded).get("runId"));
-        Path runDir = Paths.get(String.valueOf(((Map<?, ?>) loaded).get("runDirectory")));
-        if (!runDir.isAbsolute()) runDir = projectRoot.resolve(runDir).normalize();
+        IdentifierValidator.runId(runId);
+        Path runDir = IdentifierValidator.strictChild(outputRoot, runId, "Archive run directory");
         if (!Files.isDirectory(runDir)) throw new IllegalArgumentException("Run directory does not exist: " + runDir);
-        snapshotPackage(projectRoot, runDir);
-        Path dist = projectRoot.resolve("dist");
+        Object manifestObject = YamlSupport.parser().load(new String(Files.readAllBytes(runDir.resolve("run.yaml")), "UTF-8"));
+        if (!(manifestObject instanceof Map) || !"att-run/v2.1".equals(String.valueOf(((Map<?, ?>) manifestObject).get("schemaVersion")))) throw new IllegalArgumentException("Run manifest is not V2.1: " + runId);
+        Object runNode = ((Map<?, ?>) manifestObject).get("run");
+        if (!(runNode instanceof Map) || !"COMPLETE".equals(String.valueOf(((Map<?, ?>) runNode).get("state")))) throw new IllegalArgumentException("Latest run is not COMPLETE");
+        String expectedManifestHash = String.valueOf(((Map<?, ?>) loaded).get("manifestSha256"));
+        if (expectedManifestHash.length() != 64 || !expectedManifestHash.equals(sha256(runDir.resolve("run.yaml")))) throw new IllegalArgumentException("Latest run manifest hash does not match: " + runId);
+        Path dist = projectRoot.resolve("build");
         Files.createDirectories(dist);
-        Path archive = dist.resolve("att-" + runId + ".tar.gz");
+        Path stagingRoot = outputRoot.resolve(".in-progress"); Files.createDirectories(stagingRoot);
+        Path stagedRun = stagingRoot.resolve("archive-" + runId + "-" + java.util.UUID.randomUUID().toString());
+        copyTree(runDir, stagedRun);
+        snapshotPackage(projectRoot, stagedRun, (Map<?, ?>) manifestObject);
+        Path archive = dist.resolve("att-run-" + runId + ".tar.gz");
         List<Path> files = new ArrayList<Path>();
-        try (Stream<Path> stream = Files.walk(runDir)) { stream.filter(Files::isRegularFile).sorted().forEach(files::add); }
+        try (Stream<Path> stream = Files.walk(stagedRun)) { stream.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).sorted().forEach(files::add); }
         Map<String, String> hashes = new LinkedHashMap<String, String>();
-        for (Path file : files) hashes.put(runDir.relativize(file).toString().replace('\\', '/'), sha256(file));
-        Path manifest = runDir.resolve("MANIFEST.yaml");
+        for (Path file : files) hashes.put(stagedRun.relativize(file).toString().replace('\\', '/'), sha256(file));
+        Path manifest = stagedRun.resolve("MANIFEST.yaml");
         Map<String, Object> manifestData = new LinkedHashMap<String, Object>();
-        manifestData.put("runId", runId); manifestData.put("files", hashes);
+        manifestData.put("schemaVersion", "att-archive/v2.1"); manifestData.put("runId", runId); manifestData.put("files", hashes);
         Files.write(manifest, new Yaml().dump(manifestData).getBytes("UTF-8"));
+        for (Map.Entry<String, String> expected : hashes.entrySet()) {
+            Path file = stagedRun.resolve(expected.getKey()).normalize();
+            if (!file.startsWith(stagedRun) || !expected.getValue().equals(sha256(file))) throw new IllegalStateException("Archive staging hash verification failed: " + expected.getKey());
+        }
         files.add(manifest);
         try (OutputStream raw = Files.newOutputStream(archive); GZIPOutputStream gzip = new GZIPOutputStream(raw)) {
-            for (Path file : files) writeTarEntry(gzip, runDir.relativize(file).toString().replace('\\', '/'), file);
+            for (Path file : files) writeTarEntry(gzip, stagedRun.relativize(file).toString().replace('\\', '/'), file);
             gzip.write(new byte[1024]);
         }
+        GeneratedOutputCleaner.deleteDirectory(stagedRun);
         return archive;
+    }
+
+    private void copyTree(Path source, Path target) throws Exception {
+        try (Stream<Path> stream = Files.walk(source)) {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Path item = iterator.next(), destination = target.resolve(source.relativize(item));
+                if (Files.isSymbolicLink(item)) throw new IllegalArgumentException("Run evidence contains a symbolic link: " + source.relativize(item));
+                if (Files.isDirectory(item)) Files.createDirectories(destination); else { Files.createDirectories(destination.getParent()); Files.copy(item, destination); }
+            }
+        }
     }
 
     private String sha256(Path file) throws Exception {
@@ -54,21 +82,25 @@ public final class RunArchiveBuilder {
         StringBuilder result = new StringBuilder(); for (byte b : digest.digest()) result.append(String.format("%02x", b & 0xff)); return result.toString();
     }
 
-    private void snapshotPackage(Path projectRoot, Path runDir) throws Exception {
-        Path snapshot = runDir.resolve("package-config");
-        copyRedacted(projectRoot.resolve("config/config.yaml"), snapshot.resolve("config/config.yaml"));
-        for (Path root : new Path[]{projectRoot.resolve("testcase"), projectRoot.resolve("templates")}) {
-            if (!Files.isDirectory(root)) continue;
-            try (Stream<Path> stream = Files.walk(root)) {
-                java.util.Iterator<Path> iterator = stream.filter(Files::isRegularFile)
-                        .filter(p -> p.getFileName().toString().endsWith(".yaml")).iterator();
-                while (iterator.hasNext()) {
-                    Path file = iterator.next();
-                    copyRedacted(file, snapshot.resolve(projectRoot.relativize(file)));
-                }
-            }
+    private void snapshotPackage(Path projectRoot, Path runDir, Map<?, ?> runManifest) throws Exception {
+        Path canonicalProject = projectRoot.toRealPath(), snapshot = runDir.resolve("package-inputs");
+        Object inputs = runManifest.get("inputs");
+        if (!(inputs instanceof Iterable)) throw new IllegalArgumentException("Run manifest inputs are required for archive reproduction");
+        for (Object input : (Iterable<?>) inputs) {
+            if (!(input instanceof Map) || ((Map<?, ?>) input).get("path") == null) throw new IllegalArgumentException("Invalid run manifest input entry");
+            String relative = String.valueOf(((Map<?, ?>) input).get("path"));
+            Path relativePath = att.core.IdentifierValidator.relativePath(relative, "manifest input path");
+            Path source = canonicalProject.resolve(relativePath).normalize();
+            if (!source.startsWith(canonicalProject) || Files.isSymbolicLink(source) || !Files.isRegularFile(source)) throw new IllegalArgumentException("Missing/unsafe manifest input for archive: " + relative);
+            String expected = String.valueOf(((Map<?, ?>) input).get("sha256"));
+            if (expected.length() != 64 || !expected.equals(sha256(source))) throw new IllegalArgumentException("Manifest input hash no longer matches: " + relative);
+            Path target = snapshot.resolve(relativePath).normalize();
+            if (!target.startsWith(snapshot)) throw new IllegalArgumentException("Unsafe archive snapshot target: " + relative);
+            String lower = source.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+            if (lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".json") || lower.endsWith(".xml") || lower.endsWith(".txt") || lower.endsWith(".sh")) copyRedacted(source, target);
+            else { Files.createDirectories(target.getParent()); Files.copy(source, target); }
         }
-        Files.write(runDir.resolve("README.txt"), ("ATT V2 completed run package\nOpen report/index.html in a browser.\nVerify files against MANIFEST.yaml before use.\n").getBytes("UTF-8"));
+        Files.write(runDir.resolve("README.txt"), (Version.DISPLAY + " completed run package\nOpen report/index.html in a browser.\nVerify files against MANIFEST.yaml before use.\n").getBytes("UTF-8"));
     }
 
     private void copyRedacted(Path source, Path target) throws Exception {
@@ -86,6 +118,8 @@ public final class RunArchiveBuilder {
     }
 
     private void writeTarEntry(OutputStream output, String name, Path file) throws Exception {
+        Path entry = Paths.get(name).normalize();
+        if (entry.isAbsolute() || entry.startsWith("..") || name.indexOf('\\') >= 0) throw new IllegalArgumentException("Unsafe archive entry: " + name);
         byte[] content = Files.readAllBytes(file);
         byte[] header = new byte[512];
         put(header, 0, 100, name);

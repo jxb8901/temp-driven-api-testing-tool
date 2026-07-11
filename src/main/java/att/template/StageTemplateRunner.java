@@ -34,18 +34,20 @@ public class StageTemplateRunner {
         for (TemplateAction action : template.actions()) {
             try {
                 if ("render".equalsIgnoreCase(action.type())) {
-                    Path payload = template.directory().resolve(action.payload()).normalize();
-                    if (!payload.startsWith(template.directory().normalize()) || !Files.isRegularFile(payload)) {
+                    Path payload = template.directory().resolve(att.core.IdentifierValidator.relativePath(action.payload(), "render payload")).normalize();
+                    Path canonicalTemplate = template.directory().toRealPath();
+                    Path canonicalPayload = payload.toRealPath();
+                    if (!canonicalPayload.startsWith(canonicalTemplate) || Files.isSymbolicLink(payload) || !Files.isRegularFile(canonicalPayload)) {
                         throw new IllegalArgumentException("Render payload must stay inside template directory: " + action.payload());
                     }
-                    String content = new String(Files.readAllBytes(payload), StandardCharsets.UTF_8);
+                    String content = new String(Files.readAllBytes(canonicalPayload), StandardCharsets.UTF_8);
                     String rendered = templateEngine.render(content, context, log);
                     Map<String, Object> invocation = renderRecord(action, rendered, context);
                     context.addAction(action.id(), invocation);
                     log.append("ACTION " + action.id(), invocation);
                     results.add(new ValidationResult(stageName, action.id(), ResultStatus.PASS, "", rendered, ""));
                 } else if ("tool".equalsIgnoreCase(action.type())) {
-                    Object output = templateEngine.executeCall(action.call(), context, log, action.id());
+                    Object output = executeTool(action, context, log);
                     results.add(new ValidationResult(stageName, action.id(), ResultStatus.PASS, action.call(), String.valueOf(output), ""));
                 } else if ("assert".equalsIgnoreCase(action.type())) {
                     String rendered = templateEngine.renderValues(action.expression(), context);
@@ -79,6 +81,36 @@ public class StageTemplateRunner {
         return results;
     }
 
+    private Object executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        Map<String, Object> retry = action.retry();
+        int maxAttempts = integer(retry.get("maxAttempts"), 1);
+        java.util.Set<String> retryOn = strings(retry.get("retryOn"));
+        java.util.Set<Integer> exitCodes = integers(retry.get("exitCodes"));
+        List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
+        att.exec.ToolExecutionException last = null;
+        for (int number = 1; number <= maxAttempts; number++) {
+            String attemptId = action.id() + "/attempt-" + String.format("%03d", number);
+            try {
+                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, attemptId, action.timeoutMs());
+                attempts.add(new LinkedHashMap<String, Object>(result.invocation()));
+                Map<String, Object> winning = new LinkedHashMap<String, Object>(result.invocation());
+                winning.put("id", action.id()); winning.put("attempts", attempts); winning.put("winningAttempt", number);
+                context.addAction(action.id(), winning);
+                return result.output();
+            } catch (att.exec.ToolExecutionException e) {
+                last = e; Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence()); evidence.put("attempt", number); evidence.put("category", e.category()); attempts.add(evidence);
+                boolean exitEligible = !"EXIT_CODE".equals(e.category()) || exitCodes.isEmpty() || (e.exitCode() != null && exitCodes.contains(e.exitCode()));
+                if (number >= maxAttempts || "TIMEOUT".equals(e.category()) || !retryOn.contains(e.category()) || !exitEligible) break;
+            }
+        }
+        Map<String, Object> failed = new LinkedHashMap<String, Object>(); failed.put("id", action.id()); failed.put("type", "tool"); failed.put("status", "ERROR"); failed.put("attempts", attempts); failed.put("winningAttempt", null); context.addAction(action.id(), failed);
+        throw last;
+    }
+
+    private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
+    private java.util.Set<String> strings(Object value) { java.util.Set<String> result = new java.util.LinkedHashSet<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
+    private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }
+
     private Map<String, Object> renderRecord(TemplateAction action, String rendered, CaseRuntimeContext context) throws Exception {
         String saveAs = action.saveAs();
         Object mode = action.output().get("mode");
@@ -86,7 +118,7 @@ public class StageTemplateRunner {
             String fileName = saveAs == null || saveAs.trim().isEmpty() ? "output.txt" : saveAs;
             Path directory = context.actionOutputDir(action.id());
             Files.createDirectories(directory);
-            Path outputFile = directory.resolve(fileName).normalize();
+            Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(fileName, "render saveAs")).normalize();
             if (!outputFile.startsWith(directory.normalize())) {
                 throw new IllegalArgumentException("Action output file must stay under action directory: " + fileName);
             }

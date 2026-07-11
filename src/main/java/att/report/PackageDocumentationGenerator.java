@@ -1,6 +1,7 @@
 /* Author: Jeffrey + ChatGPT */
 package att.report;
 
+import att.Version;
 import att.config.FrameworkConfig;
 import att.config.SuiteConfigResolver;
 import att.config.ToolArgumentConfig;
@@ -29,7 +30,7 @@ public final class PackageDocumentationGenerator {
         Path output = projectRoot.resolve("build/docs");
         GeneratedOutputCleaner.deleteDirectory(output);
         Files.createDirectories(output);
-        String single = page("ATT V2 Single-page Reference", "<header><h1>ATT V2 Package Reference</h1><p>Testcases · Templates · Tools</p></header><nav><input id=\"search\" placeholder=\"Search English or 中文\"></nav>"
+        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Tools</p></header><nav><input id=\"search\" placeholder=\"Search English or 中文\"></nav>"
                 + section("testcases", testcasePage(projectRoot, config, new ArrayList<String>()))
                 + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
                 + section("tools", toolPage(config, new ArrayList<String>()))
@@ -97,7 +98,7 @@ public final class PackageDocumentationGenerator {
 
     private Map<String, Object> yaml(Path file) throws Exception {
         try (Reader reader = Files.newBufferedReader(file)) {
-            Object value = new Yaml().load(reader); Map<String, Object> result = new LinkedHashMap<String, Object>();
+            Object value = att.config.YamlSupport.parser().load(reader); Map<String, Object> result = new LinkedHashMap<String, Object>();
             if (value instanceof Map) for (Map.Entry<?, ?> e : ((Map<?, ?>) value).entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());
             return result;
         }

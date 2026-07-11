@@ -1,3 +1,4 @@
+schemaVersion: att-template/v2.1
 name: PAYMENT_CLEANUP
 description: Always-run cleanup example which records completion without external mutation.
 actions:
@@ -6,4 +7,4 @@ actions:
     level: INFO
     message: "Cleanup completed for ${CASE.caseId}"
     fields:
-      finalApiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Response.Status}"
+      finalApiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.children.Status.text}"

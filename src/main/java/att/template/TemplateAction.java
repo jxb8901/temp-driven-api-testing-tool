@@ -24,10 +24,14 @@ public class TemplateAction {
     private final String level;
     private final Map<String, Object> fields;
     private final Map<String, Object> output;
+    private final Map<String, Object> raw;
+    private final Map<String, Object> retry;
+    private final Long timeoutMs;
 
     public TemplateAction(String key, Map<String, Object> values) {
         this.key = key;
         Map<String, Object> data = values == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(values);
+        this.raw = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(data));
         this.id = text(data.get("id"), key);
         this.type = text(data.get("type"), "tool");
         this.payload = text(data.get("payload"), "");
@@ -39,6 +43,8 @@ public class TemplateAction {
         this.level = text(data.get("level"), "INFO");
         this.fields = map(data.get("fields"));
         this.output = map(data.get("output"));
+        this.retry = map(data.get("retry"));
+        this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
     }
 
     public String key() { return key; }
@@ -53,6 +59,9 @@ public class TemplateAction {
     public String level() { return level; }
     public Map<String, Object> fields() { return fields; }
     public Map<String, Object> output() { return output; }
+    public Map<String, Object> raw() { return raw; }
+    public Map<String, Object> retry() { return retry; }
+    public Long timeoutMs() { return timeoutMs; }
 
     private static String text(Object value, String defaultValue) {
         return value == null ? defaultValue : String.valueOf(value);

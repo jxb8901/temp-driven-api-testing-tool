@@ -22,7 +22,7 @@ public class CommandRunner {
     }
 
     public CommandResult run(String command, Duration timeout, java.nio.file.Path workingDirectory) throws IOException, InterruptedException {
-        List<String> commandArguments = split(command);
+        List<String> commandArguments = parseCommand(command);
         if (commandArguments.isEmpty()) throw new IOException("Tool command is blank");
         ProcessBuilder builder = new ProcessBuilder(commandArguments);
         if (workingDirectory != null) builder.directory(workingDirectory.toFile());
@@ -48,7 +48,7 @@ public class CommandRunner {
     }
 
     /** Parses the configured command without invoking a shell. */
-    private List<String> split(String command) throws IOException {
+    public static List<String> parseCommand(String command) throws IOException {
         List<String> result = new ArrayList<String>();
         StringBuilder token = new StringBuilder();
         boolean single = false, dual = false, escaped = false;

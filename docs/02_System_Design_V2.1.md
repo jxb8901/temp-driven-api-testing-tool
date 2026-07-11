@@ -131,13 +131,19 @@ dist/releases/att-<version>.tar.gz
 dist/releases/att-<version>-src.tar.gz
 ```
 
-Run evidence archives are written separately under:
+End-user run evidence archives created by `att.sh build` are written separately under:
 
 ```text
-dist/runs/att-run-<runId>.tar.gz
+build/att-run-<runId>.tar.gz
 ```
 
+This keeps end-user run archives under the `att.sh clean` ownership boundary. `dist/` remains exclusively owned by the development/release `build.sh` flow.
+
 Release packaging MUST run the release gate in Section 24 before publishing an archive.
+
+### 6.4 Release size policy
+
+The binary release MUST package runtime dependencies only. V2.1 removes `log4j-core` because ATT does not use a Log4j implementation directly and Apache POI requires only `log4j-api`; this saves approximately 1.8 MiB before archive compression. The remaining dominant dependencies (`poi`, `poi-ooxml`, `poi-ooxml-lite`, `xmlbeans`, Commons IO/Compress/Collections/Math, and `curvesapi`) form the supported XLSX runtime and MUST NOT be replaced by partial in-house OOXML handling in V2.1. Jackson (approximately 2.2 MiB including core and annotations) could technically be replaced by an internal strict JSON parser, but doing so would duplicate mature Unicode, number, duplicate-key, and escaping behavior; this is not accepted for V2.1. SnakeYAML has the same maintainability and security concern. Future slimming MUST demonstrate a green release gate against representative XLSX/JSON/YAML fixtures and MUST measure both installed and compressed size.
 
 ## 7. Strict configuration schemas
 
@@ -173,7 +179,7 @@ Supported top-level fields are:
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutSeconds: 120
+timeoutMs: 120000
 templates:
   root: templates
 run:
@@ -210,7 +216,7 @@ tools:
 | schemaVersion | string | Yes | exactly `att-config/v2.1` |
 | outputDirectory | string | No | relative package path; default `output` |
 | environment | string | No | non-blank; default `SIT` |
-| timeoutSeconds | integer | No | 1–86400; default 120 |
+| timeoutMs | integer | No | 1–86400000; default 120000 |
 | templates | map | No | only `root` is allowed |
 | templates.root | string | No | relative package path; default `templates` |
 | run | map | No | only `id` is allowed |
@@ -253,7 +259,7 @@ stages:
 report:
   columns:
     result: 測試結果
-timeoutSeconds: 120
+timeoutMs: 120000
 ```
 
 The complete sidecar schema is:
@@ -276,7 +282,7 @@ The complete sidecar schema is:
 | stages[].onFailure | string | No | `stop` or `continue`; default `stop` |
 | report | map | No | only `columns` is allowed |
 | report.columns | map of string | No | recognized result-column keys only |
-| timeoutSeconds | integer | No | 1–86400; overrides global value |
+| timeoutMs | integer | No | 1–86400000; overrides global value |
 
 The sidecar MUST NOT override global tools, template root, environment, or output roots. Unknown fields in `excel`, each stage, and `report` are errors.
 
@@ -339,11 +345,9 @@ Rules:
 invokeApi:
   type: tool
   call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
+  timeoutMs: 30000
   retry:
     maxAttempts: 3
-    delayMs: 500
-    backoffMultiplier: 2.0
-    maxDelayMs: 5000
     retryOn: [EXIT_CODE]
 ```
 
@@ -353,6 +357,7 @@ Rules:
 - Built-in functions are not valid as the primary call of a tool action.
 - Tool name and all argument names MUST resolve during validation.
 - Required arguments MUST be present syntactically; non-blank runtime validation still occurs before invocation.
+- `timeoutMs` is optional, is valid only for a tool action, and overrides the resolved global/sidecar `timeoutMs` for that action. Its range is 1–86400000.
 - `payload`, `saveAs`, `expression`, `message`, `level`, and `fields` are forbidden.
 - Retry follows Section 18; timeout is never retried.
 
@@ -783,6 +788,8 @@ Package-mode validation MAY record hashes for the entire package index. Paths st
 
 The HTML report and result workbook consume the completed run manifest and case evidence. They MUST NOT independently reclassify results.
 
+`report/index.html` MUST begin with a visible index linking to Overview, Groups, Cases, Case details, and the JUnit HTML view. Section targets MUST remain stable so large reports are directly navigable.
+
 ### 16.2 JSON summary
 
 Each completed run writes:
@@ -805,13 +812,16 @@ The document contains:
 
 Numbers are JSON numbers, missing optional values are `null`, and output order is deterministic.
 
-### 16.3 JUnit XML
+### 16.3 JUnit XML and HTML
 
 Each completed run writes:
 
 ```text
 <run>/ci/junit.xml
+<run>/ci/junit.html
 ```
+
+`junit.html` is a human-readable projection of the same `RunSummary` used by `junit.xml`; it does not introduce a second aggregation model. It contains counts, one row per testcase, status, duration, and either embedded case-log content or an external relative link using the same configured threshold as XML.
 
 Mapping:
 
@@ -890,22 +900,18 @@ Retry is an execution policy for tool actions. It is not a stage control-flow fe
 ```yaml
 retry:
   maxAttempts: 3
-  delayMs: 500
-  backoffMultiplier: 2.0
-  maxDelayMs: 5000
   retryOn: [EXIT_CODE]
   exitCodes: [1, 75]
 ```
 
 Rules:
 
-- `maxAttempts` includes the first attempt and is between 1 and the configured global maximum.
+- `maxAttempts` includes the first attempt and is between 1 and the V2.1 fixed safety maximum of 10. V2.1 has no global retry-maximum override; introducing one requires a future configuration schema version.
 - Default `maxAttempts` is 1.
-- Delay values are non-negative and bounded.
-- `backoffMultiplier` is at least 1.0.
 - `retryOn` values are `EXIT_CODE`, `OUTPUT_PARSE`, or `IO_ERROR`.
 - `exitCodes` is used only with `EXIT_CODE`; if omitted, any non-zero code qualifies.
-- Timeout is never retried: a tool exceeding `timeoutSeconds` is immediately classified as ERROR.
+- V2.1 has no retry delay or backoff fields. Attempts proceed immediately; delay/backoff policy is outside V2.1 scope.
+- Timeout is never retried: a tool exceeding the action `timeoutMs`, or the resolved configuration `timeoutMs` when no action override exists, is immediately classified as ERROR.
 - Configuration/argument validation errors and assertion FAIL are never retried.
 
 ### 18.2 Evidence

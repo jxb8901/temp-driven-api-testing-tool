@@ -36,7 +36,7 @@ public class RunSummary {
     }
 
     public long failed() {
-        return count(ResultStatus.FAIL) + count(ResultStatus.PRECHECK_FAILED) + count(ResultStatus.POSTCHECK_FAILED);
+        return count(ResultStatus.FAIL);
     }
 
     public long error() {
@@ -48,6 +48,14 @@ public class RunSummary {
     }
 
     public long invalid() { return count(ResultStatus.INVALID); }
+
+    public ResultStatus status() {
+        java.util.List<ResultStatus> statuses = new java.util.ArrayList<ResultStatus>();
+        for (TestResult result : results) statuses.add(result.status());
+        return ResultAggregator.aggregate(statuses);
+    }
+
+    public int exitCode() { return ResultAggregator.exitCode(status()); }
 
     private long count(ResultStatus status) {
         return results.stream().filter(result -> result.status() == status).count();
