@@ -57,7 +57,7 @@ tools/invoke_payment_api.sh
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutSeconds: 120
+timeoutMs: 120000
 templates:
   root: templates
 run:
@@ -117,11 +117,10 @@ actions:
   invokeApi:
     type: tool
     call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
+    # 可覆蓋 config/sidecar 的 timeoutMs；單位為毫秒
+    timeoutMs: 30000
     retry:
       maxAttempts: 3
-      delayMs: 500
-      backoffMultiplier: 2.0
-      maxDelayMs: 5000
       retryOn: [EXIT_CODE]
   assertStatus:
     type: assert
@@ -145,7 +144,9 @@ Action type 決定可用字段：
 - `assert` 必須有非空 `expression`；不允許 retry，輪詢請交給明確的 tool action。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
 
-retry 只適用於 tool action 的 `EXIT_CODE`。超時、配置錯誤、參數錯誤、輸出解析錯誤和 assertion FAIL 都不會 retry。每次嘗試都會保存在 `attempt-001/`、`attempt-002/` 等獨立證據目錄。
+全域 `timeoutMs` 的單位是毫秒；上例為 120 秒。sidecar 可用同名 `timeoutMs` 覆蓋全域值；個別 tool action 再以 `timeoutMs` 覆蓋已解析的全域／sidecar 值。`timeoutMs` 只可用於 tool action，範圍為 1–86400000。
+
+retry 只適用於 tool action 的 `EXIT_CODE`。超時、配置錯誤、參數錯誤、輸出解析錯誤和 assertion FAIL 都不會 retry；V2.1 沒有 retry delay 或 backoff 設定，符合條件的重試會立即進行。每次嘗試都會保存在 `attempt-001/`、`attempt-002/` 等獨立證據目錄。
 
 ## 6. 中文 Excel 和 sidecar
 
@@ -175,6 +176,7 @@ report:
   columns:
     result: 測試結果
     reportLink: 詳細報告
+timeoutMs: 60000
 ```
 
 模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V2.1：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
@@ -295,6 +297,7 @@ ATT 內置函數包括：
 - 結果工作簿：`output/<RunID>/workbooks/`
 - CI JSON：`output/<RunID>/ci/summary.json`
 - CI JUnit XML：`output/<RunID>/ci/junit.xml`
+- CI JUnit HTML：`output/<RunID>/ci/junit.html`（可直接開啟閱讀）
 - 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
 
 Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的非法字符及保留名稱限制。`report --run-id` 只接受合法 Run ID，不接受檔案路徑。
@@ -392,6 +395,6 @@ expression: "${ACTIONS.selectTxn.output.effectRows} >= 1 and true"
 - JSON/XML tool output 選擇正確，並以解析後結構撰寫 assertion。
 - 範例及 log 不包含敏感資料。
 - `./att.sh validate --package` 通過後再執行選定案例。
-- CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml` 和 run manifest。
+- CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`ci/junit.html` 和 run manifest。
 
 完整配置、Context、報告、打包及診斷內容見 [ATT V2.1 Reference Manual](09_Reference_Manual_V2.md)。

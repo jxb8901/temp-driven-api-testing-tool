@@ -105,12 +105,12 @@ For pre-execution checks and generated outputs, see [Validation, diagnostics, re
 
 config/config.yaml owns runtime defaults, template root, report defaults, run ID behavior, XML namespace mode, and tool contracts. It must not define workbook sheets, case ID columns, data columns, or stages.
 
-`schemaVersion: att-config/v2.1` is mandatory. Supported top-level fields are only `schemaVersion`, `outputDirectory`, `environment`, `timeoutSeconds`, `templates`, `run`, `report`, `xml`, `tools`, and extension fields prefixed with `x-`. Unknown non-extension fields are validation errors. In particular, V2.0's `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.1 fields.
+`schemaVersion: att-config/v2.1` is mandatory. Supported top-level fields are only `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `templates`, `run`, `report`, `xml`, `tools`, and extension fields prefixed with `x-`. Unknown non-extension fields are validation errors. In particular, V2.0's `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.1 fields.
 
     schemaVersion: att-config/v2.1
     outputDirectory: output
     environment: SIT
-    timeoutSeconds: 120
+    timeoutMs: 120000
     templates:
       root: templates
     report:
@@ -145,7 +145,7 @@ Tool arguments are metadata for validation and generated tool reference pages. E
 | schemaVersion | Yes | — | Exactly `att-config/v2.1` |
 | outputDirectory | No | output | Relative package path; root for runs, `.in-progress`, and latest-run history |
 | environment | No | SIT | Available as `${CASE.environment}` and commonly passed to tools |
-| timeoutSeconds | No | 120 | Maximum duration for each external tool process |
+| timeoutMs | No | 120000 | Maximum duration for each external tool process, in milliseconds; range 1–86400000 |
 | run.id.default | No | timestamp | Must be `timestamp` |
 | run.id.timestampFormat | No | yyyyMMdd-HHmmss | Java date/time format used for timestamp run IDs |
 | templates.root | No | templates | Root searched recursively for template directories |
@@ -211,9 +211,9 @@ dataColumns supports alias=ColumnName, ColumnName, alias=ColumnName(yaml), and C
 | stages[].runWhen | No | normal, onSuccess, onFailure, or always |
 | stages[].onFailure | No | stop or continue |
 | report.columns | No | Workbook-specific result column label overrides |
-| timeoutSeconds | No | Workbook-specific tool timeout override, 1–86400 seconds |
+| timeoutMs | No | Workbook-specific tool timeout override in milliseconds, 1–86400000 |
 
-Only the fields in this table are allowed. The sidecar top level permits `schemaVersion`, `excel`, `stages`, `report`, `timeoutSeconds`, and `x-*`; `excel` permits `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns`, and `x-*`; each stage permits `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure`, and `x-*`; `report` permits `columns` and `x-*`. Unknown non-extension fields are errors. The sidecar cannot override global tools, template root, environment, or output roots.
+Only the fields in this table are allowed. The sidecar top level permits `schemaVersion`, `excel`, `stages`, `report`, `timeoutMs`, and `x-*`; `excel` permits `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns`, and `x-*`; each stage permits `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure`, and `x-*`; `report` permits `columns` and `x-*`. Unknown non-extension fields are errors. The sidecar cannot override global tools, template root, environment, or output roots.
 
 ### 4.2 CSV-style quoting examples
 
@@ -403,13 +403,13 @@ V2.1 does not support `actionDefaults`. Each action independently owns its optio
 | Action type | Required fields | Optional fields | Result available to later actions |
 |---|---|---|---|
 | render | type, payload | saveAs, output, onFailure, description | `${ACTIONS.<id>.output}` or `${ACTIONS.<id>.outputFile}` |
-| tool | type, call | retry, onFailure, description | `${ACTIONS.<id>.output}` and canonical CASE.TOOL result |
+| tool | type, call | timeoutMs, retry, onFailure, description | `${ACTIONS.<id>.output}` and canonical CASE.TOOL result |
 | assert | type, expression | onFailure, description | status, expected, actual, error metadata |
 | log | type, message | level, fields, onFailure, description | message and rendered fields metadata |
 
 For every action type, `onFailure` accepts exactly `stop` or `continue`; if omitted or blank, ATT uses `stop`. `stop` stops later actions in the same template after a FAIL or ERROR. `continue` records the failure and lets later actions run, but never changes the stage or case result to PASS. Values such as `ignore`, `warn`, or a non-string YAML value are rejected when ATT loads the template.
 
-Type-specific validation is strict. A render action requires a regular-file `payload`; `saveAs` is required with `output.mode: file`, and render cannot define `retry`. A tool action requires exactly one configured external `call` and is the only action type allowed to define `retry`. An assert action requires a non-blank expression that parses at validation time and cannot retry. A log action requires a non-blank message; its level is TRACE, DEBUG, INFO, WARN, or ERROR. Fields intended for another action type are validation errors, not ignored configuration.
+Type-specific validation is strict. A render action requires a regular-file `payload`; `saveAs` is required with `output.mode: file`, and render cannot define `retry` or `timeoutMs`. A tool action requires exactly one configured external `call` and is the only action type allowed to define `retry` or `timeoutMs`. `timeoutMs`, when present, is an integer from 1 to 86400000 and overrides the resolved global/sidecar timeout for that action. An assert action requires a non-blank expression that parses at validation time and cannot retry. A log action requires a non-blank message; its level is TRACE, DEBUG, INFO, WARN, or ERROR. Fields intended for another action type are validation errors, not ignored configuration.
 
 `render.payload` and `render.saveAs` must remain inside the template/action output directory. Prefer `saveAs` for XML, JSON, YAML, SQL, and large text that will be passed to a tool. A tool action calls one configured global tool through `#{toolName(namedArgument=value)}`. An assert action records FAIL when its expression is false and ERROR when expression evaluation itself fails. A log action renders message and fields but does not perform an assertion.
 
@@ -644,7 +644,7 @@ Tool output types are txt, yaml, json, and xml. YAML, JSON, and XML output becom
 
 Tool keys and argument keys are case-sensitive. A template call must use named arguments for configured external tools. Positional arguments are intended for ATT built-ins, not external tool contracts.
 
-ATT validates configuration values before execution: `output` must be exactly `txt`, `yaml`, `json`, or `xml`; every argument's `required` must be the YAML boolean `true` or `false`; `delimit` may occur only on the final declared argument; and `timeoutSeconds` must be 1–86400. Invalid values stop validation with a structured diagnostic instead of being silently coerced.
+ATT validates configuration values before execution: `output` must be exactly `txt`, `yaml`, `json`, or `xml`; every argument's `required` must be the YAML boolean `true` or `false`; `delimit` may occur only on the final declared argument; global/sidecar `timeoutMs` and tool-action `timeoutMs` must be 1–86400000. Invalid values stop validation with a structured diagnostic instead of being silently coerced.
 
 ### 9.1 Command placeholders and input/output files
 
@@ -657,6 +657,8 @@ ATT writes each invocation input to `${TOOL.inputFile}` as YAML and allocates `$
 | `${TOOL.input.<argument>}` | A declared scalar input value; the final delimited value expands to process arguments |
 
 Use input/output files for large request or response data. A script may write its result to outputFile; if it does not, ATT records stdout as the raw output. Exit code 0 is PASS. A non-zero exit code, timeout, or structured-output parse failure produces ERROR, preserves command/stdout/stderr/raw-output artifacts, and follows the action's onFailure rule. A timeout is never retried.
+
+Timeout resolution is explicit: a tool action's `timeoutMs` wins; otherwise ATT uses the selected workbook sidecar's `timeoutMs` when present; otherwise it uses global `config.yaml` `timeoutMs` (default `120000`). The value is milliseconds, so `30000` means 30 seconds and `120000` means 2 minutes.
 
 #### Command tokenization, spaces, and special characters
 
@@ -884,16 +886,14 @@ Retry is an action/tool execution policy, not a stage loop. Only a `tool` action
 callApi:
   type: tool
   call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
+  timeoutMs: 30000
   retry:
     maxAttempts: 3
-    delayMs: 500
-    backoffMultiplier: 2.0
-    maxDelayMs: 5000
     retryOn: [EXIT_CODE]
     exitCodes: [1, 75]
 ```
 
-`maxAttempts` includes the first attempt and defaults to 1. V2.1 supports only `retryOn: [EXIT_CODE]`; `exitCodes` applies to that policy, and omitting it retries any non-zero exit code. Configuration/argument errors, output parse errors, I/O errors, assertion FAIL, render/log actions, and timeout are never retried. Use retry only for operations that are safe to repeat; ATT does not infer API idempotency.
+`maxAttempts` includes the first attempt and defaults to 1. V2.1 supports only `retryOn: [EXIT_CODE]`; `exitCodes` applies to that policy, and omitting it retries any non-zero exit code. Configuration/argument errors, output parse errors, I/O errors, assertion FAIL, render/log actions, and timeout are never retried. V2.1 has no retry delay or backoff fields: eligible retries run immediately. Use retry only for operations that are safe to repeat; ATT does not infer API idempotency.
 
 Every attempt has separate evidence, for example `callApi/attempt-001/` and `callApi/attempt-002/`. The final action record preserves all attempts, durations, and the winning attempt. A later successful attempt gives the action PASS but retains earlier attempt errors as evidence; exhaustion gives ERROR.
 
@@ -912,7 +912,7 @@ A request file can be:
       <Amount>${CASE.amount}</Amount>
     </PaymentRequest>
 
-Run `./att.sh validate --package` first, execute the selected Case ID, inspect case.yaml, ci/summary.json, ci/junit.xml, and the HTML report, then package the latest completed run with ./att.sh build.
+Run `./att.sh validate --package` first, execute the selected Case ID, inspect case.yaml, ci/summary.json, ci/junit.xml, ci/junit.html, and the HTML report, then package the latest completed run with ./att.sh build.
 
 ### Failure compensation and cleanup example
 
@@ -970,7 +970,8 @@ output/<RunID>/
 ├── workbooks/              Result workbook copies
 ├── ci/
 │   ├── summary.json         CI JSON summary
-│   └── junit.xml            CI JUnit XML
+│   ├── junit.xml            CI JUnit XML
+│   └── junit.html           Human-readable JUnit result view
 └── <groupId>.<rowCaseId>/
     ├── case.yaml           Persisted CASE runtime tree
     ├── <case>.log          Ordered case execution log
@@ -985,7 +986,9 @@ Open report/index.html directly from disk. Use the case table to filter by statu
 
 `--ci-output junit,json` writes the requested files under `<run>/ci/`. JSON summary uses `schemaVersion: att-ci-summary/v2.1` and includes run/ATT IDs, environment, timing, aggregate counts/status, per-case result records, diagnostic counts, report/artifact paths, and input-manifest hash.
 
-JUnit maps one ATT case to one `<testcase>`: PASS has no child, FAIL writes `<failure>`, ERROR writes `<error>`, SKIPPED writes `<skipped>`, and INVALID writes `<error type="ATTValidationError">`. Action/stage diagnostics are XML-escaped. Case logs at or below `report.junit.caseLogEmbedThresholdBytes` (default 10240 UTF-8 bytes) are embedded in `system-out`; larger logs are summarized and linked by package-relative artifact path. Set the threshold to 0 to always link externally.
+JUnit produces both `<run>/ci/junit.xml` and `<run>/ci/junit.html`. The HTML file is a human-readable projection of the same run summary as the XML; it does not perform a second result aggregation. It shows counts plus one row per testcase with status, duration, and embedded case-log content or an external relative artifact link.
+
+JUnit XML maps one ATT case to one `<testcase>`: PASS has no child, FAIL writes `<failure>`, ERROR writes `<error>`, SKIPPED writes `<skipped>`, and INVALID writes `<error type="ATTValidationError">`. Action/stage diagnostics are XML-escaped. Both JUnit formats use `report.junit.caseLogEmbedThresholdBytes` (default 10240 UTF-8 bytes): at or below the threshold the case log is embedded; larger logs are summarized and linked by package-relative artifact path. Set the threshold to 0 to always link externally.
 
 ### 11.4 Documentation, archive, and clean choices
 
@@ -1054,7 +1057,7 @@ Prefer environment-specific secret injection inside approved tool scripts. Avoid
 
 ### 13.3 Process safety
 
-Tool commands run as local processes with the permissions of the ATT user. Validate packages before running, review every configured command/script, use file-based transfer for large or sensitive data, set realistic timeoutSeconds, and run destructive tools only against the intended SIT/UAT environment. ATT records commands, inputs, stdout, stderr, raw outputs, and attempts as evidence; configure and review redaction before sharing artifacts.
+Tool commands run as local processes with the permissions of the ATT user. Validate packages before running, review every configured command/script, use file-based transfer for large or sensitive data, set realistic `timeoutMs` values, and run destructive tools only against the intended SIT/UAT environment. ATT records commands, inputs, stdout, stderr, raw outputs, and attempts as evidence; configure and review redaction before sharing artifacts.
 
 ### 13.4 Atomic completion and stale runs
 
@@ -1080,7 +1083,7 @@ ATT first validates and produces an execution plan, then writes only beneath `ou
 | `./att.sh run --all --run-id <id>` | Use an explicit new run ID |
 | `./att.sh run --all --output-dir <dir>` | Override output root |
 | `./att.sh run --all --format json` | Emit machine-readable summary |
-| `./att.sh run --all --ci-output junit,json` | Write CI JUnit and JSON files below the completed run |
+| `./att.sh run --all --ci-output junit,json` | Write JUnit XML, JUnit HTML, and JSON files below the completed run |
 | `./att.sh run --all --quiet` | Suppress normal progress output |
 | `./att.sh docs` | Generate the single-page package reference |
 | `./att.sh report --run-id <id>` | Regenerate a persisted report |
@@ -1109,7 +1112,7 @@ An assertion that evaluates false is FAIL. Tool non-zero exit, timeout, render/I
 
 ### How do I consume ATT in CI?
 
-Run `./att.sh run --all --ci-output junit,json`. Read `<run>/ci/junit.xml` for standard test reporting and `<run>/ci/summary.json` for structured ATT metadata. Use `./att.sh validate --package --format json` for pre-run validation diagnostics.
+Run `./att.sh run --all --ci-output junit,json`. Read `<run>/ci/junit.xml` for standard CI ingestion, open `<run>/ci/junit.html` for a human-readable JUnit view, and use `<run>/ci/summary.json` for structured ATT metadata. Use `./att.sh validate --package --format json` for pre-run validation diagnostics.
 
 ### Why did a tool run more than once?
 
