@@ -29,7 +29,7 @@ public final class RunArchiveBuilder {
         if (!(loaded instanceof Map) || !"att-latest-run/v2.1".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid latest run pointer");
         String runId = String.valueOf(((Map<?, ?>) loaded).get("runId"));
         IdentifierValidator.runId(runId);
-        Path runDir = IdentifierValidator.strictChild(outputRoot, runId, "Archive run directory");
+        Path runDir = IdentifierValidator.strictExistingChild(outputRoot, runId, "Archive run directory");
         if (!Files.isDirectory(runDir)) throw new IllegalArgumentException("Run directory does not exist: " + runDir);
         Object manifestObject = YamlSupport.parser().load(new String(Files.readAllBytes(runDir.resolve("run.yaml")), "UTF-8"));
         if (!(manifestObject instanceof Map) || !"att-run/v2.1".equals(String.valueOf(((Map<?, ?>) manifestObject).get("schemaVersion")))) throw new IllegalArgumentException("Run manifest is not V2.1: " + runId);

@@ -100,7 +100,7 @@ public class StageTemplateRunner {
             } catch (att.exec.ToolExecutionException e) {
                 last = e; Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence()); evidence.put("attempt", number); evidence.put("category", e.category()); attempts.add(evidence);
                 boolean exitEligible = !"EXIT_CODE".equals(e.category()) || exitCodes.isEmpty() || (e.exitCode() != null && exitCodes.contains(e.exitCode()));
-                if (number >= maxAttempts || "TIMEOUT".equals(e.category()) || !retryOn.contains(e.category()) || !exitEligible) break;
+                if (number >= maxAttempts || !"EXIT_CODE".equals(e.category()) || !retryOn.contains("EXIT_CODE") || !exitEligible) break;
             }
         }
         Map<String, Object> failed = new LinkedHashMap<String, Object>(); failed.put("id", action.id()); failed.put("type", "tool"); failed.put("status", "ERROR"); failed.put("attempts", attempts); failed.put("winningAttempt", null); context.addAction(action.id(), failed);

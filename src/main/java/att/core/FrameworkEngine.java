@@ -53,9 +53,10 @@ public class FrameworkEngine {
 
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics) throws Exception {
         Instant runStarted = Instant.now();
-        String runId = runId(options);
-        Path outputRoot = options.outputDirectory() == null ? resolve(config.outputDirectory()) : resolve(options.outputDirectory());
-        Path finalRunDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
+        ExecutionPlan plan = buildPlan(options);
+        String runId = plan.runId();
+        Path outputRoot = plan.outputRoot();
+        Path finalRunDirectory = plan.finalRunDirectory();
         if (Files.exists(finalRunDirectory)) {
             throw new IllegalArgumentException("Run directory already exists: " + finalRunDirectory);
         }
@@ -65,28 +66,23 @@ public class FrameworkEngine {
         Path runDirectory = progressRoot.resolve(runId + "-" + java.util.UUID.randomUUID().toString());
         Files.createDirectories(runDirectory);
 
-        List<Path> suites = suites(options);
-        Set<String> failedCaseIds = options.rerunFailed() ? latestFailedCaseIds(outputRoot) : Collections.<String>emptySet();
         List<TestResult> results = new ArrayList<>();
-        SuiteConfigResolver suiteConfigResolver = new SuiteConfigResolver(projectRoot, config);
         boolean stopRun = false;
-        verbose(options, "[RUN] id=" + runId + " suites=" + suites.size() + " output=" + portable(outputRoot));
+        verbose(options, "[RUN] id=" + runId + " suites=" + plan.suites().size() + " output=" + portable(outputRoot));
 
-        for (Path suite : suites) {
-            FrameworkConfig suiteConfig = suiteConfigResolver.resolve(resolve(suite));
+        for (ExecutionPlan.Suite suitePlan : plan.suites()) {
+            Path suite = suitePlan.workbook();
+            FrameworkConfig suiteConfig = suitePlan.config();
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker);
-            StageTemplateLoader templateLoader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
             ExcelReportWriter reportWriter = new ExcelReportWriter(suiteConfig);
-            List<TestCase> cases = new ExcelTestSuiteLoader(suiteConfig).load(resolve(suite));
+            List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
             List<TestResult> suiteResults = new ArrayList<TestResult>();
             for (TestCase testCase : cases) {
-                if (!options.matches(testCase)) continue;
-                if (options.rerunFailed() && !failedCaseIds.contains(testCase.caseId())) continue;
                 verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
-                TestResult result = runCase(testCase, suiteConfig, options, failedCaseIds, runId, runDirectory, templateLoader, templateRunner);
+                TestResult result = runCase(testCase, suiteConfig, options, runId, runDirectory, suitePlan, templateRunner);
                 verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
                 results.add(result);
                 suiteResults.add(result);
@@ -125,8 +121,8 @@ public class FrameworkEngine {
         return new RunSummary(relocated, finalRunDirectory.resolve("report/index.html"));
     }
 
-    private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, Set<String> failedCaseIds, String runId, Path runDirectory,
-                               StageTemplateLoader templateLoader, StageTemplateRunner templateRunner) throws Exception {
+    private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Path runDirectory,
+                               ExecutionPlan.Suite suitePlan, StageTemplateRunner templateRunner) throws Exception {
         if (!testCase.valid()) {
             return invalid(testCase, testCase.invalidReason());
         }
@@ -155,7 +151,8 @@ public class FrameworkEngine {
                         if (stage.required()) throw new IllegalArgumentException("Missing required stage data: " + stage.key());
                         continue;
                     }
-                    StageTemplate template = templateLoader.load(stageData.templateName());
+                    StageTemplate template = suitePlan.template(stageData.templateName());
+                    if (template == null) throw new IllegalArgumentException("Template was not resolved in execution plan: " + stageData.templateName());
                     verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=START");
                     context.beginStage(stageData, template.name(), template.directory());
                     caseLog.append("STAGE " + stage.key(), "template: " + stageData.templateName());
@@ -212,6 +209,32 @@ public class FrameworkEngine {
 
     private Path resolve(Path path) {
         return path.isAbsolute() ? path : projectRoot.resolve(path).normalize();
+    }
+
+    private ExecutionPlan buildPlan(ExecutionOptions options) throws Exception {
+        String runId = runId(options);
+        Path outputRoot = options.outputDirectory() == null ? resolve(config.outputDirectory()) : resolve(options.outputDirectory());
+        Path finalRunDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
+        if (Files.exists(finalRunDirectory)) throw new IllegalArgumentException("Run directory already exists: " + finalRunDirectory);
+        Set<String> failed = options.rerunFailed() ? latestFailedCaseIds(outputRoot) : Collections.<String>emptySet();
+        SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, config);
+        List<ExecutionPlan.Suite> suitePlans = new ArrayList<ExecutionPlan.Suite>();
+        for (Path selected : suites(options)) {
+            Path workbook = resolve(selected);
+            FrameworkConfig suiteConfig = resolver.resolve(workbook);
+            StageTemplateLoader loader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
+            List<TestCase> selectedCases = new ArrayList<TestCase>();
+            Map<String, StageTemplate> templates = new LinkedHashMap<String, StageTemplate>();
+            for (TestCase testCase : new ExcelTestSuiteLoader(suiteConfig).load(workbook)) {
+                if (!options.matches(testCase) || (options.rerunFailed() && !failed.contains(testCase.caseId()))) continue;
+                selectedCases.add(testCase);
+                for (StageCaseData stage : testCase.stages().values()) if (!templates.containsKey(stage.templateName())) templates.put(stage.templateName(), loader.load(stage.templateName()));
+            }
+            if (!selectedCases.isEmpty()) suitePlans.add(new ExecutionPlan.Suite(workbook, suiteConfig, selectedCases, templates));
+        }
+        ExecutionPlan plan = new ExecutionPlan(runId, outputRoot, finalRunDirectory, suitePlans);
+        if (plan.caseCount() == 0) throw new IllegalArgumentException("Case selection is empty after rerun-failed filtering");
+        return plan;
     }
 
     private void verbose(ExecutionOptions options, String message) {
@@ -365,14 +388,11 @@ public class FrameworkEngine {
     }
 
     private void appendEvent(Path runDirectory, String runId, TestResult result) throws Exception {
-        String json = "{\"runId\":\"" + json(runId) + "\",\"caseId\":\"" + json(result.caseId())
-                + "\",\"status\":\"" + result.status().name() + "\",\"durationMs\":" + result.duration().toMillis()
-                + ",\"caseLog\":\"" + json(result.caseLogPath() == null ? "" : result.caseLogPath().toString()) + "\"}\n";
+        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("caseLog", result.caseLogPath() == null ? "" : result.caseLogPath().toString());
+        String json = att.validation.JsonSupport.write(event) + "\n";
         Files.write(runDirectory.resolve("events.jsonl"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
     }
-
-    private String json(String value) { return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r"); }
 
     private static TestResult skipped(TestCase testCase, String message) {
         return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.SKIPPED, Duration.ZERO, message, "", null, Collections.<ValidationResult>emptyList());

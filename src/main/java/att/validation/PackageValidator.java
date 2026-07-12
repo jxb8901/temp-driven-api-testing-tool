@@ -73,6 +73,7 @@ public final class PackageValidator {
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
                             validateTemplate(template, config);
+                            validateReferencedTools(template, config);
                         } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, resolved)); }
                     }
                 }
@@ -86,6 +87,14 @@ public final class PackageValidator {
         return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
     }
 
+    private void validateReferencedTools(StageTemplate template, FrameworkConfig config) {
+        for (TemplateAction action : template.actions()) if ("tool".equalsIgnoreCase(action.type())) {
+            ToolCallParser.ParsedCall call = callParser.parse(action.call());
+            ToolConfig tool = config.tool(call.name());
+            if (tool != null) validateToolExecutable(tool);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private void validatePackageLayout(List<Diagnostic> diagnostics) {
         for (String required : new String[]{"config/config.yaml", "testcase", "templates", "tools", "schemas/catalog.yaml", "att.sh"}) {
@@ -97,12 +106,10 @@ public final class PackageValidator {
             Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
             if (!(loaded instanceof Map) || !"att-schema-catalog/v2.1".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
             Object schemas = ((Map<?, ?>) loaded).get("schemas"); if (!(schemas instanceof Map)) throw new IllegalArgumentException("Schema catalog requires schemas map");
-            com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
-            json.enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
             for (Object value : ((Map<?, ?>) schemas).values()) {
                 Path schema = projectRoot.resolve("schemas").resolve(String.valueOf(value)).normalize();
                 if (!schema.startsWith(projectRoot.resolve("schemas").normalize()) || !Files.isRegularFile(schema) || Files.isSymbolicLink(schema)) throw new IllegalArgumentException("Missing/unsafe schema file: " + value);
-                if (schema.getFileName().toString().endsWith(".json")) json.readTree(Files.readAllBytes(schema));
+                if (schema.getFileName().toString().endsWith(".json")) att.validation.JsonSchemaVerifier.compile(schema);
                 else if (schema.getFileName().toString().endsWith(".xsd")) { javax.xml.validation.SchemaFactory factory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI); factory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); factory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, ""); factory.newSchema(schema.toFile()); }
                 else throw new IllegalArgumentException("Unsupported catalog schema file: " + value);
             }
@@ -116,17 +123,30 @@ public final class PackageValidator {
 
     private void validatePackageTools(List<Diagnostic> diagnostics) {
         for (ToolConfig tool : global.tools().values()) {
-            try {
-                java.util.List<String> command = att.exec.CommandRunner.parseCommand(tool.command());
-                if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
-                String first = command.get(0);
-                if (first.startsWith("./") || first.startsWith("../")) {
-                    Path executable = projectRoot.resolve(first).normalize();
-                    if (!executable.startsWith(projectRoot.normalize()) || Files.isSymbolicLink(executable) || !Files.isRegularFile(executable)) throw new IllegalArgumentException("Missing/unsafe package-local tool executable: " + first);
-                    if (!Files.isExecutable(executable)) throw new IllegalArgumentException("Package-local tool is not executable: " + first);
-                }
-            } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TOOL_INVALID, e, null)); }
+            try { validateToolExecutable(tool); }
+            catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TOOL_INVALID, e, null)); }
         }
+    }
+
+    private void validateToolExecutable(ToolConfig tool) {
+        try {
+            java.util.List<String> command = att.exec.CommandRunner.parseCommand(tool.command());
+            if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
+            String first = command.get(0);
+            Path executable = java.nio.file.Paths.get(first);
+            boolean packageRelative = first.startsWith("./") || first.startsWith("../");
+            if (!executable.isAbsolute() && packageRelative) executable = projectRoot.resolve(executable).normalize();
+            else if (!executable.isAbsolute()) executable = findOnPath(first);
+            Path canonicalProject = projectRoot.toRealPath();
+            Path canonicalExecutable = executable.toRealPath();
+            if (packageRelative && !canonicalExecutable.startsWith(canonicalProject)) throw new IllegalArgumentException("Package-local tool executable escapes package root: " + first);
+            if (Files.isSymbolicLink(executable) || !Files.isRegularFile(canonicalExecutable)) throw new IllegalArgumentException("Missing/unsafe tool executable: " + first);
+            if (!Files.isExecutable(canonicalExecutable)) throw new IllegalArgumentException("Tool is not executable: " + first);
+        } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing/unsafe tool executable for " + tool.key() + ": " + e.getMessage(), e); }
+    }
+    private Path findOnPath(String executable) throws java.io.IOException {
+        String path = System.getenv("PATH"); if (path != null) for (String directory : path.split(java.io.File.pathSeparator)) { Path candidate = java.nio.file.Paths.get(directory).resolve(executable); if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate; }
+        throw new java.io.IOException("Executable not found on PATH: " + executable);
     }
 
     private ValidationSummary invalid(String mode, List<Diagnostic> diagnostics) { return new ValidationSummary(mode, 0, 0, 0, global.tools().size(), diagnostics); }
@@ -180,7 +200,7 @@ public final class PackageValidator {
         int attempts = integer(retry.get("maxAttempts"), 1); if (attempts < 1 || attempts > 10) throw new IllegalArgumentException("retry.maxAttempts must be 1..10: " + action.id());
         Object retryOn = retry.get("retryOn"); if (!(retryOn instanceof Iterable)) throw new IllegalArgumentException("retry.retryOn must be a list: " + action.id());
         boolean includesExitCode = false;
-        for (Object category : (Iterable<?>) retryOn) { if (!(category instanceof String)) throw new IllegalArgumentException("retry.retryOn values must be strings"); includesExitCode |= "EXIT_CODE".equals(category); if (!("EXIT_CODE".equals(category) || "OUTPUT_PARSE".equals(category) || "IO_ERROR".equals(category))) throw new IllegalArgumentException("Unknown retry category: " + category); }
+        for (Object category : (Iterable<?>) retryOn) { if (!(category instanceof String)) throw new IllegalArgumentException("retry.retryOn values must be strings"); includesExitCode |= "EXIT_CODE".equals(category); if (!"EXIT_CODE".equals(category)) throw new IllegalArgumentException("Unknown retry category: " + category); }
         if (retry.get("exitCodes") != null) {
             if (!includesExitCode) throw new IllegalArgumentException("retry.exitCodes requires EXIT_CODE in retryOn");
             if (!(retry.get("exitCodes") instanceof Iterable)) throw new IllegalArgumentException("retry.exitCodes must be a list");
@@ -224,15 +244,16 @@ public final class PackageValidator {
         public final int suites, cases, templates, tools;
         public final String mode;
         public final List<Diagnostic> diagnostics;
-        ValidationSummary(String mode, int suites, int cases, int templates, int tools, List<Diagnostic> diagnostics) { this.mode = mode; this.suites = suites; this.cases = cases; this.templates = templates; this.tools = tools; this.diagnostics = Collections.unmodifiableList(new ArrayList<Diagnostic>(diagnostics)); }
+        public ValidationSummary(String mode, int suites, int cases, int templates, int tools, List<Diagnostic> diagnostics) { this.mode = mode; this.suites = suites; this.cases = cases; this.templates = templates; this.tools = tools; this.diagnostics = Collections.unmodifiableList(new ArrayList<Diagnostic>(diagnostics)); }
         public boolean valid() { for (Diagnostic diagnostic : diagnostics) if (diagnostic.severity() == Diagnostic.Severity.ERROR) return false; return true; }
         public long errors() { return count(Diagnostic.Severity.ERROR); }
         public long warnings() { return count(Diagnostic.Severity.WARNING); }
         private long count(Diagnostic.Severity severity) { long count = 0; for (Diagnostic diagnostic : diagnostics) if (diagnostic.severity() == severity) count++; return count; }
         public String toJson() {
-            StringBuilder output = new StringBuilder("{\"schemaVersion\":\"att-validation/v2.1\",\"attVersion\":\"").append(att.Version.PRODUCT).append("\",\"valid\":").append(valid()).append(",\"mode\":\"").append(mode).append("\",\"summary\":{\"errors\":").append(errors()).append(",\"warnings\":").append(warnings()).append(",\"suites\":").append(suites).append(",\"cases\":").append(cases).append(",\"templates\":").append(templates).append(",\"tools\":").append(tools).append("},\"diagnostics\":[");
-            for (int i = 0; i < diagnostics.size(); i++) { if (i > 0) output.append(','); output.append(diagnostics.get(i).toJson()); }
-            return output.append("]}").toString();
+            Map<String,Object> root = new java.util.LinkedHashMap<String,Object>(); root.put("schemaVersion", "att-validation/v2.1"); root.put("attVersion", att.Version.PRODUCT); root.put("valid", valid()); root.put("mode", mode);
+            Map<String,Object> summary = new java.util.LinkedHashMap<String,Object>(); summary.put("errors", errors()); summary.put("warnings", warnings()); summary.put("suites", suites); summary.put("cases", cases); summary.put("templates", templates); summary.put("tools", tools); root.put("summary", summary);
+            List<Map<String,Object>> items = new java.util.ArrayList<Map<String,Object>>(); for (Diagnostic diagnostic : diagnostics) items.add(diagnostic.toMap()); root.put("diagnostics", items);
+            return JsonSupport.write(root);
         }
         @Override public String toString() { return suites + " suites, " + cases + " cases, " + templates + " templates, " + tools + " tools"; }
     }

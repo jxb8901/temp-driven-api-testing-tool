@@ -20,6 +20,9 @@ public final class FrameworkConfigLoader {
             Object loaded = YamlSupport.parser().load(reader);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> map = (Map<?, ?>) loaded;
+            Path schema = Paths.get("").toAbsolutePath().resolve("schemas/att-config-v2.1.schema.json");
+            if (!Files.isRegularFile(schema) && path.toAbsolutePath().normalize().getParent() != null && path.toAbsolutePath().normalize().getParent().getParent() != null) schema = path.toAbsolutePath().normalize().getParent().getParent().resolve("schemas/att-config-v2.1.schema.json");
+            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
             SchemaSupport.requireVersion(map, Version.CONFIG_SCHEMA, "config");
             SchemaSupport.rejectUnknown(map, "config", "schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "run", "report", "xml", "tools");
             validateGlobalMappings(map);

@@ -1,11 +1,11 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "att-sidecar/v2.1", "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "urn:att:schema:sidecar:v2.1", "type": "object",
   "required": ["schemaVersion", "excel", "stages"],
   "properties": {
     "schemaVersion": {"const": "att-sidecar/v2.1"},
-    "excel": {"type": "object", "required": ["sheet", "caseId", "tags"], "properties": {"sheet": {"type": "string", "minLength": 1}, "headerRows": {"type": "integer", "minimum": 1}, "caseId": {"type": "string", "minLength": 1}, "tags": {"type": "string", "minLength": 1}, "dataColumns": {"type": "string"}}, "additionalProperties": false},
-    "stages": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["key", "template"], "properties": {"key": {"type": "string", "pattern": "^[^.]+$"}, "template": {"type": "string", "minLength": 1}, "dataColumns": {"type": "string"}, "required": {"type": "boolean"}, "runWhen": {"enum": ["normal", "onSuccess", "onFailure", "always"]}, "onFailure": {"enum": ["stop", "continue"]}}, "additionalProperties": false}},
-    "report": {"type": "object", "properties": {"columns": {"type": "object", "additionalProperties": {"type": "string"}}}, "additionalProperties": false},
+    "excel": {"type": "object", "required": ["sheet", "caseId", "tags"], "properties": {"sheet": {"type": "string", "minLength": 1}, "headerRows": {"type": "integer", "minimum": 1}, "caseId": {"type": "string", "minLength": 1}, "tags": {"type": "string", "minLength": 1}, "dataColumns": {"type": "string"}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "stages": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["key", "template"], "properties": {"key": {"type": "string", "pattern": "^[^.]+$"}, "template": {"type": "string", "minLength": 1}, "dataColumns": {"type": "string"}, "required": {"type": "boolean"}, "runWhen": {"enum": ["normal", "onSuccess", "onFailure", "always"]}, "onFailure": {"enum": ["stop", "continue"]}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}},
+    "report": {"type": "object", "properties": {"columns": {"type": "object", "additionalProperties": {"type": "string"}}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 86400000}
   }, "patternProperties": {"^x-": {}}, "additionalProperties": false
 }

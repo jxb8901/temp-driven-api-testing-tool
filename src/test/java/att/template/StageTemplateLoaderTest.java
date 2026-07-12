@@ -36,4 +36,11 @@ class StageTemplateLoaderTest {
     @Test void actionFailureDefaultsToStop() {
         assertEquals("stop", new TemplateAction("note", java.util.Collections.<String, Object>singletonMap("type", "log")).onFailure());
     }
+
+    @Test void acceptsTimeoutOnlyForToolActionAtLoadBoundary() throws Exception {
+        Path dir=tempDir.resolve("templates/timeout"); Files.createDirectories(dir);
+        Files.write(dir.resolve("template.yaml"), "schemaVersion: att-template/v2.1\nname: timeout\ndescription: test\nactions:\n  call: {type: tool, call: '#{send()}', timeoutMs: 1234}\n".getBytes("UTF-8"));
+        TemplateAction action = new StageTemplateLoader(tempDir, Paths.get("templates")).load("timeout").actions().get(0);
+        assertEquals(Long.valueOf(1234), action.timeoutMs());
+    }
 }

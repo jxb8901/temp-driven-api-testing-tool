@@ -25,6 +25,10 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.17.2/jackson-annotations-2.17.2.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar \
+  "$HOME"/.m2/repository/com/networknt/json-schema-validator/1.4.0/json-schema-validator-1.4.0.jar \
+  "$HOME"/.m2/repository/com/ethlo/time/itu/1.8.0/itu-1.8.0.jar \
+  "$HOME"/.m2/repository/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar \
+  "$HOME"/.m2/repository/org/slf4j/slf4j-nop/2.0.9/slf4j-nop-2.0.9.jar \
   "$HOME"/.m2/repository/org/apache/commons/commons-compress/1.25.0/commons-compress-1.25.0.jar \
   "$HOME"/.m2/repository/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar \
   "$HOME"/.m2/repository/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar \
@@ -35,8 +39,7 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
   "$HOME"/.m2/repository/org/apache/poi/poi-ooxml-lite/5.2.5/poi-ooxml-lite-5.2.5.jar \
   "$HOME"/.m2/repository/com/github/virtuald/curvesapi/1.08/curvesapi-1.08.jar \
   "$HOME"/.m2/repository/org/yaml/snakeyaml/2.2/snakeyaml-2.2.jar \
-  "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar \
-  "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-core/2.21.1/log4j-core-2.21.1.jar; do
+  "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar; do
   CP="$CP:$jar"
 done
 

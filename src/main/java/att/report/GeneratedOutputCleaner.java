@@ -15,8 +15,7 @@ public final class GeneratedOutputCleaner {
     public void clean(Path projectRoot, FrameworkConfig config) throws IOException {
         Path root = projectRoot.toAbsolutePath().normalize();
         reportInProgress(resolve(root, config.outputDirectory()));
-        List<Path> targets = Arrays.asList(resolve(root, config.outputDirectory()), resolve(root, config.reportDirectory()),
-                resolve(root, config.logDirectory()), root.resolve("build/docs"));
+        List<Path> targets = Arrays.asList(resolve(root, config.outputDirectory()), root.resolve("build/docs"));
         for (Path target : targets) deleteSafe(root, target);
         deleteMatchingFiles(root.resolve("build"), "att-", ".tar.gz");
     }

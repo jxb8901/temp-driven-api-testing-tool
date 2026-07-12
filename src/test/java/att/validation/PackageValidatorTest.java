@@ -33,4 +33,11 @@ class PackageValidatorTest {
         Map<String,Object> builtInTool = new LinkedHashMap<String,Object>(); builtInTool.put("type","tool"); builtInTool.put("call","#{upper(value='x')}");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("tool",builtInTool))),config));
     }
+    @Test void referencedToolExecutableCannotEscapePackage() throws Exception {
+        Path project=tempDir.resolve("project"), outside=tempDir.resolve("outside.sh"); Files.createDirectories(project); Files.write(outside, "#!/bin/sh\n".getBytes("UTF-8")); outside.toFile().setExecutable(true);
+        ToolConfig tool=new ToolConfig("outside","Outside","test","../outside.sh","txt",Collections.<String,ToolArgumentConfig>emptyMap());
+        PackageValidator validator=new PackageValidator(project,new FrameworkConfig(project,project,project,"SIT",1000,project,Collections.<String,ToolConfig>emptyMap(),null,null));
+        java.lang.reflect.Method method=PackageValidator.class.getDeclaredMethod("validateToolExecutable",ToolConfig.class); method.setAccessible(true);
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,tool));
+    }
 }

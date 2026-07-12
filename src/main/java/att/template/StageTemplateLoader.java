@@ -19,10 +19,12 @@ import java.util.stream.Stream;
 /** Recursively indexes V2 template directories by full path and symbolic name. */
 public final class StageTemplateLoader {
     private final Path root;
+    private final Path projectRoot;
     private final Map<String, Path> byPath = new LinkedHashMap<String, Path>();
     private final Map<String, Path> byName = new LinkedHashMap<String, Path>();
 
     public StageTemplateLoader(Path projectRoot, Path templatesRoot) throws Exception {
+        this.projectRoot = projectRoot;
         Path canonicalProject = att.core.IdentifierValidator.canonicalPath(projectRoot, "package root");
         Path configured = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
         this.root = att.core.IdentifierValidator.canonicalPath(configured, "templates root");
@@ -77,6 +79,8 @@ public final class StageTemplateLoader {
     private StageTemplate loadDirectory(String reference, Path directory) throws Exception {
         if (!directory.normalize().startsWith(root)) throw new IllegalArgumentException("Template escapes root: " + reference);
         Map<String, Object> map = yaml(directory.resolve("template.yaml"));
+        Path schema = projectRoot.resolve("schemas/att-template-v2.1.schema.json");
+        if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, Version.TEMPLATE_SCHEMA, "template");
         SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
         SchemaSupport.string(map.get("description"), "template.description", true);
@@ -88,7 +92,7 @@ public final class StageTemplateLoader {
             String actionKey = String.valueOf(entry.getKey());
             if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey, "type", "onFailure", "retry", "description", "payload", "saveAs", "output", "call", "expression", "message", "level", "fields");
+            SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey, "type", "onFailure", "retry", "description", "payload", "saveAs", "output", "call", "expression", "message", "level", "fields", "timeoutMs");
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
             for (String mapping : new String[]{"retry", "output", "fields"}) if (actionMap.get(mapping) != null && !(actionMap.get(mapping) instanceof Map)) throw new IllegalArgumentException("actions." + actionKey + "." + mapping + " must be a map");

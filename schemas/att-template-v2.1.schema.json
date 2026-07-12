@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "att-template/v2.1",
+  "$id": "urn:att:schema:template:v2.1",
   "type": "object",
   "required": ["schemaVersion", "description", "actions"],
   "properties": {
@@ -20,7 +20,7 @@
         "onFailure": {"enum": ["stop", "continue"]},
         "payload": {"type": "string", "minLength": 1},
         "saveAs": {"type": "string", "minLength": 1},
-        "output": {"type": "object", "properties": {"mode": {"const": "file"}}, "additionalProperties": false},
+        "output": {"type": "object", "properties": {"mode": {"const": "file"}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
         "call": {"type": "string", "minLength": 1},
         "expression": {"type": "string", "minLength": 1},
         "message": {"type": "string", "minLength": 1},
@@ -37,7 +37,7 @@
       "required": ["retryOn"],
       "properties": {
         "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 10},
-        "retryOn": {"type": "array", "uniqueItems": true, "items": {"enum": ["EXIT_CODE", "OUTPUT_PARSE", "IO_ERROR"]}},
+        "retryOn": {"type": "array", "uniqueItems": true, "items": {"const": "EXIT_CODE"}},
         "exitCodes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 255}}
       },
       "additionalProperties": false

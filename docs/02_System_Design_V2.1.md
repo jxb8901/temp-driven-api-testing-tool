@@ -149,6 +149,8 @@ The binary release MUST package runtime dependencies only. V2.1 removes `log4j-c
 
 ### 7.1 General rules
 
+All versioned JSON schemas are enforced with a production Draft 2020-12 validator. Loaders MUST validate the parsed YAML/JSON tree against the applicable schema before applying cross-field, filesystem, or execution semantics; handwritten validators MUST NOT silently implement a weaker schema subset.
+
 V2.1 defines schemas for:
 
 - global `config.yaml`;
@@ -586,6 +588,8 @@ Environment allowlists, protected-environment confirmation, and production-acces
 
 ### 12.1 Pre-run plan
 
+The resolved plan is represented by an immutable `ExecutionPlan` containing the Run ID/output roots, resolved suites, effective suite configurations, selected cases, and every referenced template. Building this object is read-only. ATT MUST NOT create `outputDirectory` or `.in-progress` until `ExecutionPlan` construction succeeds.
+
 Before filesystem mutation, ATT creates an immutable execution plan containing:
 
 - selected suites and cases;
@@ -822,6 +826,8 @@ Each completed run writes:
 ```
 
 `report/junit.html` is a human-readable projection of the same `RunSummary` used by `ci/junit.xml`; it does not introduce a second aggregation model. It is stored beside `report/index.html` and contains counts, one row per testcase, status, duration, and either embedded case-log content or an external relative link using the same configured threshold as XML.
+
+`report --run-id` regenerates both `report/index.html` and `report/junit.html` from a completed manifest and uses the shared safe YAML parser.
 
 Mapping:
 

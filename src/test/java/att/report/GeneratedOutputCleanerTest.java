@@ -30,9 +30,9 @@ class GeneratedOutputCleanerTest {
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
                 Paths.get("templates"), Collections.emptyMap(), null, new RunConfig("timestamp", "yyyyMMdd"));
         new GeneratedOutputCleaner().clean(tempDir, config);
-        for (String directory : new String[]{"output", "report", "logs", "build/docs"}) {
-            assertFalse(Files.exists(tempDir.resolve(directory)));
-        }
+        for (String directory : new String[]{"output", "build/docs"}) assertFalse(Files.exists(tempDir.resolve(directory)));
+        assertTrue(Files.exists(tempDir.resolve("report")));
+        assertTrue(Files.exists(tempDir.resolve("logs")));
         assertTrue(Files.exists(tempDir.resolve("dist")));
         assertTrue(Files.exists(tempDir.resolve("target")));
         assertFalse(Files.exists(tempDir.resolve("build/att-run-R1.tar.gz")));

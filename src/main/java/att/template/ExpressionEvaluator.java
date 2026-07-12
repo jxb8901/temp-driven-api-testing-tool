@@ -190,9 +190,9 @@ public class ExpressionEvaluator {
                 if ("!=".equals(op)) return !lbool.equals(rbool);
                 throw new IllegalArgumentException("Boolean literals only support == and !=");
             }
-            Double l = number(left);
-            Double r = number(right);
-            int cmp = l != null && r != null ? Double.compare(l, r) : left.compareTo(right);
+            java.math.BigDecimal l = number(left);
+            java.math.BigDecimal r = number(right);
+            int cmp = l != null && r != null ? l.compareTo(r) : left.compareTo(right);
             if (">=".equals(op)) return cmp >= 0;
             if ("<=".equals(op)) return cmp <= 0;
             if ("==".equals(op)) return cmp == 0;
@@ -202,9 +202,9 @@ public class ExpressionEvaluator {
             return false;
         }
 
-        private static Double number(String value) {
+        private static java.math.BigDecimal number(String value) {
             try {
-                return Double.valueOf(value);
+                return new java.math.BigDecimal(value);
             } catch (NumberFormatException e) {
                 return null;
             }

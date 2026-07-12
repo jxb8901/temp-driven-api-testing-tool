@@ -31,6 +31,10 @@ DEPS="
 com/fasterxml/jackson/core/jackson-annotations/2.17.2/jackson-annotations-2.17.2.jar
 com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar
 com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar
+com/networknt/json-schema-validator/1.4.0/json-schema-validator-1.4.0.jar
+com/ethlo/time/itu/1.8.0/itu-1.8.0.jar
+org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar
+org/slf4j/slf4j-nop/2.0.9/slf4j-nop-2.0.9.jar
 commons-io/commons-io/2.16.1/commons-io-2.16.1.jar
 org/apache/commons/commons-compress/1.25.0/commons-compress-1.25.0.jar
 org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar

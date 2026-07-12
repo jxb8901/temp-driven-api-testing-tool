@@ -63,8 +63,7 @@ public final class FrameworkRunner {
             }
             RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics);
             if ("json".equals(options.format())) {
-                System.out.printf("{\"total\":%d,\"passed\":%d,\"failed\":%d,\"error\":%d,\"skipped\":%d,\"invalid\":%d,\"report\":\"%s\"}%n",
-                        summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid(), summary.reportPath().toString().replace("\\", "\\\\").replace("\"", "\\\""));
+                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", summary.reportPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
             } else if (!options.quiet()) {
                 System.out.printf("[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
@@ -74,9 +73,9 @@ public final class FrameworkRunner {
         } catch (IllegalArgumentException e) {
             String code = code(e.getMessage());
             if (options != null && "json".equals(options.format()) && "validate".equals(options.command())) {
-                System.out.println("{\"schemaVersion\":\"" + Version.VALIDATION_SCHEMA + "\",\"attVersion\":\"" + Version.PRODUCT + "\",\"valid\":false,\"mode\":\"" + options.validationScope() + "\",\"summary\":{\"errors\":1,\"warnings\":0,\"suites\":0,\"cases\":0,\"templates\":0,\"tools\":0},\"diagnostics\":[{\"code\":\"" + DiagnosticCodes.CONFIG_INVALID + "\",\"severity\":\"ERROR\",\"message\":\"" + json(e.getMessage()) + "\",\"file\":null,\"field\":null,\"sheet\":null,\"row\":null,\"column\":null,\"template\":null,\"action\":null,\"suggestion\":null}]}");
+                att.validation.Diagnostic diagnostic = new att.validation.Diagnostic(DiagnosticCodes.CONFIG_INVALID, att.validation.Diagnostic.Severity.ERROR, e.getMessage(), null, null, null, null, null, null); java.util.List<att.validation.Diagnostic> diagnostics = java.util.Collections.singletonList(diagnostic); System.out.println(new PackageValidator.ValidationSummary(options.validationScope(), 0, 0, 0, 0, diagnostics).toJson());
             } else if (options != null && "json".equals(options.format())) {
-                System.err.println("{\"valid\":false,\"code\":\"" + code + "\",\"message\":\"" + json(e.getMessage()) + "\"}");
+                java.util.Map<String,Object> error = new java.util.LinkedHashMap<String,Object>(); error.put("valid", false); error.put("code", code); error.put("message", e.getMessage()); System.err.println(att.validation.JsonSupport.write(error));
             } else System.err.println(code + ": " + e.getMessage());
             System.exit(2);
         } catch (Exception e) {
@@ -96,7 +95,6 @@ public final class FrameworkRunner {
         if (value.contains("sheet") || value.contains("column") || value.contains("case id") || value.contains("sidecar") || value.contains("stage")) return "ATT-TC-001";
         return "ATT-CFG-001";
     }
-    private static String json(String value) { return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r"); }
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {
         if (options.quiet() || !"human".equals(options.format())) return;
         for (att.validation.Diagnostic diagnostic : validation.diagnostics) System.out.println("[" + diagnostic.severity() + "] " + diagnostic.code() + ": " + diagnostic.message());

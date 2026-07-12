@@ -26,6 +26,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class FrameworkEngineTest {
     @TempDir Path projectRoot;
@@ -98,6 +99,15 @@ class FrameworkEngineTest {
                 new ValidationResult("s","assert",ResultStatus.FAIL,"","",""),
                 new ValidationResult("s","tool",ResultStatus.ERROR,"","","boom"));
         assertEquals(ResultStatus.ERROR, method.invoke(engine, mixed));
+    }
+
+    @Test void failedPlanCreatesNoOutputOrInProgressDirectory() throws Exception {
+        writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
+        writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        Files.createDirectories(projectRoot.resolve("templates"));
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "PLAN-FAIL"});
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
+        assertFalse(Files.exists(projectRoot.resolve("output")));
     }
 
     private FrameworkConfig globalConfig() {

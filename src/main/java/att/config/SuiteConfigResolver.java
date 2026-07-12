@@ -29,6 +29,8 @@ public final class SuiteConfigResolver {
         Path sidecar = sidecarPath(suitePath);
         if (!Files.exists(sidecar)) throw new IllegalArgumentException("Missing mandatory V2 sidecar: " + sidecar);
         Map<String, Object> map = load(sidecar);
+        Path schema = projectRoot.resolve("schemas/att-sidecar-v2.1.schema.json");
+        if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, Version.SIDECAR_SCHEMA, "sidecar");
         SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "excel", "stages", "report", "timeoutMs");
         Object excelValue = map.get("excel");

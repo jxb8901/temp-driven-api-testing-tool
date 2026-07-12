@@ -16,8 +16,16 @@ class ReportLifecycleTest {
         String latest="schemaVersion: att-latest-run/v2.1\nrunId: R1\nrunDirectory: R1\nstatus: PASS\nmanifestSha256: "+sha256(run.resolve("run.yaml"))+"\n";
         Files.write(output.resolve("latest-run.yaml"),latest.getBytes("UTF-8"));
         assertTrue(Files.exists(new ReportRegenerator().regenerate(output,"R1")));
+        assertTrue(Files.exists(run.resolve("report/junit.html")));
         assertTrue(Files.exists(new RunArchiveBuilder().build(tempDir,output)));
         assertFalse(Files.exists(run.resolve("package-config")));
+    }
+    @Test void reportAndBuildRejectSymlinkRunDirectory() throws Exception {
+        Path output=tempDir.resolve("out"), outside=tempDir.resolve("outside"); Files.createDirectories(output); Files.createDirectories(outside);
+        try { Files.createSymbolicLink(output.resolve("R1"), outside); } catch (UnsupportedOperationException | java.io.IOException e) { return; }
+        assertThrows(IllegalArgumentException.class, () -> new ReportRegenerator().regenerate(output,"R1"));
+        Files.write(output.resolve("latest-run.yaml"), "schemaVersion: att-latest-run/v2.1\nrunId: R1\n".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new RunArchiveBuilder().build(tempDir,output));
     }
     private String sha256(Path file) throws Exception { byte[] hash=java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)); StringBuilder out=new StringBuilder(); for(byte value:hash) out.append(String.format("%02x",value&255)); return out.toString(); }
 }

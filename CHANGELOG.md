@@ -1,5 +1,7 @@
 # Changelog
 
+- Hardened V2.1 contracts with immutable pre-mutation `ExecutionPlan`, selected-tool executable validation, symlink-safe report/archive lookup, exact clean ownership, NetworkNT Draft 2020-12 validation, Jackson-only JSON writing, EXIT_CODE-only retry, safe full report regeneration, and BigDecimal assertions (`1.0 == 1.00`).
+
 - Fixed `run --verbose` so it emits safe run/suite/case/stage/action lifecycle progress; completed the normal `[1/4]` through `[4/4]` progress sequence and made `--quiet` suppress completion output.
 
 ## [V2.1] - 2026-07-11

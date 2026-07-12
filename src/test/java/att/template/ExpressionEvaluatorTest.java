@@ -22,6 +22,8 @@ class ExpressionEvaluatorTest {
         assertTrue(evaluator.evaluate("12.50 >= 12 and true == true"));
         assertTrue(evaluator.evaluate("false or 7 < 9"));
         assertFalse(evaluator.evaluate("true != true"));
+        assertTrue(evaluator.evaluate("1.0 == 1.00"));
+        assertTrue(evaluator.evaluate("12345678901234567890.0001 > 12345678901234567890.0000"));
     }
 
     @Test void consumesBothSidesOfLogicalOperators() {

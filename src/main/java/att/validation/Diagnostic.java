@@ -32,9 +32,7 @@ public final class Diagnostic implements Comparable<Diagnostic> {
         map.put("code", code); map.put("severity", severity.name()); map.put("message", message); map.put("file", file); map.put("field", field); map.put("sheet", sheet); map.put("row", row); map.put("column", column); map.put("template", template); map.put("action", action); map.put("suggestion", suggestion); return map;
     }
     public String toJson() {
-        return "{\"code\":\"" + json(code) + "\",\"severity\":\"" + severity.name() + "\",\"message\":\"" + json(message)
-                + "\",\"file\":" + nullable(file) + ",\"field\":" + nullable(field) + ",\"sheet\":" + nullable(sheet) + ",\"row\":" + number(row)
-                + ",\"column\":" + number(column) + ",\"template\":" + nullable(template) + ",\"action\":" + nullable(action) + ",\"suggestion\":" + nullable(suggestion) + "}";
+        return JsonSupport.write(toMap());
     }
     @Override public int compareTo(Diagnostic other) {
         int value = safe(file).compareTo(safe(other.file));
@@ -45,7 +43,4 @@ public final class Diagnostic implements Comparable<Diagnostic> {
     }
     private static Integer integer(Integer value) { return value == null ? Integer.MAX_VALUE : value; }
     private static String safe(String value) { return value == null ? "" : value; }
-    private static String nullable(String value) { return value == null ? "null" : "\"" + json(value) + "\""; }
-    private static String number(Integer value) { return value == null ? "null" : value.toString(); }
-    private static String json(String value) { return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r"); }
 }

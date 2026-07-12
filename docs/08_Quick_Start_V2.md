@@ -162,7 +162,7 @@ Excel 表頭：
 schemaVersion: att-sidecar/v2.1
 excel:
   sheet: 支付測試案例集
-  headerRows: 2
+  headerRows: 1
   caseId: 案例編號
   tags: 標籤
   dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, amount=金額, expected=預期結果(yaml)
@@ -301,6 +301,8 @@ ATT 內置函數包括：
 - 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
 
 Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的非法字符及保留名稱限制。`report --run-id` 只接受合法 Run ID，不接受檔案路徑。
+
+`report --run-id` 會同時重建 `report/index.html` 和 `report/junit.html`；run 目錄或 manifest 若是跳出 output root 的 symlink，命令會拒絕處理。
 
 清理只針對 ATT 產生的最終用戶輸出：
 

@@ -32,6 +32,22 @@ public final class IdentifierValidator {
         return child;
     }
 
+    /** Resolves an existing non-symlink child and verifies canonical root containment. */
+    public static Path strictExistingChild(Path root, String validatedName, String owner) {
+        Path canonicalRoot = canonicalPath(root, owner + " root");
+        Path logical = canonicalRoot.resolve(validatedName).normalize();
+        if (logical.equals(canonicalRoot) || !logical.startsWith(canonicalRoot) || java.nio.file.Files.isSymbolicLink(logical)) {
+            throw new IllegalArgumentException(owner + " is an unsafe child: " + validatedName);
+        }
+        try {
+            Path canonical = logical.toRealPath();
+            if (!canonical.startsWith(canonicalRoot)) throw new IllegalArgumentException(owner + " escapes its root: " + validatedName);
+            return canonical;
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("Unable to resolve " + owner + ": " + validatedName + ": " + e.getMessage(), e);
+        }
+    }
+
     public static Path canonicalPath(Path path, String owner) {
         Path absolute = path.toAbsolutePath().normalize(), existing = absolute;
         try {

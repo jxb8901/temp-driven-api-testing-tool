@@ -6,7 +6,7 @@ import att.core.RunSummary;
 import att.core.TestResult;
 import att.core.ValidationResult;
 import att.core.IdentifierValidator;
-import org.yaml.snakeyaml.Yaml;
+import att.config.YamlSupport;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,10 +22,11 @@ public final class ReportRegenerator {
     @SuppressWarnings("unchecked")
     public Path regenerate(Path outputRoot, String runId) throws Exception {
         runId = IdentifierValidator.runId(runId);
-        Path runDir = IdentifierValidator.strictChild(outputRoot, runId, "Report run directory");
+        Path runDir = IdentifierValidator.strictExistingChild(outputRoot, runId, "Report run directory");
         Path manifest = runDir.resolve("run.yaml");
         if (!Files.exists(manifest)) throw new IllegalArgumentException("Run manifest does not exist: " + manifest);
-        Object loaded = new Yaml().load(new String(Files.readAllBytes(manifest), "UTF-8"));
+        if (Files.isSymbolicLink(manifest) || !Files.isRegularFile(manifest)) throw new IllegalArgumentException("Unsafe run manifest: " + manifest);
+        Object loaded = YamlSupport.parser().load(new String(Files.readAllBytes(manifest), "UTF-8"));
         if (!(loaded instanceof Map)) throw new IllegalArgumentException("Invalid run manifest: " + manifest);
         Map<String, Object> run = (Map<String, Object>) loaded;
         if (!"att-run/v2.1".equals(String.valueOf(run.get("schemaVersion")))) throw new IllegalArgumentException("Run manifest is not V2.1: " + manifest);
@@ -45,7 +46,10 @@ public final class ReportRegenerator {
         }
         Instant ended = runNode.get("endedAt") == null ? Files.getLastModifiedTime(manifest).toInstant() : Instant.parse(String.valueOf(runNode.get("endedAt")));
         Instant started = runNode.get("startedAt") == null ? ended : Instant.parse(String.valueOf(runNode.get("startedAt")));
-        return new HtmlReportGenerator().generate(runDir, runId, new RunSummary(results, runDir), started, ended);
+        RunSummary summary = new RunSummary(results, runDir);
+        Path report = new HtmlReportGenerator().generate(runDir, runId, summary, started, ended);
+        new CiReportWriter().writeJunitHtml(runDir, runId, summary, 10240);
+        return report;
     }
     private long longValue(Object value) { return value == null ? 0 : Long.parseLong(String.valueOf(value)); }
     private String text(Object value) { return value == null ? "" : String.valueOf(value); }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "att-config/v2.1",
+  "$id": "urn:att:schema:config:v2.1",
   "type": "object",
   "required": ["schemaVersion"],
   "properties": {
@@ -8,10 +8,10 @@
     "outputDirectory": {"type": "string", "minLength": 1},
     "environment": {"type": "string", "minLength": 1},
     "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 86400000},
-    "templates": {"type": "object", "properties": {"root": {"type": "string", "minLength": 1}}, "additionalProperties": false},
-    "run": {"type": "object", "properties": {"id": {"type": "object", "properties": {"default": {"const": "timestamp"}, "timestampFormat": {"type": "string", "minLength": 1}}, "additionalProperties": false}}, "additionalProperties": false},
-    "report": {"type": "object", "properties": {"mode": {"const": "append-to-copy"}, "fileNamePattern": {"type": "string"}, "columns": {"type": "object", "additionalProperties": {"type": "string"}}, "junit": {"type": "object", "properties": {"caseLogEmbedThresholdBytes": {"type": "integer", "minimum": 0, "maximum": 1048576}}, "additionalProperties": false}}, "additionalProperties": false},
-    "xml": {"type": "object", "properties": {"namespaceMode": {"enum": ["ignore", "preserve"]}}, "additionalProperties": false},
+    "templates": {"type": "object", "properties": {"root": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "run": {"type": "object", "properties": {"id": {"type": "object", "properties": {"default": {"const": "timestamp"}, "timestampFormat": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "report": {"type": "object", "properties": {"mode": {"const": "append-to-copy"}, "fileNamePattern": {"type": "string"}, "columns": {"type": "object", "additionalProperties": {"type": "string"}}, "junit": {"type": "object", "properties": {"caseLogEmbedThresholdBytes": {"type": "integer", "minimum": 0, "maximum": 1048576}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "xml": {"type": "object", "properties": {"namespaceMode": {"enum": ["ignore", "preserve"]}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "tools": {"type": "object", "additionalProperties": {"$ref": "#/$defs/tool"}}
   },
   "patternProperties": {"^x-": {}},

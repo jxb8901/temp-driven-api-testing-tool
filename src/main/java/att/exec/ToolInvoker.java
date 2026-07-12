@@ -282,11 +282,7 @@ public class ToolInvoker {
             return xmlToMap(text);
         }
         if ("json".equalsIgnoreCase(outputType)) {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-            mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-            mapper.enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
-            return mapper.readValue(text, Object.class);
+            return att.validation.JsonSupport.mapper().readValue(text, Object.class);
         }
         return text;
     }
