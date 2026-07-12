@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,7 +23,8 @@ class HtmlReportGeneratorTest {
     @Test void producesAStandaloneSinglePageReport() throws Exception {
         Path log = tempDir.resolve("payments.payment.TC001/case.log");
         Files.createDirectories(log.getParent()); Files.write(log, "ACTION callApi".getBytes("UTF-8"));
-        TestResult result = new TestResult("payments.payment.TC001", "Payment <success>", ResultStatus.PASS, Duration.ofMillis(12), "SUCCESS", "SUCCESS", log, Collections.emptyList());
+        TestResult result = new TestResult("payments.payment.TC001", "Payment <success>", ResultStatus.PASS, Duration.ofMillis(12), "SUCCESS", "SUCCESS", log,
+                Collections.emptyList(), "payments", "payment", Arrays.asList("smoke", "critical"));
         Path report = new HtmlReportGenerator().generate(tempDir, "RUN-1", new RunSummary(Collections.singletonList(result), tempDir), Instant.now(), Instant.now());
         String html = new String(Files.readAllBytes(report), "UTF-8");
         assertTrue(html.contains("Case details"));
@@ -30,6 +32,15 @@ class HtmlReportGeneratorTest {
         assertTrue(html.contains("Minimum"));
         assertTrue(html.contains("Average"));
         assertTrue(html.contains("caseSearch"));
+        assertTrue(html.contains("Workbook.Sheet"));
+        assertTrue(html.contains("payments.payment"));
+        assertTrue(html.contains("id=\"workbookFilter\""));
+        assertTrue(html.contains("id=\"sheetFilter\""));
+        assertTrue(html.contains("data-search=\"payments payment payments.payment.tc001 smoke, critical\""));
+        assertTrue(html.contains("data-sort=\"caseid\""));
+        assertTrue(html.contains("data-type=\"number\""));
+        assertTrue(html.contains("addEventListener('input',filterCases)"));
+        assertTrue(html.contains("localeCompare"));
         assertTrue(html.contains("aria-label=\"Report index\""));
         assertTrue(html.contains("href=\"#case-details\""));
         assertTrue(html.contains("href=\"junit.html\""));

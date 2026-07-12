@@ -215,7 +215,8 @@ public class FrameworkEngine {
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             writeCaseTree(caseOutputDir, context);
             return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
-                    Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations);
+                    Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
+                    testCase.workbookId(), testCase.groupId(), testCase.tags());
         } catch (Exception e) {
             caseLog.append("ERROR", e.getMessage());
             context.put("CASE.status", ResultStatus.ERROR.name());
@@ -369,6 +370,9 @@ public class FrameworkEngine {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("caseId", result.caseId());
             item.put("caseName", result.caseName());
+            item.put("workbookId", result.workbookId());
+            item.put("sheetId", result.sheetId());
+            item.put("tags", result.tags());
             item.put("status", result.status().name());
             item.put("durationMs", result.duration().toMillis());
             item.put("expected", result.expected());
@@ -438,14 +442,18 @@ public class FrameworkEngine {
     }
 
     private static TestResult skipped(TestCase testCase, String message) {
-        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.SKIPPED, Duration.ZERO, message, "", null, Collections.<ValidationResult>emptyList());
+        return result(testCase, ResultStatus.SKIPPED, Duration.ZERO, message, "", null);
     }
 
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration) {
-        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.ERROR, duration, "", message, outputXml, Collections.<ValidationResult>emptyList());
+        return result(testCase, ResultStatus.ERROR, duration, "", message, outputXml);
     }
     private static TestResult invalid(TestCase testCase, String message) {
-        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.INVALID, Duration.ZERO, "", message, null, Collections.<ValidationResult>emptyList());
+        return result(testCase, ResultStatus.INVALID, Duration.ZERO, "", message, null);
+    }
+    private static TestResult result(TestCase testCase, ResultStatus status, Duration duration, String expected, String actual, Path log) {
+        return new TestResult(testCase.caseId(), testCase.caseName(), status, duration, expected, actual, log,
+                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags());
     }
 
     private static String joinExpected(List<ValidationResult> validations) {

@@ -569,6 +569,8 @@ After validation, a case output directory is exactly:
 
 ATT MUST NOT rewrite, slugify, hash, or otherwise change the full Case ID used as the directory name. `case.yaml`, `run.yaml`, workbooks, reports, and indexes use the same value. HTML anchors and URLs MUST still apply normal URL/HTML encoding without changing the displayed identifier.
 
+The HTML report Groups table aggregates by `<workbookId>.<sheetId>`. The Cases table exposes Workbook and Sheet filters, status filtering, and text search over workbook ID, sheet ID, full Case ID, and tags. Every Cases column is sortable in ascending/descending order; numeric duration sorting MUST compare numbers rather than formatted text. Workbook ID, sheet ID, and tags are persisted per case in `run.yaml` so `att.sh report` can reproduce the same filters and grouping.
+
 Before directory creation, ATT resolves and normalizes `<runDirectory>/<fullCaseId>` and verifies that the result is a strict child of the validated run directory.
 
 ### 10.4 Report command

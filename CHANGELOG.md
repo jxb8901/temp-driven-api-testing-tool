@@ -1,5 +1,9 @@
 # Changelog
 
+- Reorganized the ATT V2.1 end-user manual into a guided ten-chapter structure: Introduction, Quick Start, User Guide, Cookbook, CLI, Configuration, Expressions, Reports, Troubleshooting, and Maintainer Architecture. Merged the configuration and schema references into one reference chapter and retained the workbook/POI, tool-tokenization, XML, retry, CI, concurrency, and run-lifecycle examples.
+
+- Enhanced HTML run reports with Workbook.Sheet group statistics, workbook/sheet/status filters, working case/tag search, and sortable Cases columns; persisted report metadata supports equivalent regeneration.
+
 - Added mandatory package-unique workbook sidecar `id`; full Case IDs now use `<workbookId>.<sheetId>.<rowCaseId>` with package validation and ExecutionPlan duplicate protection.
 
 - Added default concurrent-run rejection plus explicit `run --queue` and `run --parallel` modes, pre-execution Run ID duplicate rejection, collision-safe numeric Run ID allocation at parallel completion, full run-validation diagnostics, and a consolidated Chapter 14 config/schema reference.
