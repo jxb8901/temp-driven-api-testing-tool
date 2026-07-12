@@ -51,7 +51,7 @@ public final class SuiteConfigResolver {
         ReportConfig report = mergeReport(map.get("report"));
         int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
         return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
-                global.environment(), timeoutMs, global.templatesRoot(),
+                global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
                 global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId);
     }
 
@@ -119,7 +119,7 @@ public final class SuiteConfigResolver {
     private static int positiveInteger(Object value, int fallback, String owner) {
         if (value != null && !(value instanceof Number)) throw new IllegalArgumentException(owner + " must be an integer");
         int result = value == null ? fallback : ((Number) value).intValue();
-        int maximum = "excel.headerRows".equals(owner) ? 86400 : 86400000;
+        int maximum = "excel.headerRows".equals(owner) ? 86400 : 3600000;
         if (result < 1 || result > maximum) throw new IllegalArgumentException(owner + " must be between 1 and " + maximum);
         return result;
     }

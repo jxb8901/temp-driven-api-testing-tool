@@ -90,12 +90,12 @@ The implementation MAY introduce focused helpers for shared concerns such as sta
 
 ### 6.1 Version source
 
-The Maven project version is the authoritative ATT version. Release builds MUST use a non-SNAPSHOT value such as `2.1.0`.
+The Maven project version is the authoritative ATT version. Release builds MUST use a non-SNAPSHOT value such as `2.1.1`.
 
 The build MUST generate a resource containing:
 
 ```properties
-att.version=2.1.0
+att.version=2.1.1
 att.buildTime=2026-07-11T00:00:00Z
 att.gitCommit=<commit-or-unknown>
 ```
@@ -181,9 +181,11 @@ Supported top-level fields are:
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutMs: 120000
+timeoutMs: 10000
 templates:
   root: templates
+testcase:
+  root: testcase
 run:
   id:
     default: timestamp
@@ -202,7 +204,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Invoke a rendered payment request
-    command: "./tools/invoke_payment_api.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/invoke_payment_api.sh ${requestFile}"
     output: json
     arguments:
       requestFile:
@@ -218,9 +220,10 @@ tools:
 | schemaVersion | string | Yes | exactly `att-config/v2.1` |
 | outputDirectory | string | No | relative package path; default `output` |
 | environment | string | No | non-blank; default `SIT` |
-| timeoutMs | integer | No | 1–86400000; default 120000 |
+| timeoutMs | integer | No | 1–3600000; default 10000 |
 | templates | map | No | only `root` is allowed |
 | templates.root | string | No | relative package path; default `templates` |
+| testcase.root | string | No | relative package path; default `testcase`; paired `basename.yaml`/`basename.xlsx` files are discovered recursively |
 | run | map | No | only `id` is allowed |
 | run.id | map | No | only `default`, `timestampFormat` are allowed |
 | run.id.default | string | No | exactly `timestamp`; default `timestamp` |
@@ -262,7 +265,7 @@ stages:
 report:
   columns:
     result: 測試結果
-timeoutMs: 120000
+timeoutMs: 10000
 ```
 
 The complete sidecar schema is:
@@ -286,7 +289,7 @@ The complete sidecar schema is:
 | stages[].onFailure | string | No | `stop` or `continue`; default `stop` |
 | report | map | No | only `columns` is allowed |
 | report.columns | map of string | No | result field → physical Excel header mapping; recognized result-field keys only |
-| timeoutMs | integer | No | 1–86400000; overrides global value |
+| timeoutMs | integer | No | 1–3600000; overrides global value |
 
 The sidecar MUST NOT override global tools, template root, environment, or output roots. Unknown fields in `excel`, each stage, and `report` are errors.
 
@@ -363,7 +366,7 @@ Rules:
 - Built-in functions are not valid as the primary call of a tool action.
 - Tool name and all argument names MUST resolve during validation.
 - Required arguments MUST be present syntactically; non-blank runtime validation still occurs before invocation.
-- `timeoutMs` is optional, is valid only for a tool action, and overrides the resolved global/sidecar `timeoutMs` for that action. Its range is 1–86400000.
+- `timeoutMs` is optional, is valid only for a tool action, and overrides the resolved global/sidecar `timeoutMs` for that action. Its range is 1–3600000.
 - `payload`, `saveAs`, `expression`, `message`, `level`, and `fields` are forbidden.
 - Retry follows Section 18; timeout is never retried.
 
@@ -502,7 +505,7 @@ Suggested code families are:
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.0",
+  "attVersion": "2.1.1",
   "valid": false,
   "mode": "package",
   "summary": {
@@ -722,21 +725,20 @@ name: "{namespace-uri}localName"
 attributes:
   "{}id": "1"
 text: "A"
-children:
-  item:
-    - name: "{}item"
-      attributes: {"{}id": "1"}
-      text: "A"
-      children: {}
-    - name: "{}item"
-      attributes: {"{}id": "2"}
-      text: "B"
-      children: {}
+item:
+  - attributes: {"{}id": "1"}
+    text: "A"
+  - attributes: {"{}id": "2"}
+    text: "B"
 ```
 
 Rules:
 
 - Repeated sibling elements MUST be preserved in document order as arrays.
+- A single child MUST be represented directly, never as a one-element array.
+- A leaf without attributes is represented as `elementName: text`.
+- A leaf with exactly one attribute and no text is represented as `elementName: attributeValue`.
+- Nodes with children, multiple attributes, or both attribute and text remain maps.
 - Element attributes MUST be preserved.
 - `namespaceMode: ignore` is the default and uses local-name keys.
 - `namespaceMode: preserve` retains namespace identity using Clark notation.
@@ -744,7 +746,7 @@ Rules:
 - Comments and processing instructions are ignored unless a future schema version specifies otherwise.
 - Entity expansion, DTD loading, and external resources remain disabled.
 
-Convenience lookup MAY expose non-repeated children directly, but canonical persisted XML output MUST use one unambiguous mapping.
+This simplified structure is the canonical persisted XML output.
 
 ## 15. Run manifest and reproducibility
 
@@ -753,7 +755,7 @@ Every completed run contains `run.yaml` with at least:
 ```yaml
 schemaVersion: att-run/v2.1
 att:
-  version: 2.1.0
+  version: 2.1.1
   buildTime: 2026-07-11T00:00:00Z
   gitCommit: abcdef0
 runtime:
@@ -944,18 +946,13 @@ The action node records all attempts, final status, total duration, and winning 
 
 ## 19. Tool process safety
 
-Tool commands SHOULD be represented as an explicit argv list in V2.1:
+Tool commands are tokenized into argv without a shell. Declared named arguments are referenced directly:
 
 ```yaml
-command:
-  - ./tools/invoke_payment_api.sh
-  - --input
-  - ${TOOL.inputFile}
-  - --output
-  - ${TOOL.outputFile}
+command: "./tools/invoke_payment_api.sh ${requestFile}"
 ```
 
-String command form MAY be retained only as a deprecated compatibility form with documented ATT tokenization; it is not evaluated by a shell. Pipes, redirects, substitutions, globbing, and environment-variable expansion are not implied.
+The command is not evaluated by a shell. Pipes, redirects, substitutions, globbing, and environment-variable expansion are not implied. Tools emit their result on stdout and diagnostics on stderr; ATT writes input/stdout/stderr into the case log and creates no files unless the tool action sets `saveAs`.
 
 Processes MUST have timeouts. On timeout ATT MUST terminate the process tree where supported, wait for bounded cleanup, preserve captured output, and classify the attempt as ERROR/TIMEOUT.
 

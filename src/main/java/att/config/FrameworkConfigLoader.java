@@ -24,12 +24,12 @@ public final class FrameworkConfigLoader {
             if (!Files.isRegularFile(schema) && path.toAbsolutePath().normalize().getParent() != null && path.toAbsolutePath().normalize().getParent().getParent() != null) schema = path.toAbsolutePath().normalize().getParent().getParent().resolve("schemas/att-config-v2.1.schema.json");
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
             SchemaSupport.requireVersion(map, Version.CONFIG_SCHEMA, "config");
-            SchemaSupport.rejectUnknown(map, "config", "schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "run", "report", "xml", "tools");
+            SchemaSupport.rejectUnknown(map, "config", "schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "xml", "tools");
             validateGlobalMappings(map);
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
-                    map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 120000, "timeoutMs"),
-                    templatesRoot(map), tools(map), report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map));
+                    map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
+                    templatesRoot(map), testcasesRoot(map), tools(map), report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "");
         }
     }
 
@@ -40,6 +40,7 @@ public final class FrameworkConfigLoader {
 
     private static void validateGlobalMappings(Map<?, ?> map) {
         if (map.get("templates") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("templates"), "config.templates"), "config.templates", "root");
+        if (map.get("testcase") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("testcase"), "config.testcase"), "config.testcase", "root");
         if (map.get("run") != null) {
             Map<?, ?> run = SchemaSupport.map(map.get("run"), "config.run");
             SchemaSupport.rejectUnknown(run, "config.run", "id");
@@ -61,6 +62,10 @@ public final class FrameworkConfigLoader {
         Object value = map.get("templates");
         return value instanceof Map ? relativePath(((Map<?, ?>) value).get("root"), "templates", "templates.root") : Paths.get("templates");
     }
+    private static Path testcasesRoot(Map<?, ?> map) {
+        Object value = map.get("testcase");
+        return value instanceof Map ? relativePath(((Map<?, ?>) value).get("root"), "testcase", "testcase.root") : Paths.get("testcase");
+    }
 
     private static Map<String, ToolConfig> tools(Map<?, ?> map) {
         Map<String, ToolConfig> result = new LinkedHashMap<String, ToolConfig>();
@@ -76,10 +81,22 @@ public final class FrameworkConfigLoader {
             if (!("txt".equals(output) || "yaml".equals(output) || "json".equals(output) || "xml".equals(output))) {
                 throw new IllegalArgumentException("Tool output must be txt, yaml, json, or xml: " + key);
             }
-            result.put(key, new ToolConfig(key, required(tool, "name", "tool " + key), required(tool, "description", "tool " + key),
-                    required(tool, "command", "tool " + key), output, arguments(key, tool.get("arguments"))));
+            Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"));
+            String command = required(tool, "command", "tool " + key);
+            validateCommandArguments(key, command, arguments);
+            result.put(key, new ToolConfig(key, required(tool, "name", "tool " + key), required(tool, "description", "tool " + key), command, output, arguments));
         }
         return result;
+    }
+
+    private static void validateCommandArguments(String tool, String command, Map<String, ToolArgumentConfig> arguments) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\$\\{([^}]+)}").matcher(command);
+        while (matcher.find()) {
+            String expression = matcher.group(1);
+            String argument = expression.startsWith("TOOL.input.") ? expression.substring(11) : expression.startsWith("input.") ? expression.substring(6) : expression;
+            boolean argumentForm = expression.startsWith("TOOL.input.") || expression.startsWith("input.") || expression.matches("[A-Za-z_][A-Za-z0-9_]*");
+            if (argumentForm && !arguments.containsKey(argument)) throw new IllegalArgumentException("Tool command argument reference is case-sensitive and must match a declared argument: " + tool + "." + expression);
+        }
     }
 
     private static Map<String, ToolArgumentConfig> arguments(String toolKey, Object value) {
@@ -92,6 +109,7 @@ public final class FrameworkConfigLoader {
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Tool argument keys must be strings: " + toolKey);
             index++;
             String key = String.valueOf(entry.getKey());
+            if (!key.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Tool argument name must match [A-Za-z_][A-Za-z0-9_]*: " + toolKey + "." + key);
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Argument descriptor must be a map: " + toolKey + "." + key);
             Map<?, ?> descriptor = (Map<?, ?>) entry.getValue();
             SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key, "name", "description", "required", "delimit");
@@ -152,7 +170,7 @@ public final class FrameworkConfigLoader {
     private static int positiveInteger(Object value, int fallback, String owner) {
         if (value != null && !(value instanceof Number)) throw new IllegalArgumentException(owner + " must be an integer");
         int result = value == null ? fallback : ((Number) value).intValue();
-        if (result < 1 || result > 86400000) throw new IllegalArgumentException(owner + " must be between 1 and 86400000");
+        if (result < 1 || result > 3600000) throw new IllegalArgumentException(owner + " must be between 1 and 3600000");
         return result;
     }
     private static Path relativePath(Object value, String fallback, String owner) {

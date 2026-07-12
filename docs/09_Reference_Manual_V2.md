@@ -80,6 +80,8 @@ att-package/
 
 You normally edit `config/config.yaml`, workbook/sidecar pairs, templates, payloads, and tool scripts. ATT owns generated content below the configured output directory and its documented build locations.
 
+The global `testcase.root` setting defaults to `testcase`. Discovery is recursive, and an adjacent same-basename YAML/XLSX pair defines one testcase set at any depth.
+
 ## 02 Quick Start
 
 This example creates one payment test that renders JSON, invokes a tool, and verifies the returned status.
@@ -92,7 +94,7 @@ Create `config/config.yaml`:
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutMs: 120000
+timeoutMs: 10000
 templates:
   root: templates
 report:
@@ -104,7 +106,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Send a rendered payment request
-    command: "./tools/invoke_payment_api.sh --input '${TOOL.inputFile}' --output '${TOOL.outputFile}'"
+    command: "./tools/invoke_payment_api.sh '${requestFile}' '${environment}'"
     output: json
     arguments:
       requestFile:
@@ -117,7 +119,7 @@ tools:
         required: true
 ```
 
-`command` is tokenized into process arguments; it is not executed by a shell. The generated input file contains the named arguments passed by the action.
+`command` is tokenized into process arguments; it is not executed by a shell. Declared arguments are referenced directly, for example `${requestFile}`.
 
 ### Step 2: create the workbook and sidecar
 
@@ -131,6 +133,7 @@ Create the adjacent `testcase/payment.yaml`:
 
 ```yaml
 schemaVersion: att-sidecar/v2.1
+id: payment
 excel:
   sheet: payment=Payment Cases
   headerRows: 1
@@ -143,7 +146,7 @@ stages:
     required: true
 ```
 
-The full Case ID is `payment.TC001`: `payment` comes from the sheet mapping and `TC001` comes from the row.
+The full Case ID is `payment.payment.TC001`: the first `payment` is the mandatory package-unique workbook `id`, the second comes from the sheet mapping, and `TC001` comes from the row.
 
 ### Step 3: create the template
 
@@ -225,6 +228,7 @@ The sidecar maps Excel structure into ATT concepts. It owns the sheet mapping, h
 
 ```yaml
 schemaVersion: att-sidecar/v2.1
+id: paymentRegression
 excel:
   sheet: payment=支付測試案例集, batch=批量測試案例集
   headerRows: 2
@@ -240,7 +244,7 @@ stages:
     onFailure: stop
 ```
 
-`excel.sheet` accepts one sheet name or comma-separated `groupId=sheetName` entries. If one sheet is given without a group ID, ATT uses `default`. Full Case IDs always have the form `groupId.rowCaseId` and must be unique across the workbook.
+The root `id` is mandatory and must be unique across the package. `excel.sheet` accepts one sheet name or comma-separated `groupId=sheetName` entries. If one sheet is given without a group ID, ATT uses `default`. Full Case IDs always have the form `workbookId.groupId.rowCaseId` and must be unique across the package.
 
 #### Mapping data columns
 
@@ -384,7 +388,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Invoke a rendered request
-    command: "./tools/invoke_payment_api.sh --input '${TOOL.inputFile}' --output '${TOOL.outputFile}'"
+    command: "./tools/invoke_payment_api.sh '${requestFile}' '${environment}'"
     output: json
     arguments:
       requestFile:
@@ -422,22 +426,23 @@ ATT renders placeholders and tokenizes the command into process argv. It does no
 This configuration:
 
 ```yaml
-command: "./tools/send.sh --input '${TOOL.inputFile}' --label 'Payment regression'"
+command: "./tools/send.sh '${requestFile}' --label 'Payment regression'"
 ```
 
 produces these logical arguments:
 
 ```text
 ./tools/send.sh
---input
-<generated-input.yaml>
+<request-file-value>
 --label
 Payment regression
 ```
 
 The text `status|PENDING` remains one literal argument and `>result` does not redirect output.
 
-Do not interpolate free-text testcase values directly into `command`; spaces and quote characters may alter tokenization. Pass them as named tool arguments and let the script read `${TOOL.inputFile}`. If pipeline or redirection behavior is required, implement it inside a reviewed tool script.
+Prefer the shortest declared-argument placeholder, such as `${keywords}`; use `${input.keywords}` when an explicit namespace improves clarity. Both forms are case-sensitive and must exactly match the argument key. `${TOOL.input.keywords}` remains supported but is not the preferred authoring style. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
+
+Use Context expressions in tool configuration only for exceptional implicit global parameter passing, for example `${ACTIONS.callApi.output.status}`. Ordinary tool inputs should be declared under `arguments` and passed explicitly by the action so dependencies remain visible and validateable.
 
 #### Input, output, timeout, and status
 
@@ -445,21 +450,21 @@ Available command placeholders are:
 
 | Placeholder | Meaning |
 |---|---|
-| `${TOOL.inputFile}` | Generated YAML file containing named invocation inputs |
-| `${TOOL.outputFile}` | Allocated raw-result file path |
-| `${TOOL.input.<argument>}` | One declared scalar argument; a final delimited argument may expand to several argv items |
+| `${argument}` | Preferred direct reference to a declared argument key |
+| `${input.argument}` | Explicitly namespaced reference to the same declared argument |
+| `${ACTIONS.<action>.output.<field>}` | Exceptional Context reference for intentional implicit global parameter passing |
 
-If the tool writes `outputFile`, ATT parses that file. Otherwise it uses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`.
+ATT parses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist stdout below that action directory; without `saveAs`, tool invocation creates no files.
 
 Exit code 0 plus successful parsing is PASS. A non-zero exit code, timeout, process failure, or structured-output parse failure is ERROR. Command, inputs, stdout, stderr, raw output, duration, exit code, and parsed output are retained as evidence.
 
 Timeout precedence is:
 
 ```text
-tool action timeoutMs → workbook sidecar timeoutMs → global timeoutMs → 120000 ms
+tool action timeoutMs → workbook sidecar timeoutMs → global timeoutMs → 10000 ms
 ```
 
-Every configured timeout is an integer from 1 to 86400000 milliseconds.
+Every configured timeout is an integer from 1 to 3600000 milliseconds.
 
 ### 3.4 Running Tests
 
@@ -611,30 +616,18 @@ ATT converts XML into a stable map/list tree:
 name: Response
 attributes:
   requestId: R-100
-text: ""
-children:
-  Status:
-    - name: Status
-      attributes: {code: "00"}
-      text: SUCCESS
-      children: {}
-  Messages:
-    - name: Messages
-      attributes: {}
-      text: ""
-      children:
-        Message:
-          - name: Message
-            attributes: {severity: INFO}
-            text: accepted
-            children: {}
-          - name: Message
-            attributes: {severity: WARN}
-            text: review later
-            children: {}
+Status:
+  attributes: {code: "00"}
+  text: SUCCESS
+Messages:
+  Message:
+    - attributes: {severity: INFO}
+      text: accepted
+    - attributes: {severity: WARN}
+      text: review later
 ```
 
-Expressions use zero-based indexes, even for one child:
+Only repeated siblings are arrays, so indexes are used only for repeated nodes:
 
 ```yaml
 assertRootAttribute:
@@ -642,19 +635,21 @@ assertRootAttribute:
   expression: "${ACTIONS.callApi.output.attributes.requestId} == 'R-100'"
 assertStatusText:
   type: assert
-  expression: "${ACTIONS.callApi.output.children.Status[0].text} == 'SUCCESS'"
+  expression: "${ACTIONS.callApi.output.Status.text} == 'SUCCESS'"
 assertStatusCode:
   type: assert
-  expression: "${ACTIONS.callApi.output.children.Status[0].attributes.code} == '00'"
+  expression: "${ACTIONS.callApi.output.Status.attributes.code} == '00'"
 assertSecondMessage:
   type: assert
-  expression: "${ACTIONS.callApi.output.children.Messages[0].children.Message[1].text} == 'review later'"
+  expression: "${ACTIONS.callApi.output.Messages.Message[1].text} == 'review later'"
 assertSecondSeverity:
   type: assert
-  expression: "${ACTIONS.callApi.output.children.Messages[0].children.Message[1].attributes.severity} == 'WARN'"
+  expression: "${ACTIONS.callApi.output.Messages.Message[1].attributes.severity} == 'WARN'"
 ```
 
 With `xml.namespaceMode: ignore`, keys use local names. With `preserve`, namespace-aware names use Clark notation such as `{urn:payment}Status`. XML DTD, external entities, XInclude, and external resources are disabled.
+
+A leaf without attributes becomes `ElementName: text`. A leaf with exactly one attribute and no text becomes `ElementName: attributeValue`. Nodes with children, multiple attributes, or both attribute and text retain a map.
 
 ### Pass a list as separate process arguments
 
@@ -665,7 +660,7 @@ tools:
   grepFromAppLogs:
     name: Grep application logs
     description: Search one or more keywords
-    command: "./tools/grep_from_app_logs.sh --input '${TOOL.inputFile}' --output '${TOOL.outputFile}' ${TOOL.input.keywords}"
+    command: "./tools/grep_from_app_logs.sh '${logText}' ${keywords}"
     output: yaml
     arguments:
       logFile: {name: Log File, description: Source log, required: true}
@@ -803,7 +798,7 @@ All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknow
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutMs: 120000
+timeoutMs: 10000
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 report:
@@ -820,7 +815,7 @@ tools: {}
 | `schemaVersion` | required | Exactly `att-config/v2.1` |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty value exposed as `${CASE.environment}`; it does not choose endpoints by itself |
-| `timeoutMs` | `120000` | Integer 1–86400000 milliseconds |
+| `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
 | `templates.root` | `templates` | Non-empty package-relative template root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
@@ -851,12 +846,12 @@ V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `valida
 
 | Object | Allowed properties | Required/constraints |
 |---|---|---|
-| root | `schemaVersion`, `excel`, `stages`, `report`, `timeoutMs`, `x-*` | schemaVersion, excel, non-empty stages required |
+| root | `schemaVersion`, `id`, `excel`, `stages`, `report`, `timeoutMs`, `x-*` | schemaVersion, package-unique id, excel, non-empty stages required |
 | `excel` | `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns` | sheet, caseId, tags required; headerRows ≥ 1 |
 | `stages[]` | `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure` | key/template required; key has no dot |
 | `report` | `columns` | values are strings |
 
-`timeoutMs` is 1–86400000. Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` reject extensions and other unknown fields. The sidecar cannot override tools, template root, environment, or output root.
+`timeoutMs` is 1–3600000. Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` reject extensions and other unknown fields. The sidecar cannot override tools, template root, environment, or output root.
 
 ### Template and action
 
@@ -876,7 +871,7 @@ V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `valida
 
 Each tool requires `name`, `description`, and `command`. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. Only the final declared argument may define a non-empty `delimit`.
 
-Tool/argument keys are case-sensitive. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
+Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
 ### Identifier and path constraints
 
@@ -891,7 +886,7 @@ Group ID and row Case ID follow the same character rules; their combined full Ca
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.0",
+  "attVersion": "2.1.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -958,7 +953,7 @@ Common properties include:
 | ACTION | `id`, `type`, status, timing, error, `output`, `outputFile`, assertion/log data |
 | TOOL | configured name, input/output files, command/argv, stdout/stderr, exit code, duration, parsed output, attempts |
 
-Use `${ACTIONS.<id>...}` as a current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. `${TOOL.input}`, `${TOOL.output}`, `${TOOL.inputFile}`, and `${TOOL.outputFile}` exist only while the tool is running.
+Use `${ACTIONS.<id>...}` as a current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. `${TOOL.input}` and `${TOOL.output}` expose the latest tool call; input/stdout/stderr evidence is also written to the case log.
 
 Map properties use dot navigation and lists use zero-based brackets:
 

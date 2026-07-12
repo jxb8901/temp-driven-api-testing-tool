@@ -88,7 +88,9 @@ public final class HtmlReportGenerator {
         }
         Path tree = result.caseLogPath() == null ? null : result.caseLogPath().getParent().resolve("case.yaml");
         String treeContent = tree != null && Files.exists(tree) ? new String(Files.readAllBytes(tree), StandardCharsets.UTF_8) : "";
-        html.append("</dl><h3>Stage / Template / Action / Tool tree</h3><pre>").append(escape(treeContent)).append("</pre><h3>Detailed execution log</h3><pre>").append(escape(logContent)).append("</pre></div></details>");
+        html.append("</dl><h3>Action results</h3><table><tr><th>Stage</th><th>Action</th><th>Status</th><th>Message</th></tr>");
+        for (att.core.ValidationResult action : result.validations()) html.append("<tr><td>").append(escape(action.source())).append("</td><td>").append(escape(action.name())).append("</td><td><span class=\"badge ").append(action.status()).append("\">").append(action.status()).append("</span></td><td>").append(escape(action.message())).append("</td></tr>");
+        html.append("</table><h3>Stage / Template / Action / Tool tree</h3><pre>").append(escape(treeContent)).append("</pre><h3>Detailed execution log</h3><pre>").append(escape(logContent)).append("</pre></div></details>");
     }
 
     private String card(String name, Object value) { return "<div class=\"card\"><strong>" + escape(name) + "</strong><span>" + escape(String.valueOf(value)) + "</span></div>"; }

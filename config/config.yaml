@@ -1,7 +1,9 @@
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutMs: 120000
+timeoutMs: 10000
+testcase:
+  root: testcase
 
 run:
   id:
@@ -25,7 +27,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Invoke the payment API with a rendered request file
-    command: "./tools/invoke_payment_api.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/invoke_payment_api.sh ${requestFile} ${environment}"
     output: xml
     arguments:
       requestFile:
@@ -39,7 +41,7 @@ tools:
   selectCtxn:
     name: Select CT records
     description: Query transaction records
-    command: "./tools/select_ct_txn.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/select_ct_txn.sh ${caseId} ${txnRef}"
     output: yaml
     arguments:
       caseId:
@@ -53,12 +55,12 @@ tools:
   grepFromAppLogs:
     name: Grep application logs
     description: Find one or more keywords in application logs
-    command: "./tools/grep_from_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile} ${TOOL.input.keywords}"
+    command: "./tools/grep_from_app_logs.sh '${logText}' ${keywords}"
     output: yaml
     arguments:
-      logFile:
-        name: Log File
-        description: Application log file to search
+      logText:
+        name: Log Text
+        description: Application log text to search
         required: true
       keywords:
         name: Keywords
@@ -68,7 +70,7 @@ tools:
   getAppLogs:
     name: Get application logs
     description: Collect application logs for a case
-    command: "./tools/get_app_logs.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/get_app_logs.sh ${caseId}"
     output: txt
     arguments:
       caseId:
@@ -78,7 +80,7 @@ tools:
   genEndToEndId:
     name: Generate end-to-end ID
     description: Generate a unique end-to-end identifier
-    command: "./tools/gen_e2e_id.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/gen_e2e_id.sh ${caseId}"
     output: txt
     arguments:
       caseId:
@@ -88,13 +90,13 @@ tools:
   getAcDate:
     name: Get account date
     description: Return the current account date
-    command: "./tools/get_ac_date.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/get_ac_date.sh"
     output: txt
     arguments: {}
   getSeq:
     name: Get sequence
     description: Generate a new sequence value
-    command: "./tools/get_seq.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}"
+    command: "./tools/get_seq.sh ${caseId}"
     output: txt
     arguments:
       caseId:

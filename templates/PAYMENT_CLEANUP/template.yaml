@@ -7,4 +7,4 @@ actions:
     level: INFO
     message: "Cleanup completed for ${CASE.caseId}"
     fields:
-      finalApiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.children.Status.text}"
+      finalApiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Status}"

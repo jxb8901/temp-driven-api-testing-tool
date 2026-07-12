@@ -13,7 +13,7 @@ class CiReportWriterTest {
     @Test void switchesBetweenEmbeddedAndExternalCaseLogByConfiguredSize() throws Exception {
         Path run = tempDir.resolve("run"); Files.createDirectories(run.resolve("g.TC1"));
         Path log = run.resolve("g.TC1/case.log"); Files.write(log,"0123456789ABCDEF".getBytes("UTF-8"));
-        TestResult result = new TestResult("g.TC1","case",ResultStatus.PASS,Duration.ZERO,"","",log,Collections.<ValidationResult>emptyList());
+        TestResult result = new TestResult("g.TC1","case",ResultStatus.ERROR,Duration.ZERO,"","",log,Collections.singletonList(new ValidationResult("verify","tool",ResultStatus.ERROR,"tool","","Visible failure message")));
         RunSummary summary = new RunSummary(Collections.singletonList(result),run);
         new CiReportWriter().write(run,"R","SIT",summary,Instant.EPOCH,Instant.EPOCH,10,"abc",Collections.<att.validation.Diagnostic>emptyList(),new LinkedHashSet<String>(Arrays.asList("junit","json")));
         String external = new String(Files.readAllBytes(run.resolve("ci/junit.xml")),"UTF-8");
@@ -24,5 +24,6 @@ class CiReportWriterTest {
         String embedded = new String(Files.readAllBytes(run.resolve("ci/junit.xml")),"UTF-8");
         assertTrue(embedded.contains("0123456789ABCDEF"));
         assertTrue(new String(Files.readAllBytes(run.resolve("report/junit.html")),"UTF-8").contains("0123456789ABCDEF"));
+        assertTrue(new String(Files.readAllBytes(run.resolve("ci/summary.json")),"UTF-8").contains("Visible failure message"));
     }
 }

@@ -59,50 +59,47 @@ public class ToolInvoker {
         return invoke(invocationId, toolName, input, context, log, true);
     }
 
+    public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs, String saveAs) throws Exception {
+        return invoke(invocationId, toolName, input, context, log, false, timeoutMs, saveAs);
+    }
+
     public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
-        return invoke(invocationId, toolName, input, context, log, false, timeoutMs);
+        return invokeAttempt(invocationId, toolName, input, context, log, timeoutMs, "");
     }
 
     private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction) throws Exception {
-        return invoke(invocationId, toolName, input, context, log, recordAction, null);
+        return invoke(invocationId, toolName, input, context, log, recordAction, null, "");
     }
 
-    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs) throws Exception {
+    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs, String saveAs) throws Exception {
         ToolConfig tool = config.tool(toolName);
         if (tool == null) {
             throw new IllegalArgumentException("Unknown tool: " + toolName);
         }
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
-        Path actionDir = context.actionOutputDir(id);
-        Files.createDirectories(actionDir);
-        Path inputFile = actionDir.resolve("input.yaml");
-        Path outputFile = actionDir.resolve("output." + extension(tool.output()));
-
         Map<String, Object> resolvedInput = resolveMap(input, context);
         validateArguments(tool, resolvedInput);
         expandDelimitedArgument(tool, resolvedInput);
-        Files.write(inputFile, new Yaml().dump(resolvedInput).getBytes(StandardCharsets.UTF_8));
 
         Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
         flatten("TOOL.input", resolvedInput, renderContext);
-        renderContext.put("TOOL.inputFile", inputFile.toString());
-        renderContext.put("TOOL.outputFile", outputFile.toString());
+        flatten("input", resolvedInput, renderContext);
+        for (Map.Entry<String, Object> entry : resolvedInput.entrySet()) renderContext.put(entry.getKey(), entry.getValue());
         ToolArgumentConfig last = lastArgument(tool);
         if (last != null && last.multiValue()) {
             Object value = resolvedInput.get(last.key());
-            renderContext.put("TOOL.input." + last.key(), value instanceof List ? shellArgs(stringList((List<?>) value)) : "");
+            String expanded = value instanceof List ? shellArgs(stringList((List<?>) value)) : "";
+            renderContext.put("TOOL.input." + last.key(), expanded);
+            renderContext.put("input." + last.key(), expanded);
+            renderContext.put(last.key(), expanded);
         }
         String command = TemplateRenderer.render(tool.command(), renderContext);
         CommandResult commandResult;
         long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
         try { commandResult = commandRunner.run(command, Duration.ofMillis(timeoutMs), projectRoot); }
         catch (java.io.IOException e) { Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("id", id); evidence.put("type", "tool"); evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage()); throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e); }
-        if (!Files.exists(outputFile)) {
-            Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
-        }
-
-        String rawOutput = new String(Files.readAllBytes(outputFile), StandardCharsets.UTF_8).trim();
+        String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
         Exception parseFailure = null;
         if (commandResult.exitCode() == 0 && !commandResult.timedOut()) try { parsed = parseOutput(rawOutput, tool.output()); } catch (Exception e) { parseFailure = e; }
@@ -110,9 +107,7 @@ public class ToolInvoker {
         Map<String, Object> toolInvocation = new LinkedHashMap<String, Object>();
         toolInvocation.put("name", toolName);
         toolInvocation.put("input", resolvedInput);
-        toolInvocation.put("inputFile", inputFile.toString());
         toolInvocation.put("output", parsed);
-        toolInvocation.put("outputFile", outputFile.toString());
         toolInvocation.put("rawOutput", rawOutput);
         toolInvocation.put("stdout", commandResult.stdout());
         toolInvocation.put("stderr", commandResult.stderr());
@@ -129,9 +124,20 @@ public class ToolInvoker {
         invocation.put("durationMs", toolInvocation.get("durationMs"));
         invocation.put("input", resolvedInput);
         invocation.put("output", parsed);
-        invocation.put("inputFile", inputFile.toString());
-        invocation.put("outputFile", outputFile.toString());
         invocation.put("rawOutput", rawOutput);
+        invocation.put("stdout", commandResult.stdout());
+        invocation.put("stderr", commandResult.stderr());
+        if (saveAs != null && !saveAs.trim().isEmpty()) {
+            String actionId = id.replaceFirst("/attempt-\\d+$", "");
+            Path directory = context.actionOutputDir(actionId);
+            Files.createDirectories(directory);
+            Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
+            if (!outputFile.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool saveAs must stay under action directory: " + saveAs);
+            Files.createDirectories(outputFile.getParent());
+            Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
+            invocation.put("outputFile", outputFile.toString());
+            toolInvocation.put("outputFile", outputFile.toString());
+        }
         // Keep the action node focused on action metadata while exposing the
         // invoked tool through the V2 uppercase TOOL child node.
         Map<String, Object> toolNode = new LinkedHashMap<String, Object>();
@@ -140,8 +146,6 @@ public class ToolInvoker {
         if (recordAction) context.addAction(id, invocation);
         context.put("TOOL.input", resolvedInput);
         context.put("TOOL.output", parsed);
-        context.put("TOOL.inputFile", inputFile.toString());
-        context.put("TOOL.outputFile", outputFile.toString());
         log.append("ACTION " + id, invocation);
 
         if (commandResult.timedOut()) {
@@ -266,11 +270,22 @@ public class ToolInvoker {
         Matcher matcher = VALUE.matcher(template);
         StringBuffer output = new StringBuffer();
         while (matcher.find()) {
-            Object value = renderContext.get(matcher.group(1));
+            Object value = renderContext.containsKey(matcher.group(1)) ? renderContext.get(matcher.group(1)) : nested(renderContext, matcher.group(1));
             matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
         }
         matcher.appendTail(output);
         return output.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object nested(Map<String, Object> values, String path) {
+        Object current = values;
+        for (String part : path.split("\\.")) {
+            if (current instanceof Map) current = ((Map<String,Object>) current).get(part);
+            else if (current instanceof List && part.matches("[0-9]+")) { int index=Integer.parseInt(part); current=index<((List<?>)current).size()?((List<?>)current).get(index):null; }
+            else return null;
+        }
+        return current;
     }
 
     public Object parseOutput(String text, String outputType) throws Exception {
@@ -287,7 +302,7 @@ public class ToolInvoker {
         return text;
     }
 
-    private Map<String, Object> xmlToMap(String xml) throws Exception {
+    private Object xmlToMap(String xml) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -306,14 +321,13 @@ public class ToolInvoker {
             public void fatalError(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
         });
         Document document = builder.parse(new InputSource(new StringReader(xml)));
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("name", xmlName(document.getDocumentElement()));
-        result.putAll(elementToMap(document.getDocumentElement()));
-        return result;
+        Object value = elementValue(document.getDocumentElement());
+        if (!(value instanceof Map)) return value;
+        Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put("name", xmlName(document.getDocumentElement())); result.putAll((Map<String,Object>) value); return result;
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> elementToMap(Node node) {
+    private Object elementValue(Node node) {
         NodeList children = node.getChildNodes();
         Map<String, Object> map = new LinkedHashMap<String, Object>();
         Map<String, Object> attributes = new LinkedHashMap<String, Object>();
@@ -323,16 +337,13 @@ public class ToolInvoker {
             if (attribute.getNodeName().startsWith("xmlns")) continue;
             attributes.put(xmlName(attribute), attribute.getNodeValue());
         }
-        map.put("attributes", attributes);
         StringBuilder text = new StringBuilder();
         Map<String, Object> grouped = new LinkedHashMap<String, Object>();
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.ELEMENT_NODE) {
                 String name = xmlName(child);
-                Map<String, Object> item = new LinkedHashMap<String, Object>();
-                item.put("name", name);
-                item.putAll(elementToMap(child));
+                Object item = elementValue(child);
                 Object existing = grouped.get(name);
                 if (existing == null) grouped.put(name, item);
                 else if (existing instanceof List) ((List<Object>) existing).add(item);
@@ -341,8 +352,14 @@ public class ToolInvoker {
                 text.append(child.getNodeValue());
             }
         }
-        map.put("text", text.toString().trim());
-        map.put("children", grouped);
+        String normalizedText = text.toString().trim();
+        if (grouped.isEmpty()) {
+            if (attributes.isEmpty()) return normalizedText;
+            if (attributes.size() == 1 && normalizedText.isEmpty()) return attributes.values().iterator().next();
+        }
+        if (!attributes.isEmpty()) map.put("attributes", attributes);
+        if (!normalizedText.isEmpty()) map.put("text", normalizedText);
+        map.putAll(grouped);
         return map;
     }
 

@@ -1,8 +1,10 @@
-# ATT V2.1 - Automated Testing Tool
+# ATT 2.1.1 - Automated Testing Tool
 
 ATT V2.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
 V2.1 retains the V2 Case → Stage → Template → Action → Tool model while requiring explicit V2.1 schema versions, rejecting unknown fields, validating identifiers and paths, and distinguishing business FAIL from execution ERROR.
+
+`testcase.root` defaults to `testcase`. ATT recursively discovers adjacent `basename.yaml` + `basename.xlsx` pairs below it; each pair is one testcase set.
 
 ## Quick Start
 
@@ -44,16 +46,16 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 - Package documentation: `build/docs/index.html`
 - Latest completed-run archive: `build/att-run-<RunID>.tar.gz`
 
-`./att.sh docs` always produces one self-contained searchable page at `build/docs/index.html`; `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, configuration, and documentation source files.
+`./att.sh docs` always produces one self-contained page at `build/docs/index.html`; tool and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, or tool. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, configuration, and documentation source files.
 
 ## V2.1 essentials
 
 - `schemaVersion` is mandatory in global configuration, workbook sidecars, and templates. Unknown non-`x-*` fields are validation errors.
 - `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
-- Timeouts use milliseconds: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence. For example, `120000` is two minutes and `30000` is 30 seconds.
+- Timeouts use milliseconds with range 1–3,600,000 and default 10,000: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence.
 - Retry is available only on a tool action and only for `retryOn: [EXIT_CODE]`; retries run immediately and timeout is never retried.
 - A valid Run ID and full Case ID are used directly as `output/<RunID>/<CaseID>/` directory names. They must not contain path separators, control characters, or platform-reserved names.
-- Tool commands are tokenized by ATT, not executed by a shell. Put free text, spaces, quotes, and special characters in `${TOOL.inputFile}` rather than interpolating them directly into `command`.
+- Tool commands are tokenized by ATT, not executed by a shell. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys; tools write results to stdout and diagnostics to stderr. ATT records input/stdout/stderr in the case log and creates no tool files unless the action explicitly sets `saveAs`.
 
 ## V2 Model
 

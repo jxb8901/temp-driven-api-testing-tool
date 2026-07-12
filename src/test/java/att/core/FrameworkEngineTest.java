@@ -34,8 +34,8 @@ class FrameworkEngineTest {
     @Test
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v2.1\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    expression: \"${ACTIONS.callApi.output.children.Status.text} == 'SUCCESS'\"\n");
-        writeTool(projectRoot.resolve("tools/invoke.sh"), "cat > \"$4\" <<XML\n<Response><Status>SUCCESS</Status></Response>\nXML\n");
+                "schemaVersion: att-template/v2.1\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    expression: \"${ACTIONS.callApi.output.Status} == 'SUCCESS'\"\n");
+        writeTool(projectRoot.resolve("tools/invoke.sh"), "printf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
                 "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
@@ -141,7 +141,7 @@ class FrameworkEngineTest {
         args.put("caseId", new ToolArgumentConfig("caseId", "Case ID", "Full V2 Case ID", true, ""));
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
         tools.put("invokePaymentApi", new ToolConfig("invokePaymentApi", "Invoke", "Invoke test API",
-                "./tools/invoke.sh --input ${TOOL.inputFile} --output ${TOOL.outputFile}", "xml", args));
+                "./tools/invoke.sh ${TOOL.input.caseId}", "xml", args));
         Map<String, String> report = new LinkedHashMap<String, String>();
         report.put("result", "Test Result");
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30000,

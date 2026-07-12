@@ -53,16 +53,16 @@ public class UnifiedTemplateEngine {
         return executeCall(call, context, log, invocationId, false);
     }
 
-    public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs) throws Exception {
-        Object result = executeCall(call, context, log, invocationId, true, timeoutMs);
+    public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs) throws Exception {
+        Object result = executeCall(call, context, log, invocationId, true, timeoutMs, saveAs);
         return (att.exec.ToolInvocationResult) result;
     }
 
     private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt) throws Exception {
-        return executeCall(call, context, log, invocationId, attempt, null);
+        return executeCall(call, context, log, invocationId, attempt, null, "");
     }
 
-    private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt, Long timeoutMs) throws Exception {
+    private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt, Long timeoutMs, String saveAs) throws Exception {
         String body = call.trim();
         if (body.startsWith("#{") && body.endsWith("}")) {
             body = body.substring(2, body.length() - 1);
@@ -74,7 +74,7 @@ public class UnifiedTemplateEngine {
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for tool invocation");
         }
-        att.exec.ToolInvocationResult result = attempt ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs) : toolInvoker.invoke(invocationId, parsed.name(), input, context, log);
+        att.exec.ToolInvocationResult result = attempt ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs, saveAs) : toolInvoker.invoke(invocationId, parsed.name(), input, context, log);
         return attempt ? result : result.output();
     }
 

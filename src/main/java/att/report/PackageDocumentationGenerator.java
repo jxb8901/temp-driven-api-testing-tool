@@ -21,6 +21,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.stream.Stream;
 
 /** Generates offline JavaDoc-like testcase/template/tool reference pages. */
@@ -30,11 +32,14 @@ public final class PackageDocumentationGenerator {
         Path output = projectRoot.resolve("build/docs");
         GeneratedOutputCleaner.deleteDirectory(output);
         Files.createDirectories(output);
-        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Tools</p></header><nav><input id=\"search\" placeholder=\"Search English or 中文\"></nav>"
+        Map<String, Set<String>> filters = filterValues(projectRoot, config);
+        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\"><strong>Index</strong><a href=\"#testcases\">Testcases</a><a href=\"#templates\">Templates</a><a href=\"#tools\">Tools</a><a href=\"#builtins\">Built-ins</a></div><div class=\"filters\"><input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">" + select("workbookFilter", "All workbooks", filters.get("workbook")) + select("sheetFilter", "All sheets", filters.get("sheet")) + select("caseFilter", "All Case IDs", filters.get("caseid")) + select("toolFilter", "All tools / built-ins", filters.get("tool")) + "</div></nav>";
+        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Tools · Built-ins</p></header>" + controls
                 + section("testcases", testcasePage(projectRoot, config, new ArrayList<String>()))
                 + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
                 + section("tools", toolPage(config, new ArrayList<String>()))
-                + "<script>const q=document.querySelector('#search');q.oninput=()=>document.querySelectorAll('article').forEach(x=>x.hidden=!x.innerText.toLowerCase().includes(q.value.toLowerCase()));</script>");
+                + section("builtins", builtInPage())
+                + "<script>(()=>{const q=document.querySelector('#search'),w=document.querySelector('#workbookFilter'),s=document.querySelector('#sheetFilter'),c=document.querySelector('#caseFilter'),t=document.querySelector('#toolFilter');function apply(){const term=q.value.trim().toLowerCase();document.querySelectorAll('.doc-item').forEach(x=>{const d=x.dataset;x.hidden=!((!term||x.innerText.toLowerCase().includes(term))&&(!w.value||d.workbook===w.value)&&(!s.value||d.sheet===s.value)&&(!c.value||d.caseid===c.value)&&(!t.value||(d.tool||'').split(' ').includes(t.value)))})}[q,w,s,c,t].forEach(x=>x.addEventListener(x===q?'input':'change',apply));apply()})();</script>");
         Path index = output.resolve("index.html");
         write(index, single);
         return index;
@@ -43,13 +48,18 @@ public final class PackageDocumentationGenerator {
     private String testcasePage(Path root, FrameworkConfig global, List<String> search) throws Exception {
         StringBuilder body = new StringBuilder("<h1>Testcases</h1><p><a href=\"../index.html\">Home</a></p>");
         StageTemplateLoader templateLoader = new StageTemplateLoader(root, global.templatesRoot());
-        for (Path workbook : files(root.resolve("testcase"), ".xlsx")) {
+        for (Path workbook : files(root.resolve(global.testcasesRoot()), ".xlsx")) {
+            if (!Files.isRegularFile(workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml")))) continue;
             FrameworkConfig suite = new SuiteConfigResolver(root, global).resolve(workbook);
             List<TestCase> cases = new ExcelTestSuiteLoader(suite).load(workbook);
             body.append("<h2>").append(escape(workbook.getFileName().toString())).append("</h2><table><tr><th>Case ID</th><th>Name</th><th>Tags</th><th>Sheet</th><th>Stages → Templates</th></tr>");
             search.add(workbook.getFileName().toString());
             for (TestCase test : cases) {
-                body.append("<tr><td>").append(escape(test.caseId())).append("</td><td>").append(escape(test.caseName())).append("</td><td>").append(escape(String.valueOf(test.tags()))).append("</td><td>").append(escape(test.sheetName())).append("</td><td>");
+                String templates = test.stages().values().stream().map(StageCaseData::templateName).reduce((a,b)->a+" "+b).orElse("");
+                Set<String> usedTools = new LinkedHashSet<String>();
+                for (StageCaseData stage : test.stages().values()) for (att.template.TemplateAction action : templateLoader.load(stage.templateName()).actions()) { String call=action.call(); if(call.startsWith("#{")&&call.indexOf('(')>2) usedTools.add(call.substring(2,call.indexOf('('))); }
+                String searchable=(test.workbookId()+" "+test.sheetName()+" "+test.caseId()+" "+test.caseName()+" "+test.tags()+" "+templates+" "+String.join(" ",usedTools)).toLowerCase(java.util.Locale.ROOT);
+                body.append("<tr class=\"doc-item\" data-search=\"").append(escape(searchable)).append("\" data-workbook=\"").append(escape(test.workbookId())).append("\" data-sheet=\"").append(escape(test.sheetName())).append("\" data-caseid=\"").append(escape(test.caseId())).append("\" data-tool=\"").append(escape(String.join(" ",usedTools))).append("\" data-template=\"").append(escape(templates)).append("\"><td>").append(escape(test.caseId())).append("</td><td>").append(escape(test.caseName())).append("</td><td>").append(escape(String.valueOf(test.tags()))).append("</td><td>").append(escape(test.sheetName())).append("</td><td>");
                 for (StageCaseData stage : test.stages().values()) {
                     String canonical = templateLoader.load(stage.templateName()).name();
                     body.append(escape(stage.key())).append(" → <a href=\"../templates/index.html#").append(anchor(canonical)).append("\">").append(escape(stage.templateName())).append("</a><br>");
@@ -69,7 +79,7 @@ public final class PackageDocumentationGenerator {
             Map<String, Object> yaml = yaml(file);
             String path = templateRoot.relativize(file.getParent()).toString().replace('\\', '/');
             String name = String.valueOf(yaml.get("name") == null ? path : yaml.get("name"));
-            body.append("<section id=\"").append(anchor(name)).append("\"><h2>").append(escape(name)).append("</h2><p><code>").append(escape(path)).append("</code></p><p>").append(escape(String.valueOf(yaml.get("description") == null ? "" : yaml.get("description")))).append("</p>");
+            body.append("<section class=\"doc-item\" data-search=\"").append(escape((name+" "+path+" "+String.valueOf(yaml.get("description"))).toLowerCase(java.util.Locale.ROOT))).append("\" data-template=\"").append(escape(name + " " + path)).append("\" id=\"").append(anchor(name)).append("\"><h2>").append(escape(name)).append("</h2><p><code>").append(escape(path)).append("</code></p><p>").append(escape(String.valueOf(yaml.get("description") == null ? "" : yaml.get("description")))).append("</p>");
             Object actions = yaml.get("actions");
             body.append("<table><tr><th>Action</th><th>Type</th><th>Tool / Details</th></tr>");
             if (actions instanceof Map) for (Map.Entry<?, ?> action : ((Map<?, ?>) actions).entrySet()) {
@@ -87,13 +97,45 @@ public final class PackageDocumentationGenerator {
     }
 
     private String toolPage(FrameworkConfig config, List<String> search) {
-        StringBuilder body = new StringBuilder("<h1>Tools</h1><p><a href=\"../index.html\">Home</a></p>");
+        StringBuilder body = new StringBuilder("<h1>Tools</h1><p><a href=\"../index.html\">Home</a></p><div class=\"index\"><strong>Index:</strong> ");
+        for (ToolConfig tool : config.tools().values()) body.append("<a href=\"#").append(anchor(tool.key())).append("\">").append(escape(tool.key())).append("</a> ");
+        body.append("</div>");
         for (ToolConfig tool : config.tools().values()) {
-            body.append("<section id=\"").append(anchor(tool.key())).append("\"><h2>").append(escape(tool.name())).append("</h2><p>").append(escape(tool.description())).append("</p><p><code>").append(escape(tool.command())).append("</code>; output=").append(escape(tool.output())).append("</p><table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>Delimiter</th></tr>");
+            body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h2>").append(escape(tool.name())).append("</h2><p>").append(escape(tool.description())).append("</p><p><code>").append(escape(tool.command())).append("</code>; output=").append(escape(tool.output())).append("</p><table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>Delimiter</th></tr>");
             for (ToolArgumentConfig arg : tool.arguments().values()) body.append("<tr><td>").append(escape(arg.key())).append("</td><td>").append(escape(arg.name())).append("</td><td>").append(escape(arg.description())).append("</td><td>").append(arg.required()).append("</td><td>").append(escape(arg.delimit())).append("</td></tr>");
             body.append("</table></section>"); search.add(tool.key()); search.add(tool.name()); search.add(tool.description());
         }
         return page("Tools", body.toString());
+    }
+
+    private String builtInPage() {
+        String[][] functions = {{"upper","upper(value)","Convert text to upper case"},{"lower","lower(value)","Convert text to lower case"},{"trim","trim(value)","Trim whitespace"},{"string","string(value)","Convert a value to text"},{"number","number(value)","Normalize a number"},{"boolean","boolean(value)","Normalize a boolean"},{"length","length(value)","Return text length"},{"concat","concat(first, ...)","Concatenate values"},{"coalesce","coalesce(first, ...)","Return the first non-blank value"}};
+        StringBuilder body = new StringBuilder("<h1>Built-in functions</h1><div class=\"index\"><strong>Index:</strong> ");
+        for (String[] fn : functions) body.append("<a href=\"#builtin-").append(anchor(fn[0])).append("\">").append(fn[0]).append("</a> ");
+        body.append("</div>");
+        for (String[] fn : functions) body.append("<section class=\"doc-item\" data-search=\"").append((fn[0]+" "+fn[2]).toLowerCase(java.util.Locale.ROOT)).append("\" data-tool=\"").append(fn[0]).append("\" id=\"builtin-").append(anchor(fn[0])).append("\"><h2>").append(fn[0]).append("</h2><p>").append(fn[2]).append("</p><p><code>#{").append(fn[1]).append("}</code></p></section>");
+        return page("Built-in functions", body.toString());
+    }
+
+    private Map<String, Set<String>> filterValues(Path root, FrameworkConfig global) throws Exception {
+        Map<String, Set<String>> values = new LinkedHashMap<String, Set<String>>();
+        values.put("workbook", new LinkedHashSet<String>()); values.put("sheet", new LinkedHashSet<String>()); values.put("caseid", new LinkedHashSet<String>()); values.put("tool", new LinkedHashSet<String>());
+        for (Path workbook : files(root.resolve(global.testcasesRoot()), ".xlsx")) {
+            if (!Files.isRegularFile(workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml")))) continue;
+            FrameworkConfig suite = new SuiteConfigResolver(root, global).resolve(workbook);
+            for (TestCase test : new ExcelTestSuiteLoader(suite).load(workbook)) {
+                values.get("workbook").add(test.workbookId()); values.get("sheet").add(test.sheetName()); values.get("caseid").add(test.caseId());
+            }
+        }
+        values.get("tool").addAll(global.tools().keySet());
+        Collections.addAll(values.get("tool"), "upper", "lower", "trim", "string", "number", "boolean", "length", "concat", "coalesce");
+        return values;
+    }
+
+    private String select(String id, String label, Set<String> values) {
+        StringBuilder html = new StringBuilder("<select id=\"").append(id).append("\"><option value=\"\">").append(label).append("</option>");
+        for (String value : values) html.append("<option value=\"").append(escape(value)).append("\">").append(escape(value)).append("</option>");
+        return html.append("</select>").toString();
     }
 
     private Map<String, Object> yaml(Path file) throws Exception {
@@ -110,7 +152,7 @@ public final class PackageDocumentationGenerator {
         content = content.replace("../templates/index.html#", "#").replace("../tools/index.html#", "#").replace("../index.html", "#");
         return "<main><section id=\"" + id + "\"><article>" + content + "</article></section></main>";
     }
-    private String page(String title, String body) { return "<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + escape(title) + "</title><style>*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1280px;margin:auto;background:radial-gradient(circle at top left,#172554,#070a12 42%);color:#e5e7eb;font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}h1{font-size:30px}h2{margin-top:32px;color:#bfdbfe}a{color:#60a5fa}nav{position:sticky;top:10px;z-index:5}input{width:min(520px,100%);padding:11px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:white;box-shadow:0 8px 24px #0005}table{border-collapse:collapse;width:100%;background:#0f172acc;border:1px solid #334155;border-radius:12px;overflow:hidden}th,td{border-bottom:1px solid #26334a;padding:10px;text-align:left}th{color:#93c5fd;background:#111c31}section{margin-bottom:2rem}code{color:#a7f3d0}@media(max-width:700px){body{padding:18px}table{font-size:12px}}</style></head><body>" + body + "</body></html>"; }
+    private String page(String title, String body) { return "<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + escape(title) + "</title><style>*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1280px;margin:auto;background:radial-gradient(circle at top left,#172554,#070a12 42%);color:#e5e7eb;font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}h1{font-size:30px}h2{margin-top:32px;color:#bfdbfe}a{color:#60a5fa}nav{position:sticky;top:0;z-index:20;display:flex;flex-direction:column;gap:10px;background:#080b16f5;border:1px solid #334155;border-radius:12px;padding:12px;box-shadow:0 12px 30px #0008}.index-links,.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}input,select{padding:11px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:white;box-shadow:0 8px 24px #0005}input{width:min(520px,100%)}table{border-collapse:collapse;width:100%;background:#0f172acc;border:1px solid #334155;border-radius:12px;overflow:hidden}th,td{border-bottom:1px solid #26334a;padding:10px;text-align:left}th{color:#93c5fd;background:#111c31}section{margin-bottom:2rem}code{color:#a7f3d0}.index{padding:12px;background:#0f172a;border:1px solid #334155;border-radius:10px}.index a{margin-right:10px}@media(max-width:700px){body{padding:18px}table{font-size:12px}}</style></head><body>" + body + "</body></html>"; }
     private void write(Path path, String value) throws Exception { Files.write(path, value.getBytes(StandardCharsets.UTF_8)); }
     private String anchor(String value) { return HtmlSupport.id(value); }
     private String escape(String value) { return HtmlSupport.escape(value); }

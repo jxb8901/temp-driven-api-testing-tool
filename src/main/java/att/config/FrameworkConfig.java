@@ -17,6 +17,7 @@ public final class FrameworkConfig {
     private final String environment;
     private final int timeoutMs;
     private final Path templatesRoot;
+    private final Path testcasesRoot;
     private final Map<String, ToolConfig> tools;
     private final ReportConfig report;
     private final RunConfig run;
@@ -59,12 +60,21 @@ public final class FrameworkConfig {
                            ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode) {
-        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, tools, report, run,
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, Paths.get("testcase"), tools, report, run,
                 sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, headerRows, xmlNamespaceMode, "");
     }
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
                            int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
+                           ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
+                           String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
+                           List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, Paths.get("testcase"), tools,
+                report, run, sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, headerRows, xmlNamespaceMode, workbookId);
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
+                           int timeoutMs, Path templatesRoot, Path testcasesRoot, Map<String, ToolConfig> tools,
                            ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId) {
@@ -74,6 +84,7 @@ public final class FrameworkConfig {
         this.environment = environment == null ? "SIT" : environment;
         this.timeoutMs = timeoutMs;
         this.templatesRoot = templatesRoot == null ? Paths.get("templates") : templatesRoot;
+        this.testcasesRoot = testcasesRoot == null ? Paths.get("testcase") : testcasesRoot;
         this.tools = tools == null ? Collections.<String, ToolConfig>emptyMap() : new LinkedHashMap<String, ToolConfig>(tools);
         this.report = report == null ? defaultReport() : report;
         this.run = run == null ? new RunConfig("timestamp", "yyyyMMdd-HHmmss") : run;
@@ -95,6 +106,7 @@ public final class FrameworkConfig {
     public String environment() { return environment; }
     public int timeoutMs() { return timeoutMs; }
     public Path templatesRoot() { return templatesRoot; }
+    public Path testcasesRoot() { return testcasesRoot; }
     public Map<String, ToolConfig> tools() { return Collections.unmodifiableMap(tools); }
     public ToolConfig tool(String key) { return tools.get(key); }
     public ReportConfig report() { return report; }

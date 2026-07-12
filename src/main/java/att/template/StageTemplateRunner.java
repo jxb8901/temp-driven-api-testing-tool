@@ -72,7 +72,10 @@ public class StageTemplateRunner {
                     throw new IllegalArgumentException("Unsupported action type: " + action.type());
                 }
             } catch (Exception e) {
-                results.add(new ValidationResult(stageName, action.id(), ResultStatus.ERROR, action.type(), "", e.getMessage()));
+                String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                results.add(new ValidationResult(stageName, action.id(), ResultStatus.ERROR, action.type(), "", message));
+                Map<String,Object> error = new LinkedHashMap<String,Object>(); error.put("id", action.id()); error.put("type", action.type()); error.put("status", "ERROR"); error.put("message", message);
+                try { log.append("ACTION " + action.id() + " ERROR", error); } catch (java.io.IOException ignored) { }
                 if (stopOnFailure(action)) {
                     break;
                 }
@@ -91,7 +94,7 @@ public class StageTemplateRunner {
         for (int number = 1; number <= maxAttempts; number++) {
             String attemptId = action.id() + "/attempt-" + String.format("%03d", number);
             try {
-                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, attemptId, action.timeoutMs());
+                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, attemptId, action.timeoutMs(), action.saveAs());
                 attempts.add(new LinkedHashMap<String, Object>(result.invocation()));
                 Map<String, Object> winning = new LinkedHashMap<String, Object>(result.invocation());
                 winning.put("id", action.id()); winning.put("attempts", attempts); winning.put("winningAttempt", number);

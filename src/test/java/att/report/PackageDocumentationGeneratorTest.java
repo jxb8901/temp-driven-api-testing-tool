@@ -17,7 +17,15 @@ class PackageDocumentationGeneratorTest {
         Path result = new PackageDocumentationGenerator().generate(tempDir, config);
         String html = new String(Files.readAllBytes(result), "UTF-8");
         assertTrue(result.endsWith("index.html"));
-        assertTrue(html.contains("Search English or 中文"));
+        assertTrue(html.contains("id=\"workbookFilter\""));
+        assertTrue(html.contains("id=\"sheetFilter\""));
+        assertTrue(html.contains("id=\"caseFilter\""));
+        assertTrue(html.contains("id=\"toolFilter\""));
+        assertTrue(html.contains("position:sticky;top:0"));
+        assertTrue(html.contains("href=\"#testcases\""));
+        assertTrue(html.contains("data-tool="));
+        assertTrue(html.contains("<strong>Index</strong>"));
+        assertTrue(html.contains("Built-in functions"));
         assertNotEquals(HtmlSupport.id("中文一"), HtmlSupport.id("中文二"));
     }
 }

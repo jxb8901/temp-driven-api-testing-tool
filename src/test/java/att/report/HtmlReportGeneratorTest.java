@@ -23,11 +23,13 @@ class HtmlReportGeneratorTest {
     @Test void producesAStandaloneSinglePageReport() throws Exception {
         Path log = tempDir.resolve("payments.payment.TC001/case.log");
         Files.createDirectories(log.getParent()); Files.write(log, "ACTION callApi".getBytes("UTF-8"));
-        TestResult result = new TestResult("payments.payment.TC001", "Payment <success>", ResultStatus.PASS, Duration.ofMillis(12), "SUCCESS", "SUCCESS", log,
-                Collections.emptyList(), "payments", "payment", Arrays.asList("smoke", "critical"));
+        TestResult result = new TestResult("payments.payment.TC001", "Payment <success>", ResultStatus.ERROR, Duration.ofMillis(12), "SUCCESS", "", log,
+                Collections.singletonList(new att.core.ValidationResult("verify","callApi",ResultStatus.ERROR,"tool","","Visible failure message")), "payments", "payment", Arrays.asList("smoke", "critical"));
         Path report = new HtmlReportGenerator().generate(tempDir, "RUN-1", new RunSummary(Collections.singletonList(result), tempDir), Instant.now(), Instant.now());
         String html = new String(Files.readAllBytes(report), "UTF-8");
         assertTrue(html.contains("Case details"));
+        assertTrue(html.contains("Action results"));
+        assertTrue(html.contains("Visible failure message"));
         assertTrue(html.contains("Payment &lt;success&gt;"));
         assertTrue(html.contains("Minimum"));
         assertTrue(html.contains("Average"));

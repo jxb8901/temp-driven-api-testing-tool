@@ -49,6 +49,8 @@ templates/payment/local/CT001/request.tmp.xml
 tools/invoke_payment_api.sh
 ```
 
+全域 `testcase.root` 預設為 `testcase`。ATT 會遞歸掃描其任意子目錄；同一目錄內的 `basename.yaml` 與 `basename.xlsx` 配對後就是一個測試案例集。
+
 只有直接包含 `template.yaml` 的目錄才是模板；上例模板完整路徑是 `payment/local/CT001`。
 
 ## 4. 建立嚴格的全域配置
@@ -57,7 +59,7 @@ tools/invoke_payment_api.sh
 schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
-timeoutMs: 120000
+timeoutMs: 10000
 templates:
   root: templates
 run:
@@ -75,7 +77,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: 調用付款 API
-    command: "./tools/invoke_payment_api.sh --input '${TOOL.inputFile}' --output '${TOOL.outputFile}'"
+    command: "./tools/invoke_payment_api.sh '${requestFile}' '${environment}'"
     output: json
     arguments:
       requestFile: {name: Request File, description: 已渲染 XML, required: true}
@@ -86,12 +88,12 @@ tools:
 
 工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，只有最後一個參數可增加 `delimit`。
 
-`command` 是 ATT 拆分後直接交給 process 的參數序列，不經 shell。空白分隔參數，單引號或雙引號可將帶空格的固定文字或 ATT 生成的檔案路徑（例如 `${TOOL.inputFile}`）視為一個參數；`|`、`>`、`<`、`;`、`&`、`$()`、`*` 都不是 shell operator，而是普通字符。不要把 workbook 或 API 的不受信任文字直接插入 command：其中的引號、反斜線及空白可能改變 ATT 的分詞結果。請將這類值寫入 `${TOOL.inputFile}`，由工具 script 從 YAML input 讀取。
+`command` 是 ATT 拆分後直接交給 process 的參數序列，不經 shell。具名參數優先以 `${requestFile}` 直接引用，需要明確命名空間時使用 `${input.requestFile}`；名稱大小寫必須與 arguments key 完全一致。工具將結果寫到 stdout、診斷寫到 stderr。只有 action 明確設定 `saveAs` 時才保存 stdout。
 
 例如下列 `note` 可包含空格並保持為一個 argv：
 
 ```yaml
-command: "./tools/invoke_payment_api.sh --input '${TOOL.inputFile}' --output '${TOOL.outputFile}' --label 'Payment regression'"
+command: "./tools/invoke_payment_api.sh '${requestFile}' --label 'Payment regression'"
 ```
 
 不要這樣將案例資料直接拼到 command：
@@ -144,7 +146,7 @@ Action type 決定可用字段：
 - `assert` 必須有非空 `expression`；不允許 retry，輪詢請交給明確的 tool action。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
 
-全域 `timeoutMs` 的單位是毫秒；上例為 120 秒。sidecar 可用同名 `timeoutMs` 覆蓋全域值；個別 tool action 再以 `timeoutMs` 覆蓋已解析的全域／sidecar 值。`timeoutMs` 只可用於 tool action，範圍為 1–86400000。
+全域 `timeoutMs` 的單位是毫秒；上例為 10 秒。sidecar 可用同名 `timeoutMs` 覆蓋全域值；個別 tool action 再以 `timeoutMs` 覆蓋已解析的全域／sidecar 值。`timeoutMs` 只可用於 tool action，範圍為 1–3600000。
 
 retry 只適用於 tool action 的 `EXIT_CODE`。超時、配置錯誤、參數錯誤、輸出解析錯誤和 assertion FAIL 都不會 retry；V2.1 沒有 retry delay 或 backoff 設定，符合條件的重試會立即進行。每次嘗試都會保存在 `attempt-001/`、`attempt-002/` 等獨立證據目錄。
 
@@ -275,7 +277,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.0",
+  "attVersion": "2.1.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

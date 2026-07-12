@@ -23,6 +23,7 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -197,7 +198,8 @@ public class FrameworkEngine {
                     List<ValidationResult> stageResults = templateRunner.execute(stage.key(), template, context, caseLog);
                     ResultStatus stageStatus = aggregate(stageResults);
                     for (ValidationResult actionResult : stageResults) {
-                        verbose(options, "[ACTION] case=" + testCase.caseId() + " stage=" + stage.key() + " action=" + actionResult.name() + " status=" + actionResult.status());
+                        String detail = actionResult.message() == null || actionResult.message().isEmpty() ? "" : " message=" + actionResult.message();
+                        verbose(options, "[ACTION] case=" + testCase.caseId() + " stage=" + stage.key() + " action=" + actionResult.name() + " status=" + actionResult.status() + detail);
                     }
                     context.finishStage(stageStatus.name(), Duration.between(stageStarted, Instant.now()).toMillis());
                     verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=" + stageStatus + " durationMs=" + Duration.between(stageStarted, Instant.now()).toMillis());
@@ -301,8 +303,12 @@ public class FrameworkEngine {
     private List<Path> suites(ExecutionOptions options) throws Exception {
         List<Path> suites = new ArrayList<Path>();
         if (options.suiteDirectory() != null) {
-            try (java.util.stream.Stream<Path> paths = Files.list(resolve(options.suiteDirectory()))) {
-                paths.filter(path -> path.getFileName().toString().endsWith(".xlsx")).sorted().forEach(suites::add);
+            Path configured = options.suiteDirectory();
+            if (Paths.get("testcase").equals(configured)) configured = config.testcasesRoot();
+            try (java.util.stream.Stream<Path> paths = Files.walk(resolve(configured))) {
+                paths.filter(Files::isRegularFile).filter(path -> path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx"))
+                        .filter(path -> Files.isRegularFile(path.resolveSibling(path.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml"))))
+                        .sorted().forEach(suites::add);
             }
         } else {
             suites.addAll(options.suitePaths());
@@ -377,6 +383,9 @@ public class FrameworkEngine {
             item.put("durationMs", result.duration().toMillis());
             item.put("expected", result.expected());
             item.put("actual", result.actual());
+            List<Map<String,Object>> actionResults = new ArrayList<Map<String,Object>>();
+            for (ValidationResult action : result.validations()) { Map<String,Object> detail = new LinkedHashMap<String,Object>(); detail.put("stage", action.source()); detail.put("action", action.name()); detail.put("status", action.status().name()); detail.put("expected", action.expected()); detail.put("actual", action.actual()); detail.put("message", action.message()); actionResults.add(detail); }
+            item.put("actions", actionResults);
             item.put("caseLog", result.caseLogPath() == null ? "" : runDirectory.relativize(result.caseLogPath()).toString().replace('\\', '/'));
             cases.add(item);
         }

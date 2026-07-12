@@ -193,7 +193,7 @@ public final class PackageValidator {
                 require(action.saveAs(), "saveAs is required for render action " + action.id());
                 att.core.IdentifierValidator.relativePath(action.saveAs(), "render saveAs");
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "saveAs", "expression", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 86400000)) throw new IllegalArgumentException("timeoutMs must be 1..86400000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "expression", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); }
             if ("assert".equals(type)) { require(action.expression(), "expression is required for assert action " + action.id()); forbid(action, "payload", "saveAs", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.expression()); }
             if ("log".equals(type)) {
                 require(action.message(), "message is required for log action " + action.id());

@@ -26,7 +26,7 @@
         "message": {"type": "string", "minLength": 1},
         "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]},
         "fields": {"type": "object"},
-        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 86400000},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
         "retry": {"$ref": "#/$defs/retry"}
       },
       "patternProperties": {"^x-": {}},
@@ -48,7 +48,7 @@
         {
           "oneOf": [
             {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "saveAs"], "not": {"anyOf": [{"required": ["call"]}, {"required": ["expression"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["expression"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
+            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["expression"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
             {"properties": {"type": {"const": "assert"}}, "required": ["type", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
             {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["expression"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
           ]

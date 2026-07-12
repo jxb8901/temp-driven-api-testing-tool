@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.1
+
+- Made the package documentation index and report-style filters sticky, with keyword, workbook, sheet, Case ID, and combined tool/built-in controls.
+- Added case-sensitive `${argument}` and `${input.argument}` tool-command references while keeping argument display names unrestricted.
+- Simplified XML mapping so only repeated siblings become arrays, attribute-free leaves become text scalars, and one-attribute empty leaves become attribute scalars.
+- Corrected workbook sidecar examples to include the mandatory package-unique `id`.
+
+- Added configurable recursive `testcase.root` discovery: every adjacent `basename.yaml`/`basename.xlsx` pair below the root is one testcase set.
+- Removed automatic tool `inputFile`/`outputFile` artifacts. Tools now return stdout, record input/stdout/stderr in the case log, and use action `saveAs` only when persistence is requested.
+- Added tool and built-in indexes to generated docs plus workbook, sheet, Case ID, template, and tool filters.
+- Standardized `timeoutMs` to 1–3,600,000 with a 10,000 ms default, and flattened XML child access such as `output.Messages.Message[1].attributes.severity`.
+
 - Reorganized the ATT V2.1 end-user manual into a guided ten-chapter structure: Introduction, Quick Start, User Guide, Cookbook, CLI, Configuration, Expressions, Reports, Troubleshooting, and Maintainer Architecture. Merged the configuration and schema references into one reference chapter and retained the workbook/POI, tool-tokenization, XML, retry, CI, concurrency, and run-lifecycle examples.
 
 - Enhanced HTML run reports with Workbook.Sheet group statistics, workbook/sheet/status filters, working case/tag search, and sortable Cases columns; persisted report metadata supports equivalent regeneration.

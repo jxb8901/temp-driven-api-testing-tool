@@ -40,6 +40,7 @@ class StageTemplateRunnerTest {
         TemplateAction timeoutAction = new TemplateAction("call",map("type","tool","call","#{sample()}","retry",map("maxAttempts",3,"retryOn",Arrays.asList("EXIT_CODE"))));
         List<ValidationResult> timeoutResults = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,timeout))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(timeoutAction)),timeoutContext,new CaseExecutionLog(tempDir.resolve("case2.log")));
         assertEquals(ResultStatus.ERROR, timeoutResults.get(0).status()); assertEquals(1, timeout.calls);
+        assertTrue(new String(Files.readAllBytes(tempDir.resolve("case2.log")),"UTF-8").contains("Tool timed out: sample"));
     }
     private static final class SequencedRunner extends CommandRunner {
         int calls; final boolean timeout;
