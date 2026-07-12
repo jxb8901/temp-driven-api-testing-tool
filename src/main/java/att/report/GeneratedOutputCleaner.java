@@ -23,7 +23,7 @@ public final class GeneratedOutputCleaner {
     private void reportInProgress(Path outputRoot) throws IOException {
         Path progress = outputRoot.resolve(".in-progress");
         if (!Files.isDirectory(progress)) return;
-        try (java.util.stream.Stream<Path> entries = Files.list(progress)) {
+        try (java.util.stream.Stream<Path> entries = Files.list(progress).filter(Files::isDirectory)) {
             java.util.Iterator<Path> iterator = entries.sorted().iterator();
             while (iterator.hasNext()) {
                 Path entry = iterator.next();

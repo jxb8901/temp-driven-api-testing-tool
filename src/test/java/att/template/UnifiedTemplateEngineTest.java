@@ -23,10 +23,10 @@ class UnifiedTemplateEngineTest {
     @Test void rendersContextAndBuiltInFunctions() throws Exception {
         LinkedHashMap<String, Object> data = new LinkedHashMap<String, Object>();
         data.put("name", "  jeffrey  ");
-        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), data, Collections.emptyMap(), null), tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payments", "payment", "sheet", "TC001", Collections.<String>emptyList(), data, Collections.emptyMap(), null), tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
         assertEquals("JEFFREY / jeffrey / 12 / true", engine.render("#{upper(value=jeffrey)} / #{trim(value=${CASE.name})} / #{number('12.00')} / #{boolean(yes)}", context));
-        assertEquals("payment.TC001", engine.render("${CASE.caseId}", context));
+        assertEquals("payments.payment.TC001", engine.render("${CASE.caseId}", context));
     }
 
     @Test void supportsQuotedCommaAndTypedBuiltInArguments() throws Exception {

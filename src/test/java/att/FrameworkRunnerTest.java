@@ -19,4 +19,10 @@ class FrameworkRunnerTest {
         assertFalse(verbose.quiet());
         assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose", "--quiet"}));
     }
+
+    @Test void runIdCollisionIsClassifiedAsRunErrorEvenWhenProjectPathContainsTool() throws Exception {
+        java.lang.reflect.Method code = FrameworkRunner.class.getDeclaredMethod("code", String.class);
+        code.setAccessible(true);
+        assertEquals("ATT-RUN-001", code.invoke(null, "Run ID already exists: X (/tmp/api-testing-tool/output/X)"));
+    }
 }

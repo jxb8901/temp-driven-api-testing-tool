@@ -37,8 +37,8 @@ class ExcelTestSuiteLoaderTest {
         List<TestCase> cases = new ExcelTestSuiteLoader(config()).load(workbook);
 
         assertEquals(2, cases.size());
-        assertEquals("payment.TC001", cases.get(0).caseId());
-        assertEquals("batch.TC001", cases.get(1).caseId());
+        assertEquals("payments.payment.TC001", cases.get(0).caseId());
+        assertEquals("payments.batch.TC001", cases.get(1).caseId());
         assertEquals("", cases.get(0).caseData().get("note"));
         assertEquals("PAYMENT_INVOKE", cases.get(0).stage("invoke").templateName());
         assertEquals("PAYMENT_INVOKE", cases.get(1).stage("invoke").templateName());
@@ -53,7 +53,7 @@ class ExcelTestSuiteLoaderTest {
         writeMultiRowWorkbook(workbook);
         List<TestCase> cases = new ExcelTestSuiteLoader(config(2, false)).load(workbook);
         assertEquals(1, cases.size());
-        assertEquals("payment.TC002", cases.get(0).caseId());
+        assertEquals("payments.payment.TC002", cases.get(0).caseId());
         assertEquals("PAYMENT_INVOKE", cases.get(0).stage("invoke").templateName());
     }
 
@@ -70,7 +70,7 @@ class ExcelTestSuiteLoaderTest {
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), includeBatch
                 ? Arrays.asList(new SheetGroupConfig("payment", "支付測試案例集"), new SheetGroupConfig("batch", "批量測試案例集"))
                 : Collections.singletonList(new SheetGroupConfig("payment", "支付測試案例集")),
-                "案例編號", "標籤", data, stages, headerRows);
+                "案例編號", "標籤", data, stages, headerRows, "ignore", "payments");
     }
 
     private void writeWorkbook(Path path) throws Exception {

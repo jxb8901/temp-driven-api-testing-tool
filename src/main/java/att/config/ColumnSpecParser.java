@@ -21,6 +21,7 @@ public final class ColumnSpecParser {
             String sheet = unquote((equals < 0 ? item : item.substring(equals + 1)).trim());
             if (equals < 0 && items.size() != 1) throw new IllegalArgumentException("Group id may be omitted only for one sheet");
             if (id.isEmpty() || sheet.isEmpty()) throw new IllegalArgumentException("Sheet group id and sheet name must not be blank");
+            if (id.contains(".")) throw new IllegalArgumentException("Sheet ID must not contain '.': " + id);
             if (!ids.add(id)) throw new IllegalArgumentException("Duplicate sheet group id: " + id);
             result.add(new SheetGroupConfig(id, sheet));
         }

@@ -20,9 +20,9 @@ class HtmlReportGeneratorTest {
     @TempDir Path tempDir;
 
     @Test void producesAStandaloneSinglePageReport() throws Exception {
-        Path log = tempDir.resolve("payment.TC001/case.log");
+        Path log = tempDir.resolve("payments.payment.TC001/case.log");
         Files.createDirectories(log.getParent()); Files.write(log, "ACTION callApi".getBytes("UTF-8"));
-        TestResult result = new TestResult("payment.TC001", "Payment <success>", ResultStatus.PASS, Duration.ofMillis(12), "SUCCESS", "SUCCESS", log, Collections.emptyList());
+        TestResult result = new TestResult("payments.payment.TC001", "Payment <success>", ResultStatus.PASS, Duration.ofMillis(12), "SUCCESS", "SUCCESS", log, Collections.emptyList());
         Path report = new HtmlReportGenerator().generate(tempDir, "RUN-1", new RunSummary(Collections.singletonList(result), tempDir), Instant.now(), Instant.now());
         String html = new String(Files.readAllBytes(report), "UTF-8");
         assertTrue(html.contains("Case details"));
@@ -33,7 +33,7 @@ class HtmlReportGeneratorTest {
         assertTrue(html.contains("aria-label=\"Report index\""));
         assertTrue(html.contains("href=\"#case-details\""));
         assertTrue(html.contains("href=\"junit.html\""));
-        assertTrue(html.contains(HtmlSupport.id("payment.TC001")));
+        assertTrue(html.contains(HtmlSupport.id("payments.payment.TC001")));
         assertFalse(Files.exists(tempDir.resolve("report/cases")));
     }
 }

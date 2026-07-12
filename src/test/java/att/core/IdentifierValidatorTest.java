@@ -8,12 +8,15 @@ class IdentifierValidatorTest {
     @Test void preservesValidUnicodeIdentifiers() {
         assertEquals("SIT 回歸-01", IdentifierValidator.runId("SIT 回歸-01"));
         assertEquals("付款.TC001", IdentifierValidator.caseId("付款", "TC001"));
+        assertEquals("支付.本地.TC001", IdentifierValidator.caseId("支付", "本地", "TC001"));
     }
 
     @Test void rejectsTraversalIllegalAndReservedNames() {
         for (String value : new String[]{"../x", "a/b", "a\\b", "CON", "name.", " x", "x\n"}) {
             assertThrows(IllegalArgumentException.class, () -> IdentifierValidator.runId(value), value);
         }
+        assertThrows(IllegalArgumentException.class, () -> IdentifierValidator.workbookId("payment.regression"));
+        assertThrows(IllegalArgumentException.class, () -> IdentifierValidator.caseId("payment", "local.sit", "TC001"));
     }
 
     @Test void resolvesValidatedNameAsStrictChild() {

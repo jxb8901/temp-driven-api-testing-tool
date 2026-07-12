@@ -48,20 +48,16 @@ public class ExcelReportWriter {
                 Sheet sheet = workbook.getSheet(group.sheetName());
                 Row header = sheet.getRow(config.headerRows() - 1);
                 if (header == null) throw new IllegalArgumentException("Missing final header row in sheet: " + group.sheetName());
-                int start = Math.max(0, header.getLastCellNum());
-                int offset = 0;
-                for (String headerName : config.report().columns().values()) {
-                    header.createCell(start + offset).setCellValue(headerName);
-                    offset++;
-                }
+                Map<String, Integer> resultColumns = resolveResultColumns(header);
                 int caseColumn = columnIndex(header, config.caseIdColumn());
                 for (int rowIndex = config.headerRows(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
                     Row row = sheet.getRow(rowIndex);
                     if (row == null) continue;
                     Cell caseCell = row.getCell(caseColumn);
                     if (caseCell == null) continue;
-                    TestResult result = byCaseId.get(group.id() + "." + caseCell.toString().trim());
-                    if (result != null) writeResult(row, start, result);
+                    String prefix = config.workbookId().isEmpty() ? group.id() : config.workbookId() + "." + group.id();
+                    TestResult result = byCaseId.get(prefix + "." + caseCell.toString().trim());
+                    if (result != null) writeResult(row, resultColumns, result);
                 }
             }
             workbook.write(output);
@@ -69,10 +65,24 @@ public class ExcelReportWriter {
         return reportPath;
     }
 
-    private void writeResult(Row row, int start, TestResult result) {
-        int offset = 0;
-        for (String field : config.report().columns().keySet()) {
-            Cell cell = row.createCell(start + offset);
+    private Map<String, Integer> resolveResultColumns(Row header) {
+        Map<String, Integer> columns = new LinkedHashMap<String, Integer>();
+        int nextColumn = Math.max(0, header.getLastCellNum());
+        for (Map.Entry<String, String> mapping : config.report().columns().entrySet()) {
+            int column = columnIndex(header, mapping.getValue());
+            if (column < 0) {
+                column = nextColumn++;
+                header.createCell(column).setCellValue(mapping.getValue());
+            }
+            columns.put(mapping.getKey(), column);
+        }
+        return columns;
+    }
+
+    private void writeResult(Row row, Map<String, Integer> columns, TestResult result) {
+        for (Map.Entry<String, Integer> mapping : columns.entrySet()) {
+            String field = mapping.getKey();
+            Cell cell = row.getCell(mapping.getValue(), Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
             String text = value(field, result);
             cell.setCellValue(text);
             if ("reportLink".equals(field)) {
@@ -81,7 +91,6 @@ public class ExcelReportWriter {
                 link.setAddress(text);
                 cell.setHyperlink(link);
             }
-            offset++;
         }
     }
 
@@ -101,7 +110,7 @@ public class ExcelReportWriter {
                 return cell.getColumnIndex();
             }
         }
-        return 0;
+        return -1;
     }
 
 }

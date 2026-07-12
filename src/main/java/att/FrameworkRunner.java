@@ -47,6 +47,7 @@ public final class FrameworkRunner {
                 System.out.println("Report: " + new ReportRegenerator().regenerate(output.normalize(), options.runId()));
                 return;
             }
+            if ("run".equals(options.command())) new FrameworkEngine(root, config).assertRunIdAvailable(options);
             PackageValidator.ValidationSummary validation = new PackageValidator(root, config).validate(options);
             if ("validate".equals(options.command())) {
                 if ("json".equals(options.format())) { String json = validation.toJson(); att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json); System.out.println(json); }
@@ -54,7 +55,19 @@ public final class FrameworkRunner {
                 if (!validation.valid()) System.exit(2);
                 return;
             }
-            if (!validation.valid()) throw new IllegalArgumentException(validation.diagnostics.get(0).message());
+            if (!validation.valid()) {
+                if ("json".equals(options.format())) {
+                    String json = validation.toJson();
+                    att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json);
+                    System.out.println(json);
+                }
+                else {
+                    System.err.println("V2.1 validation FAIL: " + validation);
+                    printDiagnostics(validation, options, System.err);
+                }
+                System.exit(2);
+                return;
+            }
             printDiagnostics(validation, options);
             if (!options.quiet() && "human".equals(options.format())) System.out.println("[1/4] V" + Version.PRODUCT + " validation PASS: " + validation);
             if (!options.quiet() && "human".equals(options.format())) {
@@ -85,18 +98,29 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options]\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <group.caseId> | --tag <tag>\n  --exclude-tag <tag> --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  --format human|json --ci-output junit,json --quiet --verbose");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options]\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbook.sheet.caseId> | --tag <tag>\n  --exclude-tag <tag> --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  --format human|json --ci-output junit,json [--queue|--parallel] --quiet --verbose");
     }
 
     private static String code(String message) {
         String value = message == null ? "" : message.toLowerCase(java.util.Locale.ROOT);
+        if (value.contains("run id") || value.contains("another att run") || value.contains("run directory")) return DiagnosticCodes.RUN_FAILED;
         if (value.contains("tool") || value.contains("argument") || value.contains("argv")) return "ATT-TOOL-001";
         if (value.contains("template") || value.contains("action") || value.contains("payload")) return "ATT-TPL-001";
         if (value.contains("sheet") || value.contains("column") || value.contains("case id") || value.contains("sidecar") || value.contains("stage")) return "ATT-TC-001";
         return "ATT-CFG-001";
     }
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {
-        if (options.quiet() || !"human".equals(options.format())) return;
-        for (att.validation.Diagnostic diagnostic : validation.diagnostics) System.out.println("[" + diagnostic.severity() + "] " + diagnostic.code() + ": " + diagnostic.message());
+        printDiagnostics(validation, options, System.out);
     }
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output) {
+        if (options.quiet() || !"human".equals(options.format())) return;
+        for (att.validation.Diagnostic diagnostic : validation.diagnostics) {
+            StringBuilder location = new StringBuilder();
+            append(location, "file", diagnostic.file()); append(location, "field", diagnostic.field()); append(location, "sheet", diagnostic.sheet());
+            append(location, "row", diagnostic.row()); append(location, "column", diagnostic.column()); append(location, "template", diagnostic.template()); append(location, "action", diagnostic.action());
+            output.println("[" + diagnostic.severity() + "] " + diagnostic.code() + ": " + diagnostic.message() + (location.length() == 0 ? "" : " [" + location + "]"));
+            if (diagnostic.suggestion() != null) output.println("  suggestion: " + diagnostic.suggestion());
+        }
+    }
+    private static void append(StringBuilder out, String key, Object value) { if (value != null && !String.valueOf(value).isEmpty()) { if (out.length() > 0) out.append(", "); out.append(key).append('=').append(value); } }
 }

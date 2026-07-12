@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -45,6 +46,8 @@ public final class PackageValidator {
         int cases = 0;
         Set<String> templates = new LinkedHashSet<String>();
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        Map<String, Path> workbookIds = new LinkedHashMap<String, Path>();
+        Map<String, CaseLocation> fullCaseIds = new LinkedHashMap<String, CaseLocation>();
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, global);
         StageTemplateLoader loader;
         try { loader = new StageTemplateLoader(projectRoot, global.templatesRoot()); }
@@ -63,9 +66,16 @@ public final class PackageValidator {
                 if (!canonicalSuite.startsWith(canonicalProject) || Files.isSymbolicLink(resolved)) throw new IllegalArgumentException("Workbook escapes package root or is a symbolic link: " + suite);
                 resolved = canonicalSuite;
                 FrameworkConfig config = resolver.resolve(resolved);
+                Path previousWorkbook = workbookIds.put(config.workbookId(), resolved);
+                if (previousWorkbook != null) diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID,
+                        new IllegalArgumentException("Duplicate workbook id '" + config.workbookId() + "'; first declared by " + previousWorkbook), resolved));
                 List<TestCase> loaded = new ExcelTestSuiteLoader(config).load(resolved);
                 for (TestCase testCase : loaded) {
                     if ("selected".equals(options.validationScope()) && !options.matches(testCase)) continue;
+                    CaseLocation previousCase = fullCaseIds.put(testCase.caseId(), new CaseLocation(resolved, testCase.sheetName(), testCase.rowNumber()));
+                    if (previousCase != null) diagnostics.add(new Diagnostic(DiagnosticCodes.TESTCASE_INVALID, Diagnostic.Severity.ERROR,
+                            "Duplicate full Case ID '" + testCase.caseId() + "'; first declared at " + previousCase,
+                            resolved.toString(), testCase.sheetName(), testCase.rowNumber(), null, null, null));
                     cases++;
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
@@ -85,6 +95,12 @@ public final class PackageValidator {
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
         return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
+    }
+
+    private static final class CaseLocation {
+        private final Path file; private final String sheet; private final int row;
+        private CaseLocation(Path file, String sheet, int row) { this.file = file; this.sheet = sheet; this.row = row; }
+        @Override public String toString() { return file + "!" + sheet + ":" + row; }
     }
 
     private void validateReferencedTools(StageTemplate template, FrameworkConfig config) {

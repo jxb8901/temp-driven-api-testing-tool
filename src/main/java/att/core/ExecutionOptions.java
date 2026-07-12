@@ -29,18 +29,19 @@ public final class ExecutionOptions {
     private final boolean verbose;
     private final String validationScope;
     private final Set<String> ciOutputs;
+    private final String concurrencyMode;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
                             boolean failFast, Path outputDirectory) {
         this("run", configPath, suitePath == null ? Collections.<Path>emptyList() : Collections.singletonList(suitePath), suiteDirectory, caseIds, tags, excludeTags, runId, false,
-                rerunFailed, dryRun, failFast, outputDirectory, "human", false, false, "selected", defaultCiOutputs());
+                rerunFailed, dryRun, failFast, outputDirectory, "human", false, false, "selected", defaultCiOutputs(), "reject");
     }
 
     private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
                              Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
                              boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
-                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs) {
+                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode) {
         this.command = command;
         this.configPath = configPath;
         this.suitePaths = new ArrayList<Path>(suitePaths);
@@ -59,6 +60,7 @@ public final class ExecutionOptions {
         this.verbose = verbose;
         this.validationScope = validationScope;
         this.ciOutputs = new LinkedHashSet<String>(ciOutputs);
+        this.concurrencyMode = concurrencyMode;
     }
 
     public static ExecutionOptions parse(String[] args) {
@@ -78,6 +80,7 @@ public final class ExecutionOptions {
         boolean all = false, rerun = false, dry = false, failFast = false;
         boolean quiet = false, verbose = false, packageScope = false, selectedScope = false;
         String format = "human";
+        String concurrencyMode = "reject";
         Path output = null;
         Set<String> ciOutputs = defaultCiOutputs();
         Set<String> seenOptions = new LinkedHashSet<String>();
@@ -94,6 +97,8 @@ public final class ExecutionOptions {
             else if ("--output-dir".equals(arg)) output = Paths.get(value(args, ++i, arg));
             else if ("--format".equals(arg)) format = value(args, ++i, arg);
             else if ("--ci-output".equals(arg)) ciOutputs = parseCiOutputs(value(args, ++i, arg));
+            else if ("--queue".equals(arg)) concurrencyMode = "queue";
+            else if ("--parallel".equals(arg)) concurrencyMode = "parallel";
             else if ("--all".equals(arg)) all = true;
             else if ("--rerun-failed".equals(arg)) rerun = true;
             else if ("--dry-run".equals(arg)) dry = true;
@@ -116,15 +121,16 @@ public final class ExecutionOptions {
         if (all && suites.isEmpty() && suiteDir == null) suiteDir = Paths.get("testcase");
         if (suites.isEmpty() && suiteDir == null && (!caseIds.isEmpty() || !tags.isEmpty())) suiteDir = Paths.get("testcase");
         if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
+        if (seenOptions.contains("--queue") && seenOptions.contains("--parallel")) throw new IllegalArgumentException("--queue and --parallel are mutually exclusive");
         if (quiet && verbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         validateAllowed(command, seenOptions);
         if ("validate".equals(command) && "package".equals(validationScope) && suites.isEmpty() && suiteDir == null) suiteDir = Paths.get("testcase");
-        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs);
+        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode);
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
         Set<String> allowed = new LinkedHashSet<String>(java.util.Arrays.asList("--config", "--help"));
-        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose"));
+        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose"));
         else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
@@ -133,7 +139,7 @@ public final class ExecutionOptions {
 
     private static ExecutionOptions empty(String command) {
         return new ExecutionOptions(command, Paths.get("config/config.yaml"), Collections.<Path>emptyList(), null, new LinkedHashSet<String>(),
-                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "human", false, false, "selected", defaultCiOutputs());
+                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "human", false, false, "selected", defaultCiOutputs(), "reject");
     }
 
     public String command() { return command; }
@@ -155,6 +161,7 @@ public final class ExecutionOptions {
     public boolean verbose() { return verbose; }
     public String validationScope() { return validationScope; }
     public Set<String> ciOutputs() { return Collections.unmodifiableSet(ciOutputs); }
+    public String concurrencyMode() { return concurrencyMode; }
 
     public boolean matches(TestCase testCase) {
         boolean caseMatches = caseIds.isEmpty() || caseIds.contains(testCase.caseId());

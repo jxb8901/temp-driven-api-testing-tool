@@ -56,7 +56,7 @@ V2.1 does not add:
 ### 4.1 Explicit ownership
 
 - Global configuration owns runtime defaults, environment, template root, report defaults, and tool contracts.
-- A workbook sidecar owns workbook parsing, ordered stages, and workbook-specific reporting settings.
+- A workbook sidecar owns its package-unique stable `id`, workbook parsing, ordered stages, and workbook-specific reporting settings.
 - A stage selects one template and contributes stage-private data.
 - A template owns ordered actions.
 - An action performs render, tool, assert, or log behavior.
@@ -228,7 +228,7 @@ tools:
 | report | map | No | only `mode`, `fileNamePattern`, `columns`, `junit` are allowed |
 | report.mode | string | No | exactly `append-to-copy` |
 | report.fileNamePattern | string | No | must contain `${suiteName}` |
-| report.columns | map of string | No | recognized result-column keys only |
+| report.columns | map of string | No | result field → physical Excel header mapping; recognized result-field keys only |
 | report.junit | map | No | only `caseLogEmbedThresholdBytes` is allowed |
 | report.junit.caseLogEmbedThresholdBytes | integer | No | 0–1048576 bytes; default 10240 |
 | xml | map | No | only `namespaceMode` is allowed |
@@ -245,6 +245,7 @@ Supported top-level fields are:
 
 ```yaml
 schemaVersion: att-sidecar/v2.1
+id: payment
 excel:
   sheet: payment=支付測試案例集
   headerRows: 1
@@ -269,8 +270,9 @@ The complete sidecar schema is:
 | Field | Type | Required | Rule |
 |---|---|---:|---|
 | schemaVersion | string | Yes | exactly `att-sidecar/v2.1` |
+| id | string | Yes | package-unique stable dot-free workbook ID; first Case ID segment |
 | excel | map | Yes | fields defined below only |
-| excel.sheet | string | Yes | one sheet or comma-separated `groupId=sheetName` entries |
+| excel.sheet | string | Yes | one sheet or comma-separated `sheetId=sheetName` entries |
 | excel.headerRows | integer | No | at least 1; default 1 |
 | excel.caseId | string | Yes | physical Excel header |
 | excel.tags | string | Yes | physical Excel header |
@@ -283,10 +285,12 @@ The complete sidecar schema is:
 | stages[].runWhen | string | No | `normal`, `onSuccess`, `onFailure`, `always`; default `normal` |
 | stages[].onFailure | string | No | `stop` or `continue`; default `stop` |
 | report | map | No | only `columns` is allowed |
-| report.columns | map of string | No | recognized result-column keys only |
+| report.columns | map of string | No | result field → physical Excel header mapping; recognized result-field keys only |
 | timeoutMs | integer | No | 1–86400000; overrides global value |
 
 The sidecar MUST NOT override global tools, template root, environment, or output roots. Unknown fields in `excel`, each stage, and `report` are errors.
+
+`report.columns` is a column mapping, not merely a label list. When writing the copied result workbook, ATT first searches the final effective header row for each configured physical header and writes the result into that existing column. Only a mapped header that does not already exist is appended at the end of the sheet, in mapping declaration order.
 
 ### 7.4 Template schema
 
@@ -555,7 +559,7 @@ ATT MUST NOT rewrite, slugify, hash, or otherwise change the Run ID used as the 
 
 ### 10.3 Case ID
 
-The full Case ID remains `<groupId>.<rowCaseId>` for selection, display, reporting, runtime context, and its physical directory name. Group ID and row Case ID MUST each be non-blank and MUST satisfy the same illegal-character, control-character, reserved-name, leading/trailing-whitespace, trailing-dot, and length rules as Run ID. The combined full Case ID MUST be no longer than 255 Unicode code points.
+The full Case ID is `<workbookId>.<sheetId>.<rowCaseId>` for selection, display, reporting, runtime context, and its physical directory name. `workbookId` comes from mandatory sidecar `id`; `sheetId` is the group ID on the left of `excel.sheet`; `rowCaseId` comes from the configured Excel column. All three components MUST be non-blank and satisfy the illegal-character, control-character, reserved-name, leading/trailing-whitespace, trailing-dot, and length rules. Sidecar `id` MUST be unique across the package, sheet IDs MUST be unique within a workbook, and row IDs MUST be unique within a sheet. The combined full Case ID MUST be globally unique in the validation/execution scope and no longer than 255 Unicode code points.
 
 After validation, a case output directory is exactly:
 
@@ -626,6 +630,12 @@ If atomic directory move is unsupported across filesystems, the output root conf
 An interrupted run remains below `.in-progress` with state `ABORTED` or `INTERRUPTED` when ATT can update it safely. It is not eligible for `report`, `rerun-failed`, or `build` as a completed run.
 
 ATT MUST report stale in-progress runs when a user invokes `att.sh clean`; it MAY provide a dedicated cleanup option after displaying each run's age and path.
+
+### 12.4 Concurrent run policy and Run ID collision
+
+`att.sh run` uses reject mode by default, without an option, and takes an exclusive cross-process lock scoped to the effective output root. `--queue` waits on the same lock and tells the user that the request is queued. `--parallel` deliberately bypasses the global lock; individual `.in-progress` directories and atomic publication still isolate run evidence. `--queue` and `--parallel` are mutually exclusive.
+
+Before package validation or execution progress is printed, ATT performs a read-only check for the proposed final Run ID. Planning and lock acquisition MUST recheck it to close race windows, including after a queued request resumes. If the ID exists, ATT prints an `ATT-RUN-001` error containing the Run ID and path and exits without invoking tools. If another process publishes that ID only after the final pre-execution check, ATT MUST NOT overwrite it: completion selects the first available `<RunID>-2`, `<RunID>-3`, and so on, reports the effective Run ID, and uses it for the completed directory, manifest, reports, CI summary, and latest-run pointer.
 
 ## 13. Result model and aggregation
 
@@ -966,7 +976,7 @@ Relevant examples:
 
 ```sh
 ./att.sh validate --package
-./att.sh validate --selected --case payment.TC001
+./att.sh validate --selected --case payment.payment.TC001
 ./att.sh validate --package --format json
 ./att.sh run --all --ci-output junit,json
 ```

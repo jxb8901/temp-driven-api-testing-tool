@@ -38,7 +38,7 @@ class FrameworkEngineTest {
         writeTool(projectRoot.resolve("tools/invoke.sh"), "cat > \"$4\" <<XML\n<Response><Status>SUCCESS</Status></Response>\nXML\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
-                "schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+                "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
         writeText(projectRoot.resolve("schemas/att-ci-summary-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"inputManifestHash\"]}");
         writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
         writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
@@ -56,15 +56,15 @@ class FrameworkEngineTest {
         String verbose = console.toString("UTF-8");
         assertTrue(verbose.contains("[RUN] id=TEST-V2"));
         assertTrue(verbose.contains("[SUITE]"));
-        assertTrue(verbose.contains("[CASE] id=payment.TC001 status=START"));
-        assertTrue(verbose.contains("[STAGE] case=payment.TC001 stage=invoke"));
-        assertTrue(verbose.contains("[ACTION] case=payment.TC001 stage=invoke action=callApi status=PASS"));
+        assertTrue(verbose.contains("[CASE] id=payments.payment.TC001 status=START"));
+        assertTrue(verbose.contains("[STAGE] case=payments.payment.TC001 stage=invoke"));
+        assertTrue(verbose.contains("[ACTION] case=payments.payment.TC001 stage=invoke action=callApi status=PASS"));
         assertFalse(verbose.contains("<Response>"));
 
         assertEquals(1, summary.passed());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
-        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payment.TC001/payment.TC001.TEST.V2.001.log")));
-        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payment.TC001/case.yaml")));
+        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/payments.payment.TC001.TEST.V2.001.log")));
+        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/case.yaml")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/events.jsonl")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/summary.json")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.xml")));
@@ -77,6 +77,10 @@ class FrameworkEngineTest {
         try (java.util.stream.Stream<Path> pending = Files.list(projectRoot.resolve("output/.in-progress"))) { assertEquals(0, pending.count()); }
         String ci = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/ci/summary.json")), "UTF-8");
         assertTrue(ci.contains("\"inputManifestHash\":\""));
+        IllegalArgumentException duplicate = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(verboseOptions));
+        assertTrue(duplicate.getMessage().contains("Run ID already exists: TEST-V2"), duplicate.getMessage());
+        IllegalArgumentException preflight = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).assertRunIdAvailable(verboseOptions));
+        assertTrue(preflight.getMessage().contains("Run ID already exists: TEST-V2"), preflight.getMessage());
     }
 
     @Test void runWhenUsesPriorFailureIndependentlyFromStopState() throws Exception {
@@ -103,10 +107,32 @@ class FrameworkEngineTest {
 
     @Test void failedPlanCreatesNoOutputOrInProgressDirectory() throws Exception {
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
-        writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
         Files.createDirectories(projectRoot.resolve("templates"));
         ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "PLAN-FAIL"});
         assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
+        assertFalse(Files.exists(projectRoot.resolve("output")));
+    }
+
+    @Test void allocatesSequentialRunIdWhenCompletionNameHasCollided() throws Exception {
+        Files.createDirectories(projectRoot.resolve("output/RUN-1"));
+        Files.createDirectories(projectRoot.resolve("output/RUN-1-2"));
+        FrameworkEngine engine = new FrameworkEngine(projectRoot, globalConfig());
+        java.lang.reflect.Method method = FrameworkEngine.class.getDeclaredMethod("uniqueCompletionRunId", Path.class, String.class);
+        method.setAccessible(true);
+        assertEquals("RUN-1-3", method.invoke(engine, projectRoot.resolve("output"), "RUN-1"));
+    }
+
+    @Test void rejectsDuplicateWorkbookIdsAcrossExcelFilesDuringPlanning() throws Exception {
+        writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
+                "schemaVersion: att-template/v2.1\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  check:\n    type: assert\n    expression: \"true == true\"\n");
+        for (String name : java.util.Arrays.asList("one", "two")) {
+            writeWorkbook(projectRoot.resolve("testcase/" + name + ".xlsx"));
+            writeText(projectRoot.resolve("testcase/" + name + ".yaml"), "schemaVersion: att-sidecar/v2.1\nid: duplicate\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        }
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--all", "--run-id", "DUPLICATE-WORKBOOK"});
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
+        assertTrue(error.getMessage().contains("Duplicate workbook id 'duplicate'"), error.getMessage());
         assertFalse(Files.exists(projectRoot.resolve("output")));
     }
 

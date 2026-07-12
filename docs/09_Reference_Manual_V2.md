@@ -17,9 +17,6 @@ Test cases, templates, and tools are the primary concepts. A stage belongs to a 
 1. [Design principles](#1-design-principles)
 2. [Release layout and CLI](#2-release-layout-and-cli)
 3. [Global configuration](#3-global-configuration)
-
-[Complete schema reference](#complete-schema-reference) is the authoritative schema chapter for all numbered authoring and generated-output sections below.
-
 4. [Workbook sidecar](#4-workbook-sidecar)
 5. [Stages and template selection](#5-stages-and-template-selection)
 6. [Templates and actions](#6-templates-and-actions)
@@ -30,8 +27,9 @@ Test cases, templates, and tools are the primary concepts. A stage belongs to a 
 11. [Validation, diagnostics, reports, CI, and packaging](#11-validation-diagnostics-reports-ci-and-packaging)
 12. [Best practices and troubleshooting](#12-best-practices-and-troubleshooting)
 13. [Unicode, paths, security, and run lifecycle](#13-unicode-paths-security-and-run-lifecycle)
-14. [Complete command reference](#14-complete-command-reference)
-15. [Frequently asked questions](#15-frequently-asked-questions)
+14. [Complete config reference](#14-complete-config-reference)
+15. [Complete command reference](#15-complete-command-reference)
+16. [Frequently asked questions](#16-frequently-asked-questions)
 
 ## 1. Design principles
 
@@ -57,11 +55,11 @@ An ATT package contains `att.sh`, `config/config.yaml`, `testcase/`, `templates/
 
     ./att.sh help
     ./att.sh validate --package
-    ./att.sh validate --selected --case payment.TC001
+    ./att.sh validate --selected --case payment.payment.TC001
     ./att.sh validate --package --format json
     ./att.sh run --all
     ./att.sh run --suite testcase/payment_regression.xlsx --tag smoke
-    ./att.sh run --all --case payment.TC001 --run-id SIT-001
+    ./att.sh run --all --case payment.payment.TC001 --run-id SIT-001
     ./att.sh run --all --dry-run
     ./att.sh report --run-id SIT-001
     ./att.sh docs
@@ -90,7 +88,7 @@ Exit codes are 0 for a successful command/run without FAIL, ERROR, or INVALID; 1
 - `--all` discovers every `.xlsx` file under `testcase/` and requires its adjacent sidecar.
 - `--suite <xlsx>` selects one workbook and may be repeated.
 - `--suite-dir <dir>` discovers workbooks in another directory.
-- `--case <group.caseId>` selects a full Case ID; the unqualified row ID is not sufficient.
+- `--case <workbook.sheet.caseId>` selects a full Case ID; a sheet-qualified or unqualified row ID is not sufficient.
 - `--tag <tag>` includes cases having at least one requested tag.
 - `--exclude-tag <tag>` removes matching cases after inclusion filters.
 - If filters select no cases, ATT reports an error rather than silently producing an empty PASS run.
@@ -102,11 +100,15 @@ Exit codes are 0 for a successful command/run without FAIL, ERROR, or INVALID; 1
 
 `--dry-run` validates and records selected cases as SKIPPED without invoking tools. `--fail-fast` stops scheduling further cases after the first FAIL or ERROR. `--run-id` overrides the timestamp ID, must pass the ID safety rules in Section 13, and directly becomes the final run-directory name. `--output-dir` overrides the global output root for that command. `--ci-output junit,json` writes the requested CI files below the completed run. `--format json` emits machine-readable command output. Normal human output reports all four phases: validation, selection, execution, and completion. `--quiet` suppresses these progress and completion messages. `--verbose` additionally reports safe run, suite, case, stage, and action lifecycle metadata including IDs, status, and duration; it never prints payloads, parsed output, commands, arguments, environment variables, stdout, or stderr. `--quiet` and `--verbose` cannot be combined.
 
+Simultaneous `run` commands sharing one output root use reject mode by default; no option is needed. `--queue` displays a waiting message and runs after the output-root lock becomes available. `--parallel` does not acquire the global run lock and allows independent in-progress runs. `--queue` and `--parallel` are mutually exclusive. See [Concurrent commands and shared output](#135-concurrent-commands-and-shared-output).
+
 For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics are written to stderr. All command options are command-specific: an option that is unknown or not valid for the selected command is an error.
 
 For pre-execution checks and generated outputs, see [Validation, diagnostics, reports, CI, and packaging](#11-validation-diagnostics-reports-ci-and-packaging).
 
 ## 3. Global configuration
+
+This section is the quick-start view. For the complete field matrix, defaults, extension-field locations, and cross-field constraints, use [Complete config reference — Global configuration](#global-configuration-configconfigyaml).
 
 config/config.yaml owns runtime defaults, template root, report defaults, run ID behavior, XML namespace mode, and tool contracts. It must not define workbook sheets, case ID columns, data columns, or stages.
 
@@ -143,107 +145,15 @@ config/config.yaml owns runtime defaults, template root, report defaults, run ID
 
 Tool arguments are metadata for validation and generated tool reference pages. Each argument requires name, description, and required; only the final argument may define delimit. `command` is tokenized by ATT and is not evaluated by a shell. For the complete tool contract, command placeholders, argument validation, output parsing, delimited argument behavior, special-character behavior, and invocation examples, see [Tool configuration and execution](#9-tool-configuration-and-execution).
 
-### 3.1 Global field reference
+Field types, defaults, ranges, unknown-field behavior, and less-common report/XML/run options are defined only in [Complete config reference — Global configuration](#global-configuration-configconfigyaml).
 
-| Field | Required | Default | User-visible effect |
-|---|---:|---|---|
-| schemaVersion | Yes | — | Exactly `att-config/v2.1` |
-| outputDirectory | No | output | Relative package path; root for runs, `.in-progress`, and latest-run history |
-| environment | No | SIT | Available as `${CASE.environment}` and commonly passed to tools |
-| timeoutMs | No | 120000 | Maximum duration for each external tool process, in milliseconds; range 1–86400000 |
-| run.id.default | No | timestamp | Must be `timestamp` |
-| run.id.timestampFormat | No | yyyyMMdd-HHmmss | Java date/time format used for timestamp run IDs |
-| templates.root | No | templates | Root searched recursively for template directories |
-| report.mode | No | append-to-copy | Result-workbook write mode |
-| report.fileNamePattern | No | `${suiteName}.result.xlsx` | Result workbook filename pattern |
-| report.columns | No | Empty map | String-keyed result-workbook label overrides; schema permits arbitrary string keys |
-| report.junit.caseLogEmbedThresholdBytes | No | 10240 | Maximum UTF-8 case-log bytes embedded in JUnit `system-out`; 0 always links externally |
-| xml.namespaceMode | No | ignore | `ignore` uses local XML names; `preserve` uses Clark notation |
-| tools | No | Empty map | Global external tool contracts available to template actions |
+### 3.1 Precedence and ownership
 
-Global paths are package-relative. Keep outputDirectory outside templates and testcase so generated output is not rediscovered as source content. Schema validation rejects unknown fields, wrong scalar types, duplicate YAML keys, unsafe YAML tags, and invalid enum values; the exact extension-field locations are listed in [Complete schema reference](#complete-schema-reference).
-
-### 3.2 Precedence and ownership
-
-Global configuration provides runtime and report defaults. The workbook sidecar owns `excel`, ordered `stages`, and workbook-specific report-column overrides. Command-line `--output-dir`, `--run-id`, and selection options override their applicable runtime defaults. ATT never invents a missing sheet, case ID column, tags column, data mapping, or stage list.
-
-## Complete schema reference
-
-The files in [`schemas/`](../schemas/) are the machine-readable, complete V2.1 contract. ATT validates source files against these JSON Schema/XSD definitions; the field tables in this manual are a reading guide, not a replacement for the schema. The schema catalog is [`schemas/catalog.yaml`](../schemas/catalog.yaml).
-
-| Artifact | Schema version / identifier | Formal definition | What it validates |
-|---|---|---|---|
-| Global configuration | `att-config/v2.1` / `urn:att:schema:config:v2.1` | [att-config-v2.1.schema.json](../schemas/att-config-v2.1.schema.json) | `config/config.yaml`, tool descriptors, and tool arguments |
-| Workbook sidecar | `att-sidecar/v2.1` / `urn:att:schema:sidecar:v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) | `<workbook>.yaml` beside each selected workbook |
-| Template descriptor | `att-template/v2.1` / `urn:att:schema:template:v2.1` | [att-template-v2.1.schema.json](../schemas/att-template-v2.1.schema.json) | Every `template.yaml`, action map, retry block, and action type shape |
-| Run manifest | `att-run/v2.1` / `urn:att:schema:run:v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) | Persisted completed `<run>/run.yaml` envelope |
-| Validation JSON | `att-validation/v2.1` / `urn:att:schema:validation:v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) | `validate --format json` envelope and diagnostic fields |
-| CI JSON summary | `att-ci-summary/v2.1` / `urn:att:schema:ci-summary:v2.1` | [att-ci-summary-v2.1.schema.json](../schemas/att-ci-summary-v2.1.schema.json) | `<run>/ci/summary.json` envelope |
-| JUnit XML | XML Schema | [att-junit-v2.1.xsd](../schemas/att-junit-v2.1.xsd) | `<run>/ci/junit.xml` testsuite/testcase structure |
-| Diagnostic catalog | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../schemas/diagnostic-codes.yaml) | Stable diagnostic-code meanings |
-
-All JSON Schema files use JSON Schema Draft 2020-12. A schema-controlled object rejects unknown properties unless its definition explicitly allows an `x-*` extension. An extension is preserved but has no ATT execution meaning. Duplicate YAML keys, unsafe YAML tags, invalid scalar types, missing required fields, invalid enum values, and unsupported properties are validation errors.
-
-### Source-file schemas
-
-The following tables reproduce the complete allowed property sets for author-authored source files. `Required` means required by the schema; additional semantic checks, such as path containment, unique template names, required tool arguments at call sites, or expression syntax, are performed by ATT validation after schema validation.
-
-#### Schema: Global configuration
-
-| Object path | Allowed properties | Required / constraints |
-|---|---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `templates`, `run`, `report`, `xml`, `tools`, `x-*` | `schemaVersion` required and exactly `att-config/v2.1` |
-| `templates` | `root`, `x-*` | `root` non-empty string when present |
-| `run` | `id`, `x-*` | — |
-| `run.id` | `default`, `timestampFormat`, `x-*` | `default`, when present, exactly `timestamp`; format is non-empty string |
-| `report` | `mode`, `fileNamePattern`, `columns`, `junit`, `x-*` | `mode`, when present, exactly `append-to-copy` |
-| `report.columns` | arbitrary string keys with string values | — |
-| `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` | integer 0–1048576 when present |
-| `xml` | `namespaceMode`, `x-*` | `ignore` or `preserve` when present |
-| `tools.<toolKey>` | `name`, `description`, `command`, `output`, `arguments`, `x-*` | `name`, `description`, `command` required; `output` is `txt`, `yaml`, `json`, or `xml` |
-| `tools.<toolKey>.arguments.<argumentKey>` | `name`, `description`, `required`, `delimit`, `x-*` | `name`, `description`, `required` required; `required` is boolean; `delimit` is non-empty string when present |
-
-`timeoutMs` is an integer from 1 to 86400000. `outputDirectory` and `environment` are non-empty strings when present. The schema permits extension fields below the root, `templates`, `run`, `run.id`, `report`, `report.junit`, `xml`, each tool, and each argument.
-
-#### Schema: Workbook sidecar
-
-| Object path | Allowed properties | Required / constraints |
-|---|---|---|
-| root | `schemaVersion`, `excel`, `stages`, `report`, `timeoutMs`, `x-*` | `schemaVersion`, `excel`, and non-empty `stages` required |
-| `excel` | `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns` | `sheet`, `caseId`, `tags` required; `headerRows` integer ≥ 1 |
-| `stages[]` | `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure` | `key` and `template` required; key has no `.`; `runWhen` is `normal`, `onSuccess`, `onFailure`, or `always`; `onFailure` is `stop` or `continue` |
-| `report` | `columns` | `columns` is a map whose values are strings |
-
-`timeoutMs` is an integer from 1 to 86400000. Only the sidecar root permits `x-*`; the current V2.1 schema intentionally does **not** permit extension fields inside `excel`, each stage, or sidecar `report`.
-
-#### Schema: Template descriptor and action
-
-| Object path | Allowed properties | Required / constraints |
-|---|---|---|
-| template root | `schemaVersion`, `name`, `description`, `actions`, `x-*` | `schemaVersion`, `description`, non-empty `actions` required; `name` optional |
-| `actions.<actionId>` common | `type`, `description`, `onFailure`, `payload`, `saveAs`, `output`, `call`, `expression`, `message`, `level`, `fields`, `timeoutMs`, `retry`, `x-*` | action ID has no `.`; type is `render`, `tool`, `assert`, or `log`; `onFailure` is `stop` or `continue` |
-| `render` action | common fields allowed by render type | requires `type`, `payload`, `saveAs`; forbids `call`, `expression`, `message`, `level`, `fields`, `timeoutMs`, `retry`; `output.mode`, when present, is `file` |
-| `tool` action | common fields allowed by tool type | requires `type`, `call`; `timeoutMs` is 1–86400000; may contain `retry`; forbids render/assert/log-only fields |
-| `assert` action | common fields allowed by assert type | requires `type`, `expression`; forbids render/tool/log-only fields, `timeoutMs`, and `retry` |
-| `log` action | common fields allowed by log type | requires `type`, `message`; `level` is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`; forbids render/tool/assert-only fields, `timeoutMs`, and `retry` |
-| `retry` | `maxAttempts`, `retryOn`, `exitCodes` | `retryOn` required; every value must be `EXIT_CODE`; `maxAttempts` 1–10; every `exitCodes` item 1–255 |
-
-The template root, action object, and `output` object permit `x-*`. `fields` is an unconstrained map intended for log fields. Schema validation enforces the action shape; ATT then validates referenced payload files, tool calls, required call arguments, expression syntax, and safe paths.
-
-### Generated-output schemas
-
-Generated artifacts are not authoring inputs, but consumers may validate them against the following required envelopes:
-
-| Artifact | Required top-level fields | Additional-property rule |
-|---|---|---|
-| `run.yaml` | `schemaVersion`, `att`, `runtime`, `run`, `validation`, `inputs`, `cases`, `summary`, `outputs` | no additional top-level fields |
-| Validation JSON | `schemaVersion`, `attVersion`, `valid`, `mode`, `summary`, `diagnostics` | no additional top-level fields; `mode` is `selected` or `package` |
-| CI summary JSON | `schemaVersion`, `attVersion`, `runId`, `environment`, `startedAt`, `endedAt`, `status`, `summary`, `durationStatistics`, `cases`, `diagnosticCounts`, `report`, `inputManifestHash` | no additional top-level fields |
-| JUnit XML | one `testsuite` with required `name`, `tests`, `failures`, `errors`, `skipped`; each `testcase` has `classname`, `name`, `time` | content is constrained by `att-junit-v2.1.xsd` |
-
-The JUnit HTML file is a human-readable projection and is not an XML/JSON schema artifact. It is generated from the same completed run summary as JUnit XML.
+Global configuration provides runtime and report defaults. The workbook sidecar owns its stable package-unique `id`, `excel`, ordered `stages`, and workbook-specific report-column overrides. Command-line `--output-dir`, `--run-id`, and selection options override their applicable runtime defaults. ATT never invents a missing workbook ID, sheet, case ID column, tags column, data mapping, or stage list.
 
 ## 4. Workbook sidecar
+
+The examples below focus on workbook authoring. The complete sidecar property set, defaults, timeout precedence, extension rules, and constraints are in [Complete config reference — Workbook sidecar](#workbook-sidecar-workbookyaml).
 
 Every workbook requires an adjacent same-basename sidecar. For payment_regression.xlsx, ATT requires payment_regression.yaml in the same directory.
 
@@ -266,37 +176,18 @@ In V2.1 the first field is mandatory:
 
 ```yaml
 schemaVersion: att-sidecar/v2.1
+id: payment
 ```
 
-excel.sheet accepts comma-separated groupId=sheetName entries. With one sheet, the group ID may be omitted and ATT uses default. The full Case ID is always groupId.rowCaseId and must be unique across the workbook.
+Sidecar `id` is the mandatory stable workbook ID and must be unique across the package. `excel.sheet` accepts comma-separated sheetId=sheetName entries. With one sheet, the sheet ID may be omitted and ATT uses `default`. The full Case ID is always `workbookId.sheetId.rowCaseId` and must be globally unique.
 
 excel.caseId and excel.tags are mandatory structural columns. tags is outside dataColumns; blank tags are valid. V2 has no configurable required-column list.
 
 dataColumns supports alias=ColumnName, ColumnName, alias=ColumnName(yaml), and ColumnName(yaml). Double quotes protect commas, equals signs, and parentheses. YAML cells retain maps, lists, numbers, booleans, and strings.
 
-### 4.1 Sidecar field reference
+Required/default fields, enum values, timeout ranges, ownership restrictions, and `x-*` locations are defined in [Complete config reference — Workbook sidecar](#workbook-sidecar-workbookyaml). The sidecar cannot override global tools, template root, environment, or output roots.
 
-| Field | Required | Meaning |
-|---|---:|---|
-| schemaVersion | Yes | Exactly `att-sidecar/v2.1` |
-| excel.sheet | Yes | One sheet name or comma-separated groupId=sheetName entries |
-| excel.headerRows | No | Number of top rows treated as headers; default 1 |
-| excel.caseId | Yes | Physical Excel header holding the row Case ID |
-| excel.tags | Yes | Physical Excel header holding comma-separated tags |
-| excel.dataColumns | No | Case-level data mapping parsed into CASE |
-| stages | Yes | Non-empty ordered list of stage definitions |
-| stages[].key | Yes | Unique, dot-free runtime stage identifier |
-| stages[].template | Yes | Physical Excel header containing the row template selector |
-| stages[].dataColumns | No | Data mapping visible only below that stage |
-| stages[].required | No | Whether a blank selector is an error; default false |
-| stages[].runWhen | No | normal, onSuccess, onFailure, or always |
-| stages[].onFailure | No | stop or continue |
-| report.columns | No | Workbook-specific result column label overrides |
-| timeoutMs | No | Workbook-specific tool timeout override in milliseconds, 1–86400000 |
-
-This table is the authoring quick reference. For the complete allowed-property set and the important rule that only the sidecar root—not `excel`, a stage, or sidecar `report`—permits `x-*`, see [Schema: Workbook sidecar](#schema-workbook-sidecar). The sidecar cannot override global tools, template root, environment, or output roots.
-
-### 4.2 CSV-style quoting examples
+### 4.1 CSV-style quoting examples
 
 ```yaml
 dataColumns: amount=金額, note="備註,補充", formula="規則=值", payload="請求(yaml)"(yaml)
@@ -304,13 +195,13 @@ dataColumns: amount=金額, note="備註,補充", formula="規則=值", payload=
 
 The `(yaml)` marker belongs to the sidecar specification, not the physical Excel header. In the last example the physical header is `請求(yaml)`, while the final marker instructs ATT to parse its cell value as YAML. Double a quote inside a quoted item using CSV rules.
 
-### 4.3 Cell conversion and blank markers
+### 4.2 Cell conversion and blank markers
 
 Excel display values are trimmed before use. `N/A`, `NA`, `NULL`, `NONE`, an empty cell, and a whitespace-only value normalize to blank. A blank case/stage data value is stored as the empty string. A blank `(yaml)` data cell remains blank rather than being parsed. Non-blank YAML may be a scalar, list, or map for ordinary data columns; template selector cells follow the stricter map-or-string rules in Section 5.
 
 Excel numeric formatting matters: identifiers that must retain leading zeroes should be stored/formatted as text. Case IDs, group IDs, stage keys, aliases, template names, and paths are case-sensitive.
 
-### 4.4 Formula cells and displayed values
+### 4.3 Formula cells and displayed values
 
 ATT reads workbooks with Apache POI `DataFormatter`. It imports each configured cell's **displayed text**, not a typed Excel value. This rule applies to case IDs, tags, ordinary `dataColumns`, stage data columns, template-selector cells, and headers.
 
@@ -330,13 +221,13 @@ For non-formula cells, Apache POI applies the cell's Excel number/date format an
 
 An ordinary column always enters Context as a string. A column marked `(yaml)` parses that displayed text as YAML after formatting; this may convert a plain display value into a YAML number, boolean, list, or map. For values such as dates, percentages, scientific notation, account numbers, or codes where exact display text matters, use an ordinary (non-`(yaml)`) column or quote the YAML scalar explicitly. For example, use `'1.23E+05'` in a YAML cell when it must remain a string.
 
-### 4.5 Header and row validation
+### 4.4 Header and row validation
 
 Every configured header must exist exactly once in every configured sheet. Duplicate headers are errors. Rows whose configured cells are all blank are ignored. A non-blank row must contain a Case ID; complete Case IDs must remain unique across all configured groups. Required stage selector cells must be non-blank after normalization.
 
-Because ATT uses the full Case ID directly as the final case output-directory name, group IDs and row Case IDs must be non-blank, have no leading/trailing whitespace, not end in `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or any control character. They cannot be `.` or `..`, cannot be Windows device names such as `CON`, `NUL`, `COM1`, or `LPT1` (case-insensitive), and the combined full ID must not exceed 255 Unicode code points. Chinese and other Unicode letters/numbers are valid. ATT preserves a valid `groupId.rowCaseId` unchanged in output, reports, and manifests.
+Because ATT uses the full Case ID directly as the final case output-directory name, workbook IDs, sheet IDs, and row Case IDs must be non-blank, have no leading/trailing whitespace, not end in `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or any control character. They cannot be `.` or `..`, cannot be Windows device names such as `CON`, `NUL`, `COM1`, or `LPT1` (case-insensitive), and the combined full ID must not exceed 255 Unicode code points. Chinese and other Unicode letters/numbers are valid. ATT preserves a valid `workbookId.sheetId.rowCaseId` unchanged in output, reports, and manifests.
 
-### 4.6 Multi-row headers
+### 4.5 Multi-row headers
 
 Set `excel.headerRows` when a sheet has more than one header row. For example, `headerRows: 2` means rows 1 and 2 are headers and data starts at row 3. ATT resolves each physical column independently by scanning those rows from top to bottom and taking the last non-empty trimmed cell:
 
@@ -351,6 +242,8 @@ ATT does not concatenate parent and child labels. An empty parent cell is permit
 For stage selector cells and stage-private data, continue with [Stages and template selection](#5-stages-and-template-selection).
 
 ## 5. Stages and template selection
+
+Use this chapter for selection behavior and examples; the consolidated stage field/default/constraint reference is [Complete config reference — Workbook sidecar](#workbook-sidecar-workbookyaml).
 
 Each stage requires key and template. The template field names the physical Excel column that selects the template for each row; it is not a fixed template name in the sidecar.
 
@@ -468,11 +361,13 @@ report:
     runTime: 執行時間
 ```
 
-This changes result-workbook labels only. It does not change the HTML report structure, runtime Context keys, or the global report file-name pattern.
+Each key is an ATT result field and each value is the physical Excel header to receive that result. ATT first fills a matching column already present in the final effective header row. If the mapped header is absent, ATT appends it at the end of the sheet in mapping declaration order. This mapping does not change the HTML report structure, runtime Context keys, or the global report file-name pattern.
 
 For the selected template's implementation, see [Templates and actions](#6-templates-and-actions); for the resulting data tree, see [Runtime Context](#7-runtime-context).
 
 ## 6. Templates and actions
+
+This chapter keeps the authoring examples and execution semantics. The complete type-specific field allowlist, forbidden combinations, retry limits, and extension locations are in [Complete config reference — Template descriptor and actions](#template-descriptor-and-actions).
 
 A template is a directory if and only if it directly contains template.yaml. Nested and Unicode/Chinese paths are supported. The descriptor contains an ordered YAML actions map.
 
@@ -499,22 +394,11 @@ Supported action types are render, tool, assert, and log. Action IDs are unique 
 
 V2.1 does not support `actionDefaults`. Each action independently owns its optional `onFailure` value, so its behavior is visible at the point where the action is declared.
 
-### 6.2 Action field reference
-
-| Action type | Required fields | Optional fields | Result available to later actions |
-|---|---|---|---|
-| render | type, payload | saveAs, output, onFailure, description | `${ACTIONS.<id>.output}` or `${ACTIONS.<id>.outputFile}` |
-| tool | type, call | timeoutMs, retry, onFailure, description | `${ACTIONS.<id>.output}` and canonical CASE.TOOL result |
-| assert | type, expression | onFailure, description | status, expected, actual, error metadata |
-| log | type, message | level, fields, onFailure, description | message and rendered fields metadata |
-
-For every action type, `onFailure` accepts exactly `stop` or `continue`; if omitted or blank, ATT uses `stop`. `stop` stops later actions in the same template after a FAIL or ERROR. `continue` records the failure and lets later actions run, but never changes the stage or case result to PASS. Values such as `ignore`, `warn`, or a non-string YAML value are rejected when ATT loads the template.
-
-Type-specific validation is strict. The table above is sufficient for normal authoring; detailed required/forbidden fields, numeric ranges, retry shape, and extension locations are defined once in [Schema: Template descriptor and action](#schema-template-descriptor-and-action). Fields intended for another action type are validation errors, not ignored configuration.
+Required and forbidden fields for each action type, `onFailure`, timeout/retry limits, defaults, and extension locations are defined in [Complete config reference — Template descriptor and actions](#template-descriptor-and-actions). Fields intended for another action type are validation errors, not ignored configuration.
 
 `render.payload` and `render.saveAs` must remain inside the template/action output directory. Prefer `saveAs` for XML, JSON, YAML, SQL, and large text that will be passed to a tool. A tool action calls one configured global tool through `#{toolName(namedArgument=value)}`. An assert action records FAIL when its expression is false and ERROR when expression evaluation itself fails. A log action renders message and fields but does not perform an assertion.
 
-### 6.3 Template and file authoring rules
+### 6.2 Template and file authoring rules
 
 Keep every payload file below its template directory. A directory that lacks template.yaml is only a category directory, not a callable template. Template names, paths, descriptions, payload filenames, and payload content may use Chinese/Unicode UTF-8 text. Names and paths are case-sensitive.
 
@@ -525,7 +409,7 @@ Tool calls use the syntax described in [Expressions and built-in functions](#8-e
 The authoritative persisted tree is rooted at CASE:
 
     CASE
-    ├── caseId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
+    ├── caseId, workbookId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
     ├── status, startedAt, durationMs, error
     ├── <case data columns>
     └── STAGES
@@ -539,7 +423,7 @@ The authoritative persisted tree is rooted at CASE:
                             └── <toolName>
                                 └── input/output/status/log/artifact data
 
-Core keywords are uppercase: CASE, STAGES, TEMPLATE, ACTIONS, and TOOL. Metadata properties retain camelCase, such as caseId, groupId, startedAt, durationMs, and outputFile. There are no CASE.fields, CASE.data, or TOOLS nodes.
+Core keywords are uppercase: CASE, STAGES, TEMPLATE, ACTIONS, and TOOL. Metadata properties retain camelCase, such as caseId, workbookId, groupId, startedAt, durationMs, and outputFile. There are no CASE.fields, CASE.data, or TOOLS nodes.
 
 Normative references include ${CASE.caseId}, ${CASE.amount}, ${CASE.STAGES.invoke.channel}, and ${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.TOOL.invokePaymentApi.output}. ${ACTIONS.<actionId>...} is a current-template convenience view. ${TOOL.input}, ${TOOL.output}, ${TOOL.inputFile}, and ${TOOL.outputFile} are transient views while a tool is running.
 
@@ -547,8 +431,9 @@ Normative references include ${CASE.caseId}, ${CASE.amount}, ${CASE.STAGES.invok
 
 | Property | Availability and meaning |
 |---|---|
-| caseId | Full group-qualified Case ID |
+| caseId | Full workbook-and-sheet-qualified Case ID |
 | groupId | Sheet group ID from excel.sheet |
+| workbookId | Stable package-unique ID from the workbook sidecar `id` |
 | rowCaseId | Original row-level Case ID |
 | workbook | Workbook filename |
 | sheet | Physical sheet name |
@@ -704,7 +589,7 @@ ${CASE.currency} == 'HKD'
 ${CASE.amount} >= 100 and ${CASE.enabled} == true
 
 # Context value inside a quoted text literal
-'payment-${CASE.caseId}' == 'payment-payment.TC001'
+'payment-${CASE.caseId}' == 'payment-payment.payment.TC001'
 
 # Null and LIKE checks
 ${CASE.optionalReference} is null
@@ -722,6 +607,8 @@ For external invocation contracts and parsed outputs used by these expressions, 
 
 ## 9. Tool configuration and execution
 
+For the consolidated tool-contract schema, argument ordering rules, timeout/retry constraints, and command tokenization policy, see [Complete config reference — Tool contracts and command policy](#tool-contracts-and-command-policy). The subsections here retain detailed command and XML/JSON examples.
+
 A tool action supplies named arguments that must match the configured contract. Unknown, duplicate, or missing required arguments fail validation. Argument descriptions do not inject execution values.
 
 The tool and argument table below is an authoring guide; the complete tool/argument property schema is in [Schema: Global configuration](#schema-global-configuration).
@@ -730,24 +617,7 @@ The final argument may declare delimit. ATT normalizes the value, splits it into
 
 Tool output types are txt, yaml, json, and xml. YAML, JSON, and XML output become structured values; text output remains a string. Tool input, command, stdout, stderr, exit code, status, duration, parsed output, attempt records, and artifact paths are recorded under TOOL.toolName.
 
-### Tool and argument field reference
-
-| Field | Required | Meaning |
-|---|---:|---|
-| tools.<key> | Yes | Unique key used by `#{<key>(...)}` |
-| name | Yes | Human-readable name shown in generated documentation |
-| description | Yes | Purpose and operational notes shown to users |
-| command | Yes | Process command template rendered then tokenized by ATT; it is not shell syntax |
-| output | No | txt, yaml, json, or xml parser selection; default txt |
-| arguments | No | Ordered map of accepted invocation inputs; may be empty |
-| arguments.<key>.name | Yes | Display name for the argument |
-| arguments.<key>.description | Yes | Usage and expected-content description |
-| arguments.<key>.required | Yes | Whether a non-blank value must be supplied |
-| arguments.<key>.delimit | No | Split delimiter; valid only on the final argument |
-
-Tool keys and argument keys are case-sensitive. A template call must use named arguments for configured external tools. Positional arguments are intended for ATT built-ins, not external tool contracts.
-
-ATT validates configuration values before execution: `output` must be exactly `txt`, `yaml`, `json`, or `xml`; every argument's `required` must be the YAML boolean `true` or `false`; `delimit` may occur only on the final declared argument; global/sidecar `timeoutMs` and tool-action `timeoutMs` must be 1–86400000. Invalid values stop validation with a structured diagnostic instead of being silently coerced.
+Tool/argument required fields, parser enums, ordering, `delimit`, timeout precedence, and validation constraints are centralized in [Complete config reference — Tool contracts and command policy](#tool-contracts-and-command-policy). Tool and argument keys are case-sensitive, and configured external tools use named arguments.
 
 ### 9.1 Command placeholders and input/output files
 
@@ -1032,6 +902,8 @@ For validation, report inspection, generated package documentation, CI output, a
 
 ## 11. Validation, diagnostics, reports, CI, and packaging
 
+The validation and generated-output field/envelope summary is centralized in [Complete config reference — Validation, diagnostics, and generated-output configuration](#validation-diagnostics-and-generated-output-configuration). This chapter provides the operational commands, examples, and report navigation details.
+
 ### 11.1 Package and selected validation
 
 `./att.sh validate --package` is the default. It checks the global configuration/schema, every discovered workbook and mandatory sidecar, every configured sheet and row, all templates below `templates.root` including unreferenced ones, symbolic-name/path uniqueness, every action and expression, every tool contract, paths, and package integrity. It never invokes external tools.
@@ -1076,7 +948,7 @@ output/<RunID>/
 ├── report/
 │   ├── index.html           Main human report
 │   └── junit.html           Human-readable JUnit result view
-└── <groupId>.<rowCaseId>/
+└── <workbookId>.<sheetId>.<rowCaseId>/
     ├── case.yaml           Persisted CASE runtime tree
     ├── <case>.log          Ordered case execution log
     └── <stage>/<action>/   Render/tool artifacts and attempt-001/, attempt-002/ evidence
@@ -1111,7 +983,7 @@ The build archive contains the completed report, workbooks, per-case logs, refer
 
 | Diagnostic category | Typical cause | Corrective action |
 |---|---|---|
-| ATT-TC | Missing sidecar, sheet, structural column, or duplicate full Case ID | Check the workbook basename, sheet mapping, headers, and group-qualified IDs |
+| ATT-TC | Missing sidecar/id/sheet/structural column, duplicate workbook ID, or duplicate full Case ID | Check sidecar `id`, sheet mapping, headers, and three-segment IDs |
 | ATT-STG | Blank required selector, invalid selector YAML, or duplicate stage data key | Enter a map/scalar selector, ensure map form includes name, and remove duplicate keys |
 | ATT-TPL | Unknown template, duplicate symbolic name, missing template.yaml, invalid action/payload | Check the symbolic name/path, descriptor, action ID, and payload location |
 | ATT-CFG | Unknown field, duplicate YAML key, wrong schema version/type, invalid enum | Add the required schemaVersion and remove or rename unsupported fields; use `x-*` only for preserved extensions |
@@ -1146,9 +1018,9 @@ Identifiers and references remain case-sensitive. `LOCAL_PAYMENT`, `Local_Paymen
 - Absolute paths and paths escaping templates.root are not valid template references.
 - render payloads must remain below their template directory.
 - action output files must remain below the action output directory.
-- Run ID and full Case ID directly become output directory names: `output/<RunID>/<groupId>.<rowCaseId>/`. ATT does not slugify or hash a valid ID.
+- Run ID and full Case ID directly become output directory names: `output/<RunID>/<workbookId>.<sheetId>.<rowCaseId>/`. ATT does not slugify or hash a valid ID.
 - Run ID must be non-blank, at most 128 Unicode code points, not `.`/`..`, not leading/trailing whitespace or trailing `.`, and must not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or a control character. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
-- Group ID and row Case ID follow the same character rules; the combined full Case ID is at most 255 Unicode code points.
+- Workbook ID, sheet ID, and row Case ID follow the same character rules; the combined full Case ID is at most 255 Unicode code points.
 - `report --run-id` accepts a logical ID only, never a filesystem path.
 - Before every path write, ATT resolves against its intended root, normalizes, resolves relevant existing symlinks, and verifies strict root containment.
 - Do not place generated output below testcase or templates source trees.
@@ -1173,25 +1045,245 @@ ATT permits independent runs, but every command sharing one `outputDirectory` fo
 
 | Concurrent scenario | V2.1 behavior | What the user should expect |
 |---|---|---|
-| Two `run` commands use the same Run ID | Each command may prepare its own `.in-progress/<RunID>-<nonce>/` directory, but only one may atomically publish `output/<RunID>/`. The first successful publisher owns that Run ID. A later publisher must fail with ERROR and must not overwrite the completed directory or `latest-run.yaml`. | Run IDs are unique per output root. Use a different `--run-id`, or wait for the first command to finish before retrying. |
+| Default, with neither `--queue` nor `--parallel` | ATT takes an exclusive cross-process lock for the output root. A second run exits before executing cases and suggests `--queue` or `--parallel`. | Use this default when one mutable output/latest-run history must have a single owner. |
+| `--queue` | A concurrent request prints that it is queued, waits for the active run, then rechecks its proposed Run ID before executing cases. | Requests execute serially in lock-acquisition order determined by the operating system. |
+| `--parallel` | ATT does not take the global run lock. Each request uses its own `.in-progress` directory and may execute simultaneously. | Tools, test environments, and external data must themselves be safe for concurrent access. |
+| Run ID already exists at command preflight | Before validation/progress output, ATT prints `ATT-RUN-001` with the duplicated Run ID and completed directory, then exits without invoking case tools. Planning and queued requests recheck the ID before execution. | Choose a new `--run-id` or use a timestamp format with sufficient precision. |
+| Run ID collision appears only at completion | ATT never overwrites the completed run. It appends the first available numeric suffix (`-2`, `-3`, …), reports the final Run ID, and publishes under that directory. | Consume the Run ID/report path printed by ATT rather than assuming the requested value won a parallel race. |
 | Multiple runs complete and update `latest-run.yaml` | Each completed run publishes its own final directory first, then atomically replaces the pointer. The pointer is always either the previous complete pointer or one complete new pointer; it never points at `.in-progress` evidence. The last successful pointer publication wins, which is completion order, not start order. | Do not treat `latest-run.yaml` as “the run I started last.” Read a known `output/<RunID>/run.yaml` when a specific run is required. |
 | `build` runs while another `run` is executing | `build` reads and pins one completed `latest-run.yaml`/`run.yaml` pair before it creates an archive. It archives either the completed run visible when it acquired that pair, or a newly completed run if that run published first. It never archives `.in-progress` content. | If a particular run must be archived, wait for that Run ID to complete and confirm `output/<RunID>/run.yaml` before starting `build`. |
 | `report --run-id <id>` runs while `clean` runs | This is a destructive race and is not a supported concurrent workflow. `clean` may remove the run directory before or while `report` reads its manifest/artifacts; `report` must fail rather than produce a partial report. A successful report must be generated only from one complete, readable run directory. | Do not run `clean` while report regeneration is in progress. Wait for `report` to complete; in CI, serialize report/archive/clean jobs that use the same output root. |
 
 Atomic publication protects completed-run visibility; it does not make two commands using the same mutable output root interchangeable. Use separate `--output-dir` values when parallel jobs need independent lifecycle, cleanup, or latest-run behavior.
 
-## 14. Complete command reference
+## 14. Complete config reference
+
+This chapter is the single, user-facing reference for configuration. It consolidates the allowed fields, defaults, uncommon options, and cross-field constraints that are otherwise easy to miss while reading the workbook, template, tool, and validation chapters. The numbered chapters keep concise authoring guidance and examples; when a rule is not repeated there, use this chapter. The formal JSON Schema links and generated-output envelopes remain in [Formal schema reference](#formal-schema-reference).
+
+### Formal schema reference
+
+The files in [`schemas/`](../schemas/) are the machine-readable, complete V2.1 contract. ATT validates source files against these JSON Schema/XSD definitions; the field tables in this manual are a reading guide, not a replacement for the schema. The schema catalog is [`schemas/catalog.yaml`](../schemas/catalog.yaml).
+
+| Artifact | Schema version / identifier | Formal definition | What it validates |
+|---|---|---|---|
+| Global configuration | `att-config/v2.1` / `urn:att:schema:config:v2.1` | [att-config-v2.1.schema.json](../schemas/att-config-v2.1.schema.json) | `config/config.yaml`, tool descriptors, and tool arguments |
+| Workbook sidecar | `att-sidecar/v2.1` / `urn:att:schema:sidecar:v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) | `<workbook>.yaml` beside each selected workbook |
+| Template descriptor | `att-template/v2.1` / `urn:att:schema:template:v2.1` | [att-template-v2.1.schema.json](../schemas/att-template-v2.1.schema.json) | Every `template.yaml`, action map, retry block, and action type shape |
+| Run manifest | `att-run/v2.1` / `urn:att:schema:run:v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) | Persisted completed `<run>/run.yaml` envelope |
+| Validation JSON | `att-validation/v2.1` / `urn:att:schema:validation:v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) | `validate --format json` envelope and diagnostic fields |
+| CI JSON summary | `att-ci-summary/v2.1` / `urn:att:schema:ci-summary:v2.1` | [att-ci-summary-v2.1.schema.json](../schemas/att-ci-summary-v2.1.schema.json) | `<run>/ci/summary.json` envelope |
+| JUnit XML | XML Schema | [att-junit-v2.1.xsd](../schemas/att-junit-v2.1.xsd) | `<run>/ci/junit.xml` testsuite/testcase structure |
+| Diagnostic catalog | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../schemas/diagnostic-codes.yaml) | Stable diagnostic-code meanings |
+
+All JSON Schema files use JSON Schema Draft 2020-12. A schema-controlled object rejects unknown properties unless its definition explicitly allows an `x-*` extension. An extension is preserved but has no ATT execution meaning. Duplicate YAML keys, unsafe YAML tags, invalid scalar types, missing required fields, invalid enum values, and unsupported properties are validation errors.
+
+### Source-file schemas
+
+The following tables reproduce the complete allowed property sets for author-authored source files. `Required` means required by the schema; additional semantic checks, such as path containment, unique template names, required tool arguments at call sites, or expression syntax, are performed by ATT validation after schema validation.
+
+#### Schema: Global configuration
+
+| Object path | Allowed properties | Required / constraints |
+|---|---|---|
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `templates`, `run`, `report`, `xml`, `tools`, `x-*` | `schemaVersion` required and exactly `att-config/v2.1` |
+| `templates` | `root`, `x-*` | `root` non-empty string when present |
+| `run` | `id`, `x-*` | — |
+| `run.id` | `default`, `timestampFormat`, `x-*` | `default`, when present, exactly `timestamp`; format is non-empty string |
+| `report` | `mode`, `fileNamePattern`, `columns`, `junit`, `x-*` | `mode`, when present, exactly `append-to-copy` |
+| `report.columns` | arbitrary string keys with string values | — |
+| `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` | integer 0–1048576 when present |
+| `xml` | `namespaceMode`, `x-*` | `ignore` or `preserve` when present |
+| `tools.<toolKey>` | `name`, `description`, `command`, `output`, `arguments`, `x-*` | `name`, `description`, `command` required; `output` is `txt`, `yaml`, `json`, or `xml` |
+| `tools.<toolKey>.arguments.<argumentKey>` | `name`, `description`, `required`, `delimit`, `x-*` | `name`, `description`, `required` required; `required` is boolean; `delimit` is non-empty string when present |
+
+`timeoutMs` is an integer from 1 to 86400000. `outputDirectory` and `environment` are non-empty strings when present. The schema permits extension fields below the root, `templates`, `run`, `run.id`, `report`, `report.junit`, `xml`, each tool, and each argument.
+
+#### Schema: Workbook sidecar
+
+| Object path | Allowed properties | Required / constraints |
+|---|---|---|
+| root | `schemaVersion`, `id`, `excel`, `stages`, `report`, `timeoutMs`, `x-*` | `schemaVersion`, package-unique `id`, `excel`, and non-empty `stages` required |
+| `excel` | `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns` | `sheet`, `caseId`, `tags` required; `headerRows` integer ≥ 1 |
+| `stages[]` | `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure` | `key` and `template` required; key has no `.`; `runWhen` is `normal`, `onSuccess`, `onFailure`, or `always`; `onFailure` is `stop` or `continue` |
+| `report` | `columns` | `columns` is a map whose values are strings |
+
+`timeoutMs` is an integer from 1 to 86400000. Only the sidecar root permits `x-*`; the current V2.1 schema intentionally does **not** permit extension fields inside `excel`, each stage, or sidecar `report`.
+
+#### Schema: Template descriptor and action
+
+| Object path | Allowed properties | Required / constraints |
+|---|---|---|
+| template root | `schemaVersion`, `name`, `description`, `actions`, `x-*` | `schemaVersion`, `description`, non-empty `actions` required; `name` optional |
+| `actions.<actionId>` common | `type`, `description`, `onFailure`, `payload`, `saveAs`, `output`, `call`, `expression`, `message`, `level`, `fields`, `timeoutMs`, `retry`, `x-*` | action ID has no `.`; type is `render`, `tool`, `assert`, or `log`; `onFailure` is `stop` or `continue` |
+| `render` action | common fields allowed by render type | requires `type`, `payload`, `saveAs`; forbids `call`, `expression`, `message`, `level`, `fields`, `timeoutMs`, `retry`; `output.mode`, when present, is `file` |
+| `tool` action | common fields allowed by tool type | requires `type`, `call`; `timeoutMs` is 1–86400000; may contain `retry`; forbids render/assert/log-only fields |
+| `assert` action | common fields allowed by assert type | requires `type`, `expression`; forbids render/tool/log-only fields, `timeoutMs`, and `retry` |
+| `log` action | common fields allowed by log type | requires `type`, `message`; `level` is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`; forbids render/tool/assert-only fields, `timeoutMs`, and `retry` |
+| `retry` | `maxAttempts`, `retryOn`, `exitCodes` | `retryOn` required; every value must be `EXIT_CODE`; `maxAttempts` 1–10; every `exitCodes` item 1–255 |
+
+The template root, action object, and `output` object permit `x-*`. `fields` is an unconstrained map intended for log fields. Schema validation enforces the action shape; ATT then validates referenced payload files, tool calls, required call arguments, expression syntax, and safe paths.
+
+### Generated-output schemas
+
+Generated artifacts are not authoring inputs, but consumers may validate them against the following required envelopes:
+
+| Artifact | Required top-level fields | Additional-property rule |
+|---|---|---|
+| `run.yaml` | `schemaVersion`, `att`, `runtime`, `run`, `validation`, `inputs`, `cases`, `summary`, `outputs` | no additional top-level fields |
+| Validation JSON | `schemaVersion`, `attVersion`, `valid`, `mode`, `summary`, `diagnostics` | no additional top-level fields; `mode` is `selected` or `package` |
+| CI summary JSON | `schemaVersion`, `attVersion`, `runId`, `environment`, `startedAt`, `endedAt`, `status`, `summary`, `durationStatistics`, `cases`, `diagnosticCounts`, `report`, `inputManifestHash` | no additional top-level fields |
+| JUnit XML | one `testsuite` with required `name`, `tests`, `failures`, `errors`, `skipped`; each `testcase` has `classname`, `name`, `time` | content is constrained by `att-junit-v2.1.xsd` |
+
+The JUnit HTML file is a human-readable projection and is not an XML/JSON schema artifact. It is generated from the same completed run summary as JUnit XML.
+
+
+### Configuration layers and precedence
+
+ATT has four configuration layers. Each layer owns only the fields listed below; placing a field in another layer is an unknown-field error.
+
+| Layer | File/input | Owns | Overrides |
+|---|---|---|---|
+| Global | `config/config.yaml` | runtime defaults, template root, report defaults, XML mode, tool contracts | package defaults |
+| Workbook | `<workbook>.yaml` | Excel mapping, ordered stages, workbook result-column mappings, workbook timeout | global timeout for that workbook |
+| Template | `templates/**/template.yaml` | ordered actions, payloads, action timeout/retry/onFailure | workbook/global timeout for that action |
+| CLI | `att.sh` options | selection, run ID, output root, presentation, CI formats | applicable file defaults for one command |
+
+Precedence is CLI `--output-dir`/`--run-id` and action `timeoutMs`, then sidecar `timeoutMs`, then global `timeoutMs`; the global default is `120000` milliseconds. Selection options do not mutate configuration. A field that is valid in one layer but appears in another is rejected, even if its spelling is otherwise correct.
+
+### Global configuration (`config/config.yaml`)
+
+```yaml
+schemaVersion: att-config/v2.1
+outputDirectory: output
+environment: SIT
+timeoutMs: 120000
+templates: {root: templates}
+run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
+report:
+  mode: append-to-copy
+  fileNamePattern: "${suiteName}.result.xlsx"
+  columns: {result: Result}
+  junit: {caseLogEmbedThresholdBytes: 10240}
+xml: {namespaceMode: ignore}
+tools: {}
+```
+
+| Path | Type/default | Constraints and less-common behavior |
+|---|---|---|
+| `schemaVersion` | string/required | Exactly `att-config/v2.1`; V2.0 names such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not accepted. |
+| `outputDirectory` | string/`output` | Non-empty package-relative path; it becomes the root for completed runs, `.in-progress`, and latest-run history. Keep it outside source trees. |
+| `environment` | string/`SIT` | Exposed as `${CASE.environment}` and normally passed explicitly to tools. It does not select an endpoint by itself. |
+| `timeoutMs` | integer/`120000` | Inclusive range 1–86400000. This is milliseconds, not seconds. |
+| `templates.root` | string/`templates` | Package-relative directory searched recursively for directories containing `template.yaml`. |
+| `run.id.default` | string/`timestamp` | The only supported value is `timestamp`. |
+| `run.id.timestampFormat` | string/`yyyyMMdd-HHmmss` | Java date/time format used only when the CLI does not provide `--run-id`. |
+| `report.mode` | string/`append-to-copy` | The only supported mode is `append-to-copy`. |
+| `report.fileNamePattern` | string | Result workbook name pattern; keep it relative and free of path separators. |
+| `report.columns` | map<string,string> | ATT result field → physical Excel header mapping; it does not alter HTML, Context keys, or CI schemas. |
+| `report.junit.caseLogEmbedThresholdBytes` | integer/`10240` | Range 0–1048576 UTF-8 bytes. `0` always writes a relative artifact link instead of embedding a case log. |
+| `xml.namespaceMode` | enum/`ignore` | `ignore` uses local names; `preserve` uses Clark-notation names in the parsed Context. |
+| `tools` | ordered map | Every tool requires `name`, `description`, and `command`; `output` is `txt`, `yaml`, `json`, or `xml`. |
+
+Unknown fields are rejected except explicitly permitted `x-*` extensions at the locations listed in [Schema: Global configuration](#schema-global-configuration). Extensions are preserved metadata only; they never change execution.
+
+### Workbook sidecar (`<workbook>.yaml`)
+
+```yaml
+schemaVersion: att-sidecar/v2.1
+id: payment
+excel:
+  sheet: payment=支付測試案例集
+  headerRows: 1
+  caseId: 案例編號
+  tags: 標籤
+  dataColumns: amount=金額, expected=預期結果(yaml)
+stages:
+  - key: invoke
+    template: 執行模板
+    required: true
+    runWhen: normal
+    onFailure: stop
+    dataColumns: channel=渠道
+report: {columns: {result: 測試結果}}
+timeoutMs: 60000
+```
+
+| Path | Required/default | Constraints |
+|---|---|---|
+| `schemaVersion` | required | Exactly `att-sidecar/v2.1`. |
+| `id` | required | Stable dot-free workbook ID, unique across the package; first segment of every full Case ID. |
+| `excel.sheet` | required | One sheet name or comma-separated `sheetId=sheetName`; sheet IDs are dot-free and full Case IDs are globally unique. |
+| `excel.headerRows` | `1` | Integer ≥ 1; ATT uses the last non-empty cell per physical column and does not concatenate parent/child labels. |
+| `excel.caseId`, `excel.tags` | required | Physical headers; `tags` is structural and not part of `dataColumns`. |
+| `excel.dataColumns` | optional | CSV-style mappings; `(yaml)` parses the displayed cell text as YAML, otherwise the value is a string. |
+| `stages[]` | non-empty | Ordered list; each stage requires dot-free `key` and `template`. |
+| `stages[].dataColumns` | optional | Stage-private Context only; duplicate keys with selector-map data are errors. |
+| `stages[].required` | `false` | Blank selector is an error when true; blank optional stages are skipped. |
+| `stages[].runWhen` | `normal` | One of `normal`, `onSuccess`, `onFailure`, `always`. |
+| `stages[].onFailure` | `stop` | One of `stop`, `continue`; continue never converts FAIL/ERROR to PASS. |
+| `report.columns` | optional | Result-field to physical Excel-header mappings for the copied result workbook. |
+| `timeoutMs` | optional | Integer 1–86400000; overrides global timeout for this workbook. |
+
+Only the sidecar root accepts `x-*`; `excel`, stage objects, and sidecar `report` reject unknown properties. For quoting commas, equals signs, and parentheses in `dataColumns`, see [CSV-style quoting examples](#41-csv-style-quoting-examples).
+
+### Template descriptor and actions
+
+```yaml
+schemaVersion: att-template/v2.1
+name: PAYMENT_INVOKE
+description: Render and invoke a payment request
+actions:
+  renderRequest: {type: render, payload: request.tmp.xml, saveAs: request.xml}
+  callApi:
+    type: tool
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
+    timeoutMs: 30000
+    retry: {maxAttempts: 3, retryOn: [EXIT_CODE], exitCodes: [1, 75]}
+  checkStatus:
+    type: assert
+    expression: "${ACTIONS.callApi.output.status} == 'SUCCESS'"
+```
+
+| Action type | Required | Allowed uncommon fields and constraints |
+|---|---|---|
+| `render` | `type`, `payload`, `saveAs` | `output.mode`, when present, is `file`; cannot define `call`, `expression`, `message`, `level`, `fields`, `timeoutMs`, or `retry`. Payload/saveAs must stay below the template/action output root. |
+| `tool` | `type`, `call` | May define `timeoutMs` (1–86400000) and `retry`; call arguments must match the configured tool exactly. |
+| `assert` | `type`, `expression` | Cannot define tool/render/log-only fields, `timeoutMs`, or `retry`; expression errors are ERROR, false expressions are FAIL. |
+| `log` | `type`, `message` | `level` is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`; `fields` is a map; no timeout/retry. |
+
+Every action may define `description` and `onFailure` (`stop` or `continue`). Action IDs are unique and dot-free; actions are evaluated in YAML order. There is no `actionDefaults` block. A `retry` block is permitted only on a tool action: `maxAttempts` is 1–10 (including the first attempt), `retryOn` must contain only `EXIT_CODE`, and `exitCodes` items are 1–255. Retry has no delay/backoff fields in V2.1 and never applies to assertion, rendering, parsing, I/O, or timeout failures.
+
+The template root, action objects, and `output` object permit `x-*`; type-specific unknown fields are still rejected. The complete formal property matrix is [Schema: Template descriptor and action](#schema-template-descriptor-and-action).
+
+### Tool contracts and command policy
+
+Each `tools.<toolKey>` requires `name`, `description`, and `command`; `output` defaults to `txt` and may be `txt`, `yaml`, `json`, or `xml`. `arguments` is an ordered map. Every argument requires `name`, `description`, and boolean `required`; only the final declared argument may define non-empty `delimit`. Calls use named arguments, reject unknown/duplicate/missing required arguments, and do not accept positional values for external tools.
+
+ATT tokenizes `command` into argv and never invokes a shell. Quotes group fixed text, whitespace separates arguments, and `|`, `>`, `<`, `;`, `&`, `$`, parentheses, glob characters, and backslashes have no shell meaning. Unmatched quotes or a trailing escape are errors. Free-text workbook values should be passed as named arguments and read from `${TOOL.inputFile}`; do not interpolate them into command text. Delimited values expand only the final argument into separate argv items and preserve spaces and special characters. Full examples remain in [Command placeholders and input/output files](#91-command-placeholders-and-inputoutput-files) and [Delimited array arguments](#93-delimited-array-arguments-grep-application-logs).
+
+### Validation, diagnostics, and generated-output configuration
+
+`validate --package` is the release gate and checks the complete dependency graph, including unreferenced templates/tools; `validate --selected` checks only the selected dependency closure. `validate --format json` writes exactly one JSON document to stdout. Every diagnostic has `code`, `severity`, `message`, `file`, `field`, `sheet`, `row`, `column`, `template`, `action`, and `suggestion`; inapplicable locations are `null`. Unknown fields, duplicate YAML/JSON keys, unsafe tags, invalid types/enums, path escapes, and cross-field violations are errors.
+
+Generated `run.yaml`, validation JSON, CI summary JSON, JUnit XML, and JUnit HTML are outputs, not authoring configuration. Their required envelopes and no-additional-property rules are listed in [Generated-output schemas](#generated-output-schemas). `--ci-output junit,json` writes `<run>/ci/junit.xml`, `<run>/ci/summary.json`, and `<run>/report/junit.html`; the HTML is a projection of the same completed summary.
+
+### Shared safety constraints
+
+Run ID and full Case ID are used directly as output directory names after illegal-character validation. Workbook ID, sheet ID, and row Case ID components must be non-blank, not `.`/`..`, not leading/trailing whitespace or trailing `.`, and must exclude `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, controls, and Windows device names. Workbook IDs are package-unique; full Case IDs are globally unique and at most 255 Unicode code points. Paths must remain beneath their intended package/output/template roots. These constraints are operationally described in [Path safety](#131-path-safety); they are not configurable switches.
+
+
+## 15. Complete command reference
 
 | Syntax | Notes |
 |---|---|
 | `./att.sh` or `./att.sh --help` | Show help without executing anything |
 | `./att.sh version` | Print version |
 | `./att.sh validate --package` | Validate the complete package; default validation scope |
-| `./att.sh validate --selected --case <group.caseId>` | Validate only one selected case and its dependency closure |
+| `./att.sh validate --selected --case <workbook.sheet.caseId>` | Validate only one selected case and its dependency closure |
 | `./att.sh validate --package --format json` | Emit one structured validation JSON document to stdout |
-| `./att.sh run --all` | Execute every selected case |
+| `./att.sh run --all` | Execute every selected case; reject another active run sharing the output root by default |
 | `./att.sh run --suite <file>` | Execute one workbook |
-| `./att.sh run --all --case <group.caseId>` | Execute one full Case ID |
+| `./att.sh run --all --case <workbook.sheet.caseId>` | Execute one full Case ID |
 | `./att.sh run --all --tag <tag>` | Include cases matching a tag |
 | `./att.sh run --all --exclude-tag <tag>` | Exclude matching cases |
 | `./att.sh run --all --dry-run` | Validate/plan without external tool execution |
@@ -1201,6 +1293,8 @@ Atomic publication protects completed-run visibility; it does not make two comma
 | `./att.sh run --all --output-dir <dir>` | Override output root |
 | `./att.sh run --all --format json` | Emit machine-readable summary |
 | `./att.sh run --all --ci-output junit,json` | Write JUnit XML, JUnit HTML, and JSON files below the completed run |
+| `./att.sh run --all --queue` | Wait until the active run releases the output-root lock |
+| `./att.sh run --all --parallel` | Execute concurrently without the global run lock |
 | `./att.sh run --all --quiet` | Suppress normal progress output |
 | `./att.sh run --all --verbose` | Add safe suite/case/stage/action lifecycle progress without payload or command content |
 | `./att.sh docs` | Generate the single-page package reference |
@@ -1210,15 +1304,15 @@ Atomic publication protects completed-run visibility; it does not make two comma
 
 Options requiring a value fail when the value is missing. Unknown commands/options fail rather than being ignored. `validate --package` needs no testcase selection; `validate --selected` and `run` require an explicit selection such as --all, --suite, --case, or --tag. `--package` and `--selected` are mutually exclusive.
 
-## 15. Frequently asked questions
+## 16. Frequently asked questions
 
 ### Can two sheets both contain TC001?
 
-Yes. Give the sheets different group IDs; the full IDs become, for example, payment.TC001 and batch.TC001.
+Yes. The workbook and sheet namespaces make the full IDs distinct, for example `payment.payment.TC001` and `payment.batch.TC001`; another workbook could use `refund.payment.TC001`.
 
 ### Why was my Case ID rejected even though it is displayed correctly in Excel?
 
-The full Case ID is used directly as an output directory name. Remove leading/trailing whitespace, a trailing `.`, path separators, `: * ? " < > |`, control characters, `.`/`..`, and reserved device names. Unicode names such as `付款.TC001` are valid when they meet these rules.
+The full Case ID is used directly as an output directory name. Remove leading/trailing whitespace, a trailing `.`, path separators, `: * ? " < > |`, control characters, `.`/`..`, and reserved device names from every component. Unicode names such as `支付.本地.TC001` are valid when they meet these rules.
 
 ### Should I use validate --package or validate --selected?
 

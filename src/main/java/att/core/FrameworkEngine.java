@@ -51,14 +51,30 @@ public class FrameworkEngine {
         return run(options, Collections.<att.validation.Diagnostic>emptyList());
     }
 
+    /** Read-only early check used before validation/progress output; buildPlan rechecks to close the race window. */
+    public void assertRunIdAvailable(ExecutionOptions options) {
+        String runId = runId(options);
+        Path outputRoot = options.outputDirectory() == null ? resolve(config.outputDirectory()) : resolve(options.outputDirectory());
+        Path finalRunDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
+        if (Files.exists(finalRunDirectory)) {
+            throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + finalRunDirectory + "). Choose a different --run-id.");
+        }
+    }
+
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics) throws Exception {
         Instant runStarted = Instant.now();
         ExecutionPlan plan = buildPlan(options);
         String runId = plan.runId();
         Path outputRoot = plan.outputRoot();
         Path finalRunDirectory = plan.finalRunDirectory();
+        RunConcurrencyGuard concurrencyGuard = RunConcurrencyGuard.acquire(outputRoot, options.concurrencyMode(), new Runnable() {
+            @Override public void run() {
+                if (!options.quiet() && "human".equals(options.format())) System.out.println("ATT run queued: waiting for the active run to complete");
+            }
+        });
+        try {
         if (Files.exists(finalRunDirectory)) {
-            throw new IllegalArgumentException("Run directory already exists: " + finalRunDirectory);
+            throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + finalRunDirectory + "). Choose a different --run-id.");
         }
         Files.createDirectories(outputRoot);
         Path progressRoot = outputRoot.resolve(".in-progress");
@@ -67,6 +83,7 @@ public class FrameworkEngine {
         Files.createDirectories(runDirectory);
 
         List<TestResult> results = new ArrayList<>();
+        Map<ExecutionPlan.Suite, List<TestResult>> suiteReportResults = new LinkedHashMap<ExecutionPlan.Suite, List<TestResult>>();
         boolean stopRun = false;
         verbose(options, "[RUN] id=" + runId + " suites=" + plan.suites().size() + " output=" + portable(outputRoot));
 
@@ -76,7 +93,6 @@ public class FrameworkEngine {
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker);
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
-            ExcelReportWriter reportWriter = new ExcelReportWriter(suiteConfig);
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
             List<TestResult> suiteResults = new ArrayList<TestResult>();
@@ -86,18 +102,28 @@ public class FrameworkEngine {
                 verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
                 results.add(result);
                 suiteResults.add(result);
-                appendEvent(runDirectory, runId, result);
                 if (options.failFast() && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR)) {
                     stopRun = true;
                     break;
                 }
             }
-            List<TestResult> publishedSuiteResults = new ArrayList<TestResult>();
-            for (TestResult result : suiteResults) publishedSuiteResults.add(result.relocate(runDirectory, finalRunDirectory));
-            reportWriter.write(resolve(suite), runDirectory, publishedSuiteResults);
+            suiteReportResults.put(suitePlan, new ArrayList<TestResult>(suiteResults));
             if (stopRun) break;
         }
         if (results.isEmpty()) throw new IllegalArgumentException("Case selection is empty after rerun-failed filtering");
+        try (RunIdPublicationGuard publicationGuard = RunIdPublicationGuard.acquire(outputRoot, runId)) {
+        String completedRunId = uniqueCompletionRunId(outputRoot, runId);
+        if (!completedRunId.equals(runId)) {
+            if (!options.quiet() && "human".equals(options.format())) System.out.println("Run ID collision detected at completion; publishing as " + completedRunId);
+            finalRunDirectory = IdentifierValidator.strictChild(outputRoot, completedRunId, "Run directory");
+            runId = completedRunId;
+        }
+        for (Map.Entry<ExecutionPlan.Suite, List<TestResult>> entry : suiteReportResults.entrySet()) {
+            List<TestResult> publishedSuiteResults = new ArrayList<TestResult>();
+            for (TestResult result : entry.getValue()) publishedSuiteResults.add(result.relocate(runDirectory, finalRunDirectory));
+            new ExcelReportWriter(entry.getKey().config()).write(resolve(entry.getKey().workbook()), runDirectory, publishedSuiteResults);
+        }
+        for (TestResult result : results) appendEvent(runDirectory, runId, result);
         Instant runEnded = Instant.now();
         RunSummary summary = new RunSummary(results, runDirectory);
         Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded);
@@ -119,6 +145,19 @@ public class FrameworkEngine {
         List<TestResult> relocated = new ArrayList<TestResult>();
         for (TestResult result : results) relocated.add(result.relocate(runDirectory, finalRunDirectory));
         return new RunSummary(relocated, finalRunDirectory.resolve("report/index.html"));
+        }
+        } finally {
+            concurrencyGuard.close();
+        }
+    }
+
+    private String uniqueCompletionRunId(Path outputRoot, String requested) {
+        if (!Files.exists(IdentifierValidator.strictChild(outputRoot, requested, "Run directory"))) return requested;
+        for (int sequence = 2; sequence < Integer.MAX_VALUE; sequence++) {
+            String candidate = IdentifierValidator.runId(requested + "-" + sequence);
+            if (!Files.exists(IdentifierValidator.strictChild(outputRoot, candidate, "Run directory"))) return candidate;
+        }
+        throw new IllegalArgumentException("Unable to allocate a unique Run ID for " + requested);
     }
 
     private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Path runDirectory,
@@ -127,9 +166,7 @@ public class FrameworkEngine {
             return invalid(testCase, testCase.invalidReason());
         }
         Instant started = Instant.now();
-        String[] caseParts = testCase.caseId().split("\\.", 2);
-        if (caseParts.length != 2) throw new IllegalArgumentException("Full Case ID must be <groupId>.<rowCaseId>: " + testCase.caseId());
-        String validatedCaseId = IdentifierValidator.caseId(caseParts[0], caseParts[1]);
+        String validatedCaseId = IdentifierValidator.caseId(testCase.workbookId(), testCase.groupId(), testCase.rowCaseId());
         Path caseOutputDir = IdentifierValidator.strictChild(runDirectory, validatedCaseId, "Case directory");
         Files.createDirectories(caseOutputDir);
         Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
@@ -215,18 +252,24 @@ public class FrameworkEngine {
         String runId = runId(options);
         Path outputRoot = options.outputDirectory() == null ? resolve(config.outputDirectory()) : resolve(options.outputDirectory());
         Path finalRunDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
-        if (Files.exists(finalRunDirectory)) throw new IllegalArgumentException("Run directory already exists: " + finalRunDirectory);
+        if (Files.exists(finalRunDirectory)) throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + finalRunDirectory + "). Choose a different --run-id.");
         Set<String> failed = options.rerunFailed() ? latestFailedCaseIds(outputRoot) : Collections.<String>emptySet();
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, config);
         List<ExecutionPlan.Suite> suitePlans = new ArrayList<ExecutionPlan.Suite>();
+        Map<String, Path> workbookIds = new LinkedHashMap<String, Path>();
+        Map<String, Path> fullCaseIds = new LinkedHashMap<String, Path>();
         for (Path selected : suites(options)) {
             Path workbook = resolve(selected);
             FrameworkConfig suiteConfig = resolver.resolve(workbook);
+            Path previousWorkbook = workbookIds.put(suiteConfig.workbookId(), workbook);
+            if (previousWorkbook != null) throw new IllegalArgumentException("Duplicate workbook id '" + suiteConfig.workbookId() + "' in " + previousWorkbook + " and " + workbook);
             StageTemplateLoader loader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
             List<TestCase> selectedCases = new ArrayList<TestCase>();
             Map<String, StageTemplate> templates = new LinkedHashMap<String, StageTemplate>();
             for (TestCase testCase : new ExcelTestSuiteLoader(suiteConfig).load(workbook)) {
                 if (!options.matches(testCase) || (options.rerunFailed() && !failed.contains(testCase.caseId()))) continue;
+                Path previousCase = fullCaseIds.put(testCase.caseId(), workbook);
+                if (previousCase != null) throw new IllegalArgumentException("Duplicate full Case ID '" + testCase.caseId() + "' in " + previousCase + " and " + workbook);
                 selectedCases.add(testCase);
                 for (StageCaseData stage : testCase.stages().values()) if (!templates.containsKey(stage.templateName())) templates.put(stage.templateName(), loader.load(stage.templateName()));
             }

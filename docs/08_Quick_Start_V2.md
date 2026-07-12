@@ -160,6 +160,7 @@ Excel 表頭：
 
 ```yaml
 schemaVersion: att-sidecar/v2.1
+id: payment
 excel:
   sheet: 支付測試案例集
   headerRows: 1
@@ -179,6 +180,8 @@ report:
 timeoutMs: 60000
 ```
 
+`report.columns` 的 key 是 ATT 結果字段，value 是 Excel 實際表頭。若來源工作表已存在映射表頭（例如「測試結果」），ATT 會直接填充該欄；只有不存在的映射表頭才按配置順序追加到工作表末尾。
+
 模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V2.1：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
 
 多 sheet 使用：
@@ -187,9 +190,9 @@ timeoutMs: 60000
 sheet: payment=支付測試案例集, batch=批量測試案例集
 ```
 
-完整 Case ID 分別是 `payment.TC001`、`batch.TC001`。
+完整 Case ID 分別是 `payment.payment.TC001`、`payment.batch.TC001`。第一段來自 sidecar `id`，第二段來自 `excel.sheet` 的 sheet ID，第三段來自 Excel 案例編號。
 
-Case ID 同時是輸出目錄名，完整路徑為 `output/<RunID>/<groupId>.<rowCaseId>/`。請使用可讀、穩定的值，例如 `payment.TC001`。ID 不能是空白、`.`、`..`，不能含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 或控制字符，不能以空白或 `.` 結尾，也不能使用 `CON`、`NUL`、`COM1` 等保留名稱。ATT 不會 slugify 或 hash Case ID；合法 ID 原樣成為目錄名。
+Case ID 同時是輸出目錄名，完整路徑為 `output/<RunID>/<workbookId>.<sheetId>.<rowCaseId>/`。請使用可讀、穩定的值，例如 `payment.payment.TC001`。sidecar `id` 在 package 內必須唯一；三個 ID component 都不能是空白、`.`、`..`，不能含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 或控制字符，不能以空白或 `.` 結尾，也不能使用 `CON`、`NUL`、`COM1` 等保留名稱。ATT 不會 slugify 或 hash Case ID；合法 ID 原樣成為目錄名。
 
 ### 多行表頭
 
@@ -241,17 +244,27 @@ ATT 內置函數包括：
 ./att.sh validate --package
 
 # 快速迭代：只驗證選中案例及其依賴閉包
-./att.sh validate --selected --suite testcase/支付回歸.xlsx --case payment.TC001
+./att.sh validate --selected --suite testcase/支付回歸.xlsx --case payment.payment.TC001
 
 # CI：stdout 只有一份可機讀 JSON；進度與診斷走 stderr
 ./att.sh validate --package --format json
 
 ./att.sh run --suite testcase/支付回歸.xlsx
 ./att.sh run --all
-./att.sh run --all --case payment.TC001
+./att.sh run --all --case payment.payment.TC001
 ./att.sh run --all --tag smoke
 ./att.sh run --all --ci-output junit,json
 ```
+
+同一個 output 目錄同時收到多個 `run` 時，可選擇：
+
+```bash
+./att.sh run --all             # 默認：已有 run 時立即拒絕
+./att.sh run --all --queue     # 顯示排隊提示，等前一個 run 完成
+./att.sh run --all --parallel  # 真正並行，各自寫入獨立 in-progress 目錄
+```
+
+ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得排隊鎖後再次檢查。若已存在，會直接輸出包含重複 ID 與路徑的 `ATT-RUN-001`，不會顯示「Executing cases」或調用工具。若只在完成發布時才發生競態碰撞，ATT 會保留既有 run，並使用第一個可用的 `-2`、`-3` 等序號發布本次結果。請以完成訊息輸出的最終 Run ID 和 report 路徑為準。
 
 `validate --package` 是預設模式；它可不帶 testcase filter，並會找出未被引用但壞掉的 template 或 tool。`--selected` 僅驗證選定案例的依賴，速度較快，但輸出會明示未驗證其餘內容。
 
@@ -329,7 +342,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 ### 11.1 新增案例行
 
 1. Excel 表頭必須與 sidecar 完全一致。
-2. 每個 sheet 的 row Case ID 必須有效；ATT 會自動組成 `<groupId>.<rowCaseId>`。
+2. sidecar `id` 必須在 package 內唯一；每個 sheet 的 row Case ID 必須有效，ATT 會自動組成 `<workbookId>.<sheetId>.<rowCaseId>`。
 3. 只有 sidecar 以 `(yaml)` 標識的欄位才會解析 YAML，Excel 實際表頭不包含 `(yaml)`。
 4. required stage 的模板欄可為包含 `name` 的 YAML map，或直接使用 scalar shorthand。
 5. Case ID 必須通過非法字符檢查，因為它會原樣成為輸出目錄名。

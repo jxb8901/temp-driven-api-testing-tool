@@ -24,12 +24,13 @@ class ContextsTest {
         stageValues.put("name", "PAYMENT_INVOKE");
         stageValues.put("channel", "MOBILE");
         StageCaseData stage = new StageCaseData("invoke", "PAYMENT_INVOKE", stageValues);
-        TestCase testCase = new TestCase(2, "payment", "支付測試案例集", "TC001", Arrays.asList("smoke"), data,
+        TestCase testCase = new TestCase(2, "payments", "payment", "支付測試案例集", "TC001", Arrays.asList("smoke"), data,
                 Collections.singletonMap("invoke", stage), null);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
         context.beginStage(stage, "PAYMENT_INVOKE", tempDir.resolve("templates/PAYMENT_INVOKE"));
 
-        assertEquals("payment.TC001", context.resolve("CASE.caseId"));
+        assertEquals("payments.payment.TC001", context.resolve("CASE.caseId"));
+        assertEquals("payments", context.resolve("CASE.workbookId"));
         assertEquals("100", context.resolve("CASE.amount"));
         assertEquals("MOBILE", context.resolve("CASE.STAGES.invoke.channel"));
     }

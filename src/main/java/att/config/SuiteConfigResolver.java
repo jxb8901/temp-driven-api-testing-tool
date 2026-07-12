@@ -32,7 +32,9 @@ public final class SuiteConfigResolver {
         Path schema = projectRoot.resolve("schemas/att-sidecar-v2.1.schema.json");
         if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, Version.SIDECAR_SCHEMA, "sidecar");
-        SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "excel", "stages", "report", "timeoutMs");
+        SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "id", "excel", "stages", "report", "timeoutMs");
+        String workbookId = required(map, "id");
+        att.core.IdentifierValidator.workbookId(workbookId);
         Object excelValue = map.get("excel");
         if (!(excelValue instanceof Map)) throw new IllegalArgumentException("excel is required in sidecar: " + sidecar);
         Map<?, ?> excel = (Map<?, ?>) excelValue;
@@ -42,7 +44,7 @@ public final class SuiteConfigResolver {
         String tags = required(excel, "tags");
         int headerRows = positiveInteger(excel.get("headerRows"), 1, "excel.headerRows");
         List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(optionalString(excel.get("dataColumns"), "excel.dataColumns"));
-        rejectReserved(dataColumns, new String[]{"caseId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "STAGES"}, "excel.dataColumns");
+        rejectReserved(dataColumns, new String[]{"caseId", "workbookId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "STAGES"}, "excel.dataColumns");
         List<StageConfig> stages = stages(map.get("stages"));
         if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
@@ -50,7 +52,7 @@ public final class SuiteConfigResolver {
         int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
         return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
                 global.environment(), timeoutMs, global.templatesRoot(),
-                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode());
+                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId);
     }
 
     private List<StageConfig> stages(Object value) {

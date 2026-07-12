@@ -39,13 +39,17 @@ class V2ConfigTest {
     @Test
     void usesBuiltInStageRunWhenAndFailureDefaults() throws Exception {
         Path workbook = tempDir.resolve("payment.xlsx");
-        Files.write(tempDir.resolve("payment.yaml"), ("schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\n"
+        Files.write(tempDir.resolve("payment.yaml"), ("schemaVersion: att-sidecar/v2.1\nid: payment\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\n"
                 + "stages:\n  - key: invoke\n    template: Template\n").getBytes("UTF-8"));
         FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
                 Paths.get("templates"), null, null, null);
-        StageConfig stage = new SuiteConfigResolver(tempDir, global).resolve(workbook).stages().get(0);
+        FrameworkConfig resolved = new SuiteConfigResolver(tempDir, global).resolve(workbook);
+        StageConfig stage = resolved.stages().get(0);
+        assertEquals("payment", resolved.workbookId());
         assertEquals("normal", stage.runWhen());
         assertEquals("stop", stage.onFailure());
+        Files.write(tempDir.resolve("missing-id.yaml"), ("schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: invoke\n    template: Template\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new SuiteConfigResolver(tempDir, global).resolve(tempDir.resolve("missing-id.xlsx")));
     }
 
     @Test
@@ -59,7 +63,7 @@ class V2ConfigTest {
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingToolMetadata));
 
         Path workbook = tempDir.resolve("invalid-stage.xlsx");
-        Files.write(tempDir.resolve("invalid-stage.yaml"), ("schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\n"
+        Files.write(tempDir.resolve("invalid-stage.yaml"), ("schemaVersion: att-sidecar/v2.1\nid: invalid-stage\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\n"
                 + "stages:\n  - key: invoke\n    template: Template\n    required: maybe\n").getBytes("UTF-8"));
         FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
                 Paths.get("templates"), null, null, null);

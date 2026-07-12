@@ -99,8 +99,8 @@ public final class ExcelTestSuiteLoader {
             }
             stages.put(stage.key(), new StageCaseData(stage.key(), ValueNormalizer.normalize(String.valueOf(name)), stageValues));
         }
-        IdentifierValidator.caseId(group.id(), rowCaseId);
-        return new TestCase(row.getRowNum() + 1, group.id(), group.sheetName(), rowCaseId, tags, caseData, stages, null);
+        IdentifierValidator.caseId(config.workbookId(), group.id(), rowCaseId);
+        return new TestCase(row.getRowNum() + 1, config.workbookId(), group.id(), group.sheetName(), rowCaseId, tags, caseData, stages, null);
     }
 
     private Map<String, Object> loadColumns(Row row, Map<String, Integer> columns, List<DataColumnConfig> configured) {

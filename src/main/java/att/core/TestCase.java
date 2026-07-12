@@ -7,10 +7,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** One V2 testcase row with a group-qualified Case ID. */
+/** One V2 testcase row with a workbook-and-sheet-qualified Case ID. */
 public final class TestCase {
     private final int rowNumber;
     private final String groupId;
+    private final String workbookId;
     private final String sheetName;
     private final String rowCaseId;
     private final String caseId;
@@ -21,11 +22,17 @@ public final class TestCase {
 
     public TestCase(int rowNumber, String groupId, String sheetName, String rowCaseId, List<String> tags,
                     Map<String, Object> caseData, Map<String, StageCaseData> stages, String invalidReason) {
+        this(rowNumber, "", groupId, sheetName, rowCaseId, tags, caseData, stages, invalidReason);
+    }
+
+    public TestCase(int rowNumber, String workbookId, String groupId, String sheetName, String rowCaseId, List<String> tags,
+                    Map<String, Object> caseData, Map<String, StageCaseData> stages, String invalidReason) {
         this.rowNumber = rowNumber;
+        this.workbookId = workbookId;
         this.groupId = groupId;
         this.sheetName = sheetName;
         this.rowCaseId = rowCaseId;
-        this.caseId = groupId + "." + rowCaseId;
+        this.caseId = workbookId == null || workbookId.isEmpty() ? groupId + "." + rowCaseId : workbookId + "." + groupId + "." + rowCaseId;
         this.tags = tags == null ? Collections.<String>emptyList() : new ArrayList<String>(tags);
         this.caseData = caseData == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(caseData);
         this.stages = stages == null ? Collections.<String, StageCaseData>emptyMap() : new LinkedHashMap<String, StageCaseData>(stages);
@@ -36,6 +43,7 @@ public final class TestCase {
     public boolean enabled() { return true; }
     public int rowNumber() { return rowNumber; }
     public String groupId() { return groupId; }
+    public String workbookId() { return workbookId; }
     public String sheetName() { return sheetName; }
     public String rowCaseId() { return rowCaseId; }
     public String caseId() { return caseId; }

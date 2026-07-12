@@ -14,15 +14,15 @@ V2.1 retains the V2 Case → Stage → Template → Action → Tool model while 
 Run one workbook, full Case ID, or tag:
 
 ```sh
-./att.sh validate --selected --case payment.TC001
+./att.sh validate --selected --case payment.payment.TC001
 ./att.sh validate --package --format json
 ./att.sh run --suite testcase/payment_regression.xlsx
-./att.sh run --all --case payment.TC001
+./att.sh run --all --case payment.payment.TC001
 ./att.sh run --all --tag smoke --exclude-tag slow
 ./att.sh run --all --ci-output junit,json
 ```
 
-Every workbook requires a same-basename sidecar. The included example contains 22 cases across Chinese `payment` and `batch` sheets; both may contain row Case ID `TC001`, producing `payment.TC001` and `batch.TC001`.
+Every workbook requires a same-basename sidecar with a package-unique `id`. The included `payment` workbook contains Chinese `payment` and `batch` sheets; both may contain row Case ID `TC001`, producing `payment.payment.TC001` and `payment.batch.TC001`.
 
 ## Commands
 

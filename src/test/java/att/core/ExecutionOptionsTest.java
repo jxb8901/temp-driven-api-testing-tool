@@ -22,4 +22,12 @@ class ExecutionOptionsTest {
         assertEquals(java.util.Collections.singleton("json"), options.ciOutputs());
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"validate","--package","--ci-output","junit"}));
     }
+    @Test void parsesRunConcurrencyPolicy() {
+        assertEquals("reject", ExecutionOptions.parse(new String[]{"run","--all"}).concurrencyMode());
+        assertEquals("queue", ExecutionOptions.parse(new String[]{"run","--all","--queue"}).concurrencyMode());
+        assertEquals("parallel", ExecutionOptions.parse(new String[]{"run","--all","--parallel"}).concurrencyMode());
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run","--all","--queue","--parallel"}));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"validate","--parallel"}));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run","--all","--concurrency","parallel"}));
+    }
 }
