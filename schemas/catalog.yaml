@@ -1,6 +1,8 @@
-schemaVersion: att-schema-catalog/v2.1
+schemaVersion: att-schema-catalog/v2.2
 schemas:
-  globalConfig: att-config-v2.1.schema.json
+  globalConfig: att-config-v2.2.schema.json
+  legacyGlobalConfig: att-config-v2.1.schema.json
+  toolGroup: att-tool-group-v2.2.schema.json
   sidecar: att-sidecar-v2.1.schema.json
   template: att-template-v2.1.schema.json
   runManifest: att-run-v2.1.schema.json

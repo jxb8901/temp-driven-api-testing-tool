@@ -26,6 +26,7 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar \
   "$HOME"/.m2/repository/com/networknt/json-schema-validator/1.4.0/json-schema-validator-1.4.0.jar \
+  "$HOME"/.m2/repository/com/github/mwiede/jsch/2.28.2/jsch-2.28.2.jar \
   "$HOME"/.m2/repository/com/ethlo/time/itu/1.8.0/itu-1.8.0.jar \
   "$HOME"/.m2/repository/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar \
   "$HOME"/.m2/repository/org/slf4j/slf4j-nop/2.0.9/slf4j-nop-2.0.9.jar \

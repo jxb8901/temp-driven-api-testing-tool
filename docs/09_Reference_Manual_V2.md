@@ -1,7 +1,7 @@
-# ATT V2.1 User Manual and Reference
+# ATT V2.2 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.1
+Version: 2.2
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -51,7 +51,7 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, assert an expression, or write a structured log. ATT validates the selected package before executing external tools and records the resulting evidence below one completed run directory.
 
-### What V2.1 guarantees
+### What V2.2 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar.
@@ -93,7 +93,7 @@ This example creates one payment test that renders JSON, invokes a tool, and ver
 Create `config/config.yaml`:
 
 ```yaml
-schemaVersion: att-config/v2.1
+schemaVersion: att-config/v2.2
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -108,7 +108,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Send a rendered payment request
-    command: "./tools/invoke_payment_api.sh '${requestFile}' '${environment}'"
+    command: ["./tools/invoke_payment_api.sh", "${requestFile}", "${environment}"]
     output: json
     arguments:
       requestFile:
@@ -121,7 +121,7 @@ tools:
         required: true
 ```
 
-`command` is tokenized into process arguments; it is not executed by a shell. Declared arguments are referenced directly, for example `${requestFile}`.
+An argv-list `command` preserves every list item as one process argument. A legacy scalar command is tokenized once into the same internal list. Declared arguments are referenced directly, for example `${requestFile}`.
 
 ### Step 2: create the workbook and sidecar
 
@@ -407,14 +407,14 @@ Payload and output paths must remain below their intended template/case-log root
 
 ### 3.3 Tool
 
-A tool is an external capability configured once under `config.yaml` and called by template actions using named arguments.
+A tool is an external capability configured either globally under `config.yaml` or inside an independent tool-group file and called by template actions using named arguments.
 
 ```yaml
 tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Invoke a rendered request
-    command: "./tools/invoke_payment_api.sh '${requestFile}' '${environment}'"
+    command: ["./tools/invoke_payment_api.sh", "${requestFile}", "${environment}"]
     output: json
     arguments:
       requestFile:
@@ -437,9 +437,36 @@ callApi:
 
 Unknown, duplicate, or missing required arguments fail validation. Argument metadata documents and validates the contract; it does not inject values automatically.
 
+Global tools retain unqualified names. V2.2 groups are listed by `toolGroups` in the global config:
+
+```yaml
+toolGroups:
+  - config/tools/database.yaml
+```
+
+The referenced file declares a package-unique ID and its own tools:
+
+```yaml
+schemaVersion: att-tool-group/v2.2
+id: database
+name: Database tools
+description: Read-only queries
+script: ["/opt/att/database-tools"]
+tools:
+  selectPayment:
+    name: Select payment
+    description: Query one payment
+    command: ["select-payment", "--case", "${caseId}"]
+    output: json
+    arguments:
+      caseId: {name: Case ID, description: Full Case ID, required: true}
+```
+
+Call it as `#{database.selectPayment(caseId=${CASE.caseId})}`. With `script`, logical argv is `/opt/att/database-tools selectPayment select-payment --case <caseId>`: script argv, unqualified tool key, then tool command argv. Without `script`, the tool command starts with the executable. Persisted grouped evidence is navigable below `TOOL.database.selectPayment`.
+
 #### Command processing
 
-ATT first tokenizes the static command template and then resolves placeholders inside the resulting tokens. An ordinary declared argument always remains one atomic argv value, regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. A final argument with `delimit` is the only form that may intentionally expand into zero or more argv values. Resolved values are never tokenized again. ATT does not invoke `/bin/sh`, `cmd.exe`, PowerShell, or another shell.
+V2.2 normalizes every command to an argv template list. A scalar command is tokenized once with the legacy tokenizer. A YAML list is already normalized: each item is exactly one argv value and is never tokenized. An ordinary declared argument therefore remains atomic regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. A final argument with `delimit` is the only form that may intentionally expand into zero or more argv values. Resolved values are never tokenized again. ATT does not invoke a local shell.
 
 | Command text | Effect |
 |---|---|
@@ -466,9 +493,33 @@ Payment regression
 
 The text `status|PENDING` remains one literal argument and `>result` does not redirect output. Quotes in the static template group template text only; they are not an escaping requirement for resolved values.
 
+The recommended equivalent is clearer:
+
+```yaml
+command:
+  - ./tools/send.sh
+  - "${requestFile}"
+  - --label
+  - Payment regression
+```
+
 Prefer the shortest declared-argument placeholder, such as `${keywords}`; use `${input.keywords}` when an explicit namespace improves clarity. Both forms are case-sensitive and must exactly match the argument key. `${TOOL.input.keywords}` remains supported but is not the preferred authoring style. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
 
 Global tool commands may reference only their declared arguments. They cannot reference `${CASE...}`, `${ACTIONS...}`, or other runtime Context scopes. Pass runtime data explicitly in the action call, then reference that declared argument in the command. This keeps the global tool independent and its dependencies statically validateable.
+
+#### SSH execution
+
+Global tools and each tool group may define one execution target at their own root:
+
+```yaml
+ssh:
+  host: tools.example.internal
+  user: att
+  port: 22
+  identityFile: /secure/keys/att_ed25519
+```
+
+Root `ssh` applies only to inline global tools; a group uses only its own `ssh` and does not inherit the root value. Host/user are required, port defaults to 22, and the key is optional. Password fields are unsupported. ATT prefers local OpenSSH with `BatchMode=yes` and `StrictHostKeyChecking=yes`. If `PATH` has no executable `ssh`, ATT warns that it will use the bundled mwiede/jsch Java library. The fallback uses a strict `~/.ssh/known_hosts`, does not inherit the OpenSSH agent or `~/.ssh/config`, and normally requires `identityFile`. Both transports safely single-quote the logical argv into one POSIX remote command string. Remote connectivity and executable presence cannot be proven by package validation. SSH stdout/stderr/status/timeout/retry/assert/saveAs behavior matches local tools, and evidence records `transport: openssh|mwiede/jsch`.
 
 #### Input, output, timeout, and status
 
@@ -721,7 +772,7 @@ callApi:
     exitCodes: [1, 75]
 ```
 
-`maxAttempts` includes the first attempt and defaults to 1. V2.1 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.1 has no delay/backoff fields, so eligible retries are immediate.
+`maxAttempts` includes the first attempt and defaults to 1. V2.2 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.2 has no delay/backoff fields, so eligible retries are immediate.
 
 Each attempt is recorded directly in the case log/action record; no `attempt-001` directory is created. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.
 
@@ -790,7 +841,8 @@ This chapter is the authoritative reading reference for author-authored configur
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, tools |
+| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, optional global SSH |
+| Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels, workbook timeout |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -801,7 +853,9 @@ Action timeout overrides sidecar timeout, which overrides global timeout. CLI `-
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
-| Global configuration | `att-config/v2.1` | [att-config-v2.1.schema.json](../schemas/att-config-v2.1.schema.json) |
+| Global configuration | `att-config/v2.2` | [att-config-v2.2.schema.json](../schemas/att-config-v2.2.schema.json) |
+| Legacy global configuration (read compatibility) | `att-config/v2.1` | [att-config-v2.1.schema.json](../schemas/att-config-v2.1.schema.json) |
+| Tool group | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
 | Template descriptor | `att-template/v2.1` | [att-template-v2.1.schema.json](../schemas/att-template-v2.1.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) |
@@ -815,7 +869,7 @@ All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknow
 ### Global configuration
 
 ```yaml
-schemaVersion: att-config/v2.1
+schemaVersion: att-config/v2.2
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -829,12 +883,13 @@ report:
   columns: {}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
+toolGroups: [config/tools/database.yaml]
 tools: {}
 ```
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Exactly `att-config/v2.1` |
+| `schemaVersion` | required | `att-config/v2.2`; unchanged V2.1 files remain readable but cannot use V2.2-only fields |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty value exposed as `${CASE.environment}`; it does not choose endpoints by itself |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -848,13 +903,15 @@ tools: {}
 | `report.columns` | `{}` | Arbitrary string keys and string label values |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+| `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
+| `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
 Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `report`, `xml`, `tools`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `report`, `xml`, `toolGroups`, `ssh`, `tools`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -863,10 +920,11 @@ Allowed global object properties are:
 | `report` | `mode`, `fileNamePattern`, `columns`, `junit`, `x-*` |
 | `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` |
 | `xml` | `namespaceMode`, `x-*` |
+| `ssh` | `host`, `user`, `port`, `identityFile` |
 | `tools.<key>` | `name`, `description`, `command`, `output`, `arguments`, `x-*` |
 | `arguments.<key>` | `name`, `description`, `required`, `delimit`, `x-*` |
 
-V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.1 fields.
+V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
 Case log structured entries use YAML. `caseLog.yamlAnchors: false` is the default and prints repeated Map/List content in full at every location. With `true`, SnakeYAML may emit `&id001` and `*id001`; these are standard YAML anchor/alias markers and carry no ATT identifier semantics.
 
@@ -899,9 +957,11 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 
 ### Tool contract
 
-Each tool requires `name`, `description`, and `command`. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. Only the final declared argument may define a non-empty `delimit`.
+Each tool requires `name`, `description`, and `command`. `command` is either a non-blank scalar or a non-empty string list. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. Only the final declared argument may define a non-empty `delimit`.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
+
+A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Group calls use `group.tool`; inline global calls remain unqualified. Built-in names are reserved only in the global namespace.
 
 ### Identifier and path constraints
 
@@ -916,7 +976,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.4",
+  "attVersion": "2.2.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -981,7 +1041,7 @@ Common properties include:
 | STAGE | `key`, `name`, selector-map data, sidecar stage data, status, timing, error |
 | TEMPLATE | `name`, `path`, `description`, status, timing, error |
 | ACTION | `id`, `type`, status, timing, error, `output`, `outputFile`, assertion/log data |
-| TOOL | configured name, `input`, `command`, `argv`, `stdout`, `stderr`, `rawOutput`, parsed `output`, status, exit code, duration, retry evidence, and optional `outputFile` when `saveAs` is used |
+| TOOL | qualified configured name, optional group ID/tool key, `input`, logical/executed `argv`, optional SSH destination metadata, `stdout`, `stderr`, `rawOutput`, parsed `output`, status, exit code, duration, retry evidence, and optional `outputFile` when `saveAs` is used |
 
 Use `${ACTIONS.<id>...}` as a current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. The root `${TOOL...}` scope is reserved for invocation internals and is not a case-wide “latest tool” API. Authors must use `${ACTIONS.<id>...}` for later actions and the canonical CASE path across stages. Tool input/argv/stdout/stderr evidence is persisted below the action and written to the case log.
 
@@ -1026,10 +1086,13 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 | `length` | Return text length | `#{length(value=${CASE.reference})}` |
 | `concat` | Concatenate arguments in call order | `#{concat(a='PAY-', b=${CASE.caseId})}` |
 | `coalesce` | Return first non-blank value | `#{coalesce(${CASE.optional}, 'N/A')}` |
+| `nvl` | Return a default for null/empty text | `#{nvl(${CASE.optional}, 'N/A')}` |
+| `iif` | Select one of two values from a boolean | `#{iif(${CASE.enabled}, 'Y', 'N')}` |
+| `nchar` | Repeat a value 0–10000 times | `#{nchar(3, '9')}` |
 
-`upper`, `lower`, `trim`, `string`, `number`, `boolean`, and `length` accept `value=` or the first positional argument. Case conversion is locale-independent. `number` rejects non-numeric input and removes unnecessary trailing zeroes. `boolean` accepts true/false, yes/no, and 1/0. `concat` treats null as empty; `coalesce` skips null and whitespace-only values and returns empty when none qualifies.
+`upper`, `lower`, `trim`, `string`, `number`, `boolean`, and `length` accept `value=` or the first positional argument. Case conversion is locale-independent. `number` rejects non-numeric input and removes unnecessary trailing zeroes. `boolean` accepts true/false, yes/no, and 1/0. `concat` treats null as empty; `coalesce` skips null and whitespace-only values and returns empty when none qualifies. `nvl` tests null/empty without trimming. `iif` accepts the same boolean text forms and resolves all three arguments eagerly. `nchar` requires an integer count from 0 through 10000 and repeats the complete value.
 
-Use built-ins for deterministic local transformations and tools for filesystem, network, database, system integration, or complex reusable logic. Built-ins create no TOOL process artifacts. Invalid arguments produce action ERROR.
+Use built-ins for deterministic local transformations and tools for filesystem, network, database, system integration, or complex reusable logic. Built-ins remain global and create no TOOL process artifacts. V2.2 reserves an internal provider registry for V3, but V2.2/V2.3 configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -1090,7 +1153,7 @@ Text is XML-escaped. JUnit XML and HTML use `report.junit.caseLogEmbedThresholdB
 
 ### Run manifest and reproducibility
 
-`run.yaml` uses `schemaVersion: att-run/v2.1` and records ATT/build identity, Java/OS/locale/timezone, validation mode, environment, timestamps, status/summary, output paths, and SHA-256 inputs for effective configuration, workbook, sidecar, resolved templates/payloads, package-local tool files, and schema/catalog version.
+`run.yaml` uses `schemaVersion: att-run/v2.1` and records ATT/build identity, Java/OS/locale/timezone, validation mode, environment, timestamps, status/summary, output paths, and SHA-256 inputs for effective configuration, tool-group files, workbook, sidecar, resolved templates/payloads, package-local tool files, and schema/catalog version.
 
 ### Documentation, archive, and clean
 
@@ -1172,6 +1235,23 @@ Yes. Keep the generated run directory together so relative artifact links contin
 #### Does build execute tests again?
 
 No. It archives one completed persisted run.
+
+#### Why did ATT say it will use mwiede/jsch, or why did Java SSH algorithm negotiation fail?
+
+ATT uses the local `ssh` command when it is executable on `PATH`. If it is absent, ATT prints `local ssh command not found; ATT will use Java SSH library mwiede/jsch` and opens a Java exec channel instead. This is an automatic fallback, not a remote connectivity test.
+
+The fallback is deliberately minimal: ATT includes `com.github.mwiede:jsch:2.28.2` but does not bundle Bouncy Castle. It requires a readable non-symbolic-link `~/.ssh/known_hosts` for strict host verification. It does not read `~/.ssh/config` or automatically use the OpenSSH agent; configure an unencrypted or otherwise non-interactively readable `identityFile`. Password and interactive passphrase prompts remain unsupported.
+
+Algorithm availability depends on the Java runtime:
+
+| Algorithm | Java fallback limitation | Preferred solution |
+|---|---|---|
+| `ssh-ed25519`, `ssh-ed448` | Require Java 15+, or a Bouncy Castle provider | Prefer local OpenSSH or Java 15+; otherwise have an administrator add approved `bcprov-jdk18on` to the runtime classpath |
+| `curve25519-sha256`, `curve448-sha512` | Require Java 11+, or Bouncy Castle | Prefer local OpenSSH or Java 11+; otherwise use an approved Bouncy Castle provider |
+| `chacha20-poly1305@openssh.com` | Requires Bouncy Castle on every Java version | Prefer local OpenSSH, enable an AES-GCM/CTR cipher on the server, or add an approved Bouncy Castle provider |
+| RSA/SHA-1 `ssh-rsa` signatures | Disabled by default by mwiede/jsch | Update the server to RSA/SHA-2 (`rsa-sha2-256`/`rsa-sha2-512`) or another modern host/user-key algorithm; do not re-enable SHA-1 except as a reviewed temporary legacy measure |
+
+When negotiation fails, first run the same connection with local `ssh -v` to identify the host-key, key-exchange, cipher, or user-key mismatch. Prefer upgrading Java or the server's algorithm set over weakening JSch defaults. The authoritative compatibility notes and configurable `jsch.kex`, `jsch.server_host_key`, `jsch.cipher`, and `jsch.mac` system properties are documented in the [mwiede/jsch README](https://github.com/mwiede/jsch). ATT does not change those secure defaults.
 
 ### Security reminders
 

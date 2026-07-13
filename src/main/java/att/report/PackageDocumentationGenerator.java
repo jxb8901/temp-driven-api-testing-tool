@@ -100,8 +100,17 @@ public final class PackageDocumentationGenerator {
         StringBuilder body = new StringBuilder("<h1>Tools</h1><p><a href=\"../index.html\">Home</a></p><div class=\"index\"><strong>Index:</strong> ");
         for (ToolConfig tool : config.tools().values()) body.append("<a href=\"#").append(anchor(tool.key())).append("\">").append(escape(tool.key())).append("</a> ");
         body.append("</div>");
+        String activeGroup = null;
         for (ToolConfig tool : config.tools().values()) {
-            body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h2>").append(escape(tool.name())).append("</h2><p>").append(escape(tool.description())).append("</p><p><code>").append(escape(tool.command())).append("</code>; output=").append(escape(tool.output())).append("</p><table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>Delimiter</th></tr>");
+            String group = tool.grouped() ? tool.groupId() : "";
+            if (!group.equals(activeGroup)) {
+                body.append("<h2 class=\"tool-group\">").append(group.isEmpty() ? "Global tools" : "Tool group: " + escape(group)).append("</h2>");
+                activeGroup = group;
+            }
+            body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h3>").append(escape(tool.name())).append(" <code>").append(escape(tool.key())).append("</code></h3><p>").append(escape(tool.description())).append("</p><p>command argv: <code>[\"").append(escape(joinEscaped(tool.commandArgv()))).append("\"]</code>; output=").append(escape(tool.output())).append("</p>");
+            if (!tool.groupScriptArgv().isEmpty()) body.append("<p>group script argv: <code>[\"").append(escape(joinEscaped(tool.groupScriptArgv()))).append("\"]</code></p>");
+            if (tool.ssh() != null) body.append("<p>SSH: <code>").append(escape(tool.ssh().destination())).append(":").append(tool.ssh().port()).append("</code></p>");
+            body.append("<table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>Delimiter</th></tr>");
             for (ToolArgumentConfig arg : tool.arguments().values()) body.append("<tr><td>").append(escape(arg.key())).append("</td><td>").append(escape(arg.name())).append("</td><td>").append(escape(arg.description())).append("</td><td>").append(arg.required()).append("</td><td>").append(escape(arg.delimit())).append("</td></tr>");
             body.append("</table></section>"); search.add(tool.key()); search.add(tool.name()); search.add(tool.description());
         }
@@ -109,7 +118,7 @@ public final class PackageDocumentationGenerator {
     }
 
     private String builtInPage() {
-        String[][] functions = {{"upper","upper(value)","Convert text to upper case"},{"lower","lower(value)","Convert text to lower case"},{"trim","trim(value)","Trim whitespace"},{"string","string(value)","Convert a value to text"},{"number","number(value)","Normalize a number"},{"boolean","boolean(value)","Normalize a boolean"},{"length","length(value)","Return text length"},{"concat","concat(first, ...)","Concatenate values"},{"coalesce","coalesce(first, ...)","Return the first non-blank value"}};
+        String[][] functions = {{"upper","upper(value)","Convert text to upper case"},{"lower","lower(value)","Convert text to lower case"},{"trim","trim(value)","Trim whitespace"},{"string","string(value)","Convert a value to text"},{"number","number(value)","Normalize a number"},{"boolean","boolean(value)","Normalize a boolean"},{"length","length(value)","Return text length"},{"concat","concat(first, ...)","Concatenate values"},{"coalesce","coalesce(first, ...)","Return the first non-blank value"},{"nvl","nvl(value, defaultValue)","Return the default for null or empty text"},{"iif","iif(condition, trueValue, falseValue)","Return one branch for a boolean condition"},{"nchar","nchar(count, value)","Repeat a value count times"}};
         StringBuilder body = new StringBuilder("<h1>Built-in functions</h1><div class=\"index\"><strong>Index:</strong> ");
         for (String[] fn : functions) body.append("<a href=\"#builtin-").append(anchor(fn[0])).append("\">").append(fn[0]).append("</a> ");
         body.append("</div>");
@@ -128,7 +137,7 @@ public final class PackageDocumentationGenerator {
             }
         }
         values.get("tool").addAll(global.tools().keySet());
-        Collections.addAll(values.get("tool"), "upper", "lower", "trim", "string", "number", "boolean", "length", "concat", "coalesce");
+        values.get("tool").addAll(new att.template.DefaultBuiltInProvider().names());
         return values;
     }
 

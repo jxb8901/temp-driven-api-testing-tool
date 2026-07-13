@@ -27,7 +27,7 @@ public final class FrameworkRunner {
             if ("help".equals(options.command())) { help(); return; }
             if ("version".equals(options.command())) { System.out.println(Version.DISPLAY); return; }
             Path root = Paths.get("").toAbsolutePath();
-            FrameworkConfig config = new FrameworkConfigLoader().load(options.configPath());
+            FrameworkConfig config = new FrameworkConfigLoader().load(options.configPath(), root);
             if ("docs".equals(options.command())) {
                 System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
                 return;
@@ -51,7 +51,7 @@ public final class FrameworkRunner {
             PackageValidator.ValidationSummary validation = new PackageValidator(root, config).validate(options);
             if ("validate".equals(options.command())) {
                 if ("json".equals(options.format())) { String json = validation.toJson(); att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json); System.out.println(json); }
-                else { System.out.println("V2.1 validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation); printDiagnostics(validation, options); }
+                else { System.out.println("Validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation); printDiagnostics(validation, options); }
                 if (!validation.valid()) System.exit(2);
                 return;
             }
@@ -62,7 +62,7 @@ public final class FrameworkRunner {
                     System.out.println(json);
                 }
                 else {
-                    System.err.println("V2.1 validation FAIL: " + validation);
+                    System.err.println("Validation FAIL: " + validation);
                     printDiagnostics(validation, options, System.err);
                 }
                 System.exit(2);

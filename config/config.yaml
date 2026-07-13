@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.1
+schemaVersion: att-config/v2.2
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -15,6 +15,9 @@ run:
 templates:
   root: templates
 
+toolGroups:
+  - config/tools/sample.yaml
+
 report:
   mode: append-to-copy
   fileNamePattern: "${suiteName}.result.xlsx"
@@ -29,7 +32,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Invoke the payment API with a rendered request file
-    command: "./tools/invoke_payment_api.sh ${requestFile} ${environment}"
+    command: [./tools/invoke_payment_api.sh, "${requestFile}", "${environment}"]
     output: xml
     arguments:
       requestFile:
@@ -43,7 +46,7 @@ tools:
   selectCtxn:
     name: Select CT records
     description: Query transaction records
-    command: "./tools/select_ct_txn.sh ${caseId} ${txnRef}"
+    command: [./tools/select_ct_txn.sh, "${caseId}", "${txnRef}"]
     output: yaml
     arguments:
       caseId:
@@ -57,7 +60,7 @@ tools:
   grepFromAppLogs:
     name: Grep application logs
     description: Find one or more keywords in application logs
-    command: "./tools/grep_from_app_logs.sh '${logText}' ${keywords}"
+    command: [./tools/grep_from_app_logs.sh, "${logText}", "${keywords}"]
     output: yaml
     arguments:
       logText:
@@ -72,7 +75,7 @@ tools:
   getAppLogs:
     name: Get application logs
     description: Collect application logs for a case
-    command: "./tools/get_app_logs.sh ${caseId}"
+    command: [./tools/get_app_logs.sh, "${caseId}"]
     output: txt
     arguments:
       caseId:
@@ -82,7 +85,7 @@ tools:
   genEndToEndId:
     name: Generate end-to-end ID
     description: Generate a unique end-to-end identifier
-    command: "./tools/gen_e2e_id.sh ${caseId}"
+    command: [./tools/gen_e2e_id.sh, "${caseId}"]
     output: txt
     arguments:
       caseId:
@@ -92,13 +95,13 @@ tools:
   getAcDate:
     name: Get account date
     description: Return the current account date
-    command: "./tools/get_ac_date.sh"
+    command: [./tools/get_ac_date.sh]
     output: txt
     arguments: {}
   getSeq:
     name: Get sequence
     description: Generate a new sequence value
-    command: "./tools/get_seq.sh ${caseId}"
+    command: [./tools/get_seq.sh, "${caseId}"]
     output: txt
     arguments:
       caseId:

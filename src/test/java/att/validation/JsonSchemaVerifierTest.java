@@ -23,4 +23,12 @@ class JsonSchemaVerifierTest {
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,valid.replace("EXIT_CODE","OUTPUT_PARSE")));
     }
+
+    @Test void productionV22SchemasAcceptArgvGroupsAndRejectMalformedSsh() throws Exception {
+        Path config = Paths.get("schemas/att-config-v2.2.schema.json");
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"toolGroups\":[\"config/tools/db.yaml\"],\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"a b\"]}}}"));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"ssh\":{\"host\":\"x\",\"user\":\"u\",\"password\":\"secret\"}}"));
+        Path group = Paths.get("schemas/att-tool-group-v2.2.schema.json");
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group, "{\"schemaVersion\":\"att-tool-group/v2.2\",\"id\":\"db\",\"name\":\"DB\",\"description\":\"DB tools\",\"script\":[\"dispatch\"],\"tools\":{\"select\":{\"name\":\"Select\",\"description\":\"Select\",\"command\":[\"query\"]}}}"));
+    }
 }

@@ -20,9 +20,15 @@ public class UnifiedTemplateEngine {
     private static final Pattern VALUE = Pattern.compile("\\$\\{((?:[^}'\"]|'(?:\\\\.|[^'])*'|\"(?:\\\\.|[^\"])*\")+)}");
     private final ToolInvoker toolInvoker;
     private final ToolCallParser callParser = new ToolCallParser();
+    private final BuiltInProvider builtIns;
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker) {
+        this(toolInvoker, new DefaultBuiltInProvider());
+    }
+
+    UnifiedTemplateEngine(ToolInvoker toolInvoker, BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
+        this.builtIns = builtIns;
     }
 
     public String render(String text, CaseRuntimeContext context) throws Exception {
@@ -74,8 +80,7 @@ public class UnifiedTemplateEngine {
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
         Map<String, Object> input = resolveArguments(parsed, context);
-        Object builtIn = builtIn(parsed.name(), input);
-        if (builtIn != null) return builtIn;
+        if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return builtIns.invoke(parsed.name(), input);
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for tool invocation");
         }
@@ -135,41 +140,6 @@ public class UnifiedTemplateEngine {
         }
         return input;
     }
-
-    /** Built-ins keep ordinary transforms in templates without creating a shell tool. */
-    private Object builtIn(String name, Map<String, Object> input) {
-        String value = value(input, "value", "arg0");
-        if ("upper".equalsIgnoreCase(name)) return value.toUpperCase(java.util.Locale.ROOT);
-        if ("lower".equalsIgnoreCase(name)) return value.toLowerCase(java.util.Locale.ROOT);
-        if ("trim".equalsIgnoreCase(name)) return value.trim();
-        if ("string".equalsIgnoreCase(name)) return value;
-        if ("number".equalsIgnoreCase(name)) {
-            try { return new java.math.BigDecimal(value.trim()).stripTrailingZeros().toPlainString(); }
-            catch (NumberFormatException e) { throw new IllegalArgumentException("number() requires a Number literal: " + value); }
-        }
-        if ("boolean".equalsIgnoreCase(name)) {
-            if ("true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value)) return "true";
-            if ("false".equalsIgnoreCase(value) || "0".equals(value) || "no".equalsIgnoreCase(value)) return "false";
-            throw new IllegalArgumentException("boolean() requires true/false, yes/no, or 1/0: " + value);
-        }
-        if ("length".equalsIgnoreCase(name)) return String.valueOf(value.length());
-        if ("concat".equalsIgnoreCase(name)) {
-            StringBuilder result = new StringBuilder();
-            for (Object item : input.values()) result.append(item == null ? "" : item);
-            return result.toString();
-        }
-        if ("coalesce".equalsIgnoreCase(name)) {
-            for (Object item : input.values()) if (item != null && !String.valueOf(item).trim().isEmpty()) return item;
-            return "";
-        }
-        return null;
-    }
-
-    private String value(Map<String, Object> input, String preferred, String fallback) {
-        Object item = input.containsKey(preferred) ? input.get(preferred) : input.get(fallback);
-        return item == null ? "" : String.valueOf(item);
-    }
-
 
     @SuppressWarnings("unchecked")
     private void putNested(Map<String, Object> target, String path, Object value) {

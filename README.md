@@ -1,8 +1,8 @@
-# ATT 2.1.4 - Automated Testing Tool
+# ATT 2.2.0 - Automated Testing Tool
 
-ATT V2.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.2 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
-V2.1 retains the V2 Case → Stage → Template → Action → Tool model while requiring explicit V2.1 schema versions, rejecting unknown fields, validating identifiers and paths, and distinguishing business FAIL from execution ERROR.
+V2.2 retains the V2 Case → Stage → Template → Action → Tool model. It adds independently configured tool groups, explicit argv-list commands, SSH execution targets, and the `nvl`, `iif`, and `nchar` built-ins. Existing V2.1 global-tool configuration remains readable; sidecar, template, run, validation, and CI artifact schemas remain V2.1.
 
 `testcase.root` defaults to `testcase`. ATT recursively discovers adjacent `basename.yaml` + `basename.xlsx` pairs below it; each pair is one testcase set.
 
@@ -48,14 +48,18 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 
 `./att.sh docs` always produces one self-contained page at `build/docs/index.html`; tool and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, or tool. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, configuration, and documentation source files.
 
-## V2.1 essentials
+## V2.2 essentials
 
-- `schemaVersion` is mandatory in global configuration, workbook sidecars, and templates. Unknown non-`x-*` fields are validation errors.
+- Global configuration uses `att-config/v2.2`; each file in `toolGroups` uses `att-tool-group/v2.2` and a package-unique `id`. Grouped tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
+- Tool `command` and group `script` accept a scalar or argv list. Lists preserve each YAML item as one argument; scalar commands use the existing tokenizer once. Group scripts receive `<tool key> <tool command argv>` after the script argv.
+- Root `ssh` applies to inline global tools; a group's `ssh` applies only to that group. ATT prefers local OpenSSH and automatically warns/falls back to the bundled mwiede/jsch Java client when `ssh` is unavailable. Both use strict host-key checking, optional key files, and a safely quoted remote command; see Reference Manual Chapter 09 for Java algorithm limits.
+- Built-ins remain unqualified. V2.2 adds `nvl(value, defaultValue)`, `iif(condition, trueValue, falseValue)`, and `nchar(count, value)`; custom Java built-in providers are not loaded in V2.2.
+- `schemaVersion` is mandatory in global configuration, tool groups, workbook sidecars, and templates. Unknown non-`x-*` fields are validation errors.
 - `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
 - Timeouts use milliseconds with range 1–3,600,000 and default 10,000: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence.
 - Retry is available only on a tool action and only for `retryOn: [EXIT_CODE]`; retries run immediately and timeout is never retried.
 - A valid Run ID and full Case ID are used directly as `output/<RunID>/<CaseID>/` directory names. They must not contain path separators, control characters, or platform-reserved names.
-- Tool command templates are tokenized before declared arguments are injected as atomic argv values; resolved values are never tokenized again and no shell is used. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys. Tools write results to stdout and diagnostics to stderr; ATT records input/argv/stdout/stderr in case evidence and creates a dedicated raw-stdout artifact only when the action sets `saveAs`.
+- Tool command templates are normalized before declared arguments are injected as atomic argv values; resolved values are never tokenized again. Local tools do not use a shell. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys. Tools write results to stdout and diagnostics to stderr; ATT records logical/executed argv, input/stdout/stderr in case evidence and creates a dedicated raw-stdout artifact only when the action sets `saveAs`.
 
 ## V2 Model
 
@@ -73,5 +77,5 @@ test case --1:n stage--> template --1:n action--> tool
 - Tool argument descriptors contain `name`, `description`, `required`, and optional final-argument `delimit`.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
-See [V2.1 System Design](docs/02_System_Design_V2.1.md) for the normative specification.
-See the [ATT V2.1 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.1 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See [V2.2 System Design](docs/02_System_Design_V2.2.md) for the normative specification.
+See the [ATT V2.2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

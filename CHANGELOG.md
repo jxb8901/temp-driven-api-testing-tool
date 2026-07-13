@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.0 - 2026-07-13
+
+- Added independently maintained `att-tool-group/v2.2` files with package-unique group IDs, qualified `group.tool` calls, optional shared group dispatch scripts, qualified Case Context evidence, and package-wide validation/documentation.
+- Added `att-config/v2.2` `toolGroups` and SSH targets while retaining readable `att-config/v2.1` inline global-tool configurations. Root SSH applies to global tools and group SSH remains isolated to its group.
+- Added scalar-or-list argv configuration for tool commands and group scripts. List items remain atomic, scalar commands are tokenized once, and group dispatch uses `<script argv> <tool key> <command argv>`.
+- Added SSH execution with local OpenSSH preferred and automatic mwiede/jsch fallback when `ssh` is unavailable, including a visible fallback warning, strict host-key checking, optional identity files, transport evidence, timeout/retry/output parity, safe POSIX remote argv quoting, and non-network package validation.
+- Added global `nvl`, `iif`, and `nchar` built-ins behind an internal provider boundary; custom Java built-in providers remain disabled in V2.2.
+- Updated the V2.2 design, Quick Start, Reference Manual, generated package documentation, sample configuration, unit/integration coverage, and release metadata.
+
 ## 2.1.4
 
 - Case log YAML now expands repeated Map/List values at every location by default, avoiding generated anchors such as `&id001` and aliases such as `*id001`.

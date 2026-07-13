@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
 import java.time.Duration;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -109,6 +112,73 @@ class ToolInvokerTest {
         ToolInvocationResult result = new ToolInvoker(tempDir, config, runner).invokeAttempt("call", "capture", input, context, new CaseExecutionLog(tempDir.resolve("case.log")), 1234L);
         assertEquals(Arrays.asList("echo", "--value=A B O'Reilly a\\b;$(ignored)", "A B O'Reilly a\\b;$(ignored)"), runner.argv);
         assertEquals(runner.argv, result.invocation().get("argv"));
+    }
+
+    @Test void prependsGroupScriptAndWritesQualifiedEvidenceTree() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("id", new ToolArgumentConfig("id", "ID", "ID", true, ""));
+        ToolConfig grouped = new ToolConfig("database.select", "select", "database", "Select", "Select row",
+                Arrays.asList("query", "--id", "${id}"), Arrays.asList("./tools/dispatch", "--safe"), "txt", arguments, null);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>(); tools.put(grouped.key(), grouped);
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CaseRuntimeContext context = context(); CapturingRunner runner = new CapturingRunner();
+        ToolInvocationResult result = new ToolInvoker(tempDir,config,runner).invokeAttempt("call","database.select",Collections.<String,Object>singletonMap("id","A B"),context,new CaseExecutionLog(tempDir.resolve("case.log")),1000L);
+        assertEquals(Arrays.asList("./tools/dispatch", "--safe", "select", "query", "--id", "A B"), runner.argv);
+        assertEquals(runner.argv, result.invocation().get("logicalArgv"));
+        assertNotNull(((Map<?,?>)((Map<?,?>)result.invocation().get("TOOL")).get("database")).get("select"));
+    }
+
+    @Test void wrapsLogicalArgvForSshWithSafeRemoteQuoting() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("value", new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        SshConfig ssh = new SshConfig("tools.example", "att", 2222, "keys/id_ed25519");
+        ToolConfig tool = new ToolConfig("remote.echo", "echo", "remote", "Echo", "Remote echo",
+                Arrays.asList("printf", "%s", "${value}"), Collections.<String>emptyList(), "txt", arguments, ssh);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>(); tools.put(tool.key(), tool);
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CaseRuntimeContext context = context(); CapturingRunner runner = new CapturingRunner();
+        SshCommandRunner sshRunner = new SshCommandRunner(runner, () -> true,
+                (target, command, timeout, root) -> { throw new AssertionError("Java fallback must not run"); }, System.err);
+        String hostile = "A B O'Reilly;$(ignored)";
+        ToolInvocationResult result = new ToolInvoker(tempDir,config,runner,sshRunner).invokeAttempt("call","remote.echo",Collections.<String,Object>singletonMap("value",hostile),context,new CaseExecutionLog(tempDir.resolve("case.log")),1000L);
+        assertEquals(Arrays.asList("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-p", "2222", "-i", tempDir.resolve("keys/id_ed25519").toString(), "--", "att@tools.example", "'printf' '%s' 'A B O'\"'\"'Reilly;$(ignored)'"), runner.argv);
+        assertEquals(Arrays.asList("printf", "%s", hostile), result.invocation().get("logicalArgv"));
+        Map<?,?> toolEvidence = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.invocation().get("TOOL")).get("remote")).get("echo");
+        assertEquals("att@tools.example", ((Map<?,?>) toolEvidence.get("ssh")).get("destination"));
+        assertEquals("openssh", ((Map<?,?>) toolEvidence.get("ssh")).get("transport"));
+    }
+
+    @Test void fallsBackToMwiedeJschWhenLocalSshIsUnavailable() throws Exception {
+        SshConfig ssh = new SshConfig("tools.example", "att", 22, "keys/id_ed25519");
+        ToolConfig tool = new ToolConfig("remote.echo", "echo", "remote", "Echo", "Remote echo",
+                Arrays.asList("printf", "fallback"), Collections.<String>emptyList(), "txt", Collections.<String,ToolArgumentConfig>emptyMap(), ssh);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>(); tools.put(tool.key(), tool);
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        ByteArrayOutputStream warning = new ByteArrayOutputStream();
+        final List<String> remoteCommands = new ArrayList<String>();
+        SshCommandRunner sshRunner = new SshCommandRunner(new CapturingRunner(), () -> false,
+                (target, command, timeout, root) -> { remoteCommands.add(command); return new CommandResult(0, "fallback", "", false); },
+                new PrintStream(warning, true, "UTF-8"));
+        ToolInvocationResult result = new ToolInvoker(tempDir,config,new CapturingRunner(),sshRunner).invokeAttempt("call","remote.echo",Collections.<String,Object>emptyMap(),context(),new CaseExecutionLog(tempDir.resolve("fallback.log")),1000L);
+        assertEquals("fallback", result.output());
+        assertEquals(Collections.singletonList("'printf' 'fallback'"), remoteCommands);
+        assertEquals(Arrays.asList("printf", "fallback"), result.invocation().get("argv"));
+        Map<?,?> toolEvidence = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.invocation().get("TOOL")).get("remote")).get("echo");
+        assertEquals("mwiede/jsch", ((Map<?,?>) toolEvidence.get("ssh")).get("transport"));
+        assertTrue(warning.toString("UTF-8").contains(SshCommandRunner.FALLBACK_WARNING));
+    }
+
+    @Test void javaSshFallbackRequiresStrictKnownHostsFileBeforeConnecting() {
+        JschSshClient client = new JschSshClient(tempDir.resolve("missing-known-hosts"));
+        IOException error = assertThrows(IOException.class, () -> client.run(new SshConfig("tools.example", "att", 22, ""), "'true'", Duration.ofSeconds(1), tempDir));
+        assertTrue(error.getMessage().contains("known_hosts"));
+    }
+
+    private CaseRuntimeContext context() {
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("case"),"R",tempDir,tempDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        return context;
     }
 
     private static final class CapturingRunner extends CommandRunner {

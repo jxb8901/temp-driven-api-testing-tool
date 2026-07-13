@@ -410,9 +410,12 @@ public class FrameworkEngine {
         for (Path suite : suites(options)) { Path workbook = resolve(suite); addInput(inputs, "workbook", workbook); String name = workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml"); addInput(inputs, "sidecar", workbook.resolveSibling(name)); }
         Path templates = resolve(config.templatesRoot());
         if (Files.isDirectory(templates)) try (java.util.stream.Stream<Path> files = Files.walk(templates)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).filter(path -> !path.getFileName().toString().startsWith(".")).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "template-input", iterator.next()); }
+        java.util.Set<Path> toolGroupFiles = new java.util.LinkedHashSet<Path>();
         for (att.config.ToolConfig tool : config.tools().values()) {
-            java.util.List<String> command = att.exec.CommandRunner.parseCommand(tool.command()); String first = command.isEmpty() ? "" : command.get(0);
-            if (first.startsWith("./") || first.startsWith("../")) addInput(inputs, "tool-executable", projectRoot.resolve(first).normalize());
+            if (tool.sourceFile() != null && toolGroupFiles.add(tool.sourceFile())) addInput(inputs, "tool-group", tool.sourceFile());
+            java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
+            String first = command.isEmpty() ? "" : command.get(0);
+            if (tool.ssh() == null && (first.startsWith("./") || first.startsWith("../"))) addInput(inputs, "tool-executable", projectRoot.resolve(first).normalize());
         }
         Path schemas = projectRoot.resolve("schemas");
         if (Files.isDirectory(schemas)) try (java.util.stream.Stream<Path> files = Files.walk(schemas)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "schema", iterator.next()); }

@@ -29,7 +29,7 @@ import java.util.stream.Stream;
 public final class PackageValidator {
     private final ToolCallParser callParser = new ToolCallParser();
     private final att.template.ExpressionEvaluator expressionEvaluator = new att.template.ExpressionEvaluator();
-    private static final Set<String> BUILT_INS = new LinkedHashSet<String>(java.util.Arrays.asList("upper", "lower", "trim", "string", "number", "boolean", "length", "concat", "coalesce"));
+    private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
     private final FrameworkConfig global;
 
@@ -120,7 +120,7 @@ public final class PackageValidator {
         Path catalog = projectRoot.resolve("schemas/catalog.yaml");
         if (Files.isRegularFile(catalog)) try {
             Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v2.1".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
+            if (!(loaded instanceof Map) || !"att-schema-catalog/v2.2".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
             Object schemas = ((Map<?, ?>) loaded).get("schemas"); if (!(schemas instanceof Map)) throw new IllegalArgumentException("Schema catalog requires schemas map");
             for (Object value : ((Map<?, ?>) schemas).values()) {
                 Path schema = projectRoot.resolve("schemas").resolve(String.valueOf(value)).normalize();
@@ -138,6 +138,12 @@ public final class PackageValidator {
     }
 
     private void validatePackageTools(List<Diagnostic> diagnostics) {
+        boolean hasSshTool = false;
+        for (ToolConfig tool : global.tools().values()) if (tool.ssh() != null) { hasSshTool = true; break; }
+        if (hasSshTool && !att.exec.SshCommandRunner.localSshAvailable()) {
+            diagnostics.add(new Diagnostic(DiagnosticCodes.TOOL_INVALID, Diagnostic.Severity.WARNING,
+                    att.exec.SshCommandRunner.FALLBACK_WARNING, null, null, null, null, null, null, null, null));
+        }
         for (ToolConfig tool : global.tools().values()) {
             try { validateToolExecutable(tool); }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TOOL_INVALID, e, null)); }
@@ -146,7 +152,19 @@ public final class PackageValidator {
 
     private void validateToolExecutable(ToolConfig tool) {
         try {
-            java.util.List<String> command = att.exec.CommandRunner.parseCommand(tool.command());
+            if (tool.ssh() != null) {
+                String configured = tool.ssh().identityFile();
+                if (!configured.isEmpty()) {
+                    Path identity = java.nio.file.Paths.get(configured);
+                    if (!identity.isAbsolute()) identity = projectRoot.resolve(identity).normalize();
+                    Path canonicalIdentity = identity.toRealPath();
+                    if (Files.isSymbolicLink(identity) || !Files.isRegularFile(canonicalIdentity) || !Files.isReadable(canonicalIdentity)) {
+                        throw new IllegalArgumentException("Missing/unsafe SSH identity file for " + tool.key() + ": " + configured);
+                    }
+                }
+                return;
+            }
+            java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
             if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
             String first = command.get(0);
             Path executable = java.nio.file.Paths.get(first);

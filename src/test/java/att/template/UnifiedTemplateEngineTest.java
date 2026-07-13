@@ -4,8 +4,12 @@ import att.core.CaseRuntimeContext;
 import att.core.TestCase;
 import att.core.CaseExecutionLog;
 import att.config.FrameworkConfig;
+import att.config.ToolConfig;
+import att.config.ToolArgumentConfig;
 import att.exec.ToolInvoker;
 import att.exec.ToolInvocationResult;
+import att.exec.CommandRunner;
+import att.exec.CommandResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,8 +17,13 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Arrays;
+import java.util.List;
+import java.util.ArrayList;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Author: Jeffrey + ChatGPT. */
 class UnifiedTemplateEngineTest {
@@ -38,6 +47,22 @@ class UnifiedTemplateEngineTest {
         assertEquals("hello, world:true:12.5", new UnifiedTemplateEngine(null).render("#{concat('hello, world', ':', true, ':', 12.5)}", context));
     }
 
+    @Test void supportsV22BuiltInsAndRejectsInvalidInputs() throws Exception {
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), new LinkedHashMap<String,Object>(), Collections.emptyMap(), null), tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+        assertEquals("fallback", engine.render("#{nvl('', 'fallback')}", context));
+        assertEquals("  ", engine.render("#{nvl('  ', 'fallback')}", context));
+        assertEquals("yes", engine.render("#{iif(true, 'yes', 'no')}", context));
+        assertEquals("no", engine.render("#{iif(condition=no, trueValue='yes', falseValue='no')}", context));
+        assertEquals("999", engine.render("#{nchar(3, '9')}", context));
+        assertEquals("abab", engine.render("#{nchar(count=2, value=ab)}", context));
+        assertEquals("", engine.render("#{nchar(0, x)}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{nvl('only-one')}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{iif(maybe, a, b)}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{nchar(1.5, x)}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{nchar(10001, x)}", context));
+    }
+
     @Test void configuredToolReceivesContextTypesWithoutGuessing() throws Exception {
         LinkedHashMap<String,Object> data=new LinkedHashMap<String,Object>();
         data.put("account","00123"); data.put("count",7); data.put("enabled",true); data.put("items",Collections.singletonList(Collections.singletonMap("status","READY")));
@@ -52,9 +77,34 @@ class UnifiedTemplateEngineTest {
         assertEquals("READY",invoker.input.get("first"));
     }
 
+    @Test void executesGlobalAndQualifiedGroupedCallsThroughTheSameTemplatePath() throws Exception {
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("globalEcho", new ToolConfig("globalEcho", "Global", "Global", "echo global", "txt", Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample.echo", new ToolConfig("sample.echo", "echo", "sample", "Grouped", "Grouped",
+                Arrays.asList("echo", "grouped"), Arrays.asList("dispatch"), "txt", Collections.<String,ToolArgumentConfig>emptyMap(), null));
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tools,null,null), runner);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        context.beginStage(new att.core.StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(invoker);
+        CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"));
+        assertEquals("ok", engine.executeCall("#{globalEcho()}", context, log, "global"));
+        assertEquals(Arrays.asList("echo", "global"), runner.calls.get(0));
+        assertEquals("ok", engine.executeCall("#{sample.echo()}", context, log, "grouped"));
+        assertEquals(Arrays.asList("dispatch", "echo", "echo", "grouped"), runner.calls.get(1));
+    }
+
     private static final class CapturingInvoker extends ToolInvoker {
         private Map<String,Object> input;
         CapturingInvoker(Path root){super(root,new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));}
         @Override public ToolInvocationResult invoke(String invocationId,String toolName,Map<String,Object> input,CaseRuntimeContext context,CaseExecutionLog log){this.input=input;return new ToolInvocationResult(toolName,invocationId,"ok",Collections.<String,Object>emptyMap());}
+    }
+
+    private static final class CapturingRunner extends CommandRunner {
+        private final List<List<String>> calls = new ArrayList<List<String>>();
+        @Override public CommandResult run(List<String> argv, Duration timeout, Path workingDirectory) {
+            calls.add(new ArrayList<String>(argv));
+            return new CommandResult(0, "ok", "", false);
+        }
     }
 }

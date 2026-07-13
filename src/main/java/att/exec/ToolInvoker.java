@@ -43,15 +43,21 @@ public class ToolInvoker {
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final CommandRunner commandRunner;
+    private final SshCommandRunner sshCommandRunner;
 
     public ToolInvoker(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new CommandRunner());
     }
 
     public ToolInvoker(Path projectRoot, FrameworkConfig config, CommandRunner commandRunner) {
+        this(projectRoot, config, commandRunner, new SshCommandRunner(commandRunner));
+    }
+
+    ToolInvoker(Path projectRoot, FrameworkConfig config, CommandRunner commandRunner, SshCommandRunner sshCommandRunner) {
         this.projectRoot = projectRoot;
         this.config = config;
         this.commandRunner = commandRunner;
+        this.sshCommandRunner = sshCommandRunner;
     }
 
     public ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
@@ -85,12 +91,28 @@ public class ToolInvoker {
         validateArguments(tool, resolvedInput);
         expandDelimitedArgument(tool, resolvedInput);
 
-        List<String> argv = expandCommand(tool, resolvedInput);
-        String command = printableCommand(argv);
+        List<String> logicalArgv = expandCommand(tool, resolvedInput);
+        List<String> argv = logicalArgv;
+        String sshTransport = tool.ssh() == null ? "" : sshCommandRunner.transportName();
         CommandResult commandResult;
         long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
-        try { commandResult = commandRunner.run(argv, Duration.ofMillis(timeoutMs), projectRoot); }
-        catch (java.io.IOException e) { Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("id", id); evidence.put("type", "tool"); evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage()); throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e); }
+        try {
+            if (tool.ssh() == null) commandResult = commandRunner.run(argv, Duration.ofMillis(timeoutMs), projectRoot);
+            else {
+                SshCommandRunner.Execution execution = sshCommandRunner.run(tool.ssh(), logicalArgv, Duration.ofMillis(timeoutMs), projectRoot);
+                commandResult = execution.result(); argv = execution.argv(); sshTransport = execution.transport();
+            }
+        }
+        catch (java.io.IOException e) {
+            Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+            evidence.put("id", id); evidence.put("type", "tool"); evidence.put("name", toolName);
+            evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage());
+            evidence.put("logicalArgv", logicalArgv); evidence.put("argv", argv);
+            if (tool.grouped()) { evidence.put("groupId", tool.groupId()); evidence.put("toolKey", tool.localKey()); }
+            if (tool.ssh() != null) { evidence.put("sshDestination", tool.ssh().destination()); evidence.put("sshPort", tool.ssh().port()); evidence.put("sshTransport", sshTransport); }
+            throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e);
+        }
+        String command = printableCommand(argv);
         String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
         Exception parseFailure = null;
@@ -104,7 +126,20 @@ public class ToolInvoker {
         toolInvocation.put("stdout", commandResult.stdout());
         toolInvocation.put("stderr", commandResult.stderr());
         toolInvocation.put("command", command);
+        toolInvocation.put("logicalArgv", logicalArgv);
         toolInvocation.put("argv", argv);
+        if (tool.grouped()) {
+            toolInvocation.put("groupId", tool.groupId());
+            toolInvocation.put("toolKey", tool.localKey());
+        }
+        if (tool.ssh() != null) {
+            Map<String, Object> ssh = new LinkedHashMap<String, Object>();
+            ssh.put("destination", tool.ssh().destination());
+            ssh.put("port", tool.ssh().port());
+            ssh.put("identityFileConfigured", !tool.ssh().identityFile().isEmpty());
+            ssh.put("transport", sshTransport);
+            toolInvocation.put("ssh", ssh);
+        }
         toolInvocation.put("timeoutMs", timeoutMs);
         toolInvocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 && parseFailure == null ? "PASS" : "ERROR"));
         if (parseFailure != null) toolInvocation.put("parserDiagnostic", parseFailure.getMessage());
@@ -120,6 +155,7 @@ public class ToolInvoker {
         invocation.put("rawOutput", rawOutput);
         invocation.put("stdout", commandResult.stdout());
         invocation.put("stderr", commandResult.stderr());
+        invocation.put("logicalArgv", logicalArgv);
         invocation.put("argv", argv);
         if (saveAs != null && !saveAs.trim().isEmpty()) {
             Path directory = context.caseLogDirectory();
@@ -136,7 +172,11 @@ public class ToolInvoker {
         // Keep the action node focused on action metadata while exposing the
         // invoked tool through the V2 uppercase TOOL child node.
         Map<String, Object> toolNode = new LinkedHashMap<String, Object>();
-        toolNode.put(toolName, toolInvocation);
+        if (tool.grouped()) {
+            Map<String, Object> groupNode = new LinkedHashMap<String, Object>();
+            groupNode.put(tool.localKey(), toolInvocation);
+            toolNode.put(tool.groupId(), groupNode);
+        } else toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
         if (recordAction) context.addAction(id, invocation);
         log.append("ACTION " + id, invocation);
@@ -203,7 +243,7 @@ public class ToolInvoker {
     private boolean blank(Object value) { return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty(); }
 
     private List<String> expandCommand(ToolConfig tool, Map<String, Object> input) throws java.io.IOException {
-        List<String> tokens = CommandRunner.parseCommand(tool.command());
+        List<String> tokens = tool.commandArgv();
         List<String> argv = new ArrayList<String>();
         for (String token : tokens) {
             ToolArgumentConfig delimited = exactDelimitedPlaceholder(tool, token);
@@ -222,6 +262,12 @@ public class ToolInvoker {
             }
             matcher.appendTail(rendered);
             argv.add(rendered.toString());
+        }
+        if (!tool.groupScriptArgv().isEmpty()) {
+            List<String> dispatched = new ArrayList<String>(tool.groupScriptArgv());
+            dispatched.add(tool.localKey());
+            dispatched.addAll(argv);
+            return dispatched;
         }
         return argv;
     }

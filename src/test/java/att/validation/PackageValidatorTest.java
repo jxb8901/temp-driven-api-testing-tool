@@ -41,6 +41,20 @@ class PackageValidatorTest {
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,tool));
     }
 
+    @Test void sshToolValidationChecksIdentityButSkipsRemoteExecutable() throws Exception {
+        Path identity = tempDir.resolve("id_ed25519"); Files.write(identity, new byte[]{1});
+        ToolConfig remote = new ToolConfig("remote.query", "query", "remote", "Query", "Remote query",
+                Arrays.asList("/remote/not-present", "arg"), Collections.<String>emptyList(), "txt",
+                Collections.<String,ToolArgumentConfig>emptyMap(), new SshConfig("host.example", "att", 22, identity.toString()));
+        PackageValidator validator = new PackageValidator(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,Collections.<String,ToolConfig>emptyMap(),null,null));
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateToolExecutable", ToolConfig.class); method.setAccessible(true);
+        assertDoesNotThrow(() -> { try { method.invoke(validator, remote); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
+        ToolConfig missingKey = new ToolConfig("remote.query", "query", "remote", "Query", "Remote query",
+                Arrays.asList("/remote/not-present"), Collections.<String>emptyList(), "txt",
+                Collections.<String,ToolArgumentConfig>emptyMap(), new SshConfig("host.example", "att", 22, "missing-key"));
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator, missingKey));
+    }
+
     @Test void allSelectionUsesConfiguredRecursiveTestcaseRoot() throws Exception {
         Path cases = tempDir.resolve("custom/cases/nested");
         Files.createDirectories(cases);

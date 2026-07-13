@@ -1,0 +1,12 @@
+schemaVersion: att-tool-group/v2.2
+id: sample
+name: Sample grouped tools
+description: Demonstrates qualified tool calls and a shared group dispatcher
+script: [./tools/tool_group_dispatch.sh]
+tools:
+  getAcDate:
+    name: Get account date through a group
+    description: Return the current account date through the sample dispatcher
+    command: [./tools/get_ac_date.sh]
+    output: txt
+    arguments: {}
