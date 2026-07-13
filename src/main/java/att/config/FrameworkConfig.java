@@ -29,6 +29,7 @@ public final class FrameworkConfig {
     private final int headerRows;
     private final String xmlNamespaceMode;
     private final String workbookId;
+    private final boolean caseLogYamlAnchors;
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
                            int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
@@ -78,6 +79,16 @@ public final class FrameworkConfig {
                            ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, testcasesRoot, tools,
+                report, run, sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, headerRows, xmlNamespaceMode, workbookId, false);
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
+                           int timeoutMs, Path templatesRoot, Path testcasesRoot, Map<String, ToolConfig> tools,
+                           ReportConfig report, RunConfig run, List<SheetGroupConfig> sheetGroups,
+                           String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
+                           List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId,
+                           boolean caseLogYamlAnchors) {
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
@@ -97,6 +108,7 @@ public final class FrameworkConfig {
         this.headerRows = headerRows;
         this.xmlNamespaceMode = xmlNamespaceMode == null ? "ignore" : xmlNamespaceMode;
         this.workbookId = workbookId == null ? "" : workbookId;
+        this.caseLogYamlAnchors = caseLogYamlAnchors;
         if (!("ignore".equals(this.xmlNamespaceMode) || "preserve".equals(this.xmlNamespaceMode))) throw new IllegalArgumentException("xml.namespaceMode must be ignore or preserve");
     }
 
@@ -119,6 +131,7 @@ public final class FrameworkConfig {
     public int headerRows() { return headerRows; }
     public String xmlNamespaceMode() { return xmlNamespaceMode; }
     public String workbookId() { return workbookId; }
+    public boolean caseLogYamlAnchors() { return caseLogYamlAnchors; }
     public boolean suiteResolved() { return !sheetGroups.isEmpty(); }
 
     private static ReportConfig defaultReport() {

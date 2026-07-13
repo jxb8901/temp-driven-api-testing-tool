@@ -24,12 +24,12 @@ public final class FrameworkConfigLoader {
             if (!Files.isRegularFile(schema) && path.toAbsolutePath().normalize().getParent() != null && path.toAbsolutePath().normalize().getParent().getParent() != null) schema = path.toAbsolutePath().normalize().getParent().getParent().resolve("schemas/att-config-v2.1.schema.json");
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
             SchemaSupport.requireVersion(map, Version.CONFIG_SCHEMA, "config");
-            SchemaSupport.rejectUnknown(map, "config", "schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "xml", "tools");
+            SchemaSupport.rejectUnknown(map, "config", "schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools");
             validateGlobalMappings(map);
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
-                    templatesRoot(map), testcasesRoot(map), tools(map), report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "");
+                    templatesRoot(map), testcasesRoot(map), tools(map), report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map));
         }
     }
 
@@ -38,9 +38,15 @@ public final class FrameworkConfigLoader {
         return xml instanceof Map ? text(((Map<?, ?>) xml).get("namespaceMode"), "ignore") : "ignore";
     }
 
+    private static boolean caseLogYamlAnchors(Map<?, ?> map) {
+        Object caseLog = map.get("caseLog");
+        return caseLog instanceof Map && booleanValue(((Map<?, ?>) caseLog).get("yamlAnchors"), false, "caseLog.yamlAnchors");
+    }
+
     private static void validateGlobalMappings(Map<?, ?> map) {
         if (map.get("templates") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("templates"), "config.templates"), "config.templates", "root");
         if (map.get("testcase") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("testcase"), "config.testcase"), "config.testcase", "root");
+        if (map.get("caseLog") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("caseLog"), "config.caseLog"), "config.caseLog", "yamlAnchors");
         if (map.get("run") != null) {
             Map<?, ?> run = SchemaSupport.map(map.get("run"), "config.run");
             SchemaSupport.rejectUnknown(run, "config.run", "id");

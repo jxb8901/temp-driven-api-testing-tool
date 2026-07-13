@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.4
+
+- Case log YAML now expands repeated Map/List values at every location by default, avoiding generated anchors such as `&id001` and aliases such as `*id001`.
+- Added global `caseLog.yamlAnchors`; it defaults to `false` for fully expanded YAML and can restore YAML anchors when enabled.
+- Added the searchable `【!!!!!】` prefix to Case log blocks whose section or structured status is `ERROR`, `FAIL`, or `INVALID`.
+
 ## 2.1.3
 
 - Added inline `assert` expressions to `render` and `tool` actions so their results can be validated without a separate assert action.

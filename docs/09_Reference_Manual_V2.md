@@ -819,6 +819,7 @@ schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
+caseLog: {yamlAnchors: false}
 testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
@@ -837,6 +838,7 @@ tools: {}
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty value exposed as `${CASE.environment}`; it does not choose endpoints by itself |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
+| `caseLog.yamlAnchors` | `false` | Boolean; false fully expands repeated YAML structures, true permits anchors/aliases |
 | `templates.root` | `templates` | Non-empty package-relative template root |
 | `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
@@ -852,7 +854,8 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `templates`, `testcase`, `run`, `report`, `xml`, `tools`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `report`, `xml`, `tools`, `x-*` |
+| `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
@@ -864,6 +867,10 @@ Allowed global object properties are:
 | `arguments.<key>` | `name`, `description`, `required`, `delimit`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.1 fields.
+
+Case log structured entries use YAML. `caseLog.yamlAnchors: false` is the default and prints repeated Map/List content in full at every location. With `true`, SnakeYAML may emit `&id001` and `*id001`; these are standard YAML anchor/alias markers and carry no ATT identifier semantics.
+
+ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `FAIL`, or `INVALID` with `【!!!!!】`. Search for that exact marker to locate abnormal blocks; PASS, SKIPPED, and informational blocks remain unmarked.
 
 ### Workbook sidecar
 
@@ -909,7 +916,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.3",
+  "attVersion": "2.1.4",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

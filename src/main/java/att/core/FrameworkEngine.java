@@ -171,7 +171,7 @@ public class FrameworkEngine {
         Path caseOutputDir = IdentifierValidator.strictChild(runDirectory, validatedCaseId, "Case directory");
         Files.createDirectories(caseOutputDir);
         Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
-        CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath);
+        CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors());
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, runId, runDirectory, caseLogPath);
         context.put("CASE.environment", suiteConfig.environment());
         caseLog.append("CASE", context.caseTree());

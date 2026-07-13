@@ -2,6 +2,8 @@ schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
+caseLog:
+  yamlAnchors: false
 testcase:
   root: testcase
 

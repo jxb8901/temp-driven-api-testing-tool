@@ -90,12 +90,12 @@ The implementation MAY introduce focused helpers for shared concerns such as sta
 
 ### 6.1 Version source
 
-The Maven project version is the authoritative ATT version. Release builds MUST use a non-SNAPSHOT value such as `2.1.3`.
+The Maven project version is the authoritative ATT version. Release builds MUST use a non-SNAPSHOT value such as `2.1.4`.
 
 The build MUST generate a resource containing:
 
 ```properties
-att.version=2.1.3
+att.version=2.1.4
 att.buildTime=2026-07-11T00:00:00Z
 att.gitCommit=<commit-or-unknown>
 ```
@@ -182,6 +182,8 @@ schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
+caseLog:
+  yamlAnchors: false
 templates:
   root: templates
 testcase:
@@ -221,6 +223,8 @@ tools:
 | outputDirectory | string | No | relative package path; default `output` |
 | environment | string | No | non-blank; default `SIT` |
 | timeoutMs | integer | No | 1–3600000; default 10000 |
+| caseLog | map | No | only `yamlAnchors` is allowed |
+| caseLog.yamlAnchors | boolean | No | default `false`; `false` expands repeated structures, `true` permits YAML anchors and aliases |
 | templates | map | No | only `root` is allowed |
 | templates.root | string | No | relative package path; default `templates` |
 | testcase.root | string | No | relative package path; default `testcase`; paired `basename.yaml`/`basename.xlsx` files are discovered recursively |
@@ -239,6 +243,10 @@ tools:
 | tools | map | No | tool key → tool schema below |
 
 A tool descriptor permits only `name`, `description`, `command`, `output`, `arguments`, and `x-*`. `name`, `description`, and `command` are non-blank strings. `output` is `txt`, `yaml`, `json`, or `xml`, defaulting to `txt`. `arguments` is an ordered map; each argument permits only `name`, `description`, `required`, `delimit`, and `x-*`. `name`, `description`, and boolean `required` are mandatory; `delimit` is a non-blank string permitted only on the last declared argument.
+
+Case logs are YAML-formatted text. With the default `caseLog.yamlAnchors: false`, repeated Map/List values are printed in full at each location. Setting it to `true` permits SnakeYAML to emit anchors such as `&id001` and aliases such as `*id001`; these are YAML references, not ATT IDs.
+
+Any Case log block whose section name or nested structured `status` is `ERROR`, `FAIL`, or `INVALID` MUST begin with `【!!!!!】`, for example `【!!!!!】[ACTION invokeApi]`. Operators can search this exact marker without parsing YAML. PASS, SKIPPED, and normal informational blocks do not receive the marker.
 
 `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are outside V2.1 scope and are rejected as unknown fields.
 
@@ -514,7 +522,7 @@ Suggested code families are:
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.3",
+  "attVersion": "2.1.4",
   "valid": false,
   "mode": "package",
   "summary": {
@@ -764,7 +772,7 @@ Every completed run contains `run.yaml` with at least:
 ```yaml
 schemaVersion: att-run/v2.1
 att:
-  version: 2.1.3
+  version: 2.1.4
   buildTime: 2026-07-11T00:00:00Z
   gitCommit: abcdef0
 runtime:

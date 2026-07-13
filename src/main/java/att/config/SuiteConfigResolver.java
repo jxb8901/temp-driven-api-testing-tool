@@ -52,7 +52,7 @@ public final class SuiteConfigResolver {
         int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
         return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
                 global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
-                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId);
+                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors());
     }
 
     private List<StageConfig> stages(Object value) {

@@ -12,6 +12,7 @@
     "testcase": {"type": "object", "properties": {"root": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "run": {"type": "object", "properties": {"id": {"type": "object", "properties": {"default": {"const": "timestamp"}, "timestampFormat": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "report": {"type": "object", "properties": {"mode": {"const": "append-to-copy"}, "fileNamePattern": {"type": "string"}, "columns": {"type": "object", "additionalProperties": {"type": "string"}}, "junit": {"type": "object", "properties": {"caseLogEmbedThresholdBytes": {"type": "integer", "minimum": 0, "maximum": 1048576}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "caseLog": {"type": "object", "properties": {"yamlAnchors": {"type": "boolean", "default": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "xml": {"type": "object", "properties": {"namespaceMode": {"enum": ["ignore", "preserve"]}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "tools": {"type": "object", "additionalProperties": {"$ref": "#/$defs/tool"}}
   },

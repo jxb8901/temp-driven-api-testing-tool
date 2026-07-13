@@ -60,6 +60,8 @@ schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
+caseLog:
+  yamlAnchors: false
 testcase:
   root: testcase
 templates:
@@ -87,6 +89,10 @@ tools:
 ```
 
 `schemaVersion` 必填。V2.1 對 config、sidecar、template 和 action 採嚴格 schema：未定義字段會在 validate 報錯；若要保存工具自訂但 ATT 不解讀的資料，字段必須以 `x-` 開頭。
+
+`caseLog.yamlAnchors` 預設為 `false`，相同 Map/List 會在 Case log 每處完整輸出。設為 `true` 時，YAML 可使用 `&id001`／`*id001` 形式的 anchor/alias 以減少重複內容；它們只是 YAML 引用，不是 ATT ID。
+
+Case log 中 `ERROR`、`FAIL`、`INVALID` 區塊會以 `【!!!!!】` 開頭，例如 `【!!!!!】[ACTION invokeApi]`。可直接搜尋 `【!!!!!】` 快速定位異常日誌。
 
 工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，只有最後一個參數可增加 `delimit`。
 
@@ -302,7 +308,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.3",
+  "attVersion": "2.1.4",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
