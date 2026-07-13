@@ -44,11 +44,15 @@ public class StageTemplateRunner {
                     String rendered = templateEngine.render(content, context, log);
                     Map<String, Object> invocation = renderRecord(action, rendered, context);
                     context.addAction(action.id(), invocation);
+                    ResultStatus status = applyAssertion(action, invocation, context);
+                    context.updateAction(action.id(), invocation);
                     log.append("ACTION " + action.id(), invocation);
-                    results.add(new ValidationResult(stageName, action.id(), ResultStatus.PASS, "", rendered, ""));
+                    results.add(new ValidationResult(stageName, action.id(), status, action.assertion(), rendered, ""));
+                    if (status != ResultStatus.PASS && stopOnFailure(action)) break;
                 } else if ("tool".equalsIgnoreCase(action.type())) {
-                    Object output = executeTool(action, context, log);
-                    results.add(new ValidationResult(stageName, action.id(), ResultStatus.PASS, action.call(), String.valueOf(output), ""));
+                    ToolOutcome outcome = executeTool(action, context, log);
+                    results.add(new ValidationResult(stageName, action.id(), outcome.status, action.call(), String.valueOf(outcome.output), ""));
+                    if (outcome.status != ResultStatus.PASS && stopOnFailure(action)) break;
                 } else if ("assert".equalsIgnoreCase(action.type())) {
                     String rendered = templateEngine.renderValues(action.expression(), context);
                     boolean passed = evaluator.evaluate(action.expression(), context);
@@ -84,22 +88,27 @@ public class StageTemplateRunner {
         return results;
     }
 
-    private Object executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+    private ToolOutcome executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
         java.util.Set<String> retryOn = strings(retry.get("retryOn"));
         java.util.Set<Integer> exitCodes = integers(retry.get("exitCodes"));
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
         att.exec.ToolExecutionException last = null;
+        String saveAs = templateEngine.renderValues(action.saveAs(), context);
         for (int number = 1; number <= maxAttempts; number++) {
-            String attemptId = action.id() + "/attempt-" + String.format("%03d", number);
             try {
-                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, attemptId, action.timeoutMs(), action.saveAs());
-                attempts.add(new LinkedHashMap<String, Object>(result.invocation()));
+                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, action.id(), action.timeoutMs(), saveAs, action.overwrite() || number > 1);
+                Map<String, Object> attempt = new LinkedHashMap<String, Object>(result.invocation());
+                attempt.put("attempt", number);
+                attempts.add(attempt);
                 Map<String, Object> winning = new LinkedHashMap<String, Object>(result.invocation());
                 winning.put("id", action.id()); winning.put("attempts", attempts); winning.put("winningAttempt", number);
                 context.addAction(action.id(), winning);
-                return result.output();
+                ResultStatus status = applyAssertion(action, winning, context);
+                context.updateAction(action.id(), winning);
+                log.append("ACTION " + action.id() + " RESULT", winning);
+                return new ToolOutcome(result.output(), status);
             } catch (att.exec.ToolExecutionException e) {
                 last = e; Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence()); evidence.put("attempt", number); evidence.put("category", e.category()); attempts.add(evidence);
                 boolean exitEligible = !"EXIT_CODE".equals(e.category()) || exitCodes.isEmpty() || (e.exitCode() != null && exitCodes.contains(e.exitCode()));
@@ -115,18 +124,21 @@ public class StageTemplateRunner {
     private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }
 
     private Map<String, Object> renderRecord(TemplateAction action, String rendered, CaseRuntimeContext context) throws Exception {
-        String saveAs = action.saveAs();
+        String saveAs = templateEngine.renderValues(action.saveAs(), context);
         Object mode = action.output().get("mode");
         if ((saveAs != null && !saveAs.trim().isEmpty()) || "file".equalsIgnoreCase(String.valueOf(mode))) {
             String fileName = saveAs == null || saveAs.trim().isEmpty() ? "output.txt" : saveAs;
-            Path directory = context.actionOutputDir(action.id());
+            Path directory = context.caseLogDirectory();
             Files.createDirectories(directory);
             Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(fileName, "render saveAs")).normalize();
             if (!outputFile.startsWith(directory.normalize())) {
-                throw new IllegalArgumentException("Action output file must stay under action directory: " + fileName);
+                throw new IllegalArgumentException("Render saveAs must stay under case log directory: " + fileName);
             }
-            Files.write(outputFile, rendered.getBytes(StandardCharsets.UTF_8));
-            Map<String, Object> invocation = record(action, null, null, "PASS");
+            Files.createDirectories(outputFile.getParent());
+            if (Files.exists(outputFile) && !action.overwrite()) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + fileName);
+            if (action.overwrite()) Files.write(outputFile, rendered.getBytes(StandardCharsets.UTF_8));
+            else Files.write(outputFile, rendered.getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.CREATE_NEW);
+            Map<String, Object> invocation = record(action, rendered, rendered, "PASS");
             invocation.put("outputFile", outputFile.toString());
             invocation.put("outputBytes", rendered.getBytes(StandardCharsets.UTF_8).length);
             invocation.put("outputSha256", sha256(rendered));
@@ -134,6 +146,23 @@ public class StageTemplateRunner {
             return invocation;
         }
         return record(action, rendered, rendered, "PASS");
+    }
+
+    private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> invocation, CaseRuntimeContext context) {
+        if (action.assertion() == null || action.assertion().trim().isEmpty()) return ResultStatus.PASS;
+        String rendered = templateEngine.renderValues(action.assertion(), context);
+        boolean passed = evaluator.evaluate(action.assertion(), context);
+        invocation.put("assert", action.assertion());
+        invocation.put("assertRendered", rendered);
+        invocation.put("assertResult", passed);
+        invocation.put("status", passed ? "PASS" : "FAIL");
+        return passed ? ResultStatus.PASS : ResultStatus.FAIL;
+    }
+
+    private static final class ToolOutcome {
+        private final Object output;
+        private final ResultStatus status;
+        private ToolOutcome(Object output, ResultStatus status) { this.output = output; this.status = status; }
     }
 
     private Map<String, Object> record(TemplateAction action, Object output, String rawOutput, String status) {

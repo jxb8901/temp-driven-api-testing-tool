@@ -374,13 +374,14 @@ actions:
   renderRequest:
     type: render
     payload: request.tmp.xml
-    saveAs: request.xml
+    saveAs: "${CASE.caseId}-request.xml"
+    assert: "${ACTIONS.renderRequest.output} != ''"
   callApi:
     type: tool
     call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
-  assertStatus:
-    type: assert
-    expression: "${ACTIONS.callApi.output.status} == 'SUCCESS'"
+    saveAs: "${CASE.caseId}-response.json"
+    overwrite: false
+    assert: "${ACTIONS.callApi.output.status} == 'SUCCESS'"
   recordResult:
     type: log
     level: INFO
@@ -402,7 +403,7 @@ Actions run in YAML order. Action IDs are unique within the template and cannot 
 
 Action validation is type-specific. A render action cannot contain tool/assert/log fields; retry and timeout are valid only for tool actions; an assert action requires an expression; a log action may use `level` and `fields`. Unsupported fields are errors rather than ignored values.
 
-Payload and output paths must remain below their intended template/action roots. Template names, paths, payloads, and descriptions support UTF-8 and are case-sensitive.
+Payload and output paths must remain below their intended template/case-log roots. Template names, paths, payloads, and descriptions support UTF-8 and are case-sensitive.
 
 ### 3.3 Tool
 
@@ -479,7 +480,7 @@ Available command placeholders are:
 | `${input.argument}` | Explicitly namespaced reference to the same declared argument |
 | `${TOOL.input.argument}` | Supported explicit alias for the same declared argument |
 
-ATT parses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout below that action directory. The path must be relative and remain below that directory. Every retry attempt writes the same location, so a later attempt replaces the earlier saved stdout; the final attempt's file is the action output artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, status, parsed output, and retry evidence remain in the persisted case evidence.
+ATT parses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout in the case log directory. The relative filename may contain `${...}` Context expressions; template authors must keep it unique in that directory. `overwrite` defaults to `false`, so an existing target is an error unless overwrite is enabled. Every retry writes the same resolved target and replaces the earlier attempt's stdout, leaving the final attempt as the artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, status, parsed output, and retry evidence remain in the persisted case evidence.
 
 Exit code 0 plus successful parsing is PASS. A non-zero exit code, timeout, process failure, or structured-output parse failure is ERROR. Command, inputs, stdout, stderr, raw output, duration, exit code, and parsed output are retained as evidence.
 
@@ -722,7 +723,7 @@ callApi:
 
 `maxAttempts` includes the first attempt and defaults to 1. V2.1 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.1 has no delay/backoff fields, so eligible retries are immediate.
 
-Each attempt has separate evidence such as `attempt-001/`. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.
+Each attempt is recorded directly in the case log/action record; no `attempt-001` directory is created. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.
 
 ## 05 CLI Reference
 
@@ -881,8 +882,8 @@ V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `valida
 |---|---|
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
-| render | requires `payload`, `saveAs`; optional `output`; no call/expression/message/level/fields/timeout/retry |
-| tool | requires `call`; optional `saveAs`, `timeoutMs`, `retry`; no render/assert/log-only fields |
+| render | requires `payload`, `saveAs`; optional `output`, `overwrite`, `assert`; no call/expression/message/level/fields/timeout/retry |
+| tool | requires `call`; optional `saveAs`, `overwrite`, `assert`, `timeoutMs`, `retry`; no render/assert-action/log-only fields |
 | assert | requires `expression`; no render/tool/log-only fields, timeout, or retry |
 | log | requires `message`; optional `level`, `fields`; no render/tool/assert-only fields, timeout, or retry |
 | retry | `maxAttempts`, `retryOn`, `exitCodes`; retryOn required and contains only `EXIT_CODE` |
@@ -901,14 +902,14 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render payloads remain below the template; action output stays below the action directory. ATT normalizes and checks root containment before writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render payloads remain below the template; resolved `saveAs` output stays below the case log directory. ATT normalizes and checks root containment before writes.
 
 ### Validation JSON contract
 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.1",
+  "attVersion": "2.1.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1143,7 +1144,7 @@ A false assertion is FAIL. Invalid expression syntax/navigation, tool failure, t
 
 #### Why did a tool run more than once?
 
-Its action used retry and received an eligible non-zero exit code. Inspect `attempt-001`, `attempt-002`, and the final action record.
+Its action used retry and received an eligible non-zero exit code. Inspect the attempt list and final action record in the case log.
 
 #### Can I use a shell pipeline in `command`?
 

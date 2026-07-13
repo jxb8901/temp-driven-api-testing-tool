@@ -59,7 +59,11 @@ public class ToolInvoker {
     }
 
     public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs, String saveAs) throws Exception {
-        return invoke(invocationId, toolName, input, context, log, false, timeoutMs, saveAs);
+        return invokeAttempt(invocationId, toolName, input, context, log, timeoutMs, saveAs, false);
+    }
+
+    public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs, String saveAs, boolean overwrite) throws Exception {
+        return invoke(invocationId, toolName, input, context, log, false, timeoutMs, saveAs, overwrite);
     }
 
     public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
@@ -67,10 +71,10 @@ public class ToolInvoker {
     }
 
     private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction) throws Exception {
-        return invoke(invocationId, toolName, input, context, log, recordAction, null, "");
+        return invoke(invocationId, toolName, input, context, log, recordAction, null, "", false);
     }
 
-    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs, String saveAs) throws Exception {
+    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs, String saveAs, boolean overwrite) throws Exception {
         ToolConfig tool = config.tool(toolName);
         if (tool == null) {
             throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -118,13 +122,14 @@ public class ToolInvoker {
         invocation.put("stderr", commandResult.stderr());
         invocation.put("argv", argv);
         if (saveAs != null && !saveAs.trim().isEmpty()) {
-            String actionId = id.replaceFirst("/attempt-\\d+$", "");
-            Path directory = context.actionOutputDir(actionId);
+            Path directory = context.caseLogDirectory();
             Files.createDirectories(directory);
             Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
-            if (!outputFile.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool saveAs must stay under action directory: " + saveAs);
+            if (!outputFile.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool saveAs must stay under case log directory: " + saveAs);
             Files.createDirectories(outputFile.getParent());
-            Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
+            if (Files.exists(outputFile) && !overwrite) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + saveAs);
+            if (overwrite) Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
+            else Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.CREATE_NEW);
             invocation.put("outputFile", outputFile.toString());
             toolInvocation.put("outputFile", outputFile.toString());
         }

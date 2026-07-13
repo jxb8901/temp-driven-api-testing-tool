@@ -138,18 +138,19 @@ actions:
   renderRequest:
     type: render
     payload: request.tmp.xml
-    saveAs: request.xml
+    saveAs: "${CASE.caseId}-request.xml"
+    assert: "${ACTIONS.renderRequest.output} != ''"
   invokeApi:
     type: tool
     call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
+    saveAs: "${CASE.caseId}-response.json"
+    overwrite: false
+    assert: "${ACTIONS.invokeApi.output.status} == '${CASE.expected.status}'"
     # 可覆蓋 config/sidecar 的 timeoutMs；單位為毫秒
     timeoutMs: 30000
     retry:
       maxAttempts: 3
       retryOn: [EXIT_CODE]
-  assertStatus:
-    type: assert
-    expression: "${ACTIONS.invokeApi.output.status} == '${CASE.expected.status}'"
 ```
 
 `request.tmp.xml`：
@@ -164,14 +165,15 @@ actions:
 
 Action type 決定可用字段：
 
-- `render` 必須有 `payload`；使用 `output.mode: file` 時必須有 `saveAs`；不能 retry。
-- `tool` 必須有一個已配置的 `call`；可用 `saveAs` 保存 raw stdout，亦可設定 `timeoutMs` 與 retry。
+- `render` 必須有 `payload`；使用 `output.mode: file` 時必須有 `saveAs`；可用 `assert` 直接驗證 render 結果，但不能 retry。
+- `tool` 必須有一個已配置的 `call`；可用 `assert` 直接驗證結果，也可用 `saveAs` 保存 raw stdout，並設定 `timeoutMs` 與 retry。
+- `saveAs` 支援 `${...}` Context 表達式，文件位於 case log 所在目錄。模板開發者需確保名稱唯一；`overwrite` 預設為 `false`，同名文件已存在時會報錯。
 - `assert` 必須有非空 `expression`；不允許 retry，輪詢請交給明確的 tool action。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
 
 全域 `timeoutMs` 的單位是毫秒；上例為 10 秒。sidecar 可用同名 `timeoutMs` 覆蓋全域值；個別 tool action 再以 `timeoutMs` 覆蓋已解析的全域／sidecar 值。`timeoutMs` 只可用於 tool action，範圍為 1–3600000。
 
-retry 只適用於 tool action 的 `EXIT_CODE`。超時、配置錯誤、參數錯誤、輸出解析錯誤和 assertion FAIL 都不會 retry；V2.1 沒有 retry delay 或 backoff 設定，符合條件的重試會立即進行。每次嘗試都會保存在 `attempt-001/`、`attempt-002/` 等獨立證據目錄。
+retry 只適用於 tool action 的 `EXIT_CODE`。超時、配置錯誤、參數錯誤、輸出解析錯誤和 assertion FAIL 都不會 retry；V2.1 沒有 retry delay 或 backoff 設定，符合條件的重試會立即進行。每次嘗試的證據直接寫入 case log/action record，不建立 `attempt-001/` 等目錄；有 `saveAs` 時，最後一次嘗試會覆蓋前一次嘗試的結果文件。
 
 ## 6. 中文 Excel 和 sidecar
 
@@ -300,7 +302,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.1",
+  "attVersion": "2.1.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

@@ -192,13 +192,14 @@ public final class PackageValidator {
                 if (!"file".equals(mode)) throw new IllegalArgumentException("render output.mode must be file: " + action.id());
                 require(action.saveAs(), "saveAs is required for render action " + action.id());
                 att.core.IdentifierValidator.relativePath(action.saveAs(), "render saveAs");
+                if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "expression", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); }
-            if ("assert".equals(type)) { require(action.expression(), "expression is required for assert action " + action.id()); forbid(action, "payload", "saveAs", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.expression()); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "expression", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion()); }
+            if ("assert".equals(type)) { require(action.expression(), "expression is required for assert action " + action.id()); forbid(action, "payload", "saveAs", "overwrite", "assert", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.expression()); }
             if ("log".equals(type)) {
                 require(action.message(), "message is required for log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
-                forbid(action, "payload", "saveAs", "call", "expression", "retry", "timeoutMs");
+                forbid(action, "payload", "saveAs", "overwrite", "assert", "call", "expression", "retry", "timeoutMs");
                 for (Object key : action.fields().keySet()) if (!(key instanceof String)) throw new IllegalArgumentException("Log fields keys must be strings: " + action.id());
             }
           } catch (LocatedValidationException e) { throw e; }

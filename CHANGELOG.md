@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.3
+
+- Added inline `assert` expressions to `render` and `tool` actions so their results can be validated without a separate assert action.
+- Removed per-attempt evidence directories. Retry evidence is recorded in the case log/action record, and a configured `saveAs` file is replaced by the latest retry attempt.
+- Moved action `saveAs` files to the case-log directory, added expression-based filenames, and added `overwrite` with a default of `false` and collision errors when disabled.
+
 ## 2.1.2
 
 - Hardened tool execution by tokenizing the static command template before injecting declared arguments as atomic argv values; global commands can no longer hide runtime Context dependencies.

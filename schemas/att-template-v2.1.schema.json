@@ -20,8 +20,10 @@
         "onFailure": {"enum": ["stop", "continue"]},
         "payload": {"type": "string", "minLength": 1},
         "saveAs": {"type": "string", "minLength": 1},
+        "overwrite": {"type": "boolean", "default": false},
         "output": {"type": "object", "properties": {"mode": {"const": "file"}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
         "call": {"type": "string", "minLength": 1},
+        "assert": {"type": "string", "minLength": 1},
         "expression": {"type": "string", "minLength": 1},
         "message": {"type": "string", "minLength": 1},
         "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]},
@@ -49,8 +51,8 @@
           "oneOf": [
             {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "saveAs"], "not": {"anyOf": [{"required": ["call"]}, {"required": ["expression"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
             {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["expression"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
-            {"properties": {"type": {"const": "assert"}}, "required": ["type", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["expression"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
+            {"properties": {"type": {"const": "assert"}}, "required": ["type", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["assert"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["assert"]}, {"required": ["call"]}, {"required": ["expression"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
           ]
         }
       ]

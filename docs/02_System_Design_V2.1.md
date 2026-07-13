@@ -90,12 +90,12 @@ The implementation MAY introduce focused helpers for shared concerns such as sta
 
 ### 6.1 Version source
 
-The Maven project version is the authoritative ATT version. Release builds MUST use a non-SNAPSHOT value such as `2.1.1`.
+The Maven project version is the authoritative ATT version. Release builds MUST use a non-SNAPSHOT value such as `2.1.3`.
 
 The build MUST generate a resource containing:
 
 ```properties
-att.version=2.1.1
+att.version=2.1.3
 att.buildTime=2026-07-11T00:00:00Z
 att.gitCommit=<commit-or-unknown>
 ```
@@ -334,7 +334,9 @@ Allowed fields:
 renderRequest:
   type: render
   payload: request.tmp.xml
-  saveAs: request.xml
+  saveAs: "${CASE.caseId}-request.xml"
+  overwrite: false
+  assert: "${ACTIONS.renderRequest.output} != ''"
   output:
     mode: file
   onFailure: stop
@@ -344,7 +346,9 @@ Rules:
 
 - `payload` is mandatory and MUST identify a regular file below the template directory.
 - `saveAs` is required when `output.mode` is `file`.
-- `saveAs` MUST be a safe relative filename/path below the action output directory.
+- `saveAs` supports Context expressions and MUST resolve to a safe relative filename/path below the case log directory. Template authors are responsible for filename uniqueness within that directory.
+- `overwrite` defaults to `false`; an existing `saveAs` target is an ERROR unless `overwrite: true` is set.
+- `assert` is optional and validates the rendered result directly after the action is recorded.
 - `retry` is not allowed because render is deterministic local processing.
 - `call`, `expression`, `message`, `level`, and `fields` are forbidden.
 
@@ -354,6 +358,9 @@ Rules:
 invokeApi:
   type: tool
   call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
+  saveAs: "${CASE.caseId}-response.json"
+  overwrite: false
+  assert: "${ACTIONS.invokeApi.output.status} == 'SUCCESS'"
   timeoutMs: 30000
   retry:
     maxAttempts: 3
@@ -367,7 +374,9 @@ Rules:
 - Tool name and all argument names MUST resolve during validation.
 - Required arguments MUST be present syntactically; non-blank runtime validation still occurs before invocation.
 - `timeoutMs` is optional, is valid only for a tool action, and overrides the resolved global/sidecar `timeoutMs` for that action. Its range is 1–3600000.
-- `payload`, `saveAs`, `expression`, `message`, `level`, and `fields` are forbidden.
+- `saveAs`, `overwrite`, and `assert` are optional. `saveAs` follows the same case-log-directory, expression, uniqueness, and collision rules as render actions.
+- A tool `assert` runs only after a successful invocation. Assertion FAIL is not retried.
+- `payload`, `expression`, `message`, `level`, and `fields` are forbidden.
 - Retry follows Section 18; timeout is never retried.
 
 ### 8.3 Assert action
@@ -505,7 +514,7 @@ Suggested code families are:
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.1.1",
+  "attVersion": "2.1.3",
   "valid": false,
   "mode": "package",
   "summary": {
@@ -584,7 +593,7 @@ Before directory creation, ATT resolves and normalizes `<runDirectory>/<fullCase
 
 - Full template references use `/`, contain no empty, `.` or `..` segments, and remain below `templates.root`.
 - Render payloads remain below their template directory.
-- `saveAs` remains below its action output directory.
+- `saveAs` resolves below the case log directory.
 - Archive entry names are generated from verified relative paths and MUST contain no absolute or parent segments.
 
 ## 11. Environment value
@@ -755,7 +764,7 @@ Every completed run contains `run.yaml` with at least:
 ```yaml
 schemaVersion: att-run/v2.1
 att:
-  version: 2.1.1
+  version: 2.1.3
   buildTime: 2026-07-11T00:00:00Z
   gitCommit: abcdef0
 runtime:
@@ -935,14 +944,7 @@ Rules:
 
 ### 18.2 Evidence
 
-Every attempt has its own directory and record:
-
-```text
-invokeApi/attempt-001/
-invokeApi/attempt-002/
-```
-
-The action node records all attempts, final status, total duration, and winning attempt. ERROR is returned after exhaustion. A later successful attempt makes the action PASS while retaining earlier errors as attempt evidence and warnings.
+Every attempt is appended to the case log and retained in the action node; ATT does not create `attempt-001`-style directories. The action node records all attempts, final status, total duration, and winning attempt. ERROR is returned after exhaustion. A later successful attempt makes the action PASS while retaining earlier errors as attempt evidence and warnings. When `saveAs` is configured, each retry writes the same resolved target and the latest attempt replaces the previous attempt's file, regardless of the action's normal collision protection.
 
 ## 19. Tool process safety
 

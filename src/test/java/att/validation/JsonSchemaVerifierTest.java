@@ -19,7 +19,7 @@ class JsonSchemaVerifierTest {
     }
     @Test void productionTemplateSchemaAcceptsToolTimeoutAndRejectsParseRetry() throws Exception {
         Path schema=Paths.get("schemas/att-template-v2.1.schema.json");
-        String valid="{\"schemaVersion\":\"att-template/v2.1\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"timeoutMs\":1,\"retry\":{\"retryOn\":[\"EXIT_CODE\"]}}}}";
+        String valid="{\"schemaVersion\":\"att-template/v2.1\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"saveAs\":\"${CASE.caseId}.json\",\"overwrite\":false,\"assert\":\"${ACTIONS.call.output} != null\",\"timeoutMs\":1,\"retry\":{\"retryOn\":[\"EXIT_CODE\"]}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,valid.replace("EXIT_CODE","OUTPUT_PARSE")));
     }

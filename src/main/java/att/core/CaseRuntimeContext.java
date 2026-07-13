@@ -11,12 +11,14 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> actionsView = new LinkedHashMap<String, Object>();
     private final Path caseOutputDir;
+    private final Path caseLogPath;
     private String currentStage;
     private Map<String, Object> currentActions;
     private int toolSequence;
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this.caseOutputDir = caseOutputDir;
+        this.caseLogPath = caseLog.toAbsolutePath().normalize();
         caseNode.put("caseId", testCase.caseId());
         caseNode.put("workbookId", testCase.workbookId());
         caseNode.put("groupId", testCase.groupId());
@@ -106,13 +108,31 @@ public final class CaseRuntimeContext {
         // ACTIONS is a transient convenience view. Keep the persisted CASE
         // shape canonical while exposing the first tool's fields directly for
         // existing same-template expressions such as ${ACTIONS.call.output}.
+        Map<String, Object> view = actionView(action);
+        actionsView.put(actionId, view);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> actionView(Map<String, Object> action) {
         Map<String, Object> view = new LinkedHashMap<String, Object>(action);
         Object toolNode = action.get("TOOL");
         if (toolNode instanceof Map && !((Map<?, ?>) toolNode).isEmpty()) {
             Object first = ((Map<?, ?>) toolNode).values().iterator().next();
             if (first instanceof Map) view.putAll((Map<String, Object>) first);
         }
-        actionsView.put(actionId, view);
+        return view;
+    }
+
+    @SuppressWarnings("unchecked")
+    public void updateAction(String actionId, Map<String, Object> action) {
+        if (currentActions == null || !currentActions.containsKey(actionId)) throw new IllegalArgumentException("Unknown action id: " + actionId);
+        currentActions.put(actionId, action);
+        actionsView.put(actionId, actionView(action));
+    }
+
+    public Path caseLogDirectory() {
+        Path parent = caseLogPath.getParent();
+        return parent == null ? caseOutputDir.toAbsolutePath().normalize() : parent;
     }
 
     public Path actionOutputDir(String actionId) {
