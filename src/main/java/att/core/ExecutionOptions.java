@@ -114,17 +114,14 @@ public final class ExecutionOptions {
         if (packageScope && selectedScope) throw new IllegalArgumentException("--package and --selected are mutually exclusive");
         if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
         String validationScope = packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
-        if ("run".equals(command) && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) {
+        if ("run".equals(command) && !rerun && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) {
             throw new IllegalArgumentException(command + " requires --all, --suite, --case, or --tag");
         }
         if ("validate".equals(command) && "selected".equals(validationScope) && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) throw new IllegalArgumentException("validate --selected requires --all, --suite, --case, or --tag");
-        if (all && suites.isEmpty() && suiteDir == null) suiteDir = Paths.get("testcase");
-        if (suites.isEmpty() && suiteDir == null && (!caseIds.isEmpty() || !tags.isEmpty())) suiteDir = Paths.get("testcase");
         if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
         if (seenOptions.contains("--queue") && seenOptions.contains("--parallel")) throw new IllegalArgumentException("--queue and --parallel are mutually exclusive");
         if (quiet && verbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         validateAllowed(command, seenOptions);
-        if ("validate".equals(command) && "package".equals(validationScope) && suites.isEmpty() && suiteDir == null) suiteDir = Paths.get("testcase");
         return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode);
     }
 

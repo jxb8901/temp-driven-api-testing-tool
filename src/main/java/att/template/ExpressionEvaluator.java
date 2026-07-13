@@ -14,7 +14,7 @@ import att.core.CaseRuntimeContext;
  * Evaluates the small SQL-like boolean expression subset used by template assertions.
  */
 public class ExpressionEvaluator {
-    private static final Pattern CONTEXT = Pattern.compile("\\$\\{([^}]+)}");
+    private static final Pattern CONTEXT = Pattern.compile("\\$\\{((?:[^}'\"]|'(?:\\\\.|[^'])*'|\"(?:\\\\.|[^\"])*\")+)}");
     public boolean evaluate(String expression) {
         return new Parser(expression).parse();
     }
@@ -27,9 +27,11 @@ public class ExpressionEvaluator {
             int start = expression.indexOf("${", index);
             if (start < 0) { normalized.append(expression.substring(index)); break; }
             normalized.append(expression.substring(index, start));
-            int end = expression.indexOf('}', start + 2);
-            if (end < 0) throw new IllegalArgumentException("Unclosed context reference in expression");
-            String path = expression.substring(start + 2, end);
+            Matcher matcher = CONTEXT.matcher(expression);
+            matcher.region(start, expression.length());
+            if (!matcher.lookingAt()) throw new IllegalArgumentException("Unclosed context reference in expression");
+            int end = matcher.end() - 1;
+            String path = matcher.group(1);
             if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid context reference in expression: ${" + path + "}");
             normalized.append('0'); index = end + 1;
         }

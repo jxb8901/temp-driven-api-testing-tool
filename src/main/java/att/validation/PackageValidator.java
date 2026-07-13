@@ -248,9 +248,12 @@ public final class PackageValidator {
 
     private List<Path> suites(ExecutionOptions options) throws Exception {
         List<Path> result = new ArrayList<Path>();
-        if (options.suiteDirectory() != null) {
-            Path directory = options.suiteDirectory().isAbsolute() ? options.suiteDirectory() : projectRoot.resolve(options.suiteDirectory());
-            try (Stream<Path> stream = Files.list(directory)) { stream.filter(p -> p.getFileName().toString().toLowerCase().endsWith(".xlsx")).sorted().forEach(result::add); }
+        if (options.suiteDirectory() != null || options.suitePaths().isEmpty()) {
+            Path configured = options.suiteDirectory() == null ? global.testcasesRoot() : options.suiteDirectory();
+            Path directory = configured.isAbsolute() ? configured : projectRoot.resolve(configured);
+            try (Stream<Path> stream = Files.walk(directory)) {
+                stream.filter(Files::isRegularFile).filter(p -> p.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx")).sorted().forEach(result::add);
+            }
         } else result.addAll(options.suitePaths());
         if (result.isEmpty()) throw new IllegalArgumentException("No Excel suites selected");
         return result;

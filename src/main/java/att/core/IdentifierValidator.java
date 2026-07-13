@@ -31,8 +31,8 @@ public final class IdentifierValidator {
 
     public static String caseId(String workbookId, String groupId, String rowCaseId) {
         String workbook = workbookId(workbookId);
-        String group = component(groupId, "Case sheet ID", 128);
-        if (group.contains(".")) throw new IllegalArgumentException("Case sheet ID must not contain '.': " + group);
+        String group = component(groupId, "Case group ID", 128);
+        if (group.contains(".")) throw new IllegalArgumentException("Case group ID must not contain '.': " + group);
         String row = component(rowCaseId, "Case row ID", 128);
         String full = workbook + "." + group + "." + row;
         if (full.codePointCount(0, full.length()) > 255) throw new IllegalArgumentException("Full Case ID exceeds 255 Unicode code points");

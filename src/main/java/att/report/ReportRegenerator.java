@@ -41,13 +41,14 @@ public final class ReportRegenerator {
             Path log = String.valueOf(row.get("caseLog")).isEmpty() ? null : runDir.resolve(String.valueOf(row.get("caseLog"))).normalize();
             if (log != null && !log.startsWith(runDir)) throw new IllegalArgumentException("Unsafe case log path in manifest: " + row.get("caseLog"));
             String caseName = row.get("caseName") == null ? caseId : String.valueOf(row.get("caseName"));
-            String workbookId = text(row.get("workbookId")), sheetId = text(row.get("sheetId"));
+            String workbookId = text(row.get("workbookId")), groupId = text(row.get("groupId"));
+            if (groupId.isEmpty()) groupId = text(row.get("sheetId")); // read pre-2.1.2 manifests
             String[] idParts = caseId.split("\\.", 3);
             if (workbookId.isEmpty() && idParts.length == 3) workbookId = idParts[0];
-            if (sheetId.isEmpty() && idParts.length == 3) sheetId = idParts[1];
+            if (groupId.isEmpty() && idParts.length == 3) groupId = idParts[1];
             results.add(new TestResult(caseId, caseName, ResultStatus.valueOf(String.valueOf(row.get("status"))),
                     Duration.ofMillis(longValue(row.get("durationMs"))), text(row.get("expected")), text(row.get("actual")), log,
-                    Collections.<ValidationResult>emptyList(), workbookId, sheetId, strings(row.get("tags"))));
+                    Collections.<ValidationResult>emptyList(), workbookId, groupId, strings(row.get("tags"))));
         }
         Instant ended = runNode.get("endedAt") == null ? Files.getLastModifiedTime(manifest).toInstant() : Instant.parse(String.valueOf(runNode.get("endedAt")));
         Instant started = runNode.get("startedAt") == null ? ended : Instant.parse(String.valueOf(runNode.get("startedAt")));

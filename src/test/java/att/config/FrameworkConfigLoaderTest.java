@@ -22,6 +22,8 @@ class FrameworkConfigLoaderTest {
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(mismatch));
         Path direct=tempDir.resolve("direct.yaml"); Files.write(direct,("schemaVersion: att-config/v2.1\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${keywords} ${input.keywords}'\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
         assertEquals("顯示 名稱 !", new FrameworkConfigLoader().load(direct).tool("find").name());
+        Path hiddenContext=tempDir.resolve("hidden-context.yaml"); Files.write(hiddenContext,("schemaVersion: att-config/v2.1\ntools:\n  find:\n    name: Find\n    description: test\n    command: 'echo ${CASE.caseId}'\n    arguments: {}\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(hiddenContext));
         Path bad=tempDir.resolve("bad.yaml"); Files.write(bad,"stages: []\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(bad));
     }

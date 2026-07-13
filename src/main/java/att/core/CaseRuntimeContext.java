@@ -31,8 +31,8 @@ public final class CaseRuntimeContext {
         caseNode.put("STAGES", new LinkedHashMap<String, Object>());
         root.put("CASE", caseNode);
         root.put("ACTIONS", actionsView);
-        // TOOL is a transient, uppercase convenience scope for the currently
-        // executing tool. Persisted tool results live below ACTIONS.<actionId>.
+        // TOOL is a reserved transient scope. Persisted tool results live below
+        // ACTIONS.<actionId>; later actions must not depend on case-wide latest state.
         root.put("TOOL", new LinkedHashMap<String, Object>());
         root.put("RUN.runId", runId);
         root.put("RUN.id", runId);
@@ -126,25 +126,52 @@ public final class CaseRuntimeContext {
     public static Object getPath(Object root, String path) {
         if (path == null || path.isEmpty()) return root;
         Object current = root;
-        for (String raw : path.split("\\.")) {
-            String part = raw;
-            int bracket = part.indexOf('[');
-            String key = bracket < 0 ? part : part.substring(0, bracket);
-            if (!key.isEmpty()) {
-                if (current instanceof Map) current = ((Map<String, Object>) current).get(key);
-                else if (current instanceof java.util.List && numeric(key)) current = listValue((java.util.List<?>) current, Integer.parseInt(key));
-                else return null;
+        int position = 0;
+        while (position < path.length()) {
+            if (path.charAt(position) == '.') { position++; continue; }
+            if (path.charAt(position) == '[') {
+                int end = bracketEnd(path, position);
+                if (end < 0) return null;
+                String selector = path.substring(position + 1, end).trim();
+                if (quoted(selector)) {
+                    if (!(current instanceof Map)) return null;
+                    current = ((Map<String, Object>) current).get(unquote(selector));
+                } else if (current instanceof java.util.List && numeric(selector)) {
+                    current = listValue((java.util.List<?>) current, Integer.parseInt(selector));
+                } else return null;
+                position = end + 1;
+                continue;
             }
-            while (bracket >= 0) {
-                int end = part.indexOf(']', bracket);
-                if (end < 0 || !(current instanceof java.util.List)) return null;
-                String index = part.substring(bracket + 1, end).trim();
-                if (!numeric(index)) return null;
-                current = listValue((java.util.List<?>) current, Integer.parseInt(index));
-                bracket = part.indexOf('[', end + 1);
-            }
+            int end = position;
+            while (end < path.length() && path.charAt(end) != '.' && path.charAt(end) != '[') end++;
+            String key = path.substring(position, end);
+            if (current instanceof Map) current = ((Map<String, Object>) current).get(key);
+            else if (current instanceof java.util.List && numeric(key)) current = listValue((java.util.List<?>) current, Integer.parseInt(key));
+            else return null;
+            position = end;
         }
         return current;
+    }
+
+    private static int bracketEnd(String path, int start) {
+        char quote = 0;
+        for (int i = start + 1; i < path.length(); i++) {
+            char value = path.charAt(i);
+            if (quote != 0) {
+                if (value == quote && path.charAt(i - 1) != '\\') quote = 0;
+            } else if (value == '\'' || value == '"') quote = value;
+            else if (value == ']') return i;
+        }
+        return -1;
+    }
+
+    private static boolean quoted(String value) {
+        return value.length() >= 2 && ((value.charAt(0) == '\'' && value.charAt(value.length() - 1) == '\'') || (value.charAt(0) == '"' && value.charAt(value.length() - 1) == '"'));
+    }
+
+    private static String unquote(String value) {
+        char quote = value.charAt(0);
+        return value.substring(1, value.length() - 1).replace("\\" + quote, String.valueOf(quote)).replace("\\\\", "\\");
     }
 
     private static boolean numeric(String value) { return value != null && value.matches("\\d+"); }

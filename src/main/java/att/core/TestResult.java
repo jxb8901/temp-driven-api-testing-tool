@@ -23,7 +23,7 @@ public class TestResult {
     private final Path caseLogPath;
     private final List<ValidationResult> validations;
     private final String workbookId;
-    private final String sheetId;
+    private final String groupId;
     private final List<String> tags;
 
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath, List<ValidationResult> validations) {
@@ -31,7 +31,7 @@ public class TestResult {
     }
 
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
-                      List<ValidationResult> validations, String workbookId, String sheetId, List<String> tags) {
+                      List<ValidationResult> validations, String workbookId, String groupId, List<String> tags) {
         this.caseId = caseId;
         this.caseName = caseName;
         this.status = status;
@@ -41,7 +41,7 @@ public class TestResult {
         this.caseLogPath = caseLogPath;
         this.validations = validations;
         this.workbookId = workbookId == null ? "" : workbookId;
-        this.sheetId = sheetId == null ? "" : sheetId;
+        this.groupId = groupId == null ? "" : groupId;
         this.tags = tags == null ? Collections.<String>emptyList() : new ArrayList<String>(tags);
     }
 
@@ -55,11 +55,11 @@ public class TestResult {
     public Path outputXml() { return caseLogPath; }
     public List<ValidationResult> validations() { return validations; }
     public String workbookId() { return workbookId; }
-    public String sheetId() { return sheetId; }
+    public String groupId() { return groupId; }
     public List<String> tags() { return Collections.unmodifiableList(tags); }
     public TestResult relocate(Path from, Path to) {
         Path relocated = caseLogPath != null && caseLogPath.startsWith(from) ? to.resolve(from.relativize(caseLogPath)) : caseLogPath;
-        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, sheetId, tags);
+        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, groupId, tags);
     }
     private static String inferred(String caseId, int index) {
         if (caseId == null) return "";

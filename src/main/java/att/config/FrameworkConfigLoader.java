@@ -95,7 +95,26 @@ public final class FrameworkConfigLoader {
             String expression = matcher.group(1);
             String argument = expression.startsWith("TOOL.input.") ? expression.substring(11) : expression.startsWith("input.") ? expression.substring(6) : expression;
             boolean argumentForm = expression.startsWith("TOOL.input.") || expression.startsWith("input.") || expression.matches("[A-Za-z_][A-Za-z0-9_]*");
-            if (argumentForm && !arguments.containsKey(argument)) throw new IllegalArgumentException("Tool command argument reference is case-sensitive and must match a declared argument: " + tool + "." + expression);
+            if (!argumentForm || !arguments.containsKey(argument)) throw new IllegalArgumentException("Tool command placeholders must reference a declared argument: " + tool + "." + expression);
+        }
+        try {
+            java.util.List<String> tokens = att.exec.CommandRunner.parseCommand(command);
+            if (tokens.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool);
+            if (tokens.get(0).contains("${")) throw new IllegalArgumentException("Tool executable must be static: " + tool);
+            for (ToolArgumentConfig argument : arguments.values()) {
+                if (!argument.multiValue()) continue;
+                String direct = "${" + argument.key() + "}";
+                String input = "${input." + argument.key() + "}";
+                String legacy = "${TOOL.input." + argument.key() + "}";
+                for (String token : tokens) {
+                    if ((token.contains(direct) || token.contains(input) || token.contains(legacy))
+                            && !(token.equals(direct) || token.equals(input) || token.equals(legacy))) {
+                        throw new IllegalArgumentException("Delimited argument placeholder must occupy one complete argv token: " + tool + "." + argument.key());
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("Invalid tool command for " + tool + ": " + e.getMessage(), e);
         }
     }
 

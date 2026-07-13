@@ -302,9 +302,8 @@ public class FrameworkEngine {
 
     private List<Path> suites(ExecutionOptions options) throws Exception {
         List<Path> suites = new ArrayList<Path>();
-        if (options.suiteDirectory() != null) {
-            Path configured = options.suiteDirectory();
-            if (Paths.get("testcase").equals(configured)) configured = config.testcasesRoot();
+        if (options.suiteDirectory() != null || options.suitePaths().isEmpty()) {
+            Path configured = options.suiteDirectory() == null ? config.testcasesRoot() : options.suiteDirectory();
             try (java.util.stream.Stream<Path> paths = Files.walk(resolve(configured))) {
                 paths.filter(Files::isRegularFile).filter(path -> path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx"))
                         .filter(path -> Files.isRegularFile(path.resolveSibling(path.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml"))))
@@ -377,7 +376,7 @@ public class FrameworkEngine {
             item.put("caseId", result.caseId());
             item.put("caseName", result.caseName());
             item.put("workbookId", result.workbookId());
-            item.put("sheetId", result.sheetId());
+            item.put("groupId", result.groupId());
             item.put("tags", result.tags());
             item.put("status", result.status().name());
             item.put("durationMs", result.duration().toMillis());

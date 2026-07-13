@@ -40,4 +40,18 @@ class PackageValidatorTest {
         java.lang.reflect.Method method=PackageValidator.class.getDeclaredMethod("validateToolExecutable",ToolConfig.class); method.setAccessible(true);
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,tool));
     }
+
+    @Test void allSelectionUsesConfiguredRecursiveTestcaseRoot() throws Exception {
+        Path cases = tempDir.resolve("custom/cases/nested");
+        Files.createDirectories(cases);
+        Files.write(cases.resolve("sample.xlsx"), new byte[]{0});
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                java.nio.file.Paths.get("custom/cases"),Collections.<String,ToolConfig>emptyMap(),null,null,
+                null,"","",null,null,1,"ignore","");
+        PackageValidator validator = new PackageValidator(tempDir,config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("suites",att.core.ExecutionOptions.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked") List<Path> suites = (List<Path>) method.invoke(validator,att.core.ExecutionOptions.parse(new String[]{"validate","--package"}));
+        assertEquals(Collections.singletonList(cases.resolve("sample.xlsx")), suites);
+    }
 }

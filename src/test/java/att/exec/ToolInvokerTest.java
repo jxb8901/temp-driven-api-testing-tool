@@ -25,7 +25,7 @@ class ToolInvokerTest {
         List<?> messages = (List<?>) ((Map<?,?>) nested.get("Messages")).get("Message");
         assertEquals("WARN", ((Map<?,?>) ((Map<?,?>) messages.get(1)).get("attributes")).get("severity"));
         Map<?,?> attributeOnly = (Map<?,?>) invoker.parseOutput("<Response><Code value=\"00\"/></Response>", "xml");
-        assertEquals("00", attributeOnly.get("Code"));
+        assertEquals("00", ((Map<?,?>) ((Map<?,?>) attributeOnly.get("Code")).get("attributes")).get("value"));
         assertThrows(Exception.class, () -> invoker.parseOutput("{\"a\":1,\"a\":2}", "json"));
         assertThrows(Exception.class, () -> invoker.parseOutput("<!DOCTYPE x [<!ENTITY e SYSTEM 'file:///etc/passwd'>]><x>&e;</x>", "xml"));
         Map<?,?> json = (Map<?,?>) invoker.parseOutput("{\"items\":[1,null,123456789012345678901234567890],\"decimal\":1.234567890123456789}", "json");
@@ -90,17 +90,34 @@ class ToolInvokerTest {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         input.put("keywords", "N/A, NULL");
         new ToolInvoker(tempDir, config, runner).invokeAttempt("call", "grep", input, context, new CaseExecutionLog(tempDir.resolve("case.log")), 1234L);
-        assertEquals("echo", runner.command.trim());
+        assertEquals(Collections.singletonList("echo"), runner.argv);
         assertEquals(Duration.ofMillis(1234), runner.timeout);
     }
 
+    @Test void resolvedArgumentsRemainAtomicArgvValues() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("value", new ToolArgumentConfig("value", "Value", "Free text", true, ""));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "Capture", "Capture argv", "echo --value=${value} ${input.value}", "txt", arguments));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+        TestCase test = new TestCase(2, "payment", "sheet", "TC1", Collections.<String>emptyList(), Collections.<String,Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, tempDir.resolve("case"), "RUN-1", tempDir, tempDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("verify", "T", Collections.<String,Object>emptyMap()), "T", tempDir);
+        CapturingRunner runner = new CapturingRunner();
+        Map<String,Object> input = new LinkedHashMap<String,Object>();
+        input.put("value", "A B O'Reilly a\\b;$(ignored)");
+        ToolInvocationResult result = new ToolInvoker(tempDir, config, runner).invokeAttempt("call", "capture", input, context, new CaseExecutionLog(tempDir.resolve("case.log")), 1234L);
+        assertEquals(Arrays.asList("echo", "--value=A B O'Reilly a\\b;$(ignored)", "A B O'Reilly a\\b;$(ignored)"), runner.argv);
+        assertEquals(runner.argv, result.invocation().get("argv"));
+    }
+
     private static final class CapturingRunner extends CommandRunner {
-        private String command;
+        private List<String> argv;
         private Duration timeout;
 
         @Override
-        public CommandResult run(String command, Duration timeout, java.nio.file.Path workingDirectory) {
-            this.command = command;
+        public CommandResult run(List<String> argv, Duration timeout, java.nio.file.Path workingDirectory) {
+            this.argv = new ArrayList<String>(argv);
             this.timeout = timeout;
             return new CommandResult(0, "", "", false);
         }

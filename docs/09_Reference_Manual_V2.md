@@ -35,7 +35,9 @@ Where an older V2.0 example conflicts with this manual, this manual wins.
 ATT is an offline, template-driven API test runner. Test data lives in Excel, reusable execution logic lives in template directories, and external capabilities are registered as tools.
 
 ```text
-workbook row → test case → ordered stages → template → ordered actions → tool
+Workbook row → Test case → Ordered stages
+Stage → Template-selector column → Current row's selector cell → Template
+Template → Ordered actions → Configured tool (for tool actions)
 ```
 
 The four concepts you need first are:
@@ -146,7 +148,7 @@ stages:
     required: true
 ```
 
-The full Case ID is `payment.payment.TC001`: the first `payment` is the mandatory package-unique workbook `id`, the second comes from the sheet mapping, and `TC001` comes from the row.
+The full Case ID is `payment.payment.TC001`: the first `payment` is the mandatory package-unique workbook `id`, the second is the logical `groupId` on the left of the sheet mapping, and `TC001` comes from the row.
 
 ### Step 3: create the template
 
@@ -178,20 +180,45 @@ Create `templates/payment/request.tmp.json`:
 }
 ```
 
-### Step 4: validate and run
+### Step 4: create the mock tool
+
+Create `tools/invoke_payment_api.sh`:
+
+```sh
+#!/usr/bin/env sh
+set -eu
+
+request_file="${1:?missing request file}"
+environment="${2:?missing environment}"
+
+[ -f "$request_file" ] || {
+  echo "request file not found: $request_file" >&2
+  exit 2
+}
+
+printf '{"status":"SUCCESS","environment":"%s"}\n' "$environment"
+```
+
+Make it executable:
+
+```sh
+chmod +x tools/invoke_payment_api.sh
+```
+
+### Step 5: validate and run
 
 ```sh
 ./att.sh validate --package
-./att.sh run --suite testcase/payment.xlsx --case payment.TC001 --run-id SIT-001 --ci-output junit,json
+./att.sh run --suite testcase/payment.xlsx --case payment.payment.TC001 --run-id SIT-001 --ci-output junit,json
 ```
 
 Use package validation as the release gate. During development, a faster selected check is available:
 
 ```sh
-./att.sh validate --selected --suite testcase/payment.xlsx --case payment.TC001
+./att.sh validate --selected --suite testcase/payment.xlsx --case payment.payment.TC001
 ```
 
-### Step 5: inspect the result
+### Step 6: inspect the result
 
 After successful completion, open:
 
@@ -202,7 +229,7 @@ output/SIT-001/report/index.html
 Other useful files are:
 
 - `output/SIT-001/run.yaml` — versioned run manifest and input hashes;
-- `output/SIT-001/payment.TC001/case.yaml` — persisted runtime Context;
+- `output/SIT-001/payment.payment.TC001/case.yaml` — persisted runtime Context;
 - `output/SIT-001/ci/summary.json` — CI JSON summary;
 - `output/SIT-001/ci/junit.xml` — JUnit XML;
 - `output/SIT-001/report/junit.html` — human-readable JUnit view.
@@ -275,9 +302,7 @@ A required stage selector rejects a blank value. An optional stage with a blank 
 
 #### Formula, date, percentage, and scientific notation cells
 
-ATT reads Excel through Apache POI `DataFormatter`.
-
-ATT does **not** evaluate formulas, does not create a `FormulaEvaluator`, does not ask Excel to recalculate, and does not read a formula cell's cached result. A formula cell is imported as its expression, such as `=A2+B2`. The behavior is the same when no cached result exists.
+ATT reads the displayed text of ordinary Excel cells but does **not** calculate formulas. A formula cell is imported as its formula expression, such as `=A2+B2`; ATT does not ask Excel to recalculate or consume the cached result.
 
 Do not use a formula cell when a calculated value must be consumed by a template, assertion, or tool. Recalculate in Excel and paste the result as a value, or calculate it in a dedicated ATT step.
 
@@ -413,7 +438,7 @@ Unknown, duplicate, or missing required arguments fail validation. Argument meta
 
 #### Command processing
 
-ATT renders placeholders and tokenizes the command into process argv. It does not invoke `/bin/sh`, `cmd.exe`, PowerShell, or another shell.
+ATT first tokenizes the static command template and then resolves placeholders inside the resulting tokens. An ordinary declared argument always remains one atomic argv value, regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. A final argument with `delimit` is the only form that may intentionally expand into zero or more argv values. Resolved values are never tokenized again. ATT does not invoke `/bin/sh`, `cmd.exe`, PowerShell, or another shell.
 
 | Command text | Effect |
 |---|---|
@@ -438,11 +463,11 @@ produces these logical arguments:
 Payment regression
 ```
 
-The text `status|PENDING` remains one literal argument and `>result` does not redirect output.
+The text `status|PENDING` remains one literal argument and `>result` does not redirect output. Quotes in the static template group template text only; they are not an escaping requirement for resolved values.
 
 Prefer the shortest declared-argument placeholder, such as `${keywords}`; use `${input.keywords}` when an explicit namespace improves clarity. Both forms are case-sensitive and must exactly match the argument key. `${TOOL.input.keywords}` remains supported but is not the preferred authoring style. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
 
-Use Context expressions in tool configuration only for exceptional implicit global parameter passing, for example `${ACTIONS.callApi.output.status}`. Ordinary tool inputs should be declared under `arguments` and passed explicitly by the action so dependencies remain visible and validateable.
+Global tool commands may reference only their declared arguments. They cannot reference `${CASE...}`, `${ACTIONS...}`, or other runtime Context scopes. Pass runtime data explicitly in the action call, then reference that declared argument in the command. This keeps the global tool independent and its dependencies statically validateable.
 
 #### Input, output, timeout, and status
 
@@ -452,9 +477,9 @@ Available command placeholders are:
 |---|---|
 | `${argument}` | Preferred direct reference to a declared argument key |
 | `${input.argument}` | Explicitly namespaced reference to the same declared argument |
-| `${ACTIONS.<action>.output.<field>}` | Exceptional Context reference for intentional implicit global parameter passing |
+| `${TOOL.input.argument}` | Supported explicit alias for the same declared argument |
 
-ATT parses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist stdout below that action directory; without `saveAs`, tool invocation creates no files.
+ATT parses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout below that action directory. The path must be relative and remain below that directory. Every retry attempt writes the same location, so a later attempt replaces the earlier saved stdout; the final attempt's file is the action output artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, status, parsed output, and retry evidence remain in the persisted case evidence.
 
 Exit code 0 plus successful parsing is PASS. A non-zero exit code, timeout, process failure, or structured-output parse failure is ERROR. Command, inputs, stdout, stderr, raw output, duration, exit code, and parsed output are retained as evidence.
 
@@ -477,7 +502,7 @@ Every configured timeout is an integer from 1 to 3600000 milliseconds.
 Package mode is the default and checks global configuration, every discovered workbook/sidecar, configured sheets and rows, all templates including unreferenced ones, expressions, tools, paths, and package integrity. It never invokes external tools and is the required release gate.
 
 ```sh
-./att.sh validate --selected --case payment.TC001
+./att.sh validate --selected --case payment.payment.TC001
 ```
 
 Selected mode checks only explicitly selected cases and their dependency closure. It is useful for fast authoring feedback and reports that unselected content was not checked. `run` always performs selected-scope validation for its immutable execution plan.
@@ -486,21 +511,23 @@ Selected mode checks only explicitly selected cases and their dependency closure
 
 | Option | Meaning |
 |---|---|
-| `--all` | Discover all `.xlsx` files below `testcase/` |
+| `--all` | Discover all workbook/sidecar pairs recursively below `testcase.root` |
 | `--suite <xlsx>` | Select one workbook; repeatable |
 | `--suite-dir <dir>` | Discover workbooks below another directory |
-| `--case <group.caseId>` | Select one complete Case ID |
+| `--case <workbookId.groupId.rowCaseId>` | Select one complete Case ID |
 | `--tag <tag>` | Include cases with any requested tag |
 | `--exclude-tag <tag>` | Exclude matching cases after inclusion filters |
 
-An empty selection is an error. `--rerun-failed` selects FAIL/ERROR cases from the latest completed persisted run and requires usable run history.
+An empty selection is an error. `--rerun-failed` is itself a valid selection and reads FAIL/ERROR Case IDs from the latest completed persisted run. Additional `--case`, `--tag`, and `--exclude-tag` filters narrow that set. Missing history, no prior FAIL/ERROR cases, or no currently discoverable case matching the saved IDs is a command error. The current workbook, sidecar, template, and tool definitions are validated and executed; ATT does not replay the old input snapshot.
 
 #### Execute
 
 ```sh
 ./att.sh run --all
 ./att.sh run --suite testcase/payment.xlsx --tag smoke
-./att.sh run --all --case payment.TC001 --run-id SIT-001
+./att.sh run --all --case payment.payment.TC001 --run-id SIT-001
+./att.sh run --rerun-failed
+./att.sh run --rerun-failed --tag payment
 ./att.sh run --all --dry-run
 ```
 
@@ -515,7 +542,8 @@ An empty selection is an error. `--rerun-failed` selects FAIL/ERROR cases from t
 | ERROR | ERROR | 3 |
 | INVALID without ERROR | INVALID | 2 |
 | FAIL without ERROR/INVALID | FAIL | 1 |
-| PASS/SKIPPED only | PASS/SKIPPED | 0 |
+| At least one PASS and only PASS/SKIPPED | PASS | 0 |
+| All selected cases SKIPPED | SKIPPED | 0 |
 
 Assertion false is FAIL. Expression evaluation, process, timeout, parsing, I/O, configuration, and validation failures are ERROR or INVALID according to their phase. A run containing both FAIL and ERROR exits 3.
 
@@ -534,13 +562,15 @@ output/<RunID>/
 ├── report/
 │   ├── index.html
 │   └── junit.html
-└── <workbookId>.<sheetId>.<rowCaseId>/
+└── <workbookId>.<groupId>.<rowCaseId>/
     ├── case.yaml
     ├── <case>.log
     └── <stage>/<action>/
 ```
 
-Open `report/index.html` directly from disk. Groups are aggregated by `workbookId.sheetId`. In Cases, combine Workbook, Sheet, and Status selectors with text search over workbook ID, sheet ID, full Case ID, and tags. Click any Cases heading to toggle ascending/descending sorting; Duration sorts numerically. Expand a case and follow artifact links. Use `case.yaml` to verify the exact runtime Context used by an expression.
+Open `report/index.html` directly from disk. Groups are aggregated by `workbookId.groupId`; the UI labels the logical group as Sheet because it maps to a physical workbook sheet. In Cases, combine Workbook, Sheet, and Status selectors with text search over workbook ID, group ID, full Case ID, and tags. Click any Cases heading to toggle ascending/descending sorting; Duration sorts numerically.
+
+Each expanded case shows its full Case ID, name, status, duration, expected and actual results, action-result rows, the persisted Stage/Template/Action/Tool Context tree, the detailed execution log, and links to persisted case artifacts. The tree and log contain resolved templates, executed or skipped work, tool inputs/argv/stdout/stderr/parsed output, retry attempts, and error evidence when those events occurred.
 
 `--ci-output junit,json` requests JUnit XML, JUnit HTML, and JSON summary:
 
@@ -647,9 +677,9 @@ assertSecondSeverity:
   expression: "${ACTIONS.callApi.output.Messages.Message[1].attributes.severity} == 'WARN'"
 ```
 
-With `xml.namespaceMode: ignore`, keys use local names. With `preserve`, namespace-aware names use Clark notation such as `{urn:payment}Status`. XML DTD, external entities, XInclude, and external resources are disabled.
+With `xml.namespaceMode: ignore`, keys use local names. With `preserve`, namespace-aware names use Clark notation such as `{urn:payment}Status`. Keys containing braces, colons, dots, or spaces use quoted brackets, for example `${ACTIONS.callApi.output['{urn:payment}Status'].text}`. XML DTD, external entities, XInclude, and external resources are disabled.
 
-A leaf without attributes becomes `ElementName: text`. A leaf with exactly one attribute and no text becomes `ElementName: attributeValue`. Nodes with children, multiple attributes, or both attribute and text retain a map.
+A leaf without attributes becomes `ElementName: text`. Any element with attributes retains their names under `attributes`; therefore `<Item id="123"/>` becomes `Item: {attributes: {id: "123"}}`. Repeated same-name siblings become a list in source order; a singleton stays scalar/map. Empty elements become an empty string unless they have attributes. Text and CDATA are concatenated, trimmed at the boundary, and stored as `text` when child elements also exist. Comments and processing instructions are ignored. With namespace preservation, element and non-namespace attribute names use Clark notation, keeping equal local names from different namespaces distinct.
 
 ### Pass a list as separate process arguments
 
@@ -660,7 +690,7 @@ tools:
   grepFromAppLogs:
     name: Grep application logs
     description: Search one or more keywords
-    command: "./tools/grep_from_app_logs.sh '${logText}' ${keywords}"
+    command: "./tools/grep_from_app_logs.sh '${logFile}' ${keywords}"
     output: yaml
     arguments:
       logFile: {name: Log File, description: Source log, required: true}
@@ -673,7 +703,7 @@ grepLogs:
   call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.outputFile}, keywords='PAYMENT,POSTED')}"
 ```
 
-The final value expands into two separate arguments, `PAYMENT` and `POSTED`. Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces and `|><` inside an item remain literal data. Do not quote the placeholder for a delimited argument, because that would group the expansion into one argv item.
+The final value expands into two separate arguments, `PAYMENT` and `POSTED`. Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. The delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion.
 
 ### Retry selected exit codes
 
@@ -693,17 +723,6 @@ callApi:
 `maxAttempts` includes the first attempt and defaults to 1. V2.1 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.1 has no delay/backoff fields, so eligible retries are immediate.
 
 Each attempt has separate evidence such as `attempt-001/`. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.
-
-### Use ATT safely in parallel jobs
-
-| Concurrent operation | Contract |
-|---|---|
-| Two runs use the same Run ID | Both may prepare separate `.in-progress` directories, but only one may publish the final run. The later publisher fails and does not overwrite it. |
-| Multiple runs update `latest-run.yaml` | Each publishes its final directory first; the last completion wins the atomic pointer update. Completion order, not start order, determines latest. |
-| `build` and `run` execute together | Build pins one completed latest-run/manifest pair and never archives `.in-progress` content. |
-| `report` and `clean` execute together | Unsupported destructive race. Report fails rather than producing a partial result. Serialize report/archive/clean jobs sharing one output root. |
-
-Use separate `--output-dir` values when parallel jobs need independent run history, cleanup, or latest-run behavior.
 
 ## 05 CLI Reference
 
@@ -732,7 +751,7 @@ Use separate `--output-dir` values when parallel jobs need independent run histo
 | `./att.sh run --all` | Run all discovered cases |
 | `./att.sh run --suite <xlsx>` | Run one workbook; repeatable |
 | `./att.sh run --suite-dir <dir>` | Discover workbooks below a directory |
-| `./att.sh run <selection> --case <group.caseId>` | Include one full Case ID |
+| `./att.sh run <selection> --case <workbookId.groupId.rowCaseId>` | Include one full Case ID |
 | `./att.sh run <selection> --tag <tag>` | Include a tag |
 | `./att.sh run <selection> --exclude-tag <tag>` | Exclude a tag |
 | `./att.sh run <selection> --dry-run` | Validate/plan without tool execution |
@@ -799,6 +818,7 @@ schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
+testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 report:
@@ -817,6 +837,7 @@ tools: {}
 | `environment` | `SIT` | Non-empty value exposed as `${CASE.environment}`; it does not choose endpoints by itself |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
 | `templates.root` | `templates` | Non-empty package-relative template root |
+| `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `report.mode` | `append-to-copy` | Only `append-to-copy` is supported |
@@ -830,8 +851,9 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `templates`, `run`, `report`, `xml`, `tools`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `templates`, `testcase`, `run`, `report`, `xml`, `tools`, `x-*` |
 | `templates` | `root`, `x-*` |
+| `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
 | `run.id` | `default`, `timestampFormat`, `x-*` |
 | `report` | `mode`, `fileNamePattern`, `columns`, `junit`, `x-*` |
@@ -860,7 +882,7 @@ V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `valida
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
 | render | requires `payload`, `saveAs`; optional `output`; no call/expression/message/level/fields/timeout/retry |
-| tool | requires `call`; optional `timeoutMs`, `retry`; no render/assert/log-only fields |
+| tool | requires `call`; optional `saveAs`, `timeoutMs`, `retry`; no render/assert/log-only fields |
 | assert | requires `expression`; no render/tool/log-only fields, timeout, or retry |
 | log | requires `message`; optional `level`, `fields`; no render/tool/assert-only fields, timeout, or retry |
 | retry | `maxAttempts`, `retryOn`, `exitCodes`; retryOn required and contains only `EXIT_CODE` |
@@ -879,7 +901,7 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-Group ID and row Case ID follow the same character rules; their combined full Case ID is at most 255 Unicode code points. Template paths are relative to `templates.root`; render payloads remain below the template; action output stays below the action directory. ATT normalizes and checks root containment before writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render payloads remain below the template; action output stays below the action directory. ATT normalizes and checks root containment before writes.
 
 ### Validation JSON contract
 
@@ -927,7 +949,7 @@ The persisted runtime tree has one authoritative root:
 
 ```text
 CASE
-├── caseId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
+├── caseId, workbookId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
 ├── environment, status, startedAt, durationMs, error
 ├── <case data aliases>
 └── STAGES
@@ -947,13 +969,13 @@ Common properties include:
 
 | Scope | Examples |
 |---|---|
-| CASE | `caseId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, case data aliases |
+| CASE | `caseId`, `workbookId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, case data aliases |
 | STAGE | `key`, `name`, selector-map data, sidecar stage data, status, timing, error |
 | TEMPLATE | `name`, `path`, `description`, status, timing, error |
 | ACTION | `id`, `type`, status, timing, error, `output`, `outputFile`, assertion/log data |
-| TOOL | configured name, input/output files, command/argv, stdout/stderr, exit code, duration, parsed output, attempts |
+| TOOL | configured name, `input`, `command`, `argv`, `stdout`, `stderr`, `rawOutput`, parsed `output`, status, exit code, duration, retry evidence, and optional `outputFile` when `saveAs` is used |
 
-Use `${ACTIONS.<id>...}` as a current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. `${TOOL.input}` and `${TOOL.output}` expose the latest tool call; input/stdout/stderr evidence is also written to the case log.
+Use `${ACTIONS.<id>...}` as a current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. The root `${TOOL...}` scope is reserved for invocation internals and is not a case-wide “latest tool” API. Authors must use `${ACTIONS.<id>...}` for later actions and the canonical CASE path across stages. Tool input/argv/stdout/stderr evidence is persisted below the action and written to the case log.
 
 Map properties use dot navigation and lists use zero-based brackets:
 
@@ -963,7 +985,7 @@ ${CASE.STAGES.invoke.channel}
 ${ACTIONS.callApi.output.items[0].status}
 ```
 
-Dot notation navigates maps. Lists accept bracket or numeric-dot indexes, so `${CASE.items[0].status}` and `${CASE.items.0.status}` are equivalent. Indexes are zero-based.
+Dot notation navigates simple map keys. Lists accept bracket or numeric-dot indexes, so `${CASE.items[0].status}` and `${CASE.items.0.status}` are equivalent. Indexes are zero-based. Map keys containing dots, spaces, braces, or colons use quoted brackets, for example `${CASE.response['{urn:payment}Status'].text}`.
 
 An unresolved path renders as the empty string in ordinary template text. In an assertion, a missing value behaves as null, so `${CASE.missing} is null` is true. Invalid syntax produces an evaluation diagnostic. An action may read only data and earlier action outputs that exist at that execution point.
 
@@ -971,13 +993,15 @@ An unresolved path renders as the empty string in ordinary template text. In an 
 
 Supported assertion operators are `==`, `!=`, `>`, `>=`, `<`, `<=`, `like`, `is null`, `is not null`, `not`, `and`, and `or`. Use parentheses when mixing logical operators so intent is explicit.
 
-`LIKE` matches the complete value and uses two SQL-style wildcards:
+`like` is case-insensitive as an operator keyword, but the canonical authored spelling is lowercase. It matches the complete value and uses two SQL-style wildcards:
 
 - `%` matches zero or more characters;
 - `_` matches exactly one character;
 - matching is case-sensitive.
 
-The current implementation translates `%` to Java regular-expression `.*` and `_` to `.`. Other regular-expression metacharacters such as `.`, `+`, `*`, `[`, `]`, `(`, `)`, `?`, `^`, `$`, `|`, and backslash retain their regular-expression meaning instead of being escaped automatically. Use `LIKE` with ordinary literal text plus `%`/`_`; use `==` for exact text.
+The current implementation translates `%` to Java regular-expression `.*` and `_` to `.`. Other regular-expression metacharacters such as `.`, `+`, `*`, `[`, `]`, `(`, `)`, `?`, `^`, `$`, `|`, and backslash retain their regular-expression meaning instead of being escaped automatically. Use `like` with ordinary literal text plus `%`/`_`; use `==` for exact text.
+
+Comparison first recognizes boolean literals. If both operands are valid decimal numbers, ATT compares them as arbitrary-precision decimals, including ordinary Excel strings such as `"100"`; numeric equality also uses this coercion, so `1.0 == 1` is true. Otherwise ATT compares the rendered strings lexicographically and case-sensitively. Blank or missing values render as empty strings outside `is null`; use `is null`/`is not null` when absence matters. Use `#{number(...)}` when invalid numeric text should become an explicit evaluation error instead of a string comparison.
 
 ### Built-in functions
 
@@ -1004,8 +1028,8 @@ Typical expressions:
 ```yaml
 expression: "${CASE.amount} > 0"
 expression: "${ACTIONS.callApi.output.status} == ${CASE.expectedStatus}"
-expression: "${ACTIONS.callApi.output.message} LIKE 'PAYMENT%SUCCESS'"
-expression: "(${CASE.channel} == 'MOBILE') && (${CASE.amount} <= 1000)"
+expression: "${ACTIONS.callApi.output.message} like 'PAYMENT%SUCCESS'"
+expression: "(${CASE.channel} == 'MOBILE') and (${CASE.amount} <= 1000)"
 ```
 
 ## 08 Report Reference
@@ -1028,7 +1052,9 @@ Run and Case IDs appear unchanged after validation. A final run directory repres
 
 ### Human HTML report
 
-`report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.sheetId`; Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/sheet/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric. The report also contains case details, assertion results, Context, logs, and artifact links. Workbook ID, sheet ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
+`report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
+
+An expanded case contains the full Case ID and name, status and duration, expected and actual result, one row per recorded action result, the persisted Stage/Template/Action/Tool Context tree, detailed execution log, and artifact links. Depending on what ran, the tree/log show selected templates, executed or skipped stages/actions, assertion messages, tool arguments and argv, stdout/stderr, raw and parsed output, retry attempts, diagnostics, and saved payload/tool-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
 
 `report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
 
@@ -1101,7 +1127,7 @@ ATT imports displayed cell text, then applies strict ID safety checks. Check hid
 
 #### Can two sheets both contain `TC001`?
 
-Yes. Give sheets different group IDs, producing IDs such as `payment.TC001` and `batch.TC001`.
+Yes. Give sheets different group IDs, producing IDs such as `payment.payment.TC001` and `payment.batch.TC001`.
 
 #### Why did `N/A` become empty?
 
@@ -1150,10 +1176,11 @@ This chapter explains the behavior that users normally do not need while authori
 ### Ownership model
 
 ```text
-case owns stages
-stage selects one template and owns stage-private data
+case owns ordered stages
+stage defines a template-selector column and owns stage-private data
+the current row's selector cell names the template to resolve
 template owns ordered actions
-tool action invokes one global tool contract
+tool action invokes one independent global tool contract through declared arguments
 ```
 
 The authoritative persisted runtime tree has one `CASE` root. Convenience scopes such as `ACTIONS` and `TOOL` do not create alternative persisted roots.
@@ -1166,11 +1193,17 @@ Package mode discovers everything below the configured roots. Selected mode vali
 
 ### Execution and aggregation
 
-The runner plans selected cases and executes stage/template/action order deterministically. `onFailure` controls continuation but does not suppress result severity. Aggregation priority is:
+The runner plans selected cases and executes stage/template/action order deterministically. `onFailure` controls continuation but does not suppress result severity. Aggregation is exact and shared by all consumers:
 
 ```text
-ERROR > INVALID > FAIL > PASS/SKIPPED
+if any ERROR exists: ERROR
+else if any INVALID exists: INVALID
+else if any FAIL exists: FAIL
+else if any PASS exists: PASS
+else: SKIPPED
 ```
+
+Therefore PASS + SKIPPED is PASS, all SKIPPED is SKIPPED, and a selection that resolves to no cases is a command error rather than a SKIPPED run.
 
 Report, manifest, CLI summary, CI JSON, JUnit XML, JUnit HTML, and process exit code must derive from the same aggregate model.
 
@@ -1193,6 +1226,19 @@ An interrupted run stays in `.in-progress` and is not eligible for `report`, `bu
 ### Process safety
 
 ATT constructs argv directly and uses no implicit shell. Timeout termination must stop the managed process according to platform support and retain process evidence. Structured parsers reject malformed/ambiguous input and XML external-resource features.
+
+Workbook import uses Apache POI `DataFormatter` for ordinary cells and deliberately does not create a `FormulaEvaluator`; formula expressions, not cached results, enter Context.
+
+### CI and parallel execution
+
+| Concurrent operation | Contract |
+|---|---|
+| Two runs use the same Run ID | Both may prepare separate `.in-progress` directories, but only one may publish the final run. The later publisher fails and does not overwrite it. |
+| Multiple runs update `latest-run.yaml` | Each publishes its final directory first; the last completion wins the atomic pointer update. Completion order, not start order, determines latest. |
+| `build` and `run` execute together | Build pins one completed latest-run/manifest pair and never archives `.in-progress` content. |
+| `report` and `clean` execute together | This destructive race is unsupported. Report fails rather than producing a partial result; serialize report/archive/clean jobs sharing one output root. |
+
+Use separate `--output-dir` values when parallel jobs need independent run history, cleanup, or latest-run behavior.
 
 ### Path and identifier safety
 

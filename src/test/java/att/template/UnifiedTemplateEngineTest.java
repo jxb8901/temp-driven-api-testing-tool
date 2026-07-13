@@ -27,6 +27,10 @@ class UnifiedTemplateEngineTest {
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
         assertEquals("JEFFREY / jeffrey / 12 / true", engine.render("#{upper(value=jeffrey)} / #{trim(value=${CASE.name})} / #{number('12.00')} / #{boolean(yes)}", context));
         assertEquals("payments.payment.TC001", engine.render("${CASE.caseId}", context));
+        Map<String,Object> response = new LinkedHashMap<String,Object>();
+        response.put("{urn:payment}Status", "SUCCESS");
+        context.put("CASE.response", response);
+        assertEquals("SUCCESS", engine.render("${CASE.response['{urn:payment}Status']}", context));
     }
 
     @Test void supportsQuotedCommaAndTypedBuiltInArguments() throws Exception {

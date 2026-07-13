@@ -36,7 +36,7 @@ public final class HtmlReportGenerator {
             minimum = Math.min(minimum, duration);
             maximum = Math.max(maximum, duration);
             String workbook = result.workbookId().isEmpty() ? "default" : result.workbookId();
-            String sheet = result.sheetId().isEmpty() ? "default" : result.sheetId();
+            String sheet = result.groupId().isEmpty() ? "default" : result.groupId();
             workbooks.add(workbook); sheets.add(sheet);
             String group = workbook + "." + sheet;
             long[] counts = groups.computeIfAbsent(group, key -> new long[7]);
@@ -66,7 +66,7 @@ public final class HtmlReportGenerator {
         for (String sheet : sheets) html.append("<option value=\"").append(escape(sheet)).append("\">").append(escape(sheet)).append("</option>");
         html.append("</select><select id=\"statusFilter\"><option value=\"\">All statuses</option><option>PASS</option><option>FAIL</option><option>ERROR</option><option>SKIPPED</option><option>INVALID</option></select></div><table id=\"caseTable\"><thead><tr><th><button data-sort=\"workbook\">Workbook</button></th><th><button data-sort=\"sheet\">Sheet</button></th><th><button data-sort=\"caseid\">Case ID</button></th><th><button data-sort=\"name\">Name</button></th><th><button data-sort=\"tags\">Tags</button></th><th><button data-sort=\"status\">Status</button></th><th><button data-sort=\"duration\" data-type=\"number\">Duration</button></th></tr></thead><tbody>");
         for (TestResult result : summary.results()) {
-            String workbook = result.workbookId().isEmpty() ? "default" : result.workbookId(), sheet = result.sheetId().isEmpty() ? "default" : result.sheetId(), tags = String.join(", ", result.tags());
+            String workbook = result.workbookId().isEmpty() ? "default" : result.workbookId(), sheet = result.groupId().isEmpty() ? "default" : result.groupId(), tags = String.join(", ", result.tags());
             String search = (workbook + " " + sheet + " " + result.caseId() + " " + tags).toLowerCase(java.util.Locale.ROOT);
             html.append("<tr data-workbook=\"").append(escape(workbook)).append("\" data-sheet=\"").append(escape(sheet)).append("\" data-caseid=\"").append(escape(result.caseId())).append("\" data-name=\"").append(escape(result.caseName())).append("\" data-tags=\"").append(escape(tags)).append("\" data-search=\"").append(escape(search)).append("\" data-status=\"").append(result.status()).append("\" data-duration=\"").append(result.duration().toMillis()).append("\"><td>").append(escape(workbook)).append("</td><td>").append(escape(sheet)).append("</td><td><a href=\"#").append(anchor(result.caseId())).append("\">").append(escape(result.caseId())).append("</a></td><td>").append(escape(result.caseName())).append("</td><td>").append(escape(tags)).append("</td><td><span class=\"badge ").append(result.status()).append("\">").append(result.status()).append("</span></td><td>").append(result.duration().toMillis()).append(" ms</td></tr>");
         }

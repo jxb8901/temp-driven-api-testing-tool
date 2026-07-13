@@ -10,7 +10,6 @@ import att.config.ToolArgumentConfig;
 import att.config.YamlSupport;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
-import att.template.TemplateRenderer;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -82,22 +81,11 @@ public class ToolInvoker {
         validateArguments(tool, resolvedInput);
         expandDelimitedArgument(tool, resolvedInput);
 
-        Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
-        flatten("TOOL.input", resolvedInput, renderContext);
-        flatten("input", resolvedInput, renderContext);
-        for (Map.Entry<String, Object> entry : resolvedInput.entrySet()) renderContext.put(entry.getKey(), entry.getValue());
-        ToolArgumentConfig last = lastArgument(tool);
-        if (last != null && last.multiValue()) {
-            Object value = resolvedInput.get(last.key());
-            String expanded = value instanceof List ? shellArgs(stringList((List<?>) value)) : "";
-            renderContext.put("TOOL.input." + last.key(), expanded);
-            renderContext.put("input." + last.key(), expanded);
-            renderContext.put(last.key(), expanded);
-        }
-        String command = TemplateRenderer.render(tool.command(), renderContext);
+        List<String> argv = expandCommand(tool, resolvedInput);
+        String command = printableCommand(argv);
         CommandResult commandResult;
         long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
-        try { commandResult = commandRunner.run(command, Duration.ofMillis(timeoutMs), projectRoot); }
+        try { commandResult = commandRunner.run(argv, Duration.ofMillis(timeoutMs), projectRoot); }
         catch (java.io.IOException e) { Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("id", id); evidence.put("type", "tool"); evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage()); throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e); }
         String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
@@ -112,6 +100,7 @@ public class ToolInvoker {
         toolInvocation.put("stdout", commandResult.stdout());
         toolInvocation.put("stderr", commandResult.stderr());
         toolInvocation.put("command", command);
+        toolInvocation.put("argv", argv);
         toolInvocation.put("timeoutMs", timeoutMs);
         toolInvocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 && parseFailure == null ? "PASS" : "ERROR"));
         if (parseFailure != null) toolInvocation.put("parserDiagnostic", parseFailure.getMessage());
@@ -127,6 +116,7 @@ public class ToolInvoker {
         invocation.put("rawOutput", rawOutput);
         invocation.put("stdout", commandResult.stdout());
         invocation.put("stderr", commandResult.stderr());
+        invocation.put("argv", argv);
         if (saveAs != null && !saveAs.trim().isEmpty()) {
             String actionId = id.replaceFirst("/attempt-\\d+$", "");
             Path directory = context.actionOutputDir(actionId);
@@ -144,8 +134,6 @@ public class ToolInvoker {
         toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
         if (recordAction) context.addAction(id, invocation);
-        context.put("TOOL.input", resolvedInput);
-        context.put("TOOL.output", parsed);
         log.append("ACTION " + id, invocation);
 
         if (commandResult.timedOut()) {
@@ -172,31 +160,6 @@ public class ToolInvoker {
             }
         }
         return resolved;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> resolveMap(Map<String, Object> input, Map<String, Object> renderContext) {
-        Map<String, Object> resolved = new LinkedHashMap<String, Object>();
-        for (Map.Entry<String, Object> entry : input.entrySet()) {
-            if (entry.getValue() instanceof Map) {
-                resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue(), renderContext));
-            } else if (entry.getValue() instanceof String) {
-                resolved.put(entry.getKey(), att.core.ValueNormalizer.normalize(renderValue((String) entry.getValue(), renderContext)));
-            } else {
-                resolved.put(entry.getKey(), entry.getValue());
-            }
-        }
-        return resolved;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void flatten(String prefix, Object value, Map<String, Object> output) {
-        output.put(prefix, value);
-        if (value instanceof Map) {
-            for (Map.Entry<String, Object> entry : ((Map<String, Object>) value).entrySet()) {
-                flatten(prefix + "." + entry.getKey(), entry.getValue(), output);
-            }
-        }
     }
 
     private void validateArguments(ToolConfig tool, Map<String, Object> input) {
@@ -234,25 +197,50 @@ public class ToolInvoker {
 
     private boolean blank(Object value) { return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty(); }
 
-    private List<String> stringList(List<?> values) {
-        List<String> result = new ArrayList<String>();
-        for (Object value : values) result.add(value == null ? "" : String.valueOf(value));
-        return result;
+    private List<String> expandCommand(ToolConfig tool, Map<String, Object> input) throws java.io.IOException {
+        List<String> tokens = CommandRunner.parseCommand(tool.command());
+        List<String> argv = new ArrayList<String>();
+        for (String token : tokens) {
+            ToolArgumentConfig delimited = exactDelimitedPlaceholder(tool, token);
+            if (delimited != null) {
+                Object value = input.get(delimited.key());
+                if (value instanceof List) for (Object item : (List<?>) value) argv.add(item == null ? "" : String.valueOf(item));
+                continue;
+            }
+            Matcher matcher = VALUE.matcher(token);
+            StringBuffer rendered = new StringBuffer();
+            while (matcher.find()) {
+                String key = argumentKey(matcher.group(1));
+                if (!tool.arguments().containsKey(key)) throw new IllegalArgumentException("Tool command placeholder is not a declared argument: " + matcher.group(1));
+                Object value = input.get(key);
+                matcher.appendReplacement(rendered, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+            }
+            matcher.appendTail(rendered);
+            argv.add(rendered.toString());
+        }
+        return argv;
     }
 
-    private String shellArgs(List<String> values) {
+    private ToolArgumentConfig exactDelimitedPlaceholder(ToolConfig tool, String token) {
+        Matcher matcher = VALUE.matcher(token);
+        if (!matcher.matches()) return null;
+        ToolArgumentConfig argument = tool.arguments().get(argumentKey(matcher.group(1)));
+        return argument != null && argument.multiValue() ? argument : null;
+    }
+
+    private String argumentKey(String expression) {
+        if (expression.startsWith("TOOL.input.")) return expression.substring(11);
+        if (expression.startsWith("input.")) return expression.substring(6);
+        return expression;
+    }
+
+    private String printableCommand(List<String> argv) {
         StringBuilder output = new StringBuilder();
-        for (String item : values) {
-            if (output.length() > 0) {
-                output.append(' ');
-            }
-            output.append(shellQuote(item));
+        for (String item : argv) {
+            if (output.length() > 0) output.append(' ');
+            output.append('\'').append(item.replace("'", "'\\''")).append('\'');
         }
         return output.toString();
-    }
-
-    private String shellQuote(String value) {
-        return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
     private String renderValue(String template, CaseRuntimeContext context) {
@@ -264,28 +252,6 @@ public class ToolInvoker {
         }
         matcher.appendTail(output);
         return output.toString();
-    }
-
-    private String renderValue(String template, Map<String, Object> renderContext) {
-        Matcher matcher = VALUE.matcher(template);
-        StringBuffer output = new StringBuffer();
-        while (matcher.find()) {
-            Object value = renderContext.containsKey(matcher.group(1)) ? renderContext.get(matcher.group(1)) : nested(renderContext, matcher.group(1));
-            matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
-        }
-        matcher.appendTail(output);
-        return output.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object nested(Map<String, Object> values, String path) {
-        Object current = values;
-        for (String part : path.split("\\.")) {
-            if (current instanceof Map) current = ((Map<String,Object>) current).get(part);
-            else if (current instanceof List && part.matches("[0-9]+")) { int index=Integer.parseInt(part); current=index<((List<?>)current).size()?((List<?>)current).get(index):null; }
-            else return null;
-        }
-        return current;
     }
 
     public Object parseOutput(String text, String outputType) throws Exception {
@@ -355,7 +321,6 @@ public class ToolInvoker {
         String normalizedText = text.toString().trim();
         if (grouped.isEmpty()) {
             if (attributes.isEmpty()) return normalizedText;
-            if (attributes.size() == 1 && normalizedText.isEmpty()) return attributes.values().iterator().next();
         }
         if (!attributes.isEmpty()) map.put("attributes", attributes);
         if (!normalizedText.isEmpty()) map.put("text", normalizedText);

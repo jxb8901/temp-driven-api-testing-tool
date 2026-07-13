@@ -44,6 +44,16 @@ class ExpressionEvaluatorTest {
         assertTrue(evaluator.evaluate("${CASE.missing} is null",context));
     }
 
+    @Test void resolvesQuotedMapKeysContainingNamespaceBraces() {
+        Map<String,Object> response = new LinkedHashMap<String,Object>();
+        response.put("{urn:payment}Status", "SUCCESS");
+        Map<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("response", response);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"R",tempDir,tempDir.resolve("case.log"));
+        assertTrue(evaluator.evaluate("${CASE.response['{urn:payment}Status']} == 'SUCCESS'", context));
+        evaluator.validateSyntax("${CASE.response['{urn:payment}Status']} == 'SUCCESS'");
+    }
+
     @Test void rejectsUnclosedStringLiteral() {
         assertThrows(IllegalArgumentException.class,()->evaluator.evaluate("'unfinished == 'x'"));
     }

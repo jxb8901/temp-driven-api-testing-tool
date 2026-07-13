@@ -45,7 +45,7 @@ class StageTemplateRunnerTest {
     private static final class SequencedRunner extends CommandRunner {
         int calls; final boolean timeout;
         SequencedRunner(boolean timeout) { this.timeout = timeout; }
-        @Override public CommandResult run(String command, java.time.Duration duration, Path workingDirectory) { calls++; if (timeout) return new CommandResult(-1,"","",true); return calls == 1 ? new CommandResult(75,"","retry",false) : new CommandResult(0,"ok","",false); }
+        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory) { calls++; if (timeout) return new CommandResult(-1,"","",true); return calls == 1 ? new CommandResult(75,"","retry",false) : new CommandResult(0,"ok","",false); }
     }
     private Map<String,Object> map(Object... values){Map<String,Object> out=new LinkedHashMap<String,Object>();for(int i=0;i<values.length;i+=2)out.put(String.valueOf(values[i]),values[i+1]);return out;}
 }

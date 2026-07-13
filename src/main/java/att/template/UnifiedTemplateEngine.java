@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  * Renders ${context} references and executes #{tool(...)} calls.
  */
 public class UnifiedTemplateEngine {
-    private static final Pattern VALUE = Pattern.compile("\\$\\{([^}]+)}");
+    private static final Pattern VALUE = Pattern.compile("\\$\\{((?:[^}'\"]|'(?:\\\\.|[^'])*'|\"(?:\\\\.|[^\"])*\")+)}");
     private final ToolInvoker toolInvoker;
     private final ToolCallParser callParser = new ToolCallParser();
 

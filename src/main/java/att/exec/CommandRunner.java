@@ -22,7 +22,11 @@ public class CommandRunner {
     }
 
     public CommandResult run(String command, Duration timeout, java.nio.file.Path workingDirectory) throws IOException, InterruptedException {
-        List<String> commandArguments = parseCommand(command);
+        return run(parseCommand(command), timeout, workingDirectory);
+    }
+
+    /** Runs an already constructed argv without any further tokenization. */
+    public CommandResult run(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory) throws IOException, InterruptedException {
         if (commandArguments.isEmpty()) throw new IOException("Tool command is blank");
         ProcessBuilder builder = new ProcessBuilder(commandArguments);
         if (workingDirectory != null) builder.directory(workingDirectory.toFile());

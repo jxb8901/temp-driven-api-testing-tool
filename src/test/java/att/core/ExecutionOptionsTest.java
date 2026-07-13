@@ -30,4 +30,11 @@ class ExecutionOptionsTest {
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"validate","--parallel"}));
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run","--all","--concurrency","parallel"}));
     }
+    @Test void rerunFailedIsACompleteSelectionAndAcceptsNarrowingFilters() {
+        ExecutionOptions rerun = ExecutionOptions.parse(new String[]{"run","--rerun-failed"});
+        assertTrue(rerun.rerunFailed());
+        assertNull(rerun.suiteDirectory());
+        ExecutionOptions narrowed = ExecutionOptions.parse(new String[]{"run","--rerun-failed","--tag","payment"});
+        assertTrue(narrowed.tags().contains("payment"));
+    }
 }

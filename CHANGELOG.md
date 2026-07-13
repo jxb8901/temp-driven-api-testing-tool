@@ -1,10 +1,16 @@
 # Changelog
 
+## 2.1.2
+
+- Hardened tool execution by tokenizing the static command template before injecting declared arguments as atomic argv values; global commands can no longer hide runtime Context dependencies.
+- Standardized the logical workbook grouping term as `groupId` in Case IDs, Context, run manifests, reports, CLI help, and V2.1 documentation while retaining report regeneration for older `sheetId` manifests.
+- Completed the V2.1 manual consistency pass for executable Quick Start tooling, configurable recursive testcase discovery, `saveAs`, rerun selection, result aggregation, numeric coercion, quoted Context keys, XML projection, and report contents.
+
 ## 2.1.1
 
 - Made the package documentation index and report-style filters sticky, with keyword, workbook, sheet, Case ID, and combined tool/built-in controls.
 - Added case-sensitive `${argument}` and `${input.argument}` tool-command references while keeping argument display names unrestricted.
-- Simplified XML mapping so only repeated siblings become arrays, attribute-free leaves become text scalars, and one-attribute empty leaves become attribute scalars.
+- Simplified XML mapping so only repeated siblings become arrays, attribute-free leaves become text scalars, and every attributed element preserves attribute names under `attributes`.
 - Corrected workbook sidecar examples to include the mandatory package-unique `id`.
 
 - Added configurable recursive `testcase.root` discovery: every adjacent `basename.yaml`/`basename.xlsx` pair below the root is one testcase set.
@@ -16,7 +22,7 @@
 
 - Enhanced HTML run reports with Workbook.Sheet group statistics, workbook/sheet/status filters, working case/tag search, and sortable Cases columns; persisted report metadata supports equivalent regeneration.
 
-- Added mandatory package-unique workbook sidecar `id`; full Case IDs now use `<workbookId>.<sheetId>.<rowCaseId>` with package validation and ExecutionPlan duplicate protection.
+- Added mandatory package-unique workbook sidecar `id`; full Case IDs now use `<workbookId>.<groupId>.<rowCaseId>` with package validation and ExecutionPlan duplicate protection.
 
 - Added default concurrent-run rejection plus explicit `run --queue` and `run --parallel` modes, pre-execution Run ID duplicate rejection, collision-safe numeric Run ID allocation at parallel completion, full run-validation diagnostics, and a consolidated Chapter 14 config/schema reference.
 
@@ -39,7 +45,7 @@ V2 implements the grouped Excel → stage → template → action → tool model
 ### Added
 
 - Mandatory V2 workbook sidecars with multi-sheet `groupId=sheetName`, multi-row headers, required `caseId`/`tags`, and compact case/stage `dataColumns` parsing.
-- Full Case IDs such as `payment.TC001`, Chinese workbook fixtures, YAML map and scalar-shorthand template selectors, blank-marker normalization, and the persisted `CASE.STAGES.TEMPLATE.ACTIONS.TOOL` tree.
+- Full Case IDs such as `payment.payment.TC001`, Chinese workbook fixtures, YAML map and scalar-shorthand template selectors, blank-marker normalization, and the persisted `CASE.STAGES.TEMPLATE.ACTIONS.TOOL` tree.
 - Strict template indexing by symbolic name or full path and pre-run package/template/tool contract validation.
 - Tool argument documentation contracts with final-argument `delimit` expansion; V2 rejects `argv`; action failure behavior is explicitly `stop` or `continue` with default `stop`.
 - Offline single-page HTML run summaries and package documentation, detailed case logs/artifact links, `case.yaml`, `events.jsonl`, report regeneration, and latest-run tar.gz archives with hashes.

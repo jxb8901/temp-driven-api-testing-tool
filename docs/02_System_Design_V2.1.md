@@ -57,7 +57,7 @@ V2.1 does not add:
 
 - Global configuration owns runtime defaults, environment, template root, report defaults, and tool contracts.
 - A workbook sidecar owns its package-unique stable `id`, workbook parsing, ordered stages, and workbook-specific reporting settings.
-- A stage selects one template and contributes stage-private data.
+- A stage defines a template-selector column and contributes stage-private data; the current row's selector cell references the template ATT resolves.
 - A template owns ordered actions.
 - An action performs render, tool, assert, or log behavior.
 - A tool is a reusable external process contract.
@@ -275,7 +275,7 @@ The complete sidecar schema is:
 | schemaVersion | string | Yes | exactly `att-sidecar/v2.1` |
 | id | string | Yes | package-unique stable dot-free workbook ID; first Case ID segment |
 | excel | map | Yes | fields defined below only |
-| excel.sheet | string | Yes | one sheet or comma-separated `sheetId=sheetName` entries |
+| excel.sheet | string | Yes | one sheet or comma-separated `groupId=sheetName` entries |
 | excel.headerRows | integer | No | at least 1; default 1 |
 | excel.caseId | string | Yes | physical Excel header |
 | excel.tags | string | Yes | physical Excel header |
@@ -562,7 +562,7 @@ ATT MUST NOT rewrite, slugify, hash, or otherwise change the Run ID used as the 
 
 ### 10.3 Case ID
 
-The full Case ID is `<workbookId>.<sheetId>.<rowCaseId>` for selection, display, reporting, runtime context, and its physical directory name. `workbookId` comes from mandatory sidecar `id`; `sheetId` is the group ID on the left of `excel.sheet`; `rowCaseId` comes from the configured Excel column. All three components MUST be non-blank and satisfy the illegal-character, control-character, reserved-name, leading/trailing-whitespace, trailing-dot, and length rules. Sidecar `id` MUST be unique across the package, sheet IDs MUST be unique within a workbook, and row IDs MUST be unique within a sheet. The combined full Case ID MUST be globally unique in the validation/execution scope and no longer than 255 Unicode code points.
+The full Case ID is `<workbookId>.<groupId>.<rowCaseId>` for selection, display, reporting, runtime context, and its physical directory name. `workbookId` comes from mandatory sidecar `id`; `groupId` is the logical ID on the left of `excel.sheet`; `rowCaseId` comes from the configured Excel column. All three components MUST be non-blank and satisfy the illegal-character, control-character, reserved-name, leading/trailing-whitespace, trailing-dot, and length rules. Sidecar `id` MUST be unique across the package, group IDs MUST be unique within a workbook, and row IDs MUST be unique within a group. The combined full Case ID MUST be globally unique in the validation/execution scope and no longer than 255 Unicode code points.
 
 After validation, a case output directory is exactly:
 
@@ -572,7 +572,7 @@ After validation, a case output directory is exactly:
 
 ATT MUST NOT rewrite, slugify, hash, or otherwise change the full Case ID used as the directory name. `case.yaml`, `run.yaml`, workbooks, reports, and indexes use the same value. HTML anchors and URLs MUST still apply normal URL/HTML encoding without changing the displayed identifier.
 
-The HTML report Groups table aggregates by `<workbookId>.<sheetId>`. The Cases table exposes Workbook and Sheet filters, status filtering, and text search over workbook ID, sheet ID, full Case ID, and tags. Every Cases column is sortable in ascending/descending order; numeric duration sorting MUST compare numbers rather than formatted text. Workbook ID, sheet ID, and tags are persisted per case in `run.yaml` so `att.sh report` can reproduce the same filters and grouping.
+The HTML report Groups table aggregates by `<workbookId>.<groupId>`. The Cases table exposes Workbook and Sheet filters, status filtering, and text search over workbook ID, group ID, full Case ID, and tags. Every Cases column is sortable in ascending/descending order; numeric duration sorting MUST compare numbers rather than formatted text. Workbook ID, group ID, and tags are persisted per case in `run.yaml` so `att.sh report` can reproduce the same filters and grouping.
 
 Before directory creation, ATT resolves and normalizes `<runDirectory>/<fullCaseId>` and verifies that the result is a strict child of the validated run directory.
 
@@ -946,13 +946,13 @@ The action node records all attempts, final status, total duration, and winning 
 
 ## 19. Tool process safety
 
-Tool commands are tokenized into argv without a shell. Declared named arguments are referenced directly:
+Tool command templates are tokenized into argv before declared named arguments are resolved. Each ordinary resolved argument remains one atomic argv value; only a final declared `delimit` argument expands to multiple values. Resolved values are never tokenized again and no shell is used. Declared named arguments are referenced directly:
 
 ```yaml
 command: "./tools/invoke_payment_api.sh ${requestFile}"
 ```
 
-The command is not evaluated by a shell. Pipes, redirects, substitutions, globbing, and environment-variable expansion are not implied. Tools emit their result on stdout and diagnostics on stderr; ATT writes input/stdout/stderr into the case log and creates no files unless the tool action sets `saveAs`.
+The command is not evaluated by a shell. Pipes, redirects, substitutions, globbing, and environment-variable expansion are not implied. A global tool command may reference only declared arguments, never runtime CASE/ACTIONS Context directly. Tools emit their result on stdout and diagnostics on stderr; ATT writes input/argv/stdout/stderr into persisted case evidence and creates no dedicated tool-output file unless the tool action sets `saveAs`.
 
 Processes MUST have timeouts. On timeout ATT MUST terminate the process tree where supported, wait for bounded cleanup, preserve captured output, and classify the attempt as ERROR/TIMEOUT.
 

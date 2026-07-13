@@ -1,4 +1,4 @@
-# ATT 2.1.1 - Automated Testing Tool
+# ATT 2.1.2 - Automated Testing Tool
 
 ATT V2.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
@@ -55,7 +55,7 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 - Timeouts use milliseconds with range 1–3,600,000 and default 10,000: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence.
 - Retry is available only on a tool action and only for `retryOn: [EXIT_CODE]`; retries run immediately and timeout is never retried.
 - A valid Run ID and full Case ID are used directly as `output/<RunID>/<CaseID>/` directory names. They must not contain path separators, control characters, or platform-reserved names.
-- Tool commands are tokenized by ATT, not executed by a shell. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys; tools write results to stdout and diagnostics to stderr. ATT records input/stdout/stderr in the case log and creates no tool files unless the action explicitly sets `saveAs`.
+- Tool command templates are tokenized before declared arguments are injected as atomic argv values; resolved values are never tokenized again and no shell is used. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys. Tools write results to stdout and diagnostics to stderr; ATT records input/argv/stdout/stderr in case evidence and creates a dedicated raw-stdout artifact only when the action sets `saveAs`.
 
 ## V2 Model
 

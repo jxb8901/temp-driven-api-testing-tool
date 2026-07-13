@@ -60,6 +60,8 @@ schemaVersion: att-config/v2.1
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
+testcase:
+  root: testcase
 templates:
   root: templates
 run:
@@ -88,7 +90,7 @@ tools:
 
 工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，只有最後一個參數可增加 `delimit`。
 
-`command` 是 ATT 拆分後直接交給 process 的參數序列，不經 shell。具名參數優先以 `${requestFile}` 直接引用，需要明確命名空間時使用 `${input.requestFile}`；名稱大小寫必須與 arguments key 完全一致。工具將結果寫到 stdout、診斷寫到 stderr。只有 action 明確設定 `saveAs` 時才保存 stdout。
+`command` 的靜態模板會先由 ATT 拆分，再把具名參數作為不可再分詞的單一 argv 值注入，不經 shell；因此參數內的空格、引號、反斜線及 shell 字符都不會改變參數邊界。具名參數優先以 `${requestFile}` 直接引用，需要明確命名空間時使用 `${input.requestFile}`；名稱大小寫必須與 arguments key 完全一致。全域 tool command 只能引用已聲明參數，不能直接引用 `${CASE...}` 或 `${ACTIONS...}`。工具將結果寫到 stdout、診斷寫到 stderr。只有 action 明確設定 `saveAs` 時才另存 raw stdout。
 
 例如下列 `note` 可包含空格並保持為一個 argv：
 
@@ -99,8 +101,29 @@ command: "./tools/invoke_payment_api.sh '${requestFile}' --label 'Payment regres
 不要這樣將案例資料直接拼到 command：
 
 ```yaml
-# 不建議：CASE.note 的空格或引號會影響 ATT 的 command 分詞
+# 錯誤：全域 tool 不能隱式依賴 runtime Context
 command: "./tools/invoke_payment_api.sh --note ${CASE.note}"
+```
+
+建立最小可執行 mock tool `tools/invoke_payment_api.sh`：
+
+```sh
+#!/usr/bin/env sh
+set -eu
+
+request_file="${1:?missing request file}"
+environment="${2:?missing environment}"
+
+[ -f "$request_file" ] || {
+  echo "request file not found: $request_file" >&2
+  exit 2
+}
+
+printf '{"status":"SUCCESS","environment":"%s"}\n' "$environment"
+```
+
+```sh
+chmod +x tools/invoke_payment_api.sh
 ```
 
 ## 5. 建立 V2.1 模板與 JSON 工具輸出
@@ -142,7 +165,7 @@ actions:
 Action type 決定可用字段：
 
 - `render` 必須有 `payload`；使用 `output.mode: file` 時必須有 `saveAs`；不能 retry。
-- `tool` 必須有一個已配置的 `call`；可設定 retry。
+- `tool` 必須有一個已配置的 `call`；可用 `saveAs` 保存 raw stdout，亦可設定 `timeoutMs` 與 retry。
 - `assert` 必須有非空 `expression`；不允許 retry，輪詢請交給明確的 tool action。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
 
@@ -184,7 +207,7 @@ timeoutMs: 60000
 
 `report.columns` 的 key 是 ATT 結果字段，value 是 Excel 實際表頭。若來源工作表已存在映射表頭（例如「測試結果」），ATT 會直接填充該欄；只有不存在的映射表頭才按配置順序追加到工作表末尾。
 
-模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V2.1：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
+模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V2.1：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 多 sheet 使用：
 
@@ -192,11 +215,11 @@ timeoutMs: 60000
 sheet: payment=支付測試案例集, batch=批量測試案例集
 ```
 
-完整 Case ID 分別是 `payment.payment.TC001`、`payment.batch.TC001`。第一段來自 sidecar `id`，第二段來自 `excel.sheet` 的 sheet ID，第三段來自 Excel 案例編號。
+完整 Case ID 分別是 `payment.payment.TC001`、`payment.batch.TC001`。第一段來自 sidecar `id`，第二段來自 `excel.sheet` 的 group ID，第三段來自 Excel 案例編號。
 
-Case ID 同時是輸出目錄名，完整路徑為 `output/<RunID>/<workbookId>.<sheetId>.<rowCaseId>/`。請使用可讀、穩定的值，例如 `payment.payment.TC001`。sidecar `id` 在 package 內必須唯一；三個 ID component 都不能是空白、`.`、`..`，不能含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 或控制字符，不能以空白或 `.` 結尾，也不能使用 `CON`、`NUL`、`COM1` 等保留名稱。ATT 不會 slugify 或 hash Case ID；合法 ID 原樣成為目錄名。
+Case ID 同時是輸出目錄名，完整路徑為 `output/<RunID>/<workbookId>.<groupId>.<rowCaseId>/`。請使用可讀、穩定的值，例如 `payment.payment.TC001`。sidecar `id` 在 package 內必須唯一；三個 ID component 都不能是空白、`.`、`..`，不能含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 或控制字符，不能以空白或 `.` 結尾，也不能使用 `CON`、`NUL`、`COM1` 等保留名稱。ATT 不會 slugify 或 hash Case ID；合法 ID 原樣成為目錄名。
 
-HTML report 的 Groups 會按 `workbookId.sheetId` 統計。Cases 可用 Workbook、Sheet、Status 下拉列表過濾；搜尋框匹配 workbook、sheet、完整 Case ID 和 tags；點擊任一列頭可切換升序／降序。
+HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workbook、Sheet、Status 下拉列表過濾；搜尋框匹配 workbook、sheet、完整 Case ID 和 tags；點擊任一列頭可切換升序／降序。
 
 ### 多行表頭
 
@@ -208,7 +231,7 @@ HTML report 的 Groups 會按 `workbookId.sheetId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。有效欄名重複、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.1：Workbook sidecar](09_Reference_Manual_V2.md#4-workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。有效欄名重複、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.1：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
@@ -219,7 +242,7 @@ HTML report 的 Groups 會按 `workbookId.sheetId` 統計。Cases 可用 Workboo
 
 核心節點 `CASE`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL` 使用大寫；`caseId`、`outputFile` 等 metadata 使用 camelCase。
 
-`CASE`、`STAGE`、`TEMPLATE`、`ACTION`、`TOOL` 的所有內建屬性、適用時機及完整路徑，見 [Reference Manual V2.1：Runtime Context](09_Reference_Manual_V2.md#7-runtime-context)。
+`CASE`、`STAGE`、`TEMPLATE`、`ACTION`、`TOOL` 的所有內建屬性、適用時機及完整路徑，見 [Reference Manual V2.1：Runtime Context](09_Reference_Manual_V2.md#runtime-context)。
 
 ATT 內置函數包括：
 
@@ -239,7 +262,7 @@ ATT 內置函數包括：
 #{boolean(yes)}
 ```
 
-完整函數清單、參數規則及字面量語法見 [Reference Manual V2.1：Expressions and built-in functions](09_Reference_Manual_V2.md#8-expressions-and-built-in-functions)。
+完整函數清單、參數規則及字面量語法見 [Reference Manual V2.1：Expressions and built-in functions](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -298,7 +321,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 
 不帶參數或使用 `--help` 顯示完整用法。
 
-驗證錯誤代碼、選擇規則及 stage 執行語義見 [Reference Manual V2.1：Validation, diagnostics, reports, CI, and packaging](09_Reference_Manual_V2.md#11-validation-diagnostics-reports-ci-and-packaging)。
+驗證錯誤代碼、選擇規則及 stage 執行語義見 [Reference Manual V2.1：Validation JSON contract](09_Reference_Manual_V2.md#validation-json-contract)。
 
 ## 9. 報告、CI、文件、打包與清理
 
@@ -327,7 +350,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 
 `clean` 拒絕清除專案根目錄、專案外目錄、source/configuration directory 或會跳出專案的 symlink。
 
-報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V2.1：Validation, diagnostics, reports, CI, and packaging](09_Reference_Manual_V2.md#11-validation-diagnostics-reports-ci-and-packaging)。
+報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V2.1：Report Reference](09_Reference_Manual_V2.md#08-report-reference)。
 
 ## 10. 常見問題與安全提醒
 
@@ -346,7 +369,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 ### 11.1 新增案例行
 
 1. Excel 表頭必須與 sidecar 完全一致。
-2. sidecar `id` 必須在 package 內唯一；每個 sheet 的 row Case ID 必須有效，ATT 會自動組成 `<workbookId>.<sheetId>.<rowCaseId>`。
+2. sidecar `id` 必須在 package 內唯一；每個 sheet 的 row Case ID 必須有效，ATT 會自動組成 `<workbookId>.<groupId>.<rowCaseId>`。
 3. 只有 sidecar 以 `(yaml)` 標識的欄位才會解析 YAML，Excel 實際表頭不包含 `(yaml)`。
 4. required stage 的模板欄可為包含 `name` 的 YAML map，或直接使用 scalar shorthand。
 5. Case ID 必須通過非法字符檢查，因為它會原樣成為輸出目錄名。
@@ -376,11 +399,11 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 - {key: cleanup, template: 清理模板, required: false, runWhen: always, onFailure: continue}
 ```
 
-完整的判斷表與非阻斷診斷場景見 [Reference Manual V2.1：Stage execution semantics](09_Reference_Manual_V2.md#55-stage-execution-semantics)。
+完整的判斷表與非阻斷診斷場景見 [Reference Manual V2.1：Stage execution controls](09_Reference_Manual_V2.md#stage-execution-controls)。
 
 模板目錄必須直接包含 `template.yaml`。大型 XML、JSON、YAML 或文字內容應放在模板目錄的 request 文件中，由 `render` action 產生輸出。
 
-action 的 `onFailure` 與 stage 的設定獨立：每個 action 只可設為 `stop` 或 `continue`，未設定即為 `stop`。`stop` 停止同一模板後續 action；`continue` 僅容許後續 action 執行，仍會保留失敗結果。詳見 [Reference Manual V2.1：Action field reference](09_Reference_Manual_V2.md#62-action-field-reference)。
+action 的 `onFailure` 與 stage 的設定獨立：每個 action 只可設為 `stop` 或 `continue`，未設定即為 `stop`。`stop` 停止同一模板後續 action；`continue` 僅容許後續 action 執行，仍會保留失敗結果。詳見 [Reference Manual V2.1：Template and action](09_Reference_Manual_V2.md#template-and-action)。
 
 目前模板的結果可用 `${ACTIONS.<actionId>.output}` 讀取；跨 stage 的工具結果使用 `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<actionId>.TOOL.<toolName>.output}`。
 

@@ -30,6 +30,10 @@ class ContextsTest {
         context.beginStage(stage, "PAYMENT_INVOKE", tempDir.resolve("templates/PAYMENT_INVOKE"));
 
         assertEquals("payments.payment.TC001", context.resolve("CASE.caseId"));
+        Map<String,Object> namespaced = new LinkedHashMap<String,Object>();
+        namespaced.put("{urn:payment}Status", "SUCCESS");
+        context.put("CASE.response", namespaced);
+        assertEquals("SUCCESS", context.resolve("CASE.response['{urn:payment}Status']"));
         assertEquals("payments", context.resolve("CASE.workbookId"));
         assertEquals("100", context.resolve("CASE.amount"));
         assertEquals("MOBILE", context.resolve("CASE.STAGES.invoke.channel"));
