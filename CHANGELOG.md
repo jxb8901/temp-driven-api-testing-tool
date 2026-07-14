@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.1 - 2026-07-14
+
+- Added local filesystem built-ins for regular-file/directory existence, file size, directory creation, collision-safe copy/move, and delete operations, with normalized path results and explicit overwrite/missing-file controls.
+- Added `randomChoice` for selecting one of 1–1000 positional or named input values while preserving the selected value's type.
+- Added the `fpp` reference tool group with executable POSIX scripts for an API-adapter XML skeleton, multi-row pipe-delimited SQLPlus output conversion using safe column names as direct elements, and child-script execution with YAML status plus captured stdout/stderr.
+- Expanded generated package documentation, Quick Start, Reference Manual, V2.3 design notes, README, and unit/integration coverage for the V2.3.1 contracts.
+
 ## 2.3.0 - 2026-07-14
 
 - Added `att-template/v2.3` with safe deterministic render payload globs and required `renderAs: file|text|json|yaml|xml`; file mode preserves matched template-relative paths below the Case output directory, while typed modes store one value or an ordered path-to-value map.

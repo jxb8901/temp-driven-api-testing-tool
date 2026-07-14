@@ -44,6 +44,9 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("substr(value, start[, length])"));
         assertTrue(html.contains("systimestamp()"));
         assertTrue(html.contains("dateAdd(value, amount, unit)"));
+        assertTrue(html.contains("fileExists(path)"));
+        assertTrue(html.contains("copyFile(source, target[, overwrite])"));
+        assertTrue(html.contains("randomChoice(first, ...)"));
         assertTrue(html.contains("<h2>indexOf</h2>"));
         assertNotEquals(HtmlSupport.id("中文一"), HtmlSupport.id("中文二"));
     }

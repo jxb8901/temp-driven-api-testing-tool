@@ -1,0 +1,55 @@
+schemaVersion: att-tool-group/v2.2
+id: fpp
+name: FPP reference tools
+description: Reference script contracts for FPP API, SQLPlus, and controlled script execution integrations
+tools:
+  invokeApi:
+    name: Invoke FPP API
+    description: Reference API invocation skeleton returning an XML result envelope
+    command: [./tools/fpp_invoke_api.sh, "${requestId}", "${requestType}", "${requestFile}", "${apiLogPath}"]
+    output: xml
+    arguments:
+      requestId:
+        name: Request ID
+        description: Unique request correlation ID
+        required: true
+      requestType:
+        name: Request Type
+        description: FPP request or message type
+        required: true
+      requestFile:
+        name: Request File
+        description: Absolute path of the request payload file
+        required: true
+      apiLogPath:
+        name: API Log Path
+        description: Full path of the API integration log file
+        required: true
+  sqlplusToXml:
+    name: Convert SQLPlus output to XML
+    description: Convert pipe-delimited SQLPlus rows into XML using safe column names as element names
+    command: [./tools/fpp_sqlplus_to_xml.sh, "${inputFile}"]
+    output: xml
+    arguments:
+      inputFile:
+        name: SQLPlus Output File
+        description: SQLPlus output using SET COLSEP '|' with one header row and zero or more data rows
+        required: true
+  runScript:
+    name: Run script and capture streams
+    description: Execute one script, persist stdout and stderr separately, and return a YAML outcome
+    command: [./tools/fpp_run_script.sh, "${script}", "${stdoutPath}", "${stderrPath}"]
+    output: yaml
+    arguments:
+      script:
+        name: Script
+        description: Full path of the executable script to run without arguments
+        required: true
+      stdoutPath:
+        name: Stdout Path
+        description: Full target path for the script standard output
+        required: true
+      stderrPath:
+        name: Stderr Path
+        description: Full target path for the script standard error
+        required: true

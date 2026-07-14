@@ -1,7 +1,14 @@
 /* Author: Jeffrey + ChatGPT */
 package att.template;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.CopyOption;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -16,32 +23,44 @@ import java.time.temporal.ChronoUnit;
 import java.time.temporal.Temporal;
 import java.time.temporal.TemporalAccessor;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
-/** The only built-in provider registered by ATT V2.2. */
+/** The only built-in provider registered by ATT V2.3.1. */
 public final class DefaultBuiltInProvider implements BuiltInProvider {
     private static final int MAX_TEXT_LENGTH = 10000;
+    private static final int MAX_RANDOM_CHOICES = 1000;
     private static final DateTimeFormatter SYSTEM_TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.ROOT);
     private static final Set<String> NAMES = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
             "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
             "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains",
             "startswith", "endswith", "replace", "padleft", "padright", "sysdate", "systimestamp",
-            "formatdate", "dateadd")));
+            "formatdate", "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories",
+            "copyfile", "movefile", "deletefile", "randomchoice")));
 
     private final Clock clock;
+    private final Random random;
 
     public DefaultBuiltInProvider() {
-        this(Clock.systemDefaultZone());
+        this(Clock.systemDefaultZone(), new Random());
     }
 
     DefaultBuiltInProvider(Clock clock) {
+        this(clock, new Random());
+    }
+
+    DefaultBuiltInProvider(Clock clock, Random random) {
         if (clock == null) throw new IllegalArgumentException("clock is required");
+        if (random == null) throw new IllegalArgumentException("random is required");
         this.clock = clock;
+        this.random = random;
     }
 
     @Override public Set<String> names() { return NAMES; }
@@ -86,6 +105,13 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             int count = boundedSize(argument(input, "count", "arg0"), "nchar", "count");
             return repeat(text(argument(input, "value", "arg1")), count);
         }
+        if ("fileexists".equals(function)) return String.valueOf(Files.isRegularFile(singlePath(input, "fileExists"), LinkOption.NOFOLLOW_LINKS));
+        if ("directoryexists".equals(function)) return String.valueOf(Files.isDirectory(singlePath(input, "directoryExists"), LinkOption.NOFOLLOW_LINKS));
+        if ("filesize".equals(function)) return fileSize(input);
+        if ("makedirectories".equals(function)) return makeDirectories(input);
+        if ("copyfile".equals(function) || "movefile".equals(function)) return transferFile(input, function);
+        if ("deletefile".equals(function)) return deleteFile(input);
+        if ("randomchoice".equals(function)) return randomChoice(input);
         if ("substr".equals(function)) return substr(input);
         if ("indexof".equals(function)) return indexOf(input);
         if ("contains".equals(function) || "startswith".equals(function) || "endswith".equals(function)) {
@@ -106,6 +132,80 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("formatdate".equals(function)) return formatDate(input);
         if ("dateadd".equals(function)) return dateAdd(input);
         throw new IllegalArgumentException("Unknown built-in: " + name);
+    }
+
+    private Object fileSize(Map<String, Object> input) {
+        Path path = singlePath(input, "fileSize");
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("fileSize() requires an existing regular file: " + path);
+        try { return String.valueOf(Files.size(path)); }
+        catch (IOException e) { throw fileFailure("fileSize", e); }
+    }
+
+    private Object makeDirectories(Map<String, Object> input) {
+        Path path = singlePath(input, "makeDirectories");
+        if (Files.isSymbolicLink(path)) throw new IllegalArgumentException("makeDirectories() refuses a symbolic-link target: " + path);
+        try {
+            Files.createDirectories(path);
+            return path.toString();
+        } catch (IOException e) { throw fileFailure("makeDirectories", e); }
+    }
+
+    private Object transferFile(Map<String, Object> input, String function) {
+        String display = displayName(function);
+        require(input, display, 2, 3, "source", "target", "overwrite");
+        Path source = normalizedPath(argument(input, "source", "arg0"), display, "source");
+        Path target = normalizedPath(argument(input, "target", "arg1"), display, "target");
+        boolean overwrite = input.containsKey("overwrite") || input.containsKey("arg2")
+                ? booleanValue(argument(input, "overwrite", "arg2"), display) : false;
+        if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException(display + "() requires an existing regular source file: " + source);
+        if (Files.isSymbolicLink(source) || Files.isSymbolicLink(target)) throw new IllegalArgumentException(display + "() refuses symbolic-link source or target paths");
+        if (source.equals(target)) throw new IllegalArgumentException(display + "() source and target must be different");
+        try {
+            Path parent = target.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            CopyOption[] options = overwrite ? new CopyOption[]{StandardCopyOption.REPLACE_EXISTING} : new CopyOption[0];
+            if ("copyfile".equals(function)) Files.copy(source, target, options); else Files.move(source, target, options);
+            return target.toString();
+        } catch (IOException e) { throw fileFailure(display, e); }
+    }
+
+    private Object deleteFile(Map<String, Object> input) {
+        require(input, "deleteFile", 1, 2, "path", "missingOk");
+        Path path = normalizedPath(argument(input, "path", "arg0"), "deleteFile", "path");
+        boolean missingOk = input.containsKey("missingOk") || input.containsKey("arg1")
+                ? booleanValue(argument(input, "missingOk", "arg1"), "deleteFile") : false;
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("deleteFile() refuses directories: " + path);
+        try {
+            boolean deleted = Files.deleteIfExists(path);
+            if (!deleted && !missingOk) throw new IllegalArgumentException("deleteFile() file does not exist: " + path);
+            return String.valueOf(deleted);
+        } catch (IOException e) { throw fileFailure("deleteFile", e); }
+    }
+
+    private Object randomChoice(Map<String, Object> input) {
+        rejectMixedArgumentStyles(input, "randomChoice");
+        if (input.isEmpty() || input.size() > MAX_RANDOM_CHOICES) throw new IllegalArgumentException("randomChoice() requires 1 to " + MAX_RANDOM_CHOICES + " arguments");
+        List<Object> values = new ArrayList<Object>(input.values());
+        return values.get(random.nextInt(values.size()));
+    }
+
+    private static Path singlePath(Map<String, Object> input, String function) {
+        if (input.size() != 1 || !(input.containsKey("path") || input.containsKey("arg0"))) {
+            throw new IllegalArgumentException(function + "() requires exactly one path argument");
+        }
+        return normalizedPath(argument(input, "path", "arg0"), function, "path");
+    }
+
+    private static Path normalizedPath(Object value, String function, String argument) {
+        String text = text(value).trim();
+        if (text.isEmpty()) throw new IllegalArgumentException(function + "() " + argument + " must not be blank");
+        try { return Paths.get(text).toAbsolutePath().normalize(); }
+        catch (RuntimeException e) { throw new IllegalArgumentException(function + "() has an invalid " + argument + " path: " + text, e); }
+    }
+
+    private static IllegalArgumentException fileFailure(String function, IOException exception) {
+        String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+        return new IllegalArgumentException(function + "() file operation failed: " + message, exception);
     }
 
     private Object invokeSingleValue(String function, Object raw) {
@@ -335,6 +435,14 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("padright".equals(function)) return "padRight";
         if ("formatdate".equals(function)) return "formatDate";
         if ("dateadd".equals(function)) return "dateAdd";
+        if ("fileexists".equals(function)) return "fileExists";
+        if ("directoryexists".equals(function)) return "directoryExists";
+        if ("filesize".equals(function)) return "fileSize";
+        if ("makedirectories".equals(function)) return "makeDirectories";
+        if ("copyfile".equals(function)) return "copyFile";
+        if ("movefile".equals(function)) return "moveFile";
+        if ("deletefile".equals(function)) return "deleteFile";
+        if ("randomchoice".equals(function)) return "randomChoice";
         return function;
     }
 

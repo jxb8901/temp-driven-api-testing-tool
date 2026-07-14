@@ -1,7 +1,7 @@
-# ATT V2.3.0 User Manual and Reference
+# ATT V2.3.1 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.3.0
+Version: 2.3.1
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -474,6 +474,22 @@ tools:
 ```
 
 Call it as `#{database.selectPayment(caseId=${CASE.caseId})}`. With `script`, logical argv is `/opt/att/database-tools selectPayment select-payment --case <caseId>`: script argv, unqualified tool key, then tool command argv. Without `script`, the tool command starts with the executable. Persisted grouped evidence is navigable below `TOOL.database.selectPayment`.
+
+The shipped `fpp` group is a reference implementation rather than an FPP product adapter:
+
+| Call | Input | Parsed result |
+|---|---|---|
+| `fpp.invokeApi` | `requestId`, `requestType`, absolute request-file path, API-log path | XML with request metadata, `ResultCode`, and `ResultMessage` |
+| `fpp.sqlplusToXml` | SQLPlus output-file path | XML rows and columns plus `RowCount` |
+| `fpp.runScript` | child script, stdout path, stderr path | YAML with child `exitCode`, `success`, `errorMessage`, and output paths |
+
+```text
+#{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
+#{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
+#{fpp.runScript(script=${CASE.script}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
+```
+
+`tools/fpp_invoke_api.sh` validates and XML-escapes its inputs, records a correlation line in the requested log, and deliberately returns `ResultCode=NOT_IMPLEMENTED` until its marked integration block is replaced with an approved API client. A missing request file returns `INPUT_FILE_NOT_FOUND`. `tools/fpp_sqlplus_to_xml.sh` expects the first non-blank line to contain pipe-separated column names and converts one or more subsequent records; separator and SQLPlus footer lines are ignored. A safe ASCII XML name such as `name` is emitted directly as `<name>value</name>`; names with spaces, an invalid first character, or the reserved case-insensitive `xml` prefix use the valid fallback `<Column name="original">value</Column>`. `tools/fpp_run_script.sh` captures the complete child stdout/stderr, reports missing/non-executable scripts as child exit codes 127/126, and exits successfully after producing valid YAML, so assertions should inspect `${output.result.exitCode}` rather than the tool process exit code. These scripts require a POSIX shell; Windows packages may point an equivalent tool group at `.bat`, PowerShell, or native commands.
 
 #### Command processing
 
@@ -993,7 +1009,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.0",
+  "attVersion": "2.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1121,6 +1137,14 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 | `systimestamp` | Return system-zone offset timestamp | `#{systimestamp()}` |
 | `formatDate` | Format an ISO-8601 value | `#{formatDate(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `dateAdd` | Add a calendar/time amount | `#{dateAdd(${CASE.businessDate}, 1, 'day')}` |
+| `fileExists` | Test whether a regular file exists | `#{fileExists(${CASE.requestFile})}` |
+| `directoryExists` | Test whether a directory exists | `#{directoryExists(${CASE.outputDirectory})}` |
+| `fileSize` | Return regular-file size in bytes | `#{fileSize(${CASE.requestFile})}` |
+| `makeDirectories` | Create a directory tree and return its absolute path | `#{makeDirectories(${CASE.archiveDirectory})}` |
+| `copyFile` | Copy a regular file and return the target path | `#{copyFile(${CASE.requestFile}, ${CASE.backupFile}, true)}` |
+| `moveFile` | Move a regular file and return the target path | `#{moveFile(${CASE.sourceFile}, ${CASE.targetFile})}` |
+| `deleteFile` | Delete a non-directory file | `#{deleteFile(${CASE.temporaryFile}, true)}` |
+| `randomChoice` | Return one of 1–1000 input values | `#{randomChoice('A', 'B', 'C')}` |
 
 `upper`, `lower`, `trim`, `ltrim`, `rtrim`, `string`, `number`, `boolean`, and `length` require exactly one argument and accept either `value=...` or one unnamed value. Other built-ins accept either their documented names or a complete positional list; do not mix named and positional arguments in one call. Case conversion is locale-independent. `number` rejects non-numeric input and removes unnecessary trailing zeroes. `boolean` accepts true/false, yes/no, and 1/0. `concat` treats null as empty; `coalesce` skips null and whitespace-only values and returns empty when none qualifies. `nvl` tests null/empty without trimming. `iif` accepts the same boolean text forms and resolves all three arguments eagerly. `nchar` requires an integer count from 0 through 10000 and repeats the complete value.
 
@@ -1128,7 +1152,11 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 
 `sysdate()` returns `yyyy-MM-dd`. `systimestamp()` returns `yyyy-MM-dd'T'HH:mm:ss.SSSXXX`; both use the JVM system zone at invocation time. `formatDate` accepts ISO local dates, local date-times, offset/zoned timestamps, and UTC instants, then applies a locale-independent Java `DateTimeFormatter` pattern. `zoneId` accepts an IANA name such as `Asia/Hong_Kong` or an offset such as `+08:00`; it converts instant/offset/zoned values and attaches a zone to a local date-time. `dateAdd` preserves the input ISO shape and accepts singular/plural `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, or `millisecond`; incompatible combinations such as hours plus a date-only value are errors.
 
-Use built-ins for in-process transformations and time values; use tools for filesystem, network, database, system integration, or complex reusable logic. Built-ins remain global and create no TOOL process artifacts. V2.2 reserves an internal provider registry for V3, but V2.2/V2.3 configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Filesystem built-ins resolve relative paths against the ATT JVM working directory and return normalized absolute paths from create/copy/move operations. Existence and size functions accept only their documented regular-file or directory type and do not follow the final symbolic link. Copy and move reject symbolic-link sources/targets, create missing target parents, and default `overwrite` to `false`; an existing target is an error unless `overwrite=true`. `deleteFile` rejects directories, may delete a file or symbolic link itself, and defaults `missingOk` to `false`. Filesystem errors produce action ERROR and these in-process operations create no TOOL process artifacts.
+
+`randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
+
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.1 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 

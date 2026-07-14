@@ -17,6 +17,7 @@ templates:
 
 toolGroups:
   - config/tools/sample.yaml
+  - config/tools/fpp.yaml
 
 report:
   mode: append-to-copy

@@ -1,6 +1,6 @@
-# ATT 2.3.0 - Automated Testing Tool
+# ATT 2.3.1 - Automated Testing Tool
 
-ATT V2.3.0 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.3.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
 V2.3 retains the V2 Case → Stage → Template → Action → Tool model and all V2.2 tool-group, argv-list, SSH, Windows, shorthand, and built-in capabilities. It adds multi-file render globs and typed render results, nests every action outcome under `action.output`, lets `assert` decide non-assert action PASS/FAIL, partially evaluates action descriptions during validation, and records explicit Expected/Actual report values. Templates use `att-template/v2.3`; configuration/tool-group schemas remain V2.2 and sidecar/run/CI schemas retain their existing versions.
 
@@ -67,7 +67,8 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 - Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
 - Tool `command` and group `script` accept a scalar or argv list. Lists preserve each YAML item as one argument; scalar commands use the existing tokenizer once. Group scripts receive `<tool key> <tool command argv>` after the script argv.
 - Root `ssh` applies to inline global tools; a group's `ssh` applies only to that group. ATT prefers local OpenSSH and automatically warns/falls back to the bundled mwiede/jsch Java client when `ssh` is unavailable. Both use strict host-key checking, optional key files, and a safely quoted remote command; see Reference Manual Chapter 09 for Java algorithm limits.
-- Built-ins remain unqualified. V2.3 includes `substr`, `indexOf`, `sysdate`, `systimestamp`, trimming, matching, replacement, padding, ISO date formatting/arithmetic, plus the existing conversion, `nvl`, `iif`, and `nchar` functions. Custom Java built-in providers are not loaded in V2.3.
+- Built-ins remain unqualified. V2.3.1 adds regular-file/directory checks, file size, directory creation, copy/move/delete operations, and `randomChoice`; it also includes the V2.3 string, date, conversion, `nvl`, `iif`, and `nchar` functions. File writes reject collisions unless their explicit overwrite option is true, and custom Java built-in providers are not loaded.
+- The shipped `fpp` tool group provides POSIX reference scripts for an API-adapter skeleton, SQLPlus pipe-delimited output to XML, and child-script execution with YAML status plus captured stdout/stderr. Replace the API script's marked integration block before production use; provide equivalent commands on Windows.
 - A built-in that accepts exactly one value may be written as `#{upper(${CASE.currency})}` instead of `value=...`. A configured tool may omit its argument name only when its configuration declares exactly one argument, for example `#{getAppLogs(${CASE.caseId})}`; multi-argument tools still require names.
 - `schemaVersion` is mandatory in global configuration, tool groups, workbook sidecars, and templates. V2.3 templates use `att-template/v2.3`; unknown non-`x-*` fields are validation errors.
 - `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
@@ -93,4 +94,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.3 System Design](docs/02_System_Design_V2.3.md) for the normative specification.
-See the [ATT V2.3.0 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.0 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.3.1 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.1 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

@@ -1,8 +1,8 @@
-# ATT V2.3.0 新手入門
+# ATT V2.3.1 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.3.0 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.0 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.3.1 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.1 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.0 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.1 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -316,6 +316,11 @@ ATT 內置函數包括：
 - `padLeft(value, length[, pad])`、`padRight(...)`：補齊文字，預設使用空格；
 - `sysdate()`、`systimestamp()`：返回系統時區的 ISO 日期／帶 offset 毫秒 timestamp；
 - `formatDate(value, pattern[, zoneId])`、`dateAdd(value, amount, unit)`：格式化 ISO-8601 日期時間或進行日期加減。
+- `fileExists(path)`、`directoryExists(path)`、`fileSize(path)`：檢查一般文件、目錄或取得文件 byte 數；
+- `makeDirectories(path)`：建立完整目錄樹；
+- `copyFile(source, target[, overwrite])`、`moveFile(...)`：複製／移動一般文件，預設不覆蓋同名目標；
+- `deleteFile(path[, missingOk])`：刪除非目錄文件，預設在文件不存在時報錯；
+- `randomChoice(first, ...)`：從 1 至 1000 個輸入值中隨機返回一個值。
 
 例如：
 
@@ -329,11 +334,24 @@ ATT 內置函數包括：
 #{nvl(${CASE.optionalReference}, 'NO-REFERENCE')}
 #{iif(${CASE.enabled}, 'Y', 'N')}
 #{nchar(3, '9')}
+#{fileExists(${CASE.requestFile})}
+#{copyFile(${CASE.requestFile}, ${CASE.backupFile}, true)}
+#{randomChoice('PRIMARY', 'SECONDARY', 'FALLBACK')}
 ```
 
 只有一個 `value` 的 built-in 可省略 `value=`。配置中只宣告一個 argument 的 tool 也可省略名稱，如 `#{getAppLogs(${CASE.caseId})}`；只要 tool 宣告零個或多個 argument，就必須沿用原有的空參數／具名參數寫法，多參數 tool 不接受位置參數。
 
-完整函數清單、參數規則及字面量語法見 [Reference Manual V2.3.0：Expressions and built-in functions](09_Reference_Manual_V2.md#built-in-functions)。
+檔案 built-in 的相對路徑以 ATT 進程工作目錄為基準；寫入操作的 `overwrite` 預設為 `false`。它們不產生 TOOL process evidence，需要外部稽核、網路或平台命令時仍應配置 tool。
+
+套件也載入 `config/tools/fpp.yaml` 參考工具組，可按以下方式呼叫：
+
+```text
+#{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
+#{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
+#{fpp.runScript(script=${CASE.script}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
+```
+
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`runScript` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML，並把完整 stdout/stderr 寫入指定文件。完整函數、工具契約及平台限制見 [Reference Manual V2.3.1](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -380,7 +398,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.0",
+  "attVersion": "2.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

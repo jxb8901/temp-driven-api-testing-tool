@@ -1,13 +1,13 @@
 # ATT V2.3 System Design
 
 Status: implementation contract
-Target release: 2.3.0
+Target release: 2.3.1
 
 ## 1. Scope
 
 V2.3 refactors template actions without changing the established workbook → testcase → ordered stage → template → ordered action → tool model. The release adds multi-file render actions, a single nested action-outcome contract, assertion-controlled action results, two-phase action text evaluation, and explicit Expected/Actual report values.
 
-The V2.2 tool groups, argv, built-ins, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise.
+The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; it does not change the template or tool-group schemas.
 
 V2.3 introduces `att-template/v2.3`. V2.3 packages use that template schema. Configuration and tool-group schemas remain at their V2.2 versions because their contracts do not change.
 
@@ -286,7 +286,11 @@ Implementation is divided into the following components:
 7. migration of shipped templates, Quick Start, Reference Manual, README, CHANGELOG, generated docs, and schema catalog;
 8. focused unit tests plus package-level validation/build verification.
 
-No V2.3 extension point for custom Java action types or built-ins is introduced.
+V2.3.1 adds ATT-owned local filesystem helpers (`fileExists`, `directoryExists`, `fileSize`, `makeDirectories`, `copyFile`, `moveFile`, and `deleteFile`) plus `randomChoice`. Mutating filesystem helpers use collision-safe defaults, reject unsafe final symlink copy/move targets, and return normalized absolute paths. These helpers produce no external TOOL evidence. `randomChoice` accepts 1–1000 consistently positional or named values and preserves the chosen value's type.
+
+The shipped `fpp` group contains POSIX reference scripts for an API adapter skeleton, SQLPlus pipe-delimited output conversion, and child-script execution with captured stdout/stderr plus YAML status. The SQLPlus converter emits safe column names as direct XML elements and falls back to a `Column name="..."` element only when a header cannot safely form an XML name. The API skeleton reports `NOT_IMPLEMENTED` until its explicit integration block is replaced. The script runner preserves the child exit code inside parsed YAML while the wrapper exits successfully so ATT can parse and assert the result. Platform-specific implementations may replace these commands without changing the `fpp.*` call contract.
+
+No V2.3 extension point for custom Java action types or user-supplied built-ins is introduced.
 
 ## 12. Test and release gates
 
@@ -300,4 +304,6 @@ V2.3 is complete only when automated coverage includes:
 - canonical `assert` migration and rejection of `expression`, `acture`, and `actural`;
 - Expected/Actual ordering, missing optionals, multiline normalization, escaping, HTML, Excel, JSON, JUnit, and report regeneration;
 - migrated sample package validation and execution;
+- filesystem collision, missing-file, symlink boundary, and random-choice argument coverage;
+- executable FPP script tests for XML/YAML escaping, multiple SQLPlus rows, child exit propagation, and stdout/stderr capture;
 - `mvn test`, `./build.sh`, built-package `validate --package`, docs generation, and `git diff --check`.
