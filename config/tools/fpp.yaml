@@ -37,8 +37,8 @@ tools:
         required: true
   runScript:
     name: Run script and capture streams
-    description: Execute one script, persist stdout and stderr separately, and return a YAML outcome
-    command: [./tools/fpp_run_script.sh, "${script}", "${stdoutPath}", "${stderrPath}"]
+    description: Execute one script with optional pipe-delimited atomic arguments, persist both streams, and return a YAML outcome
+    command: [./tools/fpp_run_script.sh, "${script}", "${stdoutPath}", "${stderrPath}", "${arguments}"]
     output: yaml
     arguments:
       script:
@@ -52,4 +52,81 @@ tools:
       stderrPath:
         name: Stderr Path
         description: Full target path for the script standard error
+        required: true
+      arguments:
+        name: Arguments
+        description: Optional pipe-delimited script arguments; use an empty value for no arguments
+        required: false
+        delimit: "|"
+  moveFiles:
+    name: Move matching files
+    description: Move regular files matching one filename glob between directories after collision preflight
+    command: [./tools/fpp_move_files.sh, "${sourceDirectory}", "${pattern}", "${targetDirectory}", "${overwrite}"]
+    output: yaml
+    arguments:
+      sourceDirectory:
+        name: Source Directory
+        description: Directory containing the prepared input files
+        required: true
+      pattern:
+        name: Filename Pattern
+        description: Filename glob evaluated only within the source directory
+        required: true
+      targetDirectory:
+        name: Target Directory
+        description: Destination directory
+        required: true
+      overwrite:
+        name: Overwrite
+        description: true to replace existing target files; false to reject every collision
+        required: true
+  inspectFiles:
+    name: Inspect matching files
+    description: Return matching regular files, count, line counts, and an optional all-files line-count comparison
+    command: [./tools/fpp_inspect_files.sh, "${directory}", "${pattern}", "${expectedLineCount}"]
+    output: yaml
+    arguments:
+      directory:
+        name: Directory
+        description: Directory to inspect without recursion
+        required: true
+      pattern:
+        name: Filename Pattern
+        description: Filename glob evaluated only within the directory
+        required: true
+      expectedLineCount:
+        name: Expected Line Count
+        description: Optional non-negative line count which every matched file must have
+        required: false
+  searchText:
+    name: Search fixed text
+    description: Count lines containing one literal keyword in a regular text file
+    command: [./tools/fpp_search_text.sh, "${file}", "${keyword}"]
+    output: yaml
+    arguments:
+      file:
+        name: File
+        description: Text file to search
+        required: true
+      keyword:
+        name: Keyword
+        description: Non-blank literal text; no regular-expression evaluation
+        required: true
+  querySqlplus:
+    name: Query SQLPlus and return XML
+    description: Execute one SQL file through SQLPlus, save raw streams, and convert pipe-delimited stdout to XML
+    command: [./tools/fpp_query_sqlplus.sh, "${sqlFile}", "${outputFile}", "${stderrPath}"]
+    output: xml
+    arguments:
+      sqlFile:
+        name: SQL File
+        description: SQLPlus script which exits non-zero while its expected condition is not yet satisfied
+        required: true
+      outputFile:
+        name: SQLPlus Output File
+        description: Full path for raw pipe-delimited SQLPlus stdout
+        required: true
+      stderrPath:
+        name: SQLPlus Stderr Path
+        description: Full path for SQLPlus diagnostics
         required: true

@@ -1,0 +1,534 @@
+schemaVersion: att-template/v2.3
+name: FPP_D3I_BATCH_SIT
+description: SIT D3I batch end-to-end flow covering D3I, RLT012, DVO, DRR, and DSR processing.
+
+# CASE path inputs:
+# d3InputDirectory, d3WorkerDirectory, d3DoneDirectory, aftOutboundDirectory,
+# iclOutboundDirectory, artifactDirectory, job2HandlerScript, job3HandlerScript,
+# xml2IffScript, acDate, d3rltXmlFile, d3rltTextFile.
+# Every *SqlFile must print one summary row with RECORD_COUNT, MATCH_COUNT,
+# and RESULT_SUMMARY. Its MATCH_COUNT predicate implements the status named by
+# the corresponding assertion. Every *ExpectedCount is supplied by testcase data.
+actions:
+  moveD3iFiles:
+    type: tool
+    description: "1. Move prepared FPSPD3I XML files into WKR_D3"
+    call: "#{fpp.moveFiles(sourceDirectory=${CASE.d3InputDirectory}, pattern='FPSPD3I*.xml', targetDirectory=${CASE.d3WorkerDirectory}, overwrite=false)}"
+
+  assertMoveD3iFiles:
+    type: assert
+    description: Prepared FPSPD3I files are moved to WKR_D3
+    assert: "${ACTIONS.moveD3iFiles.output.exitCode} == 0 and ${ACTIONS.moveD3iFiles.output.result.count} > 0"
+    expected: "one or more FPSPD3I*.xml files moved successfully"
+    actual: "exitCode=${ACTIONS.moveD3iFiles.output.exitCode}, count=${ACTIONS.moveD3iFiles.output.result.count}, error=${ACTIONS.moveD3iFiles.output.result.errorMessage}"
+
+  runJob2D3i:
+    type: tool
+    description: "2. Execute Job2Handler.sh D3 for FPSPD3I"
+    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-d3i.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-d3i.stderr.log', arguments='D3')}"
+
+  assertJob2D3i:
+    type: assert
+    description: Job2 D3I processing reports no error
+    assert: "${ACTIONS.runJob2D3i.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob2D3i.output.result.exitCode}, error=${ACTIONS.runJob2D3i.output.result.errorMessage}"
+
+  queryD3iTxn:
+    type: tool
+    description: "2.1 Query D3 transactions after D3I Job2 processing"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iTxnSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-txn.out', stderrPath='${CASE.artifactDirectory}/d3i-txn.err')}"
+    timeoutMs: 10000
+    retry: &dbRetry
+      maxAttempts: 3
+      retryOn: [EXIT_CODE]
+
+  assertD3iTxn:
+    type: assert
+    description: D3 transaction record count and PCFM status match
+    assert: "${ACTIONS.queryD3iTxn.output.exitCode} == 0 and ${ACTIONS.queryD3iTxn.output.result.RowCount} == 1 and ${ACTIONS.queryD3iTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iTxnExpectedCount} and ${ACTIONS.queryD3iTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iTxnExpectedCount}"
+    expected: "recordCount=${CASE.d3iTxnExpectedCount}, SR_STUS=PCFM"
+    actual: "${ACTIONS.queryD3iTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryD3iFileJnl:
+    type: tool
+    description: "2.2 Query TB_FILE_JNL for FPSPD3I"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-file-jnl.out', stderrPath='${CASE.artifactDirectory}/d3i-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertD3iFileJnl:
+    type: assert
+    description: FPSPD3I file journal count and P status match
+    assert: "${ACTIONS.queryD3iFileJnl.output.exitCode} == 0 and ${ACTIONS.queryD3iFileJnl.output.result.RowCount} == 1 and ${ACTIONS.queryD3iFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iFileExpectedCount} and ${ACTIONS.queryD3iFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iFileExpectedCount}"
+    expected: "recordCount=${CASE.d3iFileExpectedCount}, SR_FILE_STUS=P"
+    actual: "${ACTIONS.queryD3iFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectD3iDone:
+    type: tool
+    description: "2.3 Inspect WKR_D3/done for processed FPSPD3I files"
+    call: "#{fpp.inspectFiles(directory=${CASE.d3DoneDirectory}, pattern='FPSPD3I*.xml.*', expectedLineCount='')}"
+
+  assertD3iDone:
+    type: assert
+    description: WKR_D3 done contains processed FPSPD3I files
+    assert: "${ACTIONS.inspectD3iDone.output.exitCode} == 0 and ${ACTIONS.inspectD3iDone.output.result.count} > 0"
+    expected: WKR_D3/done contains FPSPD3I*.xml.*
+    actual: "count=${ACTIONS.inspectD3iDone.output.result.count}"
+
+  runJob3D3i:
+    type: tool
+    description: "3. Execute Job3Handler_iff.sh -104"
+    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-104.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-104.stderr.log', arguments='-104')}"
+
+  assertJob3D3i:
+    type: assert
+    description: Job3 -104 reports no error
+    assert: "${ACTIONS.runJob3D3i.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob3D3i.output.result.exitCode}, error=${ACTIONS.runJob3D3i.output.result.errorMessage}"
+
+  inspectD3iAftOutput:
+    type: tool
+    description: "3.1 Inspect AFT outbound 012D3D3I.TXT"
+    call: "#{fpp.inspectFiles(directory=${CASE.aftOutboundDirectory}, pattern='012D3D3I.TXT', expectedLineCount='')}"
+
+  assertD3iAftOutput:
+    type: assert
+    description: AFT outbound contains 012D3D3I.TXT
+    assert: "${ACTIONS.inspectD3iAftOutput.output.result.count} > 0"
+    expected: /outbound/aft/012D3D3I.TXT exists
+    actual: "count=${ACTIONS.inspectD3iAftOutput.output.result.count}"
+
+  inspectD3iFlistOutput:
+    type: tool
+    description: "3.1 Inspect AFT outbound D3I_FLIST0300.TXT"
+    call: "#{fpp.inspectFiles(directory=${CASE.aftOutboundDirectory}, pattern='D3I_FLIST0300.TXT', expectedLineCount='')}"
+
+  assertD3iFlistOutput:
+    type: assert
+    description: AFT outbound contains D3I_FLIST0300.TXT
+    assert: "${ACTIONS.inspectD3iFlistOutput.output.result.count} > 0"
+    expected: /outbound/aft/D3I_FLIST0300.TXT exists
+    actual: "count=${ACTIONS.inspectD3iFlistOutput.output.result.count}"
+
+  queryD3iOutboundTxn:
+    type: tool
+    description: "3.2 Query D3 transaction after Job3 -104"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iOutboundTxnSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-outbound-txn.out', stderrPath='${CASE.artifactDirectory}/d3i-outbound-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertD3iOutboundTxn:
+    type: assert
+    description: D3 outbound transaction count and OTWD status match
+    assert: "${ACTIONS.queryD3iOutboundTxn.output.exitCode} == 0 and ${ACTIONS.queryD3iOutboundTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iOutboundTxnExpectedCount} and ${ACTIONS.queryD3iOutboundTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iOutboundTxnExpectedCount}"
+    expected: "recordCount=${CASE.d3iOutboundTxnExpectedCount}, SR_STUS=OTWD"
+    actual: "${ACTIONS.queryD3iOutboundTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryD3iOutboundFileJnl:
+    type: tool
+    description: "3.3 Query TB_FILE_JNL for 012D3D3I and D3I_FLIST0300"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iOutboundFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-outbound-file-jnl.out', stderrPath='${CASE.artifactDirectory}/d3i-outbound-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertD3iOutboundFileJnl:
+    type: assert
+    description: D3I outbound file journals have expected P and C statuses
+    assert: "${ACTIONS.queryD3iOutboundFileJnl.output.exitCode} == 0 and ${ACTIONS.queryD3iOutboundFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iOutboundFileExpectedCount} and ${ACTIONS.queryD3iOutboundFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iOutboundFileExpectedCount}"
+    expected: "recordCount=${CASE.d3iOutboundFileExpectedCount}, SR_FILE_STUS=P and C"
+    actual: "${ACTIONS.queryD3iOutboundFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  convertD3Rlt:
+    type: tool
+    description: "4.1 Convert AFTD3RLT012 AcDate XML to IFF text"
+    call: "#{fpp.runScript(script=${CASE.xml2IffScript}, stdoutPath='${CASE.artifactDirectory}/xml2iff.stdout.log', stderrPath='${CASE.artifactDirectory}/xml2iff.stderr.log', arguments='${CASE.d3rltXmlFile}|${CASE.d3rltTextFile}')}"
+
+  assertConvertD3Rlt:
+    type: assert
+    description: XML2IFF conversion succeeds
+    assert: "${ACTIONS.convertD3Rlt.output.result.exitCode} == 0"
+    expected: "AFTD3RLT012_${CASE.acDate}.XML.txt generated"
+    actual: "exitCode=${ACTIONS.convertD3Rlt.output.result.exitCode}, error=${ACTIONS.convertD3Rlt.output.result.errorMessage}"
+
+  moveD3Rlt:
+    type: tool
+    description: "4.2 Move AFTD3RLT012 AcDate text into WKR_D3"
+    call: "#{fpp.moveFiles(sourceDirectory=${CASE.d3InputDirectory}, pattern='AFTD3RLT012_${CASE.acDate}.txt', targetDirectory=${CASE.d3WorkerDirectory}, overwrite=false)}"
+
+  assertMoveD3Rlt:
+    type: assert
+    description: Prepared AFTD3RLT012 text is moved to WKR_D3
+    assert: "${ACTIONS.moveD3Rlt.output.exitCode} == 0 and ${ACTIONS.moveD3Rlt.output.result.count} == 1"
+    expected: "AFTD3RLT012_${CASE.acDate}.txt moved successfully"
+    actual: "count=${ACTIONS.moveD3Rlt.output.result.count}, error=${ACTIONS.moveD3Rlt.output.result.errorMessage}"
+
+  runJob2Rlt:
+    type: tool
+    description: "5. Execute Job2Handler.sh D3 for RLT012"
+    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-rlt.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-rlt.stderr.log', arguments='D3')}"
+
+  assertJob2Rlt:
+    type: assert
+    description: Job2 RLT012 processing reports no error
+    assert: "${ACTIONS.runJob2Rlt.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob2Rlt.output.result.exitCode}, error=${ACTIONS.runJob2Rlt.output.result.errorMessage}"
+
+  queryRltTxn:
+    type: tool
+    description: "5.1 Query D3 RLT012 transaction"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.rltTxnSqlFile}, outputFile='${CASE.artifactDirectory}/rlt-txn.out', stderrPath='${CASE.artifactDirectory}/rlt-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertRltTxn:
+    type: assert
+    description: RLT012 transaction count and CFM status match
+    assert: "${ACTIONS.queryRltTxn.output.exitCode} == 0 and ${ACTIONS.queryRltTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.rltTxnExpectedCount} and ${ACTIONS.queryRltTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.rltTxnExpectedCount}"
+    expected: "recordCount=${CASE.rltTxnExpectedCount}, SR_STUS=CFM"
+    actual: "${ACTIONS.queryRltTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryRltFileJnl:
+    type: tool
+    description: "5.2 Query TB_FILE_JNL for RLT012"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.rltFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/rlt-file-jnl.out', stderrPath='${CASE.artifactDirectory}/rlt-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertRltFileJnl:
+    type: assert
+    description: RLT012 file journal count and C status match
+    assert: "${ACTIONS.queryRltFileJnl.output.exitCode} == 0 and ${ACTIONS.queryRltFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.rltFileExpectedCount} and ${ACTIONS.queryRltFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.rltFileExpectedCount}"
+    expected: "recordCount=${CASE.rltFileExpectedCount}, SR_FILE_STUS=C"
+    actual: "${ACTIONS.queryRltFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectRltDone:
+    type: tool
+    description: "5.3 Inspect WKR_D3/done for RLT012 text"
+    call: "#{fpp.inspectFiles(directory=${CASE.d3DoneDirectory}, pattern='AFTD3RLT012_${CASE.acDate}.txt', expectedLineCount='')}"
+
+  assertRltDone:
+    type: assert
+    description: WKR_D3 done contains RLT012 text
+    assert: "${ACTIONS.inspectRltDone.output.result.count} == 1"
+    expected: "WKR_D3/done/AFTD3RLT012_${CASE.acDate}.txt exists"
+    actual: "count=${ACTIONS.inspectRltDone.output.result.count}"
+
+  runJob3Rlt:
+    type: tool
+    description: "6. Execute Job3Handler_iff.sh -105"
+    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-105.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-105.stderr.log', arguments='-105')}"
+
+  assertJob3Rlt:
+    type: assert
+    description: Job3 -105 reports no error
+    assert: "${ACTIONS.runJob3Rlt.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob3Rlt.output.result.exitCode}, error=${ACTIONS.runJob3Rlt.output.result.errorMessage}"
+
+  inspectDvoOutput:
+    type: tool
+    description: "6.1 Inspect ICL outbound for nine-line FPSPDVO XML"
+    call: "#{fpp.inspectFiles(directory=${CASE.iclOutboundDirectory}, pattern='FPSPDVO*.xml', expectedLineCount=9)}"
+
+  assertDvoOutput:
+    type: assert
+    description: ICL outbound contains expected nine-line DVO files
+    assert: "${ACTIONS.inspectDvoOutput.output.result.count} == ${CASE.dvoExpectedFileCount} and ${ACTIONS.inspectDvoOutput.output.result.lineCountMatches} == true"
+    expected: "fileCount=${CASE.dvoExpectedFileCount}, each FPSPDVO*.xml has 9 lines"
+    actual: "fileCount=${ACTIONS.inspectDvoOutput.output.result.count}, lineCountMatches=${ACTIONS.inspectDvoOutput.output.result.lineCountMatches}"
+
+  queryDvoTxn:
+    type: tool
+    description: "6.2 Query D3 DVO transaction"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.dvoTxnSqlFile}, outputFile='${CASE.artifactDirectory}/dvo-txn.out', stderrPath='${CASE.artifactDirectory}/dvo-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDvoTxn:
+    type: assert
+    description: DVO transaction count and OTWD status match
+    assert: "${ACTIONS.queryDvoTxn.output.exitCode} == 0 and ${ACTIONS.queryDvoTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dvoTxnExpectedCount} and ${ACTIONS.queryDvoTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dvoTxnExpectedCount}"
+    expected: "recordCount=${CASE.dvoTxnExpectedCount}, SR_STUS=OTWD"
+    actual: "${ACTIONS.queryDvoTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryDvoFileJnl:
+    type: tool
+    description: "6.3 Query TB_FILE_JNL for DVO"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.dvoFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/dvo-file-jnl.out', stderrPath='${CASE.artifactDirectory}/dvo-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDvoFileJnl:
+    type: assert
+    description: DVO file journal count and C status match
+    assert: "${ACTIONS.queryDvoFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDvoFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dvoFileExpectedCount} and ${ACTIONS.queryDvoFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dvoFileExpectedCount}"
+    expected: "recordCount=${CASE.dvoFileExpectedCount}, SR_FILE_STUS=C"
+    actual: "${ACTIONS.queryDvoFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectDrrInput:
+    type: tool
+    description: "7. Inspect prepared ten-line FPSPDRR XML files"
+    call: "#{fpp.inspectFiles(directory=${CASE.d3InputDirectory}, pattern='FPSPDRR*.xml', expectedLineCount=10)}"
+
+  assertDrrInput:
+    type: assert
+    description: Prepared DRR files contain ten lines
+    assert: "${ACTIONS.inspectDrrInput.output.result.count} == ${CASE.drrExpectedFileCount} and ${ACTIONS.inspectDrrInput.output.result.lineCountMatches} == true"
+    expected: "fileCount=${CASE.drrExpectedFileCount}, each FPSPDRR*.xml has 10 lines"
+    actual: "fileCount=${ACTIONS.inspectDrrInput.output.result.count}, lineCountMatches=${ACTIONS.inspectDrrInput.output.result.lineCountMatches}"
+
+  moveDrrFiles:
+    type: tool
+    description: "7. Move prepared FPSPDRR XML files into WKR_D3"
+    call: "#{fpp.moveFiles(sourceDirectory=${CASE.d3InputDirectory}, pattern='FPSPDRR*.xml', targetDirectory=${CASE.d3WorkerDirectory}, overwrite=false)}"
+
+  assertMoveDrrFiles:
+    type: assert
+    description: Prepared FPSPDRR files are moved to WKR_D3
+    assert: "${ACTIONS.moveDrrFiles.output.exitCode} == 0 and ${ACTIONS.moveDrrFiles.output.result.count} == ${CASE.drrExpectedFileCount}"
+    expected: "${CASE.drrExpectedFileCount} FPSPDRR files moved successfully"
+    actual: "count=${ACTIONS.moveDrrFiles.output.result.count}, error=${ACTIONS.moveDrrFiles.output.result.errorMessage}"
+
+  runJob2Drr:
+    type: tool
+    description: "8. Execute Job2Handler.sh D3 for DRR"
+    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-drr.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-drr.stderr.log', arguments='D3')}"
+
+  assertJob2Drr:
+    type: assert
+    description: Job2 DRR processing reports no error
+    assert: "${ACTIONS.runJob2Drr.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob2Drr.output.result.exitCode}, error=${ACTIONS.runJob2Drr.output.result.errorMessage}"
+
+  queryDrrTxn:
+    type: tool
+    description: "8.1 Query D3 DRR transactions"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.drrTxnSqlFile}, outputFile='${CASE.artifactDirectory}/drr-txn.out', stderrPath='${CASE.artifactDirectory}/drr-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDrrTxn:
+    type: assert
+    description: DRR transaction count and CAPT or CRJT plus PCFM states match
+    assert: "${ACTIONS.queryDrrTxn.output.exitCode} == 0 and ${ACTIONS.queryDrrTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrTxnExpectedCount} and ${ACTIONS.queryDrrTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrTxnExpectedCount}"
+    expected: "recordCount=${CASE.drrTxnExpectedCount}, SR_STUS=(CAPT or CRJT) and PCFM"
+    actual: "${ACTIONS.queryDrrTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryDrrFileJnl:
+    type: tool
+    description: "8.2 Query TB_FILE_JNL for DRR"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.drrFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/drr-file-jnl.out', stderrPath='${CASE.artifactDirectory}/drr-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDrrFileJnl:
+    type: assert
+    description: DRR file journal count and C status match
+    assert: "${ACTIONS.queryDrrFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDrrFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrFileExpectedCount} and ${ACTIONS.queryDrrFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrFileExpectedCount}"
+    expected: "recordCount=${CASE.drrFileExpectedCount}, SR_FILE_STUS=C"
+    actual: "${ACTIONS.queryDrrFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectDrrDone:
+    type: tool
+    description: "8.3 Inspect WKR_D3/done for processed FPSPDRR files"
+    call: "#{fpp.inspectFiles(directory=${CASE.d3DoneDirectory}, pattern='FPSPDRR*.xml.*', expectedLineCount='')}"
+
+  assertDrrDone:
+    type: assert
+    description: WKR_D3 done contains processed FPSPDRR files
+    assert: "${ACTIONS.inspectDrrDone.output.result.count} == ${CASE.drrExpectedFileCount}"
+    expected: "${CASE.drrExpectedFileCount} FPSPDRR*.xml.* files"
+    actual: "count=${ACTIONS.inspectDrrDone.output.result.count}"
+
+  runJob3Drr:
+    type: tool
+    description: "9. Execute Job3Handler_iff.sh -106"
+    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-106.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-106.stderr.log', arguments='-106')}"
+
+  assertJob3Drr:
+    type: assert
+    description: Job3 -106 reports no error
+    assert: "${ACTIONS.runJob3Drr.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob3Drr.output.result.exitCode}, error=${ACTIONS.runJob3Drr.output.result.errorMessage}"
+
+  queryDrrCapSent:
+    type: tool
+    description: "9.1 Query D3 DRR capture-sent state"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.drrCapSentSqlFile}, outputFile='${CASE.artifactDirectory}/drr-cap-sent.out', stderrPath='${CASE.artifactDirectory}/drr-cap-sent.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDrrCapSent:
+    type: assert
+    description: DRR capture-sent record count and S flag match
+    assert: "${ACTIONS.queryDrrCapSent.output.exitCode} == 0 and ${ACTIONS.queryDrrCapSent.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrCapExpectedCount} and ${ACTIONS.queryDrrCapSent.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrCapExpectedCount}"
+    expected: "recordCount=${CASE.drrCapExpectedCount}, SR_IS_CAP_SENT=S"
+    actual: "${ACTIONS.queryDrrCapSent.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryDrrCapFileJnl:
+    type: tool
+    description: "9.2 Query TB_FILE_JNL after DRR capture send"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.drrCapFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/drr-cap-file-jnl.out', stderrPath='${CASE.artifactDirectory}/drr-cap-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDrrCapFileJnl:
+    type: assert
+    description: DRR capture file journal count and C status match
+    assert: "${ACTIONS.queryDrrCapFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDrrCapFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrCapFileExpectedCount} and ${ACTIONS.queryDrrCapFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrCapFileExpectedCount}"
+    expected: "recordCount=${CASE.drrCapFileExpectedCount}, SR_FILE_STUS=C"
+    actual: "${ACTIONS.queryDrrCapFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectDrrAftOutput:
+    type: tool
+    description: "9.3 Inspect AFT outbound 012D3DRR.TXT"
+    call: "#{fpp.inspectFiles(directory=${CASE.aftOutboundDirectory}, pattern='012D3DRR.TXT', expectedLineCount='')}"
+
+  assertDrrAftOutput:
+    type: assert
+    description: AFT outbound contains 012D3DRR.TXT
+    assert: "${ACTIONS.inspectDrrAftOutput.output.result.count} == 1"
+    expected: /outbound/aft/012D3DRR.TXT exists
+    actual: "count=${ACTIONS.inspectDrrAftOutput.output.result.count}"
+
+  inspectDsrInput:
+    type: tool
+    description: "10. Inspect prepared ten-line FPSPDSR XML files"
+    call: "#{fpp.inspectFiles(directory=${CASE.d3InputDirectory}, pattern='FPSPDSR*.xml', expectedLineCount=10)}"
+
+  assertDsrInput:
+    type: assert
+    description: Prepared DSR files contain ten lines
+    assert: "${ACTIONS.inspectDsrInput.output.result.count} == ${CASE.dsrExpectedFileCount} and ${ACTIONS.inspectDsrInput.output.result.lineCountMatches} == true"
+    expected: "fileCount=${CASE.dsrExpectedFileCount}, each FPSPDSR*.xml has 10 lines"
+    actual: "fileCount=${ACTIONS.inspectDsrInput.output.result.count}, lineCountMatches=${ACTIONS.inspectDsrInput.output.result.lineCountMatches}"
+
+  moveDsrFiles:
+    type: tool
+    description: "10. Move prepared FPSPDSR XML files into WKR_D3"
+    call: "#{fpp.moveFiles(sourceDirectory=${CASE.d3InputDirectory}, pattern='FPSPDSR*.xml', targetDirectory=${CASE.d3WorkerDirectory}, overwrite=false)}"
+
+  assertMoveDsrFiles:
+    type: assert
+    description: Prepared FPSPDSR files are moved to WKR_D3
+    assert: "${ACTIONS.moveDsrFiles.output.exitCode} == 0 and ${ACTIONS.moveDsrFiles.output.result.count} == ${CASE.dsrExpectedFileCount}"
+    expected: "${CASE.dsrExpectedFileCount} FPSPDSR files moved successfully"
+    actual: "count=${ACTIONS.moveDsrFiles.output.result.count}, error=${ACTIONS.moveDsrFiles.output.result.errorMessage}"
+
+  runJob2Dsr:
+    type: tool
+    description: "11. Execute Job2Handler.sh D3 for DSR"
+    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-dsr.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-dsr.stderr.log', arguments='D3')}"
+
+  assertJob2Dsr:
+    type: assert
+    description: Job2 DSR processing reports no error
+    assert: "${ACTIONS.runJob2Dsr.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob2Dsr.output.result.exitCode}, error=${ACTIONS.runJob2Dsr.output.result.errorMessage}"
+
+  queryDsrTxn:
+    type: tool
+    description: "11.1 Query D3 DSR transactions"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrTxnSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-txn.out', stderrPath='${CASE.artifactDirectory}/dsr-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDsrTxn:
+    type: assert
+    description: DSR transaction count and ACPT or UCPT plus SUCC or RJCT states match
+    assert: "${ACTIONS.queryDsrTxn.output.exitCode} == 0 and ${ACTIONS.queryDsrTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrTxnExpectedCount} and ${ACTIONS.queryDsrTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrTxnExpectedCount}"
+    expected: "recordCount=${CASE.dsrTxnExpectedCount}, SR_STUS=(ACPT or UCPT) and (SUCC or RJCT)"
+    actual: "${ACTIONS.queryDsrTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryDsrFileJnl:
+    type: tool
+    description: "11.2 Query TB_FILE_JNL for DSR"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-file-jnl.out', stderrPath='${CASE.artifactDirectory}/dsr-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDsrFileJnl:
+    type: assert
+    description: DSR file journal count and C status match
+    assert: "${ACTIONS.queryDsrFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDsrFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFileExpectedCount} and ${ACTIONS.queryDsrFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFileExpectedCount}"
+    expected: "recordCount=${CASE.dsrFileExpectedCount}, SR_FILE_STUS=C"
+    actual: "${ACTIONS.queryDsrFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectDsrOutbound:
+    type: tool
+    description: "11.3 Inspect AFT outbound for processed FPSPDSR XML"
+    call: "#{fpp.inspectFiles(directory=${CASE.aftOutboundDirectory}, pattern='FPSPDSR*.xml.*', expectedLineCount='')}"
+
+  assertDsrOutbound:
+    type: assert
+    description: AFT outbound contains processed FPSPDSR files
+    assert: "${ACTIONS.inspectDsrOutbound.output.result.count} == ${CASE.dsrExpectedFileCount}"
+    expected: "${CASE.dsrExpectedFileCount} FPSPDSR*.xml.* files"
+    actual: "count=${ACTIONS.inspectDsrOutbound.output.result.count}"
+
+  runJob3Dsr:
+    type: tool
+    description: "12. Execute Job3Handler_iff.sh -107"
+    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-107.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-107.stderr.log', arguments='-107')}"
+
+  assertJob3Dsr:
+    type: assert
+    description: Job3 -107 reports no error
+    assert: "${ACTIONS.runJob3Dsr.output.result.exitCode} == 0"
+    expected: exitCode=0
+    actual: "exitCode=${ACTIONS.runJob3Dsr.output.result.exitCode}, error=${ACTIONS.runJob3Dsr.output.result.errorMessage}"
+
+  queryDsrFinalTxn:
+    type: tool
+    description: "12.1 Query final D3 DSR transaction state"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrFinalTxnSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-final-txn.out', stderrPath='${CASE.artifactDirectory}/dsr-final-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDsrFinalTxn:
+    type: assert
+    description: Final DSR transaction count and SUCC or RJCT status match
+    assert: "${ACTIONS.queryDsrFinalTxn.output.exitCode} == 0 and ${ACTIONS.queryDsrFinalTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFinalTxnExpectedCount} and ${ACTIONS.queryDsrFinalTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFinalTxnExpectedCount}"
+    expected: "recordCount=${CASE.dsrFinalTxnExpectedCount}, SR_STUS=SUCC or RJCT"
+    actual: "${ACTIONS.queryDsrFinalTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryDsrFinalFileJnl:
+    type: tool
+    description: "12.2 Query final TB_FILE_JNL DSR state"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrFinalFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-final-file-jnl.out', stderrPath='${CASE.artifactDirectory}/dsr-final-file-jnl.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertDsrFinalFileJnl:
+    type: assert
+    description: Final DSR file journal count and C status match
+    assert: "${ACTIONS.queryDsrFinalFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDsrFinalFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFinalFileExpectedCount} and ${ACTIONS.queryDsrFinalFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFinalFileExpectedCount}"
+    expected: "recordCount=${CASE.dsrFinalFileExpectedCount}, SR_FILE_STUS=C"
+    actual: "${ACTIONS.queryDsrFinalFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  inspectDsrAftOutput:
+    type: tool
+    description: "12.3 Inspect AFT outbound 012D3DSR.TXT"
+    call: "#{fpp.inspectFiles(directory=${CASE.aftOutboundDirectory}, pattern='012D3DSR.TXT', expectedLineCount='')}"
+
+  assertDsrAftOutput:
+    type: assert
+    description: AFT outbound contains 012D3DSR.TXT
+    assert: "${ACTIONS.inspectDsrAftOutput.output.result.count} == 1"
+    expected: /outbound/aft/012D3DSR.TXT exists
+    actual: "count=${ACTIONS.inspectDsrAftOutput.output.result.count}"
+
+  logD3iSummary:
+    type: log
+    level: INFO
+    message: "D3I batch end-to-end flow completed for ${CASE.caseId}"
+    fields:
+      d3iFiles: "${ACTIONS.moveD3iFiles.output.result.count}"
+      drrFiles: "${ACTIONS.moveDrrFiles.output.result.count}"
+      dsrFiles: "${ACTIONS.moveDsrFiles.output.result.count}"

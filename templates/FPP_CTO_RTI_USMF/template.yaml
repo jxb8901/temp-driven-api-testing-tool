@@ -1,0 +1,152 @@
+schemaVersion: att-template/v2.3
+name: FPP_CTO_RTI_USMF
+description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
+
+# CASE message inputs:
+# precheckRequestId, precheckRequestType, precheckRequestFile,
+# confirmRequestId, confirmRequestType, confirmRequestFile,
+# pacs004RequestId, pacs004RequestType, pacs004RequestFile, apiLogPath,
+# apiSuccessCode, transactionLogFile, precheckLogKeyword, confirmLogKeyword,
+# pacs002AcscLogFile, pacs002AcscKeyword, pacs002AcccLogFile,
+# pacs002AcccKeyword, artifactDirectory, amount.
+# Every *SqlFile must print one summary row with RECORD_COUNT, MATCH_COUNT,
+# and RESULT_SUMMARY. MATCH_COUNT covers the business condition named below.
+actions:
+  invokePrecheck:
+    type: tool
+    description: "1. Send CT001 Precheck"
+    call: "#{fpp.invokeApi(requestId=${CASE.precheckRequestId}, requestType=${CASE.precheckRequestType}, requestFile=${CASE.precheckRequestFile}, apiLogPath=${CASE.apiLogPath})}"
+
+  assertPrecheck:
+    type: assert
+    description: CT001 Precheck succeeds
+    assert: "${ACTIONS.invokePrecheck.output.exitCode} == 0 and ${ACTIONS.invokePrecheck.output.result.ResultCode} == '${CASE.apiSuccessCode}'"
+    expected: "ResultCode=${CASE.apiSuccessCode}"
+    actual: "ResultCode=${ACTIONS.invokePrecheck.output.result.ResultCode}, message=${ACTIONS.invokePrecheck.output.result.ResultMessage}"
+
+  searchPrecheckLog:
+    type: tool
+    description: "1.2 Check CT001 Precheck transaction log keyword"
+    call: "#{fpp.searchText(file=${CASE.transactionLogFile}, keyword=${CASE.precheckLogKeyword})}"
+
+  assertPrecheckLog:
+    type: assert
+    description: CT001 Precheck transaction log contains the expected keyword
+    assert: "${ACTIONS.searchPrecheckLog.output.exitCode} == 0 and ${ACTIONS.searchPrecheckLog.output.result.found} == true"
+    expected: "transaction log contains ${CASE.precheckLogKeyword}"
+    actual: "found=${ACTIONS.searchPrecheckLog.output.result.found}, count=${ACTIONS.searchPrecheckLog.output.result.count}"
+
+  invokeConfirm:
+    type: tool
+    description: "2. Send CT001 Confirm"
+    call: "#{fpp.invokeApi(requestId=${CASE.confirmRequestId}, requestType=${CASE.confirmRequestType}, requestFile=${CASE.confirmRequestFile}, apiLogPath=${CASE.apiLogPath})}"
+
+  assertConfirm:
+    type: assert
+    description: CT001 Confirm succeeds
+    assert: "${ACTIONS.invokeConfirm.output.exitCode} == 0 and ${ACTIONS.invokeConfirm.output.result.ResultCode} == '${CASE.apiSuccessCode}'"
+    expected: "ResultCode=${CASE.apiSuccessCode}"
+    actual: "ResultCode=${ACTIONS.invokeConfirm.output.result.ResultCode}, message=${ACTIONS.invokeConfirm.output.result.ResultMessage}"
+
+  searchConfirmLog:
+    type: tool
+    description: "2.2 Check CT001 Confirm transaction log keyword"
+    call: "#{fpp.searchText(file=${CASE.transactionLogFile}, keyword=${CASE.confirmLogKeyword})}"
+
+  assertConfirmLog:
+    type: assert
+    description: CT001 Confirm transaction log contains the expected keyword
+    assert: "${ACTIONS.searchConfirmLog.output.exitCode} == 0 and ${ACTIONS.searchConfirmLog.output.result.found} == true"
+    expected: "transaction log contains ${CASE.confirmLogKeyword}"
+    actual: "found=${ACTIONS.searchConfirmLog.output.result.found}, count=${ACTIONS.searchConfirmLog.output.result.count}"
+
+  queryCtoAfterConfirm:
+    type: tool
+    description: "3.1 Poll CTO transaction until ACSC and ACCC states succeed"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.ctoAcscAcccSqlFile}, outputFile='${CASE.artifactDirectory}/cto-acsc-accc.out', stderrPath='${CASE.artifactDirectory}/cto-acsc-accc.err')}"
+    timeoutMs: 10000
+    retry: &dbRetry
+      maxAttempts: 3
+      retryOn: [EXIT_CODE]
+
+  assertCtoAfterConfirm:
+    type: assert
+    description: CTO ACSC and ACCC transaction states match within three attempts
+    assert: "${ACTIONS.queryCtoAfterConfirm.output.exitCode} == 0 and ${ACTIONS.queryCtoAfterConfirm.output.result.RowCount} == 1 and ${ACTIONS.queryCtoAfterConfirm.output.result.Rows.Row.RECORD_COUNT} == ${CASE.ctoAcscAcccExpectedCount} and ${ACTIONS.queryCtoAfterConfirm.output.result.Rows.Row.MATCH_COUNT} == ${CASE.ctoAcscAcccExpectedCount}"
+    expected: "recordCount=${CASE.ctoAcscAcccExpectedCount}, ACSC and ACCC successful"
+    actual: "${ACTIONS.queryCtoAfterConfirm.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  searchPacs002Acsc:
+    type: tool
+    description: "3.2-3.3 Obtain and verify Pacs002 ACSC transaction log"
+    call: "#{fpp.searchText(file=${CASE.pacs002AcscLogFile}, keyword=${CASE.pacs002AcscKeyword})}"
+
+  assertPacs002Acsc:
+    type: assert
+    description: Pacs002 ACSC log result matches the expectation
+    assert: "${ACTIONS.searchPacs002Acsc.output.exitCode} == 0 and ${ACTIONS.searchPacs002Acsc.output.result.found} == true"
+    expected: "Pacs002 ACSC log contains ${CASE.pacs002AcscKeyword}"
+    actual: "found=${ACTIONS.searchPacs002Acsc.output.result.found}, count=${ACTIONS.searchPacs002Acsc.output.result.count}"
+
+  searchPacs002Accc:
+    type: tool
+    description: "3.4-3.5 Obtain and verify Pacs002 ACCC transaction log"
+    call: "#{fpp.searchText(file=${CASE.pacs002AcccLogFile}, keyword=${CASE.pacs002AcccKeyword})}"
+
+  assertPacs002Accc:
+    type: assert
+    description: Pacs002 ACCC log result matches the expectation
+    assert: "${ACTIONS.searchPacs002Accc.output.exitCode} == 0 and ${ACTIONS.searchPacs002Accc.output.result.found} == true"
+    expected: "Pacs002 ACCC log contains ${CASE.pacs002AcccKeyword}"
+    actual: "found=${ACTIONS.searchPacs002Accc.output.result.found}, count=${ACTIONS.searchPacs002Accc.output.result.count}"
+
+  invokePacs004:
+    type: tool
+    description: "4. Simulate sending Pacs004 under the configured FPS Console condition"
+    call: "#{fpp.invokeApi(requestId=${CASE.pacs004RequestId}, requestType=${CASE.pacs004RequestType}, requestFile=${CASE.pacs004RequestFile}, apiLogPath=${CASE.apiLogPath})}"
+
+  assertPacs004:
+    type: assert
+    description: Pacs004 simulation reports no error
+    assert: "${ACTIONS.invokePacs004.output.exitCode} == 0 and ${ACTIONS.invokePacs004.output.result.ResultCode} == '${CASE.apiSuccessCode}'"
+    expected: "ResultCode=${CASE.apiSuccessCode}"
+    actual: "ResultCode=${ACTIONS.invokePacs004.output.result.ResultCode}, message=${ACTIONS.invokePacs004.output.result.ResultMessage}"
+
+  queryRtiTxn:
+    type: tool
+    description: "5. Poll RTI transaction until successful with the testcase amount"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.rtiTxnSqlFile}, outputFile='${CASE.artifactDirectory}/rti-txn.out', stderrPath='${CASE.artifactDirectory}/rti-txn.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertRtiTxn:
+    type: assert
+    description: RTI transaction succeeds and amount matches
+    assert: "${ACTIONS.queryRtiTxn.output.exitCode} == 0 and ${ACTIONS.queryRtiTxn.output.result.RowCount} == 1 and ${ACTIONS.queryRtiTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.rtiTxnExpectedCount} and ${ACTIONS.queryRtiTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.rtiTxnExpectedCount}"
+    expected: "recordCount=${CASE.rtiTxnExpectedCount}, RTI success, amount=${CASE.amount}"
+    actual: "${ACTIONS.queryRtiTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  queryCtoRefund:
+    type: tool
+    description: "6. Poll CTO transaction until the specified OID is refunded"
+    call: "#{fpp.querySqlplus(sqlFile=${CASE.ctoRefundSqlFile}, outputFile='${CASE.artifactDirectory}/cto-refund.out', stderrPath='${CASE.artifactDirectory}/cto-refund.err')}"
+    timeoutMs: 10000
+    retry: *dbRetry
+
+  assertCtoRefund:
+    type: assert
+    description: CTO transaction is refunded
+    assert: "${ACTIONS.queryCtoRefund.output.exitCode} == 0 and ${ACTIONS.queryCtoRefund.output.result.RowCount} == 1 and ${ACTIONS.queryCtoRefund.output.result.Rows.Row.RECORD_COUNT} == ${CASE.ctoRefundExpectedCount} and ${ACTIONS.queryCtoRefund.output.result.Rows.Row.MATCH_COUNT} == ${CASE.ctoRefundExpectedCount}"
+    expected: "recordCount=${CASE.ctoRefundExpectedCount}, specified OID is refunded"
+    actual: "${ACTIONS.queryCtoRefund.output.result.Rows.Row.RESULT_SUMMARY}"
+
+  logCtoRtiSummary:
+    type: log
+    level: INFO
+    message: "CTO plus RTI success flow completed for ${CASE.caseId}"
+    fields:
+      precheckResult: "${ACTIONS.invokePrecheck.output.result.ResultCode}"
+      confirmResult: "${ACTIONS.invokeConfirm.output.result.ResultCode}"
+      pacs004Result: "${ACTIONS.invokePacs004.output.result.ResultCode}"
+      rtiSummary: "${ACTIONS.queryRtiTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+      refundSummary: "${ACTIONS.queryCtoRefund.output.result.Rows.Row.RESULT_SUMMARY}"

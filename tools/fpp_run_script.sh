@@ -1,15 +1,16 @@
 #!/usr/bin/env sh
-# Executes one pre-reviewed script without arguments and returns its result as YAML.
+# Executes one pre-reviewed script with optional atomic arguments and returns its result as YAML.
 set -eu
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: fpp_run_script.sh <script> <stdout-path> <stderr-path>" >&2
+if [ "$#" -lt 3 ]; then
+  echo "usage: fpp_run_script.sh <script> <stdout-path> <stderr-path> [argument ...]" >&2
   exit 2
 fi
 
 script=$1
 stdout_path=$2
 stderr_path=$3
+shift 3
 
 if [ "$stdout_path" = "$stderr_path" ]; then
   echo "stdout and stderr paths must be different" >&2
@@ -28,7 +29,7 @@ elif [ ! -x "$script" ]; then
   printf 'Script is not executable: %s\n' "$script" > "$stderr_path"
 else
   set +e
-  "$script" > "$stdout_path" 2> "$stderr_path"
+  "$script" "$@" > "$stdout_path" 2> "$stderr_path"
   exit_code=$?
   set -e
 fi
