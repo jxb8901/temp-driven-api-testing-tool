@@ -7,7 +7,7 @@ if [ "${1:-}" = "clean" ]; then
   rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist"
   exit 0
 fi
-for required in pom.xml src/main/java config templates tools testcase schemas att.sh README.md CHANGELOG.md; do
+for required in pom.xml src/main/java config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then
     echo "Missing required package path: $ROOT_DIR/$required" >&2
     exit 2
@@ -108,6 +108,7 @@ else
 fi
 
 cp "$ROOT_DIR/att.sh" "$PACKAGE_DIR/att.sh"
+cp "$ROOT_DIR/att.bat" "$PACKAGE_DIR/att.bat"
 cp "$ROOT_DIR/README.md" "$PACKAGE_DIR/README.md"
 cp "$ROOT_DIR/CHANGELOG.md" "$PACKAGE_DIR/CHANGELOG.md"
 cp -R "$ROOT_DIR/config" "$PACKAGE_DIR/config"
@@ -125,8 +126,11 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 {
   echo "name: $PACKAGE_NAME"
   echo "main: att.sh"
+  echo "mainWindows: att.bat"
   echo "java: JDK 8+ runtime"
   echo "contents:"
+  echo "  - att.sh"
+  echo "  - att.bat"
   echo "  - lib/att-${VERSION}.jar"
   echo "  - lib/"
   echo "  - config/"
@@ -144,6 +148,7 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 
 mkdir -p "$SOURCE_PACKAGE_DIR"
 cp "$ROOT_DIR/att.sh" "$SOURCE_PACKAGE_DIR/att.sh"
+cp "$ROOT_DIR/att.bat" "$SOURCE_PACKAGE_DIR/att.bat"
 cp "$ROOT_DIR/build.sh" "$SOURCE_PACKAGE_DIR/build.sh"
 cp "$ROOT_DIR/README.md" "$SOURCE_PACKAGE_DIR/README.md"
 cp "$ROOT_DIR/CHANGELOG.md" "$SOURCE_PACKAGE_DIR/CHANGELOG.md"
@@ -166,6 +171,7 @@ find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 {
   echo "name: $SOURCE_PACKAGE_NAME"
   echo "main: att.sh"
+  echo "mainWindows: att.bat"
   echo "contents:"
   echo "  - src/"
   echo "  - templates/"
@@ -178,6 +184,7 @@ find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
   echo "  - CHANGELOG.md"
   echo "  - pom.xml"
   echo "  - att.sh"
+  echo "  - att.bat"
   echo "  - build.sh"
 } > "$SOURCE_PACKAGE_DIR/RELEASE_MANIFEST.txt"
 

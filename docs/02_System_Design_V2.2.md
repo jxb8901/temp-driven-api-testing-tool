@@ -1,29 +1,39 @@
 # ATT V2.2 System Design
 
-Status: implementation contract for ATT 2.2.0
-Scope: tool organization, argv commands, built-ins, and SSH execution
+Status: implementation contract for ATT 2.2.1
+Scope: tool organization, argv commands, built-ins, SSH execution, and cross-platform launchers
 
 ## 1. Goals
 
-V2.2 adds five capabilities without changing testcase, sidecar, template-action, report, or Case Context contracts:
+V2.2 adds six capabilities without changing testcase, sidecar, template-action, report, or Case Context contracts:
 
 1. External tools may be split into independently maintained tool-group files.
 2. Existing tools declared directly in `config/config.yaml` remain global tools and keep their unqualified calls.
-3. Built-ins remain global and add `nvl`, `iif`, and `nchar`.
+3. Built-ins remain global. V2.2.0 adds `nvl`, `iif`, and `nchar`; V2.2.1 adds common string/date functions and single-value shorthand.
 4. Commands support an explicit argv-list form; legacy scalar commands are normalized to the same internal list.
 5. Global tools and each tool group may execute through one configured SSH target.
+6. `att.sh` and `att.bat` provide equivalent Unix/macOS and Windows CLI entrypoints.
 
 V2.2 does not load user Java classes. A built-in provider boundary is reserved for V3; V2.3 also remains closed to custom Java providers.
 
 ## 2. Versioned artifacts
 
-- Product version: `2.2.0`.
+- Product version: `2.2.1`.
 - New global configuration schema: `att-config/v2.2`.
 - New group schema: `att-tool-group/v2.2`.
 - Existing V2.1 sidecar, template, run, validation, CI, and JUnit contracts remain unchanged.
 - An unchanged `att-config/v2.1` file remains readable. V2.2-only fields require `att-config/v2.2`.
 
 The V2.2 schema catalog references both the V2.2 global/group schemas and the unchanged V2.1 schemas.
+
+### 2.1 Cross-platform launcher contract
+
+- Linux and macOS use `./att.sh`; Windows uses `att.bat`. Both forward all arguments to `att.FrameworkRunner` and preserve its process exit code.
+- A binary release launcher finds `lib/att-*.jar` and starts the runner with every JAR below `lib/` on the platform-native classpath.
+- Source-tree launchers compile with Maven when available. `att.bat` may use already compiled `target/classes` when Maven is absent; if neither compiled classes nor Maven exists, it exits with code 2 and an actionable diagnostic.
+- Both binary and source release archives contain `att.sh` and `att.bat`. Package validation requires both launchers.
+- Launcher portability does not make individual external tools portable. Tool authors must configure executables/scripts supported by the target host; for example, a `.sh` sample may need a `.bat`, `.cmd`, PowerShell, or native executable equivalent on Windows.
+- Windows executable discovery honors `PATH` plus `PATHEXT`; Unix/macOS discovery continues to use exact executable names on `PATH`.
 
 ## 3. Global configuration
 
@@ -99,6 +109,7 @@ Rules:
 - Group IDs are package-unique and match `[A-Za-z_][A-Za-z0-9_-]*`.
 - Tool keys use the same pattern and are unique within the group.
 - A grouped tool is invoked only by its qualified name: `#{database.selectPayment(caseId=${CASE.caseId})}`.
+- A configured global or grouped tool that declares exactly one argument may omit its argument name, for example `#{database.selectPayment(${CASE.caseId})}`. Tools declaring zero or multiple arguments retain their existing call rules; multi-argument tools require named arguments.
 - The qualified name is also the configuration lookup key. Persisted evidence uses `TOOL.database.selectPayment` nesting so Context paths remain navigable.
 - Group IDs and tool keys cannot contain `.` because the dot is the namespace separator.
 - A group may omit `script`. Without it, the tool command itself contains the executable argv.
@@ -152,24 +163,24 @@ The argv-list form is recommended because quoting is represented by YAML rather 
 
 ## 7. Built-ins
 
-Built-ins remain global and are called without a group prefix. Existing built-ins remain unchanged.
+Built-ins remain global and are called without a group prefix. A function accepting exactly one `value` accepts either `value=...` or one unnamed argument. Multi-argument functions accept either a complete positional list or their documented names; named and positional arguments must not be mixed.
 
-New functions:
+V2.2.0 functions are `nvl(value, defaultValue)`, `iif(condition, trueValue, falseValue)`, and `nchar(count, value)`. Their null, eager-branch, boolean, and 0–10000 repetition contracts remain unchanged.
 
-```text
-nvl(value, defaultValue)
-iif(condition, trueValue, falseValue)
-nchar(count, value)
-```
+V2.2.1 adds:
 
-Semantics:
+| Family | Functions | Contract |
+|---|---|---|
+| trim | `ltrim(value)`, `rtrim(value)` | Remove leading or trailing whitespace; `trim` remains available for both sides |
+| slice/search | `substr(value, start[, length])`, `indexOf(value, search[, fromIndex])` | Zero-based UTF-16 indexes; negative `substr` start counts from the end; `indexOf` returns `-1` when absent |
+| predicates | `contains(value, search)`, `startsWith(value, prefix)`, `endsWith(value, suffix)` | Case-sensitive literal matching and `true`/`false` text output |
+| replacement/padding | `replace(value, target, replacement)`, `padLeft(value, length[, pad])`, `padRight(value, length[, pad])` | Literal replacement; padding defaults to one space, never truncates, and is bounded to length 10000 |
+| current time | `sysdate()`, `systimestamp()` | System-zone `yyyy-MM-dd` and ISO offset timestamp with milliseconds |
+| date transform | `formatDate(value, pattern[, zoneId])`, `dateAdd(value, amount, unit)` | ISO-8601 input; locale-independent Java date patterns; optional IANA/offset zone; arithmetic units year/month/week/day/hour/minute/second/millisecond |
 
-- `nvl` returns `defaultValue` when `value` is null or the empty string; otherwise it returns `value` unchanged.
-- `iif` accepts boolean values plus `true/false`, `yes/no`, and `1/0` text forms. It returns exactly one of the two supplied branch values. As with other V2 calls, all arguments are resolved before the built-in executes; `iif` is not a lazy expression operator.
-- `nchar(3, "9")` returns `999`. `count` must be an integer from 0 through 10000; `value` may contain more than one character and the whole value is repeated.
-- Missing positional arguments and invalid boolean/count values are errors.
+`substr` clamps an overlong requested length at the end but rejects a start outside the text. `formatDate` converts instants to the configured zone (or the JVM system zone); an explicit zone also converts offset/zoned timestamps and attaches a zone to local date-times. `dateAdd` preserves the input ISO shape and rejects units incompatible with that shape, such as adding hours to a date-only value.
 
-Implementation reserves an internal `BuiltInProvider`/registry boundary. Only ATT's built-in provider is registered in V2.2.0; no class name, classpath, plugin directory, or user implementation field is accepted by configuration.
+Implementation reserves an internal `BuiltInProvider`/registry boundary. Only ATT's built-in provider is registered in V2.2.1; no class name, classpath, plugin directory, or user implementation field is accepted by configuration.
 
 ## 8. SSH execution
 
@@ -234,10 +245,12 @@ Required automated coverage:
 - V2.2 group loading, unique IDs, qualified lookup, and invalid paths;
 - scalar-to-argv normalization and exact list preservation;
 - group script ordering;
-- `nvl`, `iif`, and `nchar` success/error cases;
+- V2.2.0 plus V2.2.1 built-in success/error cases, including fixed-clock date behavior;
+- unnamed single-argument tool and single-value built-in calls, plus multi-argument rejection;
+- Windows launcher/package presence and platform-native classpath construction;
 - OpenSSH/JSch transport selection, fallback warning, safe remote quoting, and no real network dependency;
 - local versus SSH executable validation;
 - end-to-end template calls for global and grouped tools;
 - package validation and generated documentation visibility.
 
-Release gates remain `mvn clean test`, `./att.sh validate --package`, built-wrapper validation, and `./build.sh`.
+Release gates remain `mvn clean test`, `./att.sh validate --package`, built-wrapper validation, and `./build.sh`. The release archive audit additionally verifies `att.bat` and both launchers in the source archive; Windows execution is validated on a Windows host or CI runner when available.

@@ -37,6 +37,10 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("nvl(value, defaultValue)"));
         assertTrue(html.contains("iif(condition, trueValue, falseValue)"));
         assertTrue(html.contains("nchar(count, value)"));
+        assertTrue(html.contains("substr(value, start[, length])"));
+        assertTrue(html.contains("systimestamp()"));
+        assertTrue(html.contains("dateAdd(value, amount, unit)"));
+        assertTrue(html.contains("<h2>indexOf</h2>"));
         assertNotEquals(HtmlSupport.id("中文一"), HtmlSupport.id("中文二"));
     }
 }

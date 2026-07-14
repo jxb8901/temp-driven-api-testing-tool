@@ -113,7 +113,7 @@ public final class PackageValidator {
 
     @SuppressWarnings("unchecked")
     private void validatePackageLayout(List<Diagnostic> diagnostics) {
-        for (String required : new String[]{"config/config.yaml", "testcase", "templates", "tools", "schemas/catalog.yaml", "att.sh"}) {
+        for (String required : new String[]{"config/config.yaml", "testcase", "templates", "tools", "schemas/catalog.yaml", "att.sh", "att.bat"}) {
             Path path = projectRoot.resolve(required);
             if (!Files.exists(path)) diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, new IllegalArgumentException("Missing required package path: " + required), path));
         }
@@ -179,8 +179,30 @@ public final class PackageValidator {
         } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing/unsafe tool executable for " + tool.key() + ": " + e.getMessage(), e); }
     }
     private Path findOnPath(String executable) throws java.io.IOException {
-        String path = System.getenv("PATH"); if (path != null) for (String directory : path.split(java.io.File.pathSeparator)) { Path candidate = java.nio.file.Paths.get(directory).resolve(executable); if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate; }
+        String path = System.getenv("PATH");
+        if (path != null) for (String directory : path.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
+            for (String name : executableCandidates(executable, java.io.File.separatorChar == '\\', System.getenv("PATHEXT"))) {
+                Path candidate = java.nio.file.Paths.get(directory).resolve(name);
+                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate;
+            }
+        }
         throw new java.io.IOException("Executable not found on PATH: " + executable);
+    }
+
+    static List<String> executableCandidates(String executable, boolean windows, String pathExt) {
+        List<String> result = new ArrayList<String>();
+        result.add(executable);
+        String fileName = java.nio.file.Paths.get(executable).getFileName().toString();
+        if (!windows || fileName.lastIndexOf('.') > 0) return result;
+        String configured = pathExt == null || pathExt.trim().isEmpty() ? ".COM;.EXE;.BAT;.CMD" : pathExt;
+        for (String item : configured.split(";")) {
+            String extension = item.trim();
+            if (extension.isEmpty()) continue;
+            if (!extension.startsWith(".")) extension = "." + extension;
+            String candidate = executable + extension;
+            if (!result.contains(candidate)) result.add(candidate);
+        }
+        return result;
     }
 
     private ValidationSummary invalid(String mode, List<Diagnostic> diagnostics) { return new ValidationSummary(mode, 0, 0, 0, global.tools().size(), diagnostics); }
@@ -257,8 +279,10 @@ public final class PackageValidator {
         if (tool == null) throw new IllegalArgumentException("Unknown tool in template: " + toolName);
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
-            if (argument.positional()) throw new IllegalArgumentException("Configured tools require named arguments: " + argument.expression());
-            String key = argument.key();
+            if (argument.positional() && !(tool.arguments().size() == 1 && parsed.arguments().size() == 1)) {
+                throw new IllegalArgumentException("Configured tools require named arguments unless the tool declares exactly one argument: " + argument.expression());
+            }
+            String key = argument.positional() ? tool.arguments().keySet().iterator().next() : argument.key();
             if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate tool argument: " + key);
             if (!tool.arguments().containsKey(key)) throw new IllegalArgumentException("Unknown argument '" + key + "' for tool " + toolName);
         }

@@ -1,8 +1,8 @@
-# ATT V2.2 新手入門
+# ATT V2.2.1 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.2 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.2 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.2.1 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.2.1 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.2 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.2.1 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -41,6 +41,8 @@ V2.2 的狀態不可混淆：
 ## 3. 目錄
 
 ```text
+att.sh
+att.bat
 config/config.yaml
 config/tools/payment.yaml
 testcase/支付回歸.xlsx
@@ -303,11 +305,20 @@ ATT 內置函數包括：
 - `nvl(value, defaultValue)`：value 為 null/空字串時返回預設值；
 - `iif(condition, trueValue, falseValue)`：按布爾條件選值；
 - `nchar(count, value)`：重複文字，例如 `nchar(3, '9')` 返回 `999`。
+- `ltrim(value)`、`rtrim(value)`：只移除左側或右側空白；
+- `substr(value, start[, length])`、`indexOf(value, search[, fromIndex])`：以 0 為起點截取／搜尋；`substr` 的負數 start 從尾部計算；
+- `contains`、`startsWith`、`endsWith`、`replace`：進行大小寫敏感的字面文字比對／替換；
+- `padLeft(value, length[, pad])`、`padRight(...)`：補齊文字，預設使用空格；
+- `sysdate()`、`systimestamp()`：返回系統時區的 ISO 日期／帶 offset 毫秒 timestamp；
+- `formatDate(value, pattern[, zoneId])`、`dateAdd(value, amount, unit)`：格式化 ISO-8601 日期時間或進行日期加減。
 
 例如：
 
 ```text
-#{upper(value=${CASE.currency})}
+#{upper(${CASE.currency})}
+#{getAppLogs(${CASE.caseId})}
+#{substr(${CASE.reference}, 0, 8)}
+#{formatDate('2026-07-14T04:30:00Z', 'yyyyMMdd-HHmm', 'Asia/Hong_Kong')}
 #{coalesce(${CASE.optionalReference}, 'NO-REFERENCE')}
 #{boolean(yes)}
 #{nvl(${CASE.optionalReference}, 'NO-REFERENCE')}
@@ -315,7 +326,9 @@ ATT 內置函數包括：
 #{nchar(3, '9')}
 ```
 
-完整函數清單、參數規則及字面量語法見 [Reference Manual V2.2：Expressions and built-in functions](09_Reference_Manual_V2.md#built-in-functions)。
+只有一個 `value` 的 built-in 可省略 `value=`。配置中只宣告一個 argument 的 tool 也可省略名稱，如 `#{getAppLogs(${CASE.caseId})}`；只要 tool 宣告零個或多個 argument，就必須沿用原有的空參數／具名參數寫法，多參數 tool 不接受位置參數。
+
+完整函數清單、參數規則及字面量語法見 [Reference Manual V2.2.1：Expressions and built-in functions](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -336,6 +349,15 @@ ATT 內置函數包括：
 ./att.sh run --all --ci-output junit,json
 ```
 
+Windows 使用同一組命令與參數，只需將 `./att.sh` 換成 `att.bat`：
+
+```bat
+att.bat validate --package
+att.bat run --all
+```
+
+Binary release 只需 Java 8+。在 source tree 中，`att.bat` 會在 Maven 可用時先編譯；若 Maven 不存在，必須已有 `target\classes`。外部 tool 仍須由模板開發人員提供 Windows 可執行的 `.bat`、`.cmd`、PowerShell 或 native command，`att.bat` 不會自動轉換 `.sh` 工具。
+
 同一個 output 目錄同時收到多個 `run` 時，可選擇：
 
 ```bash
@@ -353,7 +375,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.2.0",
+  "attVersion": "2.2.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

@@ -88,6 +88,7 @@ public class ToolInvoker {
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
         Map<String, Object> resolvedInput = resolveMap(input, context);
+        normalizeSinglePositionalArgument(tool, resolvedInput);
         validateArguments(tool, resolvedInput);
         expandDelimitedArgument(tool, resolvedInput);
 
@@ -216,6 +217,14 @@ public class ToolInvoker {
                 throw new IllegalArgumentException("Missing required argument '" + argument.key() + "' for tool " + tool.key());
             }
         }
+    }
+
+    private void normalizeSinglePositionalArgument(ToolConfig tool, Map<String, Object> input) {
+        if (tool.arguments().size() != 1 || input.size() != 1 || !input.containsKey("arg0")) return;
+        String declaredKey = tool.arguments().keySet().iterator().next();
+        if ("arg0".equals(declaredKey)) return;
+        Object value = input.remove("arg0");
+        input.put(declaredKey, value);
     }
 
     private void expandDelimitedArgument(ToolConfig tool, Map<String, Object> input) {

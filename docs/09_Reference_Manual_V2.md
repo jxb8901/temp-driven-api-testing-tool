@@ -1,7 +1,7 @@
-# ATT V2.2 User Manual and Reference
+# ATT V2.2.1 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.2
+Version: 2.2.1
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -67,6 +67,7 @@ An action can render a payload, call a tool, assert an expression, or write a st
 ```text
 att-package/
 ├── att.sh
+├── att.bat
 ├── config/config.yaml
 ├── testcase/
 │   ├── payment.xlsx
@@ -211,6 +212,8 @@ chmod +x tools/invoke_payment_api.sh
 ./att.sh validate --package
 ./att.sh run --suite testcase/payment.xlsx --case payment.payment.TC001 --run-id SIT-001 --ci-output junit,json
 ```
+
+On Windows, replace `./att.sh` with `att.bat`; command names, options, output, and exit codes are identical. This Quick Start tool is a POSIX shell example, so a Windows package must configure an equivalent `.bat`, `.cmd`, PowerShell, or native executable before running that tool.
 
 Use package validation as the release gate. During development, a faster selected check is available:
 
@@ -427,7 +430,7 @@ tools:
         required: true
 ```
 
-The action call must use the configured key and named arguments:
+The action call must use the configured key. Tools with multiple declared arguments use named arguments:
 
 ```yaml
 callApi:
@@ -435,7 +438,7 @@ callApi:
   call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
 ```
 
-Unknown, duplicate, or missing required arguments fail validation. Argument metadata documents and validates the contract; it does not inject values automatically.
+Unknown, duplicate, or missing required arguments fail validation. Argument metadata documents and validates the contract; it does not inject values automatically. If—and only if—the tool declares exactly one argument, the call may omit its name: `#{getAppLogs(${CASE.caseId})}` is equivalent to `#{getAppLogs(caseId=${CASE.caseId})}`. A zero-argument tool still uses `#{tool()}`; a multi-argument tool rejects positional arguments.
 
 Global tools retain unqualified names. V2.2 groups are listed by `toolGroups` in the global config:
 
@@ -793,6 +796,8 @@ Each attempt is recorded directly in the case log/action record; no `attempt-001
 
 ### Command syntax
 
+The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` with the same command and options, for example `att.bat validate --package`. Binary releases require Java 8+. Source-tree `att.bat` compiles with Maven when available and otherwise requires existing `target\classes`.
+
 | Syntax | Notes |
 |---|---|
 | `./att.sh` or `./att.sh help` | Show help |
@@ -976,7 +981,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.2.0",
+  "attVersion": "2.2.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1080,6 +1085,8 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 | `upper` | Convert text to upper case | `#{upper(value=${CASE.currency})}` |
 | `lower` | Convert text to lower case | `#{lower(value=${CASE.channel})}` |
 | `trim` | Remove surrounding whitespace | `#{trim(value=${CASE.reference})}` |
+| `ltrim` | Remove leading whitespace | `#{ltrim(${CASE.reference})}` |
+| `rtrim` | Remove trailing whitespace | `#{rtrim(${CASE.reference})}` |
 | `string` | Convert a value to text | `#{string(value=${CASE.amount})}` |
 | `number` | Parse and normalize a number | `#{number(value='12.50')}` |
 | `boolean` | Convert true/false, yes/no, or 1/0 | `#{boolean(yes)}` |
@@ -1089,10 +1096,26 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 | `nvl` | Return a default for null/empty text | `#{nvl(${CASE.optional}, 'N/A')}` |
 | `iif` | Select one of two values from a boolean | `#{iif(${CASE.enabled}, 'Y', 'N')}` |
 | `nchar` | Repeat a value 0–10000 times | `#{nchar(3, '9')}` |
+| `substr` | Extract text from a zero-based start | `#{substr(${CASE.reference}, 0, 8)}` |
+| `indexOf` | Return zero-based position or `-1` | `#{indexOf(${CASE.reference}, '-')}` |
+| `contains` | Test literal substring membership | `#{contains(${CASE.message}, 'SUCCESS')}` |
+| `startsWith` | Test a literal prefix | `#{startsWith(${CASE.reference}, 'PAY')}` |
+| `endsWith` | Test a literal suffix | `#{endsWith(${CASE.fileName}, '.xml')}` |
+| `replace` | Replace every literal target | `#{replace(${CASE.reference}, '-', '')}` |
+| `padLeft` | Pad to a minimum length | `#{padLeft(${CASE.sequence}, 8, '0')}` |
+| `padRight` | Pad to a minimum length | `#{padRight(${CASE.code}, 5, '_')}` |
+| `sysdate` | Return system-zone ISO date | `#{sysdate()}` |
+| `systimestamp` | Return system-zone offset timestamp | `#{systimestamp()}` |
+| `formatDate` | Format an ISO-8601 value | `#{formatDate(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
+| `dateAdd` | Add a calendar/time amount | `#{dateAdd(${CASE.businessDate}, 1, 'day')}` |
 
-`upper`, `lower`, `trim`, `string`, `number`, `boolean`, and `length` accept `value=` or the first positional argument. Case conversion is locale-independent. `number` rejects non-numeric input and removes unnecessary trailing zeroes. `boolean` accepts true/false, yes/no, and 1/0. `concat` treats null as empty; `coalesce` skips null and whitespace-only values and returns empty when none qualifies. `nvl` tests null/empty without trimming. `iif` accepts the same boolean text forms and resolves all three arguments eagerly. `nchar` requires an integer count from 0 through 10000 and repeats the complete value.
+`upper`, `lower`, `trim`, `ltrim`, `rtrim`, `string`, `number`, `boolean`, and `length` require exactly one argument and accept either `value=...` or one unnamed value. Other built-ins accept either their documented names or a complete positional list; do not mix named and positional arguments in one call. Case conversion is locale-independent. `number` rejects non-numeric input and removes unnecessary trailing zeroes. `boolean` accepts true/false, yes/no, and 1/0. `concat` treats null as empty; `coalesce` skips null and whitespace-only values and returns empty when none qualifies. `nvl` tests null/empty without trimming. `iif` accepts the same boolean text forms and resolves all three arguments eagerly. `nchar` requires an integer count from 0 through 10000 and repeats the complete value.
 
-Use built-ins for deterministic local transformations and tools for filesystem, network, database, system integration, or complex reusable logic. Built-ins remain global and create no TOOL process artifacts. V2.2 reserves an internal provider registry for V3, but V2.2/V2.3 configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+`substr(value, start[, length])` uses zero-based UTF-16 indexes. A negative start counts from the end; an out-of-range start or negative length is an error, while an overlong length stops at the end. `indexOf` is case-sensitive, accepts an optional zero-based `fromIndex`, and returns `-1` when absent. Match and replacement functions are case-sensitive and literal, not regular expressions. Padding defaults to one space, never truncates an already long value, rejects an empty pad, and limits target length to 10000.
+
+`sysdate()` returns `yyyy-MM-dd`. `systimestamp()` returns `yyyy-MM-dd'T'HH:mm:ss.SSSXXX`; both use the JVM system zone at invocation time. `formatDate` accepts ISO local dates, local date-times, offset/zoned timestamps, and UTC instants, then applies a locale-independent Java `DateTimeFormatter` pattern. `zoneId` accepts an IANA name such as `Asia/Hong_Kong` or an offset such as `+08:00`; it converts instant/offset/zoned values and attaches a zone to a local date-time. `dateAdd` preserves the input ISO shape and accepts singular/plural `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, or `millisecond`; incompatible combinations such as hours plus a date-only value are errors.
+
+Use built-ins for in-process transformations and time values; use tools for filesystem, network, database, system integration, or complex reusable logic. Built-ins remain global and create no TOOL process artifacts. V2.2 reserves an internal provider registry for V3, but V2.2/V2.3 configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -1235,6 +1258,12 @@ Yes. Keep the generated run directory together so relative artifact links contin
 #### Does build execute tests again?
 
 No. It archives one completed persisted run.
+
+#### Why does `att.bat` ask for Maven, or why does a `.sh` tool fail on Windows?
+
+In a binary release, `att.bat` finds `lib\att-*.jar` and only requires Java 8+. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+
+The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 
 #### Why did ATT say it will use mwiede/jsch, or why did Java SSH algorithm negotiation fail?
 

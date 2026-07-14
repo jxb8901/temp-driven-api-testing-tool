@@ -10,7 +10,7 @@ class FrameworkRunnerTest {
         java.lang.reflect.Method help=FrameworkRunner.class.getDeclaredMethod("help"); help.setAccessible(true);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream(); PrintStream previous=System.out;
         try { System.setOut(new PrintStream(bytes)); help.invoke(null); } finally { System.setOut(previous); }
-        String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertFalse(text.contains("--single-page"));
+        String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertTrue(text.contains("att.bat")); assertFalse(text.contains("--single-page"));
     }
 
     @Test void verboseIsAnExplicitOutputModeAndConflictsWithQuiet() {

@@ -21,6 +21,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
 import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -61,6 +64,49 @@ class UnifiedTemplateEngineTest {
         assertThrows(IllegalArgumentException.class, () -> engine.render("#{iif(maybe, a, b)}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.render("#{nchar(1.5, x)}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.render("#{nchar(10001, x)}", context));
+    }
+
+    @Test void supportsV221StringAndDateBuiltIns() throws Exception {
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), new LinkedHashMap<String,Object>(), Collections.emptyMap(), null), tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        Clock clock = Clock.fixed(Instant.parse("2026-07-14T04:34:56.789Z"), ZoneId.of("Asia/Hong_Kong"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null, new DefaultBuiltInProvider(clock));
+
+        assertEquals("x  |  x|bcd|ef|2|4", engine.render("#{ltrim('  x  ')}|#{rtrim('  x  ')}|#{substr('abcdef', 1, 3)}|#{substr('abcdef', -2)}|#{indexOf('banana', 'na')}|#{indexOf('banana', 'na', 3)}", context));
+        assertEquals("true|true|true|PAY-001|0007|7___", engine.render("#{contains('payment', 'pay')}|#{startsWith('payment', 'pay')}|#{endsWith('payment', 'ment')}|#{replace('REF-001', 'REF', 'PAY')}|#{padLeft('7', 4, '0')}|#{padRight('7', 4, '_')}", context));
+        assertEquals("2026-07-14", engine.render("#{sysdate()}", context));
+        assertEquals("2026-07-14T12:34:56.789+08:00", engine.render("#{systimestamp()}", context));
+        assertEquals("20260714-1234", engine.render("#{formatDate('2026-07-14T04:34:56Z', 'yyyyMMdd-HHmm', 'Asia/Hong_Kong')}", context));
+        assertEquals("2026-02-28|2026-07-14T05:34:56Z", engine.render("#{dateAdd('2026-01-31', 1, 'month')}|#{dateAdd('2026-07-14T04:34:56Z', 1, 'hour')}", context));
+
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{sysdate('unexpected')}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{substr('abc', 4)}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{padLeft('x', 3, '')}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{formatDate('14/07/2026', 'yyyyMMdd')}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{dateAdd('2026-07-14', 1, 'hour')}", context));
+    }
+
+    @Test void singleValueBuiltInsAcceptOnlyNamedOrUnnamedValue() throws Exception {
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), new LinkedHashMap<String,Object>(), Collections.emptyMap(), null), tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+        assertEquals("ABC|ABC", engine.render("#{upper('abc')}|#{upper(value='abc')}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{upper()}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{upper(other='abc')}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.render("#{upper('a', 'b')}", context));
+    }
+
+    @Test void singleArgumentToolAcceptsUnnamedArgument() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("message", new ToolArgumentConfig("message", "Message", "Text", true, ""));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("echoOne", new ToolConfig("echoOne", "Echo one", "Echo one value", "echo ${message}", "txt", arguments));
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tools,null,null), runner);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        context.beginStage(new att.core.StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+
+        assertEquals("ok", new UnifiedTemplateEngine(invoker).executeCall("#{echoOne('hello world')}", context, new CaseExecutionLog(tempDir.resolve("case.log")), "single"));
+        assertEquals(Arrays.asList("echo", "hello world"), runner.calls.get(0));
+        assertEquals("hello world", context.resolve("ACTIONS.single.input.message"));
     }
 
     @Test void configuredToolReceivesContextTypesWithoutGuessing() throws Exception {

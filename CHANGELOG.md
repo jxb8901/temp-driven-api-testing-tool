@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.1 - 2026-07-14
+
+- Added `att.bat` as the Windows CLI entrypoint with packaged-release and Maven-backed source-tree modes, Windows `PATHEXT` tool lookup, and inclusion in package validation, binary/source release archives, manifests, help, and user documentation.
+- Added `substr`, `indexOf`, `sysdate`, `systimestamp`, `ltrim`, `rtrim`, `contains`, `startsWith`, `endsWith`, `replace`, `padLeft`, `padRight`, `formatDate`, and `dateAdd` built-ins with deterministic argument validation and documented ISO-8601 date behavior.
+- Added unnamed single-argument calls for configured tools that declare exactly one argument; single-value built-ins likewise accept either `value=...` or one unnamed argument. Multi-argument tools continue to require named arguments.
+- Expanded unit coverage and generated package documentation for Windows packaging, string/date built-ins, and positional shorthand validation/runtime behavior.
+
 ## 2.2.0 - 2026-07-13
 
 - Added independently maintained `att-tool-group/v2.2` files with package-unique group IDs, qualified `group.tool` calls, optional shared group dispatch scripts, qualified Case Context evidence, and package-wide validation/documentation.

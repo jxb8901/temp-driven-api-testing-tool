@@ -1,8 +1,8 @@
-# ATT 2.2.0 - Automated Testing Tool
+# ATT 2.2.1 - Automated Testing Tool
 
-ATT V2.2 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.2.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
-V2.2 retains the V2 Case → Stage → Template → Action → Tool model. It adds independently configured tool groups, explicit argv-list commands, SSH execution targets, and the `nvl`, `iif`, and `nchar` built-ins. Existing V2.1 global-tool configuration remains readable; sidecar, template, run, validation, and CI artifact schemas remain V2.1.
+V2.2 retains the V2 Case → Stage → Template → Action → Tool model. V2.2.1 adds a Windows launcher, single-argument shorthand, and everyday string/date built-ins on top of V2.2 tool groups, explicit argv-list commands, SSH execution targets, and built-in provider boundary. Existing V2.1 global-tool configuration remains readable; sidecar, template, run, validation, and CI artifact schemas remain V2.1.
 
 `testcase.root` defaults to `testcase`. ATT recursively discovers adjacent `basename.yaml` + `basename.xlsx` pairs below it; each pair is one testcase set.
 
@@ -11,6 +11,13 @@ V2.2 retains the V2 Case → Stage → Template → Action → Tool model. It ad
 ```sh
 ./att.sh validate --package
 ./att.sh run --all
+```
+
+On Windows, run the same commands through `att.bat`:
+
+```bat
+att.bat validate --package
+att.bat run --all
 ```
 
 Run one workbook, full Case ID, or tag:
@@ -51,9 +58,11 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 ## V2.2 essentials
 
 - Global configuration uses `att-config/v2.2`; each file in `toolGroups` uses `att-tool-group/v2.2` and a package-unique `id`. Grouped tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
+- Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
 - Tool `command` and group `script` accept a scalar or argv list. Lists preserve each YAML item as one argument; scalar commands use the existing tokenizer once. Group scripts receive `<tool key> <tool command argv>` after the script argv.
 - Root `ssh` applies to inline global tools; a group's `ssh` applies only to that group. ATT prefers local OpenSSH and automatically warns/falls back to the bundled mwiede/jsch Java client when `ssh` is unavailable. Both use strict host-key checking, optional key files, and a safely quoted remote command; see Reference Manual Chapter 09 for Java algorithm limits.
-- Built-ins remain unqualified. V2.2 adds `nvl(value, defaultValue)`, `iif(condition, trueValue, falseValue)`, and `nchar(count, value)`; custom Java built-in providers are not loaded in V2.2.
+- Built-ins remain unqualified. V2.2.1 includes `substr`, `indexOf`, `sysdate`, `systimestamp`, trimming, matching, replacement, padding, ISO date formatting/arithmetic, plus the existing conversion, `nvl`, `iif`, and `nchar` functions. Custom Java built-in providers are not loaded in V2.2.
+- A built-in that accepts exactly one value may be written as `#{upper(${CASE.currency})}` instead of `value=...`. A configured tool may omit its argument name only when its configuration declares exactly one argument, for example `#{getAppLogs(${CASE.caseId})}`; multi-argument tools still require names.
 - `schemaVersion` is mandatory in global configuration, tool groups, workbook sidecars, and templates. Unknown non-`x-*` fields are validation errors.
 - `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
 - Timeouts use milliseconds with range 1–3,600,000 and default 10,000: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence.
@@ -78,4 +87,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.2 System Design](docs/02_System_Design_V2.2.md) for the normative specification.
-See the [ATT V2.2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.2.1 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.2.1 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

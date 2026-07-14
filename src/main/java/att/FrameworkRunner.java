@@ -98,7 +98,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options]\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  --format human|json --ci-output junit,json [--queue|--parallel] --quiet --verbose");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  --format human|json --ci-output junit,json [--queue|--parallel] --quiet --verbose");
     }
 
     private static String code(String message) {

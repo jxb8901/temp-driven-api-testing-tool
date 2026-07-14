@@ -22,6 +22,25 @@ class PackageValidatorTest {
         java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateToolCall", String.class, FrameworkConfig.class);
         method.setAccessible(true);
         assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send(message='hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
+        assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send('hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
+    @Test void positionalToolArgumentsRemainInvalidForMultiArgumentTools() throws Exception {
+        Map<String,ToolArgumentConfig> args = new LinkedHashMap<String,ToolArgumentConfig>();
+        args.put("first", new ToolArgumentConfig("first", "First", "First", true, ""));
+        args.put("second", new ToolArgumentConfig("second", "Second", "Second", true, ""));
+        ToolConfig tool = new ToolConfig("send", "Send", "Send values", "echo", "txt", args);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>(); tools.put("send", tool);
+        PackageValidator validator = new PackageValidator(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10,tempDir,tools,null,null));
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateToolCall", String.class, FrameworkConfig.class);
+        method.setAccessible(true);
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator, "#{send('a', 'b')}", new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10,tempDir,tools,null,null)));
+    }
+
+    @Test void windowsPathLookupUsesPathExtWithoutChangingUnixLookup() {
+        assertEquals(Arrays.asList("pwsh", "pwsh.EXE", "pwsh.CMD"), PackageValidator.executableCandidates("pwsh", true, ".EXE;.CMD"));
+        assertEquals(Collections.singletonList("pwsh.exe"), PackageValidator.executableCandidates("pwsh.exe", true, ".EXE;.CMD"));
+        assertEquals(Collections.singletonList("pwsh"), PackageValidator.executableCandidates("pwsh", false, ".EXE;.CMD"));
     }
     @Test void enforcesTypeSpecificActionContracts() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10,tempDir,Collections.<String,ToolConfig>emptyMap(),null,null);
