@@ -80,6 +80,7 @@ public final class PackageValidator {
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
                             StageTemplate template = loader.load(stage.templateName());
+                            validateTemplateValues(template, testCase, stage, config);
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
                             validateTemplate(template, config);
@@ -220,30 +221,51 @@ public final class PackageValidator {
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
             if (!("render".equals(type) || "tool".equals(type) || "assert".equals(type) || "log".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
+            syntaxEngine.validateValueSyntax(action.description());
+            syntaxEngine.validateValueSyntax(action.expected());
+            syntaxEngine.validateValueSyntax(action.actual());
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
-                forbid(action, "call", "expression", "message", "level", "fields", "retry", "timeoutMs");
-                Path payload = template.directory().resolve(att.core.IdentifierValidator.relativePath(action.payload(), "render payload")).normalize();
-                Path canonicalTemplate = template.directory().toRealPath(), canonicalPayload;
-                try { canonicalPayload = payload.toRealPath(); } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing render payload: " + action.payload()); }
-                if (!canonicalPayload.startsWith(canonicalTemplate) || Files.isSymbolicLink(payload) || !Files.isRegularFile(canonicalPayload)) throw new IllegalArgumentException("Missing/unsafe render payload: " + action.payload());
-                String mode = action.output().get("mode") == null ? "file" : String.valueOf(action.output().get("mode"));
-                att.config.SchemaSupport.rejectUnknown(action.output(), "actions." + action.id() + ".output", "mode");
-                if (!"file".equals(mode)) throw new IllegalArgumentException("render output.mode must be file: " + action.id());
-                require(action.saveAs(), "saveAs is required for render action " + action.id());
-                att.core.IdentifierValidator.relativePath(action.saveAs(), "render saveAs");
+                require(action.renderAs(), "renderAs is required for render action " + action.id());
+                if (!java.util.Arrays.asList("file", "text", "json", "yaml", "xml").contains(action.renderAs().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Invalid renderAs: " + action.renderAs());
+                forbid(action, "saveAs", "overwrite", "output", "call", "expression", "expected", "actual", "message", "level", "fields", "retry", "timeoutMs");
+                List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
+                if (!"file".equalsIgnoreCase(action.renderAs())) for (Path payload : payloads) {
+                    String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                    if (!content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
+                }
                 if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "expression", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion()); }
-            if ("assert".equals(type)) { require(action.expression(), "expression is required for assert action " + action.id()); forbid(action, "payload", "saveAs", "overwrite", "assert", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.expression()); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "renderAs", "expression", "expected", "actual", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion()); }
+            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.assertion()); }
             if ("log".equals(type)) {
                 require(action.message(), "message is required for log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
-                forbid(action, "payload", "saveAs", "overwrite", "assert", "call", "expression", "retry", "timeoutMs");
+                forbid(action, "payload", "renderAs", "saveAs", "overwrite", "call", "expression", "expected", "actual", "retry", "timeoutMs");
                 for (Object key : action.fields().keySet()) if (!(key instanceof String)) throw new IllegalArgumentException("Log fields keys must be strings: " + action.id());
+                if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
           } catch (LocatedValidationException e) { throw e; }
           catch (Exception e) { throw new LocatedValidationException(e.getMessage(), template.name(), action.id(), "actions." + action.id(), e); }
+        }
+    }
+
+    private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage, FrameworkConfig config) {
+        att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
+        context.put("CASE.environment", config.environment());
+        context.beginStage(stage, template.name(), template.directory());
+        att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
+        for (TemplateAction action : template.actions()) {
+            engine.renderValidationValues(action.description(), context);
+            if ("assert".equalsIgnoreCase(action.type())) engine.renderValidationValues(action.expected(), context);
+            if ("render".equalsIgnoreCase(action.type()) && !"file".equalsIgnoreCase(action.renderAs())) try {
+                for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
+                    String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                    String partial = engine.renderValidationValues(content, context);
+                    if (!partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
+                }
+            } catch (Exception e) { throw new IllegalArgumentException("Invalid " + action.renderAs() + " render payload for action " + action.id() + ": " + e.getMessage(), e); }
         }
     }
 

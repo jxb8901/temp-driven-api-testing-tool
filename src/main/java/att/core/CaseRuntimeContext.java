@@ -97,6 +97,10 @@ public final class CaseRuntimeContext {
 
     public Map<String, Object> values() { return root; }
     public Map<String, Object> caseTree() { return caseNode; }
+    public Path caseOutputDirectory() { return caseOutputDir.toAbsolutePath().normalize(); }
+
+    public void setActionOutput(Map<String, Object> output) { root.put("output", output); }
+    public void clearActionOutput() { root.remove("output"); }
 
     public int nextToolSequence(String ignored) { return ++toolSequence; }
     public String nextInvocationId(String base) { return base + "_" + String.format("%03d", nextToolSequence(base)); }
@@ -105,22 +109,12 @@ public final class CaseRuntimeContext {
         if (currentActions == null) throw new IllegalStateException("No current stage for action: " + actionId);
         if (currentActions.containsKey(actionId)) throw new IllegalArgumentException("Duplicate action id: " + actionId);
         currentActions.put(actionId, action);
-        // ACTIONS is a transient convenience view. Keep the persisted CASE
-        // shape canonical while exposing the first tool's fields directly for
-        // existing same-template expressions such as ${ACTIONS.call.output}.
         Map<String, Object> view = actionView(action);
         actionsView.put(actionId, view);
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> actionView(Map<String, Object> action) {
-        Map<String, Object> view = new LinkedHashMap<String, Object>(action);
-        Object toolNode = action.get("TOOL");
-        if (toolNode instanceof Map && !((Map<?, ?>) toolNode).isEmpty()) {
-            Object first = ((Map<?, ?>) toolNode).values().iterator().next();
-            if (first instanceof Map) view.putAll((Map<String, Object>) first);
-        }
-        return view;
+        return new LinkedHashMap<String, Object>(action);
     }
 
     @SuppressWarnings("unchecked")

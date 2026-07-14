@@ -39,6 +39,7 @@ report:
   columns:
     result: 測試結果
     durationMs: 耗時毫秒
+    expectedResult: 預期結果
     actualResult: 實際結果
     caseLog: 案例日誌
     reportLink: 詳細報告

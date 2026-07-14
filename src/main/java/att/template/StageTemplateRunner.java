@@ -1,7 +1,4 @@
-/*
- * Author: Jeffrey + ChatGPT
- */
-
+/* Author: Jeffrey + ChatGPT */
 package att.template;
 
 import att.core.CaseExecutionLog;
@@ -12,194 +9,206 @@ import att.core.ValidationResult;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
+import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Executes V2 template actions and records outcomes in the CASE tree.
- */
+/** Executes V2.3 actions and persists one canonical nested outcome per action. */
 public class StageTemplateRunner {
     private final UnifiedTemplateEngine templateEngine;
     private final ExpressionEvaluator evaluator = new ExpressionEvaluator();
+    private final RenderPayloadResolver payloadResolver = new RenderPayloadResolver();
 
-    public StageTemplateRunner(UnifiedTemplateEngine templateEngine) {
-        this.templateEngine = templateEngine;
-    }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this.templateEngine = templateEngine; }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         for (TemplateAction action : template.actions()) {
+            Instant started = Instant.now();
+            List<String> targets = new ArrayList<String>();
+            Map<String, Object> output = outcome(targets);
+            Map<String, Object> node = new LinkedHashMap<String, Object>();
+            node.put("id", action.id());
+            node.put("type", action.type());
+            String description = templateEngine.renderValidationValues(action.description(), context);
+            node.put("description", description);
+            node.put("output", output);
+            boolean recorded = false;
+            String expected = "", actual = "";
             try {
-                if ("render".equalsIgnoreCase(action.type())) {
-                    Path payload = template.directory().resolve(att.core.IdentifierValidator.relativePath(action.payload(), "render payload")).normalize();
-                    Path canonicalTemplate = template.directory().toRealPath();
-                    Path canonicalPayload = payload.toRealPath();
-                    if (!canonicalPayload.startsWith(canonicalTemplate) || Files.isSymbolicLink(payload) || !Files.isRegularFile(canonicalPayload)) {
-                        throw new IllegalArgumentException("Render payload must stay inside template directory: " + action.payload());
-                    }
-                    String content = new String(Files.readAllBytes(canonicalPayload), StandardCharsets.UTF_8);
-                    String rendered = templateEngine.render(content, context, log);
-                    Map<String, Object> invocation = renderRecord(action, rendered, context);
-                    context.addAction(action.id(), invocation);
-                    ResultStatus status = applyAssertion(action, invocation, context);
-                    context.updateAction(action.id(), invocation);
-                    log.append("ACTION " + action.id(), invocation);
-                    results.add(new ValidationResult(stageName, action.id(), status, action.assertion(), rendered, ""));
-                    if (status != ResultStatus.PASS && stopOnFailure(action)) break;
-                } else if ("tool".equalsIgnoreCase(action.type())) {
-                    ToolOutcome outcome = executeTool(action, context, log);
-                    results.add(new ValidationResult(stageName, action.id(), outcome.status, action.call(), String.valueOf(outcome.output), ""));
-                    if (outcome.status != ResultStatus.PASS && stopOnFailure(action)) break;
-                } else if ("assert".equalsIgnoreCase(action.type())) {
-                    String rendered = templateEngine.renderValues(action.expression(), context);
-                    boolean passed = evaluator.evaluate(action.expression(), context);
-                    Map<String, Object> invocation = record(action, rendered, rendered, passed ? "PASS" : "FAIL");
-                    context.addAction(action.id(), invocation);
-                    log.append("ACTION " + action.id(), invocation);
-                    results.add(new ValidationResult(stageName, action.id(), passed ? ResultStatus.PASS : ResultStatus.FAIL, action.expression(), rendered, ""));
-                    if (!passed && stopOnFailure(action)) {
-                        break;
-                    }
-                } else if ("log".equalsIgnoreCase(action.type())) {
-                    String message = templateEngine.renderValues(action.message(), context);
-                    Map<String, Object> invocation = record(action, message, message, "PASS");
-                    invocation.put("level", action.level());
-                    invocation.put("message", message);
-                    invocation.put("fields", renderFields(action.fields(), templateEngine, context));
-                    context.addAction(action.id(), invocation);
-                    log.append("ACTION " + action.id(), invocation);
-                    results.add(new ValidationResult(stageName, action.id(), ResultStatus.PASS, "", message, ""));
-                } else {
-                    throw new IllegalArgumentException("Unsupported action type: " + action.type());
+                String type = action.type().toLowerCase(java.util.Locale.ROOT);
+                if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
+                else if ("tool".equals(type)) executeTool(action, context, log, output, targets, node);
+                else if ("assert".equals(type)) expected = templateEngine.renderValidationValues(action.expected(), context);
+                else if ("log".equals(type)) executeLog(action, context, output);
+                else throw new IllegalArgumentException("Unsupported action type: " + action.type());
+
+                context.addAction(action.id(), node);
+                recorded = true;
+                context.setActionOutput(output);
+                ResultStatus status = applyAssertion(action, output, context);
+                if ("assert".equals(type)) {
+                    output.put("result", Boolean.valueOf(status == ResultStatus.PASS));
+                    actual = normalizeLines(templateEngine.renderValuesPreserving(action.actual(), context));
+                    expected = normalizeLines(expected);
+                    output.put("expected", expected);
+                    output.put("actual", actual);
                 }
+                output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
+                node.put("description", normalizeLines(templateEngine.renderValuesPreserving(description, context)));
+                context.updateAction(action.id(), node);
+                log.append("ACTION " + action.id(), node);
+                String reportExpected = "assert".equals(type) ? joinLines(String.valueOf(node.get("description")), expected) : "";
+                results.add(new ValidationResult(stageName, action.id(), status, reportExpected, "assert".equals(type) ? actual : "", assertionMessage(output)));
+                if (status != ResultStatus.PASS && stopOnFailure(action)) break;
             } catch (Exception e) {
-                String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                results.add(new ValidationResult(stageName, action.id(), ResultStatus.ERROR, action.type(), "", message));
-                Map<String,Object> error = new LinkedHashMap<String,Object>(); error.put("id", action.id()); error.put("type", action.type()); error.put("status", "ERROR"); error.put("message", message);
-                try { log.append("ACTION " + action.id() + " ERROR", error); } catch (java.io.IOException ignored) { }
-                if (stopOnFailure(action)) {
-                    break;
-                }
+                String message = message(e);
+                output.put("status", "ERROR");
+                output.put("success", false);
+                output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
+                Map<String, Object> exception = new LinkedHashMap<String, Object>();
+                exception.put("type", e.getClass().getName());
+                exception.put("message", message);
+                output.put("exception", exception);
+                context.setActionOutput(output);
+                node.put("description", normalizeLines(templateEngine.renderValuesPreserving(description, context)));
+                try {
+                    if (recorded) context.updateAction(action.id(), node); else context.addAction(action.id(), node);
+                    log.append("ACTION " + action.id() + " ERROR", node);
+                } catch (Exception ignored) { }
+                String reportExpected = "assert".equalsIgnoreCase(action.type()) ? joinLines(String.valueOf(node.get("description")), expected) : "";
+                results.add(new ValidationResult(stageName, action.id(), ResultStatus.ERROR, reportExpected, actual, message));
+                if (stopOnFailure(action)) break;
+            } finally {
+                context.clearActionOutput();
             }
         }
         return results;
     }
 
-    private ToolOutcome executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+    private void executeRender(TemplateAction action, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log,
+                               Map<String, Object> output, List<String> targets) throws Exception {
+        Path templateRoot = template.directory().toRealPath();
+        List<Path> matches = payloadResolver.resolve(template.directory(), action.payload());
+        Map<String, Object> multiple = new LinkedHashMap<String, Object>();
+        Object single = null;
+        for (Path source : matches) {
+            String relative = RenderPayloadResolver.portable(templateRoot.relativize(source));
+            String content = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+            String rendered = templateEngine.render(content, context, log);
+            Object value;
+            if ("file".equalsIgnoreCase(action.renderAs())) {
+                Path target = context.caseOutputDirectory().resolve(relative.replace('/', java.io.File.separatorChar)).normalize();
+                if (!target.startsWith(context.caseOutputDirectory())) throw new IllegalArgumentException("Render target escapes Case output directory: " + relative);
+                Files.createDirectories(target.getParent());
+                Files.write(target, rendered.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW);
+                value = target.toString();
+                targets.add(target.toString());
+            } else value = templateEngine.parseRendered(rendered, action.renderAs());
+            if (matches.size() == 1) single = value; else multiple.put(relative, value);
+        }
+        output.put("result", "file".equalsIgnoreCase(action.renderAs()) ? new ArrayList<String>(targets) : (matches.size() == 1 ? single : multiple));
+        output.put("renderAs", action.renderAs().toLowerCase(java.util.Locale.ROOT));
+        output.put("sources", sourceNames(templateRoot, matches));
+    }
+
+    private void executeLog(TemplateAction action, CaseRuntimeContext context, Map<String, Object> output) {
+        String message = templateEngine.renderValuesPreserving(action.message(), context);
+        output.put("result", message);
+        output.put("level", action.level());
+        output.put("fields", renderFields(action.fields(), context));
+    }
+
+    private void executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
+                             List<String> targets, Map<String, Object> node) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
         java.util.Set<String> retryOn = strings(retry.get("retryOn"));
         java.util.Set<Integer> exitCodes = integers(retry.get("exitCodes"));
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
-        att.exec.ToolExecutionException last = null;
+        output.put("attempts", attempts);
         String saveAs = templateEngine.renderValues(action.saveAs(), context);
         for (int number = 1; number <= maxAttempts; number++) {
             try {
                 att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, action.id(), action.timeoutMs(), saveAs, action.overwrite() || number > 1);
-                Map<String, Object> attempt = new LinkedHashMap<String, Object>(result.invocation());
-                attempt.put("attempt", number);
-                attempts.add(attempt);
-                Map<String, Object> winning = new LinkedHashMap<String, Object>(result.invocation());
-                winning.put("id", action.id()); winning.put("attempts", attempts); winning.put("winningAttempt", number);
-                context.addAction(action.id(), winning);
-                ResultStatus status = applyAssertion(action, winning, context);
-                context.updateAction(action.id(), winning);
-                log.append("ACTION " + action.id() + " RESULT", winning);
-                return new ToolOutcome(result.output(), status);
+                Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
+                invocation.put("attempt", number);
+                attempts.add(invocation);
+                int exitCode = integer(invocation.get("exitCode"), 0);
+                boolean retryable = exitCode != 0 && retryOn.contains("EXIT_CODE") && (exitCodes.isEmpty() || exitCodes.contains(Integer.valueOf(exitCode)));
+                if (retryable && number < maxAttempts) continue;
+                output.put("result", result.output());
+                copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
+                output.put("winningAttempt", number);
+                Object saved = invocation.get("outputFile");
+                if (saved != null) targets.add(String.valueOf(saved));
+                if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
+                return;
             } catch (att.exec.ToolExecutionException e) {
-                last = e; Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence()); evidence.put("attempt", number); evidence.put("category", e.category()); attempts.add(evidence);
-                boolean exitEligible = !"EXIT_CODE".equals(e.category()) || exitCodes.isEmpty() || (e.exitCode() != null && exitCodes.contains(e.exitCode()));
-                if (number >= maxAttempts || !"EXIT_CODE".equals(e.category()) || !retryOn.contains("EXIT_CODE") || !exitEligible) break;
+                Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
+                evidence.put("attempt", number);
+                evidence.put("category", e.category());
+                attempts.add(evidence);
+                copy(evidence, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
+                if (evidence.containsKey("output")) output.put("result", evidence.get("output"));
+                if (evidence.get("outputFile") != null) targets.add(String.valueOf(evidence.get("outputFile")));
+                if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
+                throw e;
             }
         }
-        Map<String, Object> failed = new LinkedHashMap<String, Object>(); failed.put("id", action.id()); failed.put("type", "tool"); failed.put("status", "ERROR"); failed.put("attempts", attempts); failed.put("winningAttempt", null); context.addAction(action.id(), failed);
-        throw last;
+        throw new IllegalStateException("Tool action completed without a final attempt: " + action.id());
     }
 
-    private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
-    private java.util.Set<String> strings(Object value) { java.util.Set<String> result = new java.util.LinkedHashSet<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
-    private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }
-
-    private Map<String, Object> renderRecord(TemplateAction action, String rendered, CaseRuntimeContext context) throws Exception {
-        String saveAs = templateEngine.renderValues(action.saveAs(), context);
-        Object mode = action.output().get("mode");
-        if ((saveAs != null && !saveAs.trim().isEmpty()) || "file".equalsIgnoreCase(String.valueOf(mode))) {
-            String fileName = saveAs == null || saveAs.trim().isEmpty() ? "output.txt" : saveAs;
-            Path directory = context.caseLogDirectory();
-            Files.createDirectories(directory);
-            Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(fileName, "render saveAs")).normalize();
-            if (!outputFile.startsWith(directory.normalize())) {
-                throw new IllegalArgumentException("Render saveAs must stay under case log directory: " + fileName);
-            }
-            Files.createDirectories(outputFile.getParent());
-            if (Files.exists(outputFile) && !action.overwrite()) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + fileName);
-            if (action.overwrite()) Files.write(outputFile, rendered.getBytes(StandardCharsets.UTF_8));
-            else Files.write(outputFile, rendered.getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.CREATE_NEW);
-            Map<String, Object> invocation = record(action, rendered, rendered, "PASS");
-            invocation.put("outputFile", outputFile.toString());
-            invocation.put("outputBytes", rendered.getBytes(StandardCharsets.UTF_8).length);
-            invocation.put("outputSha256", sha256(rendered));
-            invocation.put("outputPreview", preview(rendered));
-            return invocation;
+    private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context) {
+        if (action.assertion() == null || action.assertion().trim().isEmpty()) {
+            output.put("status", "PASS"); output.put("success", true); return ResultStatus.PASS;
         }
-        return record(action, rendered, rendered, "PASS");
-    }
-
-    private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> invocation, CaseRuntimeContext context) {
-        if (action.assertion() == null || action.assertion().trim().isEmpty()) return ResultStatus.PASS;
-        String rendered = templateEngine.renderValues(action.assertion(), context);
+        String rendered = templateEngine.renderValuesPreserving(action.assertion(), context);
         boolean passed = evaluator.evaluate(action.assertion(), context);
-        invocation.put("assert", action.assertion());
-        invocation.put("assertRendered", rendered);
-        invocation.put("assertResult", passed);
-        invocation.put("status", passed ? "PASS" : "FAIL");
+        Map<String, Object> assertion = new LinkedHashMap<String, Object>();
+        assertion.put("expression", action.assertion());
+        assertion.put("rendered", rendered);
+        assertion.put("passed", passed);
+        output.put("assertion", assertion);
+        output.put("status", passed ? "PASS" : "FAIL");
+        output.put("success", passed);
         return passed ? ResultStatus.PASS : ResultStatus.FAIL;
     }
 
-    private static final class ToolOutcome {
-        private final Object output;
-        private final ResultStatus status;
-        private ToolOutcome(Object output, ResultStatus status) { this.output = output; this.status = status; }
+    private Map<String, Object> outcome(List<String> targets) {
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("status", "PASS");
+        output.put("success", true);
+        output.put("exception", null);
+        output.put("durationMs", 0L);
+        output.put("targetFiles", targets);
+        output.put("result", null);
+        return output;
     }
 
-    private Map<String, Object> record(TemplateAction action, Object output, String rawOutput, String status) {
-        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
-        invocation.put("id", action.id());
-        invocation.put("type", action.type());
-        invocation.put("output", output);
-        invocation.put("rawOutput", rawOutput);
-        invocation.put("status", status);
-        invocation.put("durationMs", 0);
-        return invocation;
+    private List<String> sourceNames(Path root, List<Path> matches) {
+        List<String> result = new ArrayList<String>();
+        for (Path path : matches) result.add(RenderPayloadResolver.portable(root.relativize(path)));
+        return result;
     }
 
-    private boolean stopOnFailure(TemplateAction action) {
-        return !"continue".equals(action.onFailure());
-    }
-
-    private Map<String, Object> renderFields(Map<String, Object> fields, UnifiedTemplateEngine engine, CaseRuntimeContext context) {
+    private Map<String, Object> renderFields(Map<String, Object> fields, CaseRuntimeContext context) {
         Map<String, Object> rendered = new LinkedHashMap<String, Object>();
-        for (Map.Entry<String, Object> entry : fields.entrySet()) {
-            rendered.put(entry.getKey(), engine.renderValues(String.valueOf(entry.getValue()), context));
-        }
+        for (Map.Entry<String, Object> entry : fields.entrySet()) rendered.put(entry.getKey(), templateEngine.renderValuesPreserving(String.valueOf(entry.getValue()), context));
         return rendered;
     }
 
-    private String preview(String text) {
-        String normalized = text.replace('\n', ' ').replace('\r', ' ');
-        return normalized.length() <= 120 ? normalized : normalized.substring(0, 120);
-    }
-
-    private String sha256(String text) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] bytes = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-        StringBuilder output = new StringBuilder();
-        for (byte value : bytes) {
-            output.append(String.format("%02x", value & 0xff));
-        }
-        return output.toString();
-    }
+    private void copy(Map<String, Object> from, Map<String, Object> to, String... keys) { for (String key : keys) if (from.containsKey(key)) to.put(key, from.get(key)); }
+    private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
+    private java.util.Set<String> strings(Object value) { java.util.Set<String> result = new java.util.LinkedHashSet<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
+    private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }
+    private boolean stopOnFailure(TemplateAction action) { return !"continue".equals(action.onFailure()); }
+    private String assertionMessage(Map<String, Object> output) { Object value = output.get("assertion"); return value == null ? "" : String.valueOf(value); }
+    private String message(Exception e) { return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(); }
+    private String normalizeLines(String value) { return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n'); }
+    private String joinLines(String first, String second) { String a = normalizeLines(first).trim(), b = normalizeLines(second).trim(); return a.isEmpty() ? b : (b.isEmpty() ? a : a + "\n" + b); }
 }

@@ -6,7 +6,7 @@
 
     <groupId>att</groupId>
     <artifactId>template-driven-api-testing-tool</artifactId>
-    <version>2.2.1</version>
+    <version>2.3.0</version>
     <name>Template-driven API Test Framework</name>
 
     <properties>

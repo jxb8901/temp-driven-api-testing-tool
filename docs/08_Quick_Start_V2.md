@@ -1,8 +1,8 @@
-# ATT V2.2.1 新手入門
+# ATT V2.3.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.2.1 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.2.1 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.3.0 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.0 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.2.1 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.0 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -12,7 +12,7 @@ test case --1:n stage--> template --1:n action--> tool
 
 Test case、template、tool 是核心概念。Stage 只定義一個案例調用模板的數量及順序；Action 只定義模板調用工具或執行 render/assert/log 的數量及順序。
 
-## 2. 先理解 V2.2 的工作方式
+## 2. 先理解 V2.3 的工作方式
 
 一次正常 run 會依序完成：
 
@@ -26,7 +26,7 @@ validate + plan
 
 只有完整完成的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 留在 `.in-progress`，不會被誤當成完成結果。
 
-V2.2 的狀態不可混淆：
+V2.3 的狀態不可混淆：
 
 | 狀態 | 意義 | 例子 |
 |---|---|---|
@@ -173,26 +173,28 @@ printf '{"status":"SUCCESS","environment":"%s"}\n' "$environment"
 chmod +x tools/invoke_payment_api.sh
 ```
 
-## 5. 建立 V2.2 模板與 JSON 工具輸出
+## 5. 建立 V2.3 模板與 JSON 工具輸出
 
 `templates/payment/local/CT001/template.yaml`：
 
 ```yaml
-schemaVersion: att-template/v2.1
+schemaVersion: att-template/v2.3
 name: 本地付款
 description: 產生付款 XML 並調用 API
 actions:
   renderRequest:
     type: render
-    payload: request.tmp.xml
-    saveAs: "${CASE.caseId}-request.xml"
-    assert: "${ACTIONS.renderRequest.output} != ''"
+    description: "為 ${CASE.caseId} 產生付款 request；狀態=${output.status}"
+    payload: requests/*.xml
+    renderAs: file
+    assert: "${output.targetFiles[0]} != null"
   invokeApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
+    description: 調用付款 API
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
     saveAs: "${CASE.caseId}-response.json"
     overwrite: false
-    assert: "${ACTIONS.invokeApi.output.status} == '${CASE.expected.status}'"
+    assert: "${output.result.status} == '${CASE.expected.status}'"
     # 可覆蓋 config/sidecar 的 timeoutMs；單位為毫秒
     timeoutMs: 30000
     retry:
@@ -200,7 +202,7 @@ actions:
       retryOn: [EXIT_CODE]
 ```
 
-`request.tmp.xml`：
+`requests/request.xml`：
 
 ```xml
 <PaymentRequest>
@@ -210,13 +212,15 @@ actions:
 </PaymentRequest>
 ```
 
-Action type 決定可用字段：
+Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `description`：validate 先替換案例等靜態值，保留 `${output...}` 之類的 runtime 值；執行完成後再解析剩餘表達式。
 
-- `render` 必須有 `payload`；使用 `output.mode: file` 時必須有 `saveAs`；可用 `assert` 直接驗證 render 結果，但不能 retry。
-- `tool` 必須有一個已配置的 `call`；可用 `assert` 直接驗證結果，也可用 `saveAs` 保存 raw stdout，並設定 `timeoutMs` 與 retry。
-- `saveAs` 支援 `${...}` Context 表達式，文件位於 case log 所在目錄。模板開發者需確保名稱唯一；`overwrite` 預設為 `false`，同名文件已存在時會報錯。
-- `assert` 必須有非空 `expression`；不允許 retry，輪詢請交給明確的 tool action。
+- `render` 必須有 `payload` glob 及 `renderAs: file|text|json|yaml|xml`。`file` 把每個匹配文件 render 到 Case output 目錄的同名相對路徑，目標清單位於 `output.targetFiles`；其他類型把單一值或按相對路徑排序的多值 map 放在 `output.result`。render 不再使用 `saveAs`、`overwrite` 或配置 `output.mode`。
+- `tool` 必須有一個已配置的 `call`；仍可用 `saveAs` 保存 raw stdout，並設定 `timeoutMs` 與 retry。
+- `assert` action 必須有非空 `assert`，不再使用 `expression`；可加 `expected`（validate 階段求值）和 `actual`（runtime 求值）。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
+- render、tool、log 都可用 `assert` 決定 PASS/FAIL；操作異常仍是 ERROR。tool exit code 是 `output.exitCode` 證據，不再單獨決定 action 結果。
+
+所有 action 的結果統一位於 `ACTIONS.<id>.output`：`status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及有設定時的 `assertion`。不要再讀取 action 頂層 `status`、`outputFile` 或舊式 scalar `output`。
 
 全域 `timeoutMs` 的單位是毫秒；上例為 10 秒。sidecar 可用同名 `timeoutMs` 覆蓋全域值；個別 tool action 再以 `timeoutMs` 覆蓋已解析的全域／sidecar 值。`timeoutMs` 只可用於 tool action，範圍為 1–3600000。
 
@@ -256,7 +260,7 @@ timeoutMs: 60000
 
 `report.columns` 的 key 是 ATT 結果字段，value 是 Excel 實際表頭。若來源工作表已存在映射表頭（例如「測試結果」），ATT 會直接填充該欄；只有不存在的映射表頭才按配置順序追加到工作表末尾。
 
-模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V2.2：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V2.3：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 多 sheet 使用：
 
@@ -280,18 +284,19 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。有效欄名重複、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.2：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。有效欄名重複、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.3：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
 - `${CASE.amount}`：讀取 Context。
 - `${CASE.STAGES.invoke.TEMPLATE.ACTIONS.invokeApi.TOOL.invokePaymentApi.output}`：跨 stage 完整路徑。
-- `${ACTIONS.invokeApi.output}`：目前 template 的便捷路徑。
+- `${ACTIONS.invokeApi.output.result}`：目前 template 的便捷結果路徑。
+- `${output.status}`：當前 action 在 assertion／runtime description 中的本地 outcome 路徑。
 - `#{tool(name='中文,字串', count=2, enabled=true)}`：調用工具，支援字串、數字、布爾 literal。
 
-核心節點 `CASE`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL` 使用大寫；`caseId`、`outputFile` 等 metadata 使用 camelCase。
+核心節點 `CASE`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL` 使用大寫；`caseId`、`targetFiles` 等 metadata 使用 camelCase。
 
-`CASE`、`STAGE`、`TEMPLATE`、`ACTION`、`TOOL` 的所有內建屬性、適用時機及完整路徑，見 [Reference Manual V2.2：Runtime Context](09_Reference_Manual_V2.md#runtime-context)。
+`CASE`、`STAGE`、`TEMPLATE`、`ACTION`、`TOOL` 的所有內建屬性、適用時機及完整路徑，見 [Reference Manual V2.3：Runtime Context](09_Reference_Manual_V2.md#runtime-context)。
 
 ATT 內置函數包括：
 
@@ -328,7 +333,7 @@ ATT 內置函數包括：
 
 只有一個 `value` 的 built-in 可省略 `value=`。配置中只宣告一個 argument 的 tool 也可省略名稱，如 `#{getAppLogs(${CASE.caseId})}`；只要 tool 宣告零個或多個 argument，就必須沿用原有的空參數／具名參數寫法，多參數 tool 不接受位置參數。
 
-完整函數清單、參數規則及字面量語法見 [Reference Manual V2.2.1：Expressions and built-in functions](09_Reference_Manual_V2.md#built-in-functions)。
+完整函數清單、參數規則及字面量語法見 [Reference Manual V2.3.0：Expressions and built-in functions](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -375,7 +380,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.2.1",
+  "attVersion": "2.3.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -396,7 +401,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 
 不帶參數或使用 `--help` 顯示完整用法。
 
-驗證錯誤代碼、選擇規則及 stage 執行語義見 [Reference Manual V2.2：Validation JSON contract](09_Reference_Manual_V2.md#validation-json-contract)。
+驗證錯誤代碼、選擇規則及 stage 執行語義見 [Reference Manual V2.3：Validation JSON contract](09_Reference_Manual_V2.md#validation-json-contract)。
 
 ## 9. 報告、CI、文件、打包與清理
 
@@ -415,6 +420,8 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 - JUnit HTML 報告：`output/<RunID>/report/junit.html`（可直接開啟閱讀）
 - 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
 
+`./att.sh docs` 的 Testcases 區段先按 workbook、再按 Sheet 分組。Sheet 名稱只顯示於分組標題，table 依序包含 Case ID、Name、Tags、Stages → Templates 及最後一欄 Expected Result；Expected Result 依 action 順序組合所有 assert action 在 validation 階段可解析的 `description` 與 `expected`，未解析的 runtime placeholder 保持原樣，換行統一為 LF。
+
 Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的非法字符及保留名稱限制。`report --run-id` 只接受合法 Run ID，不接受檔案路徑。
 
 `report --run-id` 會同時重建 `report/index.html` 和 `report/junit.html`；run 目錄或 manifest 若是跳出 output root 的 symlink，命令會拒絕處理。
@@ -425,7 +432,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 
 `clean` 拒絕清除專案根目錄、專案外目錄、source/configuration directory 或會跳出專案的 symlink。
 
-報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V2.2：Report Reference](09_Reference_Manual_V2.md#08-report-reference)。
+報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V2.3：Report Reference](09_Reference_Manual_V2.md#08-report-reference)。
 
 ## 10. 常見問題與安全提醒
 
@@ -437,7 +444,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 - JSON／XML output ERROR：檢查 raw output 和 parser diagnostic；JSON duplicate key、非合法 JSON，以及 XML DTD/外部 entity 都會被拒絕。
 - ERROR 與 FAIL：ERROR 表示執行可靠性問題，優先查看 tool attempt、stdout、stderr、raw output 和 case log；FAIL 表示 assertion 的預期與實際不一致。
 
-更多配置錯誤診斷及常見問題可參考 [Reference Manual V2.2](09_Reference_Manual_V2.md)。
+更多配置錯誤診斷及常見問題可參考 [Reference Manual V2.3](09_Reference_Manual_V2.md)。
 
 ## 11. 案例開發參考
 
@@ -474,21 +481,21 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 - {key: cleanup, template: 清理模板, required: false, runWhen: always, onFailure: continue}
 ```
 
-完整的判斷表與非阻斷診斷場景見 [Reference Manual V2.2：Stage execution controls](09_Reference_Manual_V2.md#stage-execution-controls)。
+完整的判斷表與非阻斷診斷場景見 [Reference Manual V2.3：Stage execution controls](09_Reference_Manual_V2.md#stage-execution-controls)。
 
 模板目錄必須直接包含 `template.yaml`。大型 XML、JSON、YAML 或文字內容應放在模板目錄的 request 文件中，由 `render` action 產生輸出。
 
-action 的 `onFailure` 與 stage 的設定獨立：每個 action 只可設為 `stop` 或 `continue`，未設定即為 `stop`。`stop` 停止同一模板後續 action；`continue` 僅容許後續 action 執行，仍會保留失敗結果。詳見 [Reference Manual V2.2：Template and action](09_Reference_Manual_V2.md#template-and-action)。
+action 的 `onFailure` 與 stage 的設定獨立：每個 action 只可設為 `stop` 或 `continue`，未設定即為 `stop`。`stop` 停止同一模板後續 action；`continue` 僅容許後續 action 執行，仍會保留失敗結果。詳見 [Reference Manual V2.3：Template and action](09_Reference_Manual_V2.md#template-and-action)。
 
-目前模板的結果可用 `${ACTIONS.<actionId>.output}` 讀取；跨 stage 的工具結果使用 `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<actionId>.TOOL.<toolName>.output}`。
+目前模板的結果可用 `${ACTIONS.<actionId>.output.result}` 讀取；跨 stage 的 action 結果使用 `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<actionId>.output.result}`，完整工具證據仍位於該 action 的 `TOOL` 節點。
 
 ### 11.3 表達式與工具呼叫
 
 字串 literal 必須加引號；數字及布爾值可保留原生型別：
 
 ```yaml
-expression: "${ACTIONS.callApi.output.status} == 'SUCCESS'"
-expression: "${ACTIONS.selectTxn.output.effectRows} >= 1 and true"
+assert: "${ACTIONS.callApi.output.result.status} == 'SUCCESS'"
+assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 ```
 
 內置函數可處理簡單轉換：
@@ -501,7 +508,7 @@ expression: "${ACTIONS.selectTxn.output.effectRows} >= 1 and true"
 
 外部工具只接受已在 `config/config.yaml` 或其 `toolGroups` 文件宣告的命名參數。全局工具使用 `tool(...)`，組內工具使用 `group.tool(...)`。最後一個參數可使用 `delimit`，例如把 `PAYMENT,POSTED` 解析為有順序的多個命令參數。
 
-### 11.4 V2.2 開發檢查表
+### 11.4 V2.3 開發檢查表
 
 - config、sidecar 和 template 都有正確的 `schemaVersion`。
 - Workbook 與 sidecar 檔名相同且位於同一目錄。
@@ -511,9 +518,11 @@ expression: "${ACTIONS.selectTxn.output.effectRows} >= 1 and true"
 - 工具組 ID 唯一，使用 `group.tool` 調用；argv list 每項都是預期的一個 process argument。
 - SSH 工具已在執行主機準備 key/agent 與 known-host 記錄，且 package validation 無法替代連線測試。
 - 每個 action 都符合其 type 專屬字段要求；只為可安全重試的 tool action 設定 retry。
+- render glob 至少匹配一個安全的普通文件，`renderAs` 正確，輸出相對路徑在同一 Case 內不衝突。
+- assert action 使用 `assert`／`expected`／`actual`，報表多行值以 LF 保存；不使用舊 `expression` 或拼錯的 `acture`／`actural`。
 - JSON/XML tool output 選擇正確，並以解析後結構撰寫 assertion。
 - 範例及 log 不包含敏感資料。
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、報告、打包及診斷內容見 [ATT V2.2 Reference Manual](09_Reference_Manual_V2.md)。
+完整配置、Context、報告、打包及診斷內容見 [ATT V2.3 Reference Manual](09_Reference_Manual_V2.md)。

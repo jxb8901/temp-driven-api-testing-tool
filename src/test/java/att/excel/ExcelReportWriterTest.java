@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExcelReportWriterTest {
     @TempDir Path tempDir;
@@ -38,22 +39,26 @@ class ExcelReportWriterTest {
         Map<String, String> columns = new LinkedHashMap<String, String>();
         columns.put("result", "測試結果");
         columns.put("durationMs", "耗時毫秒");
+        columns.put("expectedResult", "預期結果");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
                 Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", columns),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList());
-        TestResult result = new TestResult("payment.TC001", "付款", ResultStatus.PASS, Duration.ofMillis(37), "", "", null, Collections.emptyList());
+        TestResult result = new TestResult("payment.TC001", "付款", ResultStatus.PASS, Duration.ofMillis(37), "line1\r\nline2", "", null, Collections.emptyList());
 
         Path output = new ExcelReportWriter(config).write(source, tempDir.resolve("run"), Collections.singletonList(result));
 
         try (InputStream input = Files.newInputStream(output); Workbook workbook = WorkbookFactory.create(input)) {
             Row header = workbook.getSheet("案例").getRow(0);
             Row row = workbook.getSheet("案例").getRow(1);
-            assertEquals(3, header.getLastCellNum());
+            assertEquals(4, header.getLastCellNum());
             assertEquals("測試結果", header.getCell(1).getStringCellValue());
             assertEquals("耗時毫秒", header.getCell(2).getStringCellValue());
             assertEquals("PASS", row.getCell(1).getStringCellValue());
             assertEquals("37", row.getCell(2).getStringCellValue());
+            assertEquals("預期結果", header.getCell(3).getStringCellValue());
+            assertEquals("line1\nline2", row.getCell(3).getStringCellValue());
+            assertTrue(row.getCell(3).getCellStyle().getWrapText());
         }
     }
 

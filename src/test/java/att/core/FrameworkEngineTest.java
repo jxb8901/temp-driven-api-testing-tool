@@ -34,7 +34,7 @@ class FrameworkEngineTest {
     @Test
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v2.1\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    expression: \"${ACTIONS.callApi.output.Status} == 'SUCCESS'\"\n");
+                "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    description: API status\n    assert: \"${ACTIONS.callApi.output.result.Status} == 'SUCCESS'\"\n    expected: SUCCESS\n    actual: \"${ACTIONS.callApi.output.result.Status}\"\n");
         writeTool(projectRoot.resolve("tools/invoke.sh"), "printf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
@@ -62,6 +62,8 @@ class FrameworkEngineTest {
         assertFalse(verbose.contains("<Response>"));
 
         assertEquals(1, summary.passed());
+        assertEquals("API status\nSUCCESS", summary.results().get(0).expected());
+        assertEquals("SUCCESS", summary.results().get(0).actual());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/payments.payment.TC001.TEST.V2.001.log")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/case.yaml")));
@@ -125,7 +127,7 @@ class FrameworkEngineTest {
 
     @Test void rejectsDuplicateWorkbookIdsAcrossExcelFilesDuringPlanning() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v2.1\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  check:\n    type: assert\n    expression: \"true == true\"\n");
+                "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  check:\n    type: assert\n    assert: \"true == true\"\n");
         for (String name : java.util.Arrays.asList("one", "two")) {
             writeWorkbook(projectRoot.resolve("testcase/" + name + ".xlsx"));
             writeText(projectRoot.resolve("testcase/" + name + ".yaml"), "schemaVersion: att-sidecar/v2.1\nid: duplicate\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");

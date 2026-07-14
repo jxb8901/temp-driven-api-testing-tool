@@ -18,10 +18,25 @@ class JsonSchemaVerifierTest {
         assertEquals("a\t\b\f\u0001z", JsonSupport.mapper().readTree(json).get("value").asText());
     }
     @Test void productionTemplateSchemaAcceptsToolTimeoutAndRejectsParseRetry() throws Exception {
-        Path schema=Paths.get("schemas/att-template-v2.1.schema.json");
-        String valid="{\"schemaVersion\":\"att-template/v2.1\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"saveAs\":\"${CASE.caseId}.json\",\"overwrite\":false,\"assert\":\"${ACTIONS.call.output} != null\",\"timeoutMs\":1,\"retry\":{\"retryOn\":[\"EXIT_CODE\"]}}}}";
+        Path schema=Paths.get("schemas/att-template-v2.3.schema.json");
+        String valid="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"saveAs\":\"${CASE.caseId}.json\",\"overwrite\":false,\"assert\":\"${output.result} != null\",\"timeoutMs\":1,\"retry\":{\"retryOn\":[\"EXIT_CODE\"]}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,valid.replace("EXIT_CODE","OUTPUT_PARSE")));
+    }
+
+    @Test void v23TemplateSchemaEnforcesCanonicalRenderAndAssertFields() throws Exception {
+        Path schema=Paths.get("schemas/att-template-v2.3.schema.json");
+        String render="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"render\":{\"type\":\"render\",\"payload\":\"data/*.json\",\"renderAs\":\"json\"}}}";
+        String assertion="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"check\":{\"type\":\"assert\",\"assert\":\"true\",\"expected\":\"yes\",\"actual\":\"yes\"}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,render));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,assertion));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,render.replace("\"renderAs\":\"json\"","\"dataType\":\"json\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,render.replace(",\"renderAs\":\"json\"","")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,render.replace("\"renderAs\":\"json\"","\"renderAs\":\"binary\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,render.replace("\"renderAs\":\"json\"","\"saveAs\":\"out.json\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assertion.replace("\"assert\":\"true\"","\"expression\":\"true\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assertion.replace("\"actual\"","\"acture\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assertion.replace("\"actual\"","\"actural\"")));
     }
 
     @Test void productionV22SchemasAcceptArgvGroupsAndRejectMalformedSsh() throws Exception {

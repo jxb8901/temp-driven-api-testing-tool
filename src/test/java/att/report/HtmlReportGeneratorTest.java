@@ -38,7 +38,9 @@ class HtmlReportGeneratorTest {
         assertTrue(html.contains("payments.payment"));
         assertTrue(html.contains("id=\"workbookFilter\""));
         assertTrue(html.contains("id=\"sheetFilter\""));
-        assertTrue(html.contains("data-search=\"payments payment payments.payment.tc001 smoke, critical\""));
+        assertTrue(html.contains("data-search=\"payments payment payments.payment.tc001 smoke, critical success "));
+        assertTrue(html.contains("data-expected=\"SUCCESS\""));
+        assertTrue(html.contains("data-sort=\"expected\""));
         assertTrue(html.contains("data-sort=\"caseid\""));
         assertTrue(html.contains("data-type=\"number\""));
         assertTrue(html.contains("addEventListener('input',filterCases)"));

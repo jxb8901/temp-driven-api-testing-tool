@@ -4,7 +4,7 @@ schemas:
   legacyGlobalConfig: att-config-v2.1.schema.json
   toolGroup: att-tool-group-v2.2.schema.json
   sidecar: att-sidecar-v2.1.schema.json
-  template: att-template-v2.1.schema.json
+  template: att-template-v2.3.schema.json
   runManifest: att-run-v2.1.schema.json
   validation: att-validation-v2.1.schema.json
   ciSummary: att-ci-summary-v2.1.schema.json

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.3.0 - 2026-07-14
+
+- Added `att-template/v2.3` with safe deterministic render payload globs and required `renderAs: file|text|json|yaml|xml`; file mode preserves matched template-relative paths below the Case output directory, while typed modes store one value or an ordered path-to-value map.
+- Unified every action outcome below `action.output`, including status, success, exception, duration, target files, typed result, process/retry evidence, and assertion details; completed-action Context now uses `.output.result` and `.output.targetFiles` without legacy flattening.
+- Made `assert` available to render, tool, and log actions and the required expression field for assert actions. Operational failures remain ERROR, while completed tool exit codes are evidence and explicit assertions decide PASS/FAIL.
+- Added two-phase action text handling: validation resolves known Case values while preserving runtime placeholders, then runtime completes descriptions and assert-action `actual` values against the action-local `${output...}` scope. Assert actions add optional `expected` and canonical `actual`; legacy `expression`, `acture`, and `actural` are rejected.
+- Added ordered LF-preserving Expected/Actual aggregation from assert actions across HTML, result workbooks, CI JSON, JUnit detail, regenerated reports, Case logs, default/configurable report columns, and sample templates.
+- Grouped generated package-documentation Testcases by workbook and Sheet, removed the redundant Sheet table column, and added validation-time Expected Result text assembled from assert actions.
+- Updated the V2.3 design, Quick Start, Reference Manual, README, schema catalog, generated package documentation, shipped templates/configuration, and focused unit/integration coverage.
+
 ## 2.2.1 - 2026-07-14
 
 - Added `att.bat` as the Windows CLI entrypoint with packaged-release and Maven-backed source-tree modes, Windows `PATHEXT` tool lookup, and inclusion in package validation, binary/source release archives, manifests, help, and user documentation.

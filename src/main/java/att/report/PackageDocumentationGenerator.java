@@ -6,10 +6,13 @@ import att.config.FrameworkConfig;
 import att.config.SuiteConfigResolver;
 import att.config.ToolArgumentConfig;
 import att.config.ToolConfig;
+import att.core.CaseRuntimeContext;
 import att.core.StageCaseData;
 import att.core.TestCase;
 import att.excel.ExcelTestSuiteLoader;
 import att.template.StageTemplateLoader;
+import att.template.TemplateAction;
+import att.template.UnifiedTemplateEngine;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.Reader;
@@ -52,23 +55,55 @@ public final class PackageDocumentationGenerator {
             if (!Files.isRegularFile(workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml")))) continue;
             FrameworkConfig suite = new SuiteConfigResolver(root, global).resolve(workbook);
             List<TestCase> cases = new ExcelTestSuiteLoader(suite).load(workbook);
-            body.append("<h2>").append(escape(workbook.getFileName().toString())).append("</h2><table><tr><th>Case ID</th><th>Name</th><th>Tags</th><th>Sheet</th><th>Stages → Templates</th></tr>");
-            search.add(workbook.getFileName().toString());
+            Map<String, List<TestCase>> casesBySheet = new LinkedHashMap<String, List<TestCase>>();
             for (TestCase test : cases) {
-                String templates = test.stages().values().stream().map(StageCaseData::templateName).reduce((a,b)->a+" "+b).orElse("");
-                Set<String> usedTools = new LinkedHashSet<String>();
-                for (StageCaseData stage : test.stages().values()) for (att.template.TemplateAction action : templateLoader.load(stage.templateName()).actions()) { String call=action.call(); if(call.startsWith("#{")&&call.indexOf('(')>2) usedTools.add(call.substring(2,call.indexOf('('))); }
-                String searchable=(test.workbookId()+" "+test.sheetName()+" "+test.caseId()+" "+test.caseName()+" "+test.tags()+" "+templates+" "+String.join(" ",usedTools)).toLowerCase(java.util.Locale.ROOT);
-                body.append("<tr class=\"doc-item\" data-search=\"").append(escape(searchable)).append("\" data-workbook=\"").append(escape(test.workbookId())).append("\" data-sheet=\"").append(escape(test.sheetName())).append("\" data-caseid=\"").append(escape(test.caseId())).append("\" data-tool=\"").append(escape(String.join(" ",usedTools))).append("\" data-template=\"").append(escape(templates)).append("\"><td>").append(escape(test.caseId())).append("</td><td>").append(escape(test.caseName())).append("</td><td>").append(escape(String.valueOf(test.tags()))).append("</td><td>").append(escape(test.sheetName())).append("</td><td>");
-                for (StageCaseData stage : test.stages().values()) {
-                    String canonical = templateLoader.load(stage.templateName()).name();
-                    body.append(escape(stage.key())).append(" → <a href=\"../templates/index.html#").append(anchor(canonical)).append("\">").append(escape(stage.templateName())).append("</a><br>");
-                }
-                body.append("</td></tr>"); search.add(test.caseId()); search.add(test.caseName());
+                if (!casesBySheet.containsKey(test.sheetName())) casesBySheet.put(test.sheetName(), new ArrayList<TestCase>());
+                casesBySheet.get(test.sheetName()).add(test);
             }
-            body.append("</table>");
+            body.append("<h2>").append(escape(workbook.getFileName().toString())).append("</h2>");
+            search.add(workbook.getFileName().toString());
+            for (Map.Entry<String, List<TestCase>> sheet : casesBySheet.entrySet()) {
+                body.append("<section class=\"sheet-group\" data-sheet=\"").append(escape(sheet.getKey())).append("\"><h3>Sheet: ").append(escape(sheet.getKey())).append("</h3><table><tr><th>Case ID</th><th>Name</th><th>Tags</th><th>Stages → Templates</th><th>Expected Result</th></tr>");
+                for (TestCase test : sheet.getValue()) {
+                    String templates = test.stages().values().stream().map(StageCaseData::templateName).reduce((a,b)->a+" "+b).orElse("");
+                    Set<String> usedTools = new LinkedHashSet<String>();
+                    for (StageCaseData stage : test.stages().values()) for (TemplateAction action : templateLoader.load(stage.templateName()).actions()) { String call=action.call(); if(call.startsWith("#{")&&call.indexOf('(')>2) usedTools.add(call.substring(2,call.indexOf('('))); }
+                    String expectedResult = expectedResult(root, suite, test, templateLoader);
+                    String searchable=(test.workbookId()+" "+test.sheetName()+" "+test.caseId()+" "+test.caseName()+" "+test.tags()+" "+expectedResult.replace('\n', ' ')+" "+templates+" "+String.join(" ",usedTools)).toLowerCase(java.util.Locale.ROOT);
+                    body.append("<tr class=\"doc-item\" data-search=\"").append(escape(searchable)).append("\" data-workbook=\"").append(escape(test.workbookId())).append("\" data-sheet=\"").append(escape(test.sheetName())).append("\" data-caseid=\"").append(escape(test.caseId())).append("\" data-tool=\"").append(escape(String.join(" ",usedTools))).append("\" data-template=\"").append(escape(templates)).append("\"><td>").append(escape(test.caseId())).append("</td><td>").append(escape(test.caseName())).append("</td><td>").append(escape(String.valueOf(test.tags()))).append("</td><td>");
+                    for (StageCaseData stage : test.stages().values()) {
+                        String canonical = templateLoader.load(stage.templateName()).name();
+                        body.append(escape(stage.key())).append(" → <a href=\"../templates/index.html#").append(anchor(canonical)).append("\">").append(escape(stage.templateName())).append("</a><br>");
+                    }
+                    body.append("</td><td class=\"multiline\">").append(escape(expectedResult)).append("</td></tr>"); search.add(test.caseId()); search.add(test.caseName());
+                }
+                body.append("</table></section>");
+            }
         }
         return page("Testcases", body.toString());
+    }
+
+    private String expectedResult(Path root, FrameworkConfig suite, TestCase test, StageTemplateLoader loader) throws Exception {
+        CaseRuntimeContext context = new CaseRuntimeContext(test, root.resolve("build/docs"), "DOCS", root.resolve("build/docs"), root.resolve("build/docs/docs.log"));
+        context.put("CASE.environment", suite.environment());
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+        StringBuilder result = new StringBuilder();
+        for (StageCaseData stage : test.stages().values()) {
+            att.template.StageTemplate template = loader.load(stage.templateName());
+            context.beginStage(stage, template.name(), template.directory());
+            for (TemplateAction action : template.actions()) if ("assert".equalsIgnoreCase(action.type())) {
+                appendLine(result, engine.renderValidationValues(action.description(), context));
+                appendLine(result, engine.renderValidationValues(action.expected(), context));
+            }
+        }
+        return result.toString();
+    }
+
+    private void appendLine(StringBuilder output, String value) {
+        String normalized = value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (normalized.isEmpty()) return;
+        if (output.length() > 0) output.append('\n');
+        output.append(normalized);
     }
 
     @SuppressWarnings("unchecked")
@@ -88,7 +123,7 @@ public final class PackageDocumentationGenerator {
                 String tool = call.startsWith("#{") && call.indexOf('(') > 2 ? call.substring(2, call.indexOf('(')) : "";
                 body.append("<tr><td>").append(escape(String.valueOf(action.getKey()))).append("</td><td>").append(escape(String.valueOf(value.get("type")))).append("</td><td>");
                 if (!tool.isEmpty()) body.append("<a href=\"../tools/index.html#").append(anchor(tool)).append("\">").append(escape(tool)).append("</a>");
-                else body.append(escape(String.valueOf(value.get("payload") == null ? value.get("expression") : value.get("payload"))));
+                else body.append(escape(String.valueOf(value.get("payload") == null ? value.get("assert") : value.get("payload"))));
                 body.append("</td></tr>");
             }
             body.append("</table></section>"); search.add(name); search.add(path);
@@ -172,7 +207,7 @@ public final class PackageDocumentationGenerator {
         content = content.replace("../templates/index.html#", "#").replace("../tools/index.html#", "#").replace("../index.html", "#");
         return "<main><section id=\"" + id + "\"><article>" + content + "</article></section></main>";
     }
-    private String page(String title, String body) { return "<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + escape(title) + "</title><style>*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1280px;margin:auto;background:radial-gradient(circle at top left,#172554,#070a12 42%);color:#e5e7eb;font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}h1{font-size:30px}h2{margin-top:32px;color:#bfdbfe}a{color:#60a5fa}nav{position:sticky;top:0;z-index:20;display:flex;flex-direction:column;gap:10px;background:#080b16f5;border:1px solid #334155;border-radius:12px;padding:12px;box-shadow:0 12px 30px #0008}.index-links,.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}input,select{padding:11px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:white;box-shadow:0 8px 24px #0005}input{width:min(520px,100%)}table{border-collapse:collapse;width:100%;background:#0f172acc;border:1px solid #334155;border-radius:12px;overflow:hidden}th,td{border-bottom:1px solid #26334a;padding:10px;text-align:left}th{color:#93c5fd;background:#111c31}section{margin-bottom:2rem}code{color:#a7f3d0}.index{padding:12px;background:#0f172a;border:1px solid #334155;border-radius:10px}.index a{margin-right:10px}@media(max-width:700px){body{padding:18px}table{font-size:12px}}</style></head><body>" + body + "</body></html>"; }
+    private String page(String title, String body) { return "<!doctype html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + escape(title) + "</title><style>*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1280px;margin:auto;background:radial-gradient(circle at top left,#172554,#070a12 42%);color:#e5e7eb;font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}h1{font-size:30px}h2{margin-top:32px;color:#bfdbfe}h3{color:#c7d2fe}a{color:#60a5fa}nav{position:sticky;top:0;z-index:20;display:flex;flex-direction:column;gap:10px;background:#080b16f5;border:1px solid #334155;border-radius:12px;padding:12px;box-shadow:0 12px 30px #0008}.index-links,.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}input,select{padding:11px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:white;box-shadow:0 8px 24px #0005}input{width:min(520px,100%)}table{border-collapse:collapse;width:100%;background:#0f172acc;border:1px solid #334155;border-radius:12px;overflow:hidden}th,td{border-bottom:1px solid #26334a;padding:10px;text-align:left;vertical-align:top}th{color:#93c5fd;background:#111c31}.multiline{white-space:pre-wrap}section{margin-bottom:2rem}code{color:#a7f3d0}.index{padding:12px;background:#0f172a;border:1px solid #334155;border-radius:10px}.index a{margin-right:10px}@media(max-width:700px){body{padding:18px}table{font-size:12px}}</style></head><body>" + body + "</body></html>"; }
     private void write(Path path, String value) throws Exception { Files.write(path, value.getBytes(StandardCharsets.UTF_8)); }
     private String anchor(String value) { return HtmlSupport.id(value); }
     private String escape(String value) { return HtmlSupport.escape(value); }

@@ -1,7 +1,7 @@
-# ATT V2.2.1 User Manual and Reference
+# ATT V2.3.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.2.1
+Version: 2.3.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -51,7 +51,7 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, assert an expression, or write a structured log. ATT validates the selected package before executing external tools and records the resulting evidence below one completed run directory.
 
-### What V2.2 guarantees
+### What V2.3 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar.
@@ -156,20 +156,23 @@ The full Case ID is `payment.payment.TC001`: the first `payment` is the mandator
 Create `templates/payment/template.yaml`:
 
 ```yaml
-schemaVersion: att-template/v2.1
+schemaVersion: att-template/v2.3
 name: PAYMENT_INVOKE
 description: Render, invoke, and verify a payment
 actions:
   renderRequest:
     type: render
     payload: request.tmp.json
-    saveAs: request.json
+    renderAs: file
   callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
   assertStatus:
     type: assert
-    expression: "${ACTIONS.callApi.output.status} == ${CASE.expectedStatus}"
+    description: Payment API status matches the expected status
+    assert: "${ACTIONS.callApi.output.result.status} == ${CASE.expectedStatus}"
+    expected: "${CASE.expectedStatus}"
+    actual: "${ACTIONS.callApi.output.result.status}"
 ```
 
 Create `templates/payment/request.tmp.json`:
@@ -370,21 +373,22 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
 
 ```yaml
-schemaVersion: att-template/v2.1
+schemaVersion: att-template/v2.3
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
   renderRequest:
     type: render
-    payload: request.tmp.xml
-    saveAs: "${CASE.caseId}-request.xml"
-    assert: "${ACTIONS.renderRequest.output} != ''"
+    description: "Render request for ${CASE.caseId}; status=${output.status}"
+    payload: requests/*.xml
+    renderAs: file
+    assert: "${output.targetFiles[0]} != null"
   callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
     saveAs: "${CASE.caseId}-response.json"
     overwrite: false
-    assert: "${ACTIONS.callApi.output.status} == 'SUCCESS'"
+    assert: "${output.result.status} == 'SUCCESS'"
   recordResult:
     type: log
     level: INFO
@@ -397,16 +401,20 @@ actions:
 
 | Type | Purpose | Required fields | Common result |
 |---|---|---|---|
-| `render` | Render a UTF-8 payload | `type`, `payload`, `saveAs` | `output`, `outputFile` |
-| `tool` | Invoke a configured external tool | `type`, `call` | parsed `output`, process evidence |
-| `assert` | Evaluate a boolean expression | `type`, `expression` | PASS/FAIL or evaluation ERROR |
+| `render` | Render one or more UTF-8 payloads | `type`, `payload`, `renderAs` | nested `output.result` and `output.targetFiles` |
+| `tool` | Invoke a configured external tool | `type`, `call` | nested typed result and process evidence |
+| `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
 | `log` | Write a rendered structured message | `type`, `message` | message and rendered fields |
 
 Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
 
-Action validation is type-specific. A render action cannot contain tool/assert/log fields; retry and timeout are valid only for tool actions; an assert action requires an expression; a log action may use `level` and `fields`. Unsupported fields are errors rather than ignored values.
+Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log fields. Retry and timeout are valid only for tool actions. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid. A log action may use `level` and `fields`. Unsupported fields are errors rather than ignored values.
 
-Payload and output paths must remain below their intended template/case-log roots. Template names, paths, payloads, and descriptions support UTF-8 and are case-sensitive.
+Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
+
+Every action supports expression-bearing `description`. Validation partially resolves static Case values and preserves unavailable runtime placeholders exactly. After execution, ATT resolves the remaining placeholders against the current action-local `${output...}` scope before persisting the final description.
+
+Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. `renderAs: file` writes the rendered result under the Case output directory using that same relative path; collisions are ERROR. Other render modes write no file and store one typed value, or an ordered relative-path-to-value map for multiple matches, in `output.result`.
 
 ### 3.3 Tool
 
@@ -435,7 +443,7 @@ The action call must use the configured key. Tools with multiple declared argume
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
+  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
 ```
 
 Unknown, duplicate, or missing required arguments fail validation. Argument metadata documents and validates the contract; it does not inject values automatically. If—and only if—the tool declares exactly one argument, the call may omit its name: `#{getAppLogs(${CASE.caseId})}` is equivalent to `#{getAppLogs(caseId=${CASE.caseId})}`. A zero-argument tool still uses `#{tool()}`; a multi-argument tool rejects positional arguments.
@@ -534,9 +542,9 @@ Available command placeholders are:
 | `${input.argument}` | Explicitly namespaced reference to the same declared argument |
 | `${TOOL.input.argument}` | Supported explicit alias for the same declared argument |
 
-ATT parses stdout as raw output. `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout in the case log directory. The relative filename may contain `${...}` Context expressions; template authors must keep it unique in that directory. `overwrite` defaults to `false`, so an existing target is an error unless overwrite is enabled. Every retry writes the same resolved target and replaces the earlier attempt's stdout, leaving the final attempt as the artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, status, parsed output, and retry evidence remain in the persisted case evidence.
+ATT parses stdout as raw output. The tool configuration `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout in the case log directory. The relative filename may contain `${...}` Context expressions; template authors must keep it unique in that directory. `overwrite` defaults to `false`, so an existing target is an error unless overwrite is enabled. Every retry writes the same resolved target and replaces the earlier attempt's stdout, leaving the final attempt as the artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, parsed result, exit code, and retry evidence remain in the persisted case evidence.
 
-Exit code 0 plus successful parsing is PASS. A non-zero exit code, timeout, process failure, or structured-output parse failure is ERROR. Command, inputs, stdout, stderr, raw output, duration, exit code, and parsed output are retained as evidence.
+Timeout, launch/process I/O failure, or structured-output parse failure is ERROR and cannot be overridden by an assertion. Otherwise a tool action's `assert` decides PASS/FAIL. If no assertion is configured, operational completion is PASS even when the process exit code is non-zero. The exit code remains in `action.output.exitCode`, so templates that require zero must say so explicitly. Command, inputs, stdout, stderr, raw output, duration, exit code, parsed `output.result`, and assertion details are retained as evidence.
 
 Timeout precedence is:
 
@@ -625,7 +633,7 @@ output/<RunID>/
 
 Open `report/index.html` directly from disk. Groups are aggregated by `workbookId.groupId`; the UI labels the logical group as Sheet because it maps to a physical workbook sheet. In Cases, combine Workbook, Sheet, and Status selectors with text search over workbook ID, group ID, full Case ID, and tags. Click any Cases heading to toggle ascending/descending sorting; Duration sorts numerically.
 
-Each expanded case shows its full Case ID, name, status, duration, expected and actual results, action-result rows, the persisted Stage/Template/Action/Tool Context tree, the detailed execution log, and links to persisted case artifacts. The tree and log contain resolved templates, executed or skipped work, tool inputs/argv/stdout/stderr/parsed output, retry attempts, and error evidence when those events occurred.
+Each expanded case shows its full Case ID, name, status, duration, Expected and Actual results, action-result rows, the persisted Stage/Template/Action/Tool Context tree, the detailed execution log, and links to persisted case artifacts. Only `type: assert` actions contribute: Expected appends each non-blank final description and validation-time `expected`; Actual appends each non-blank runtime `actual`. Values follow action order and use exactly one LF between non-blank entries. HTML escapes and pre-wraps the text, Excel preserves LF with wrapping, JSON uses escaped `\n`, and JUnit retains the same line boundaries.
 
 `--ci-output junit,json` requests JUnit XML, JUnit HTML, and JSON summary:
 
@@ -663,6 +671,7 @@ report:
   columns:
     result: 測試結果
     durationMs: 耗時毫秒
+    expectedResult: 預期結果
     actualResult: 實際結果
     caseLog: 案例日誌
     reportLink: 詳細報告
@@ -678,7 +687,10 @@ Configure `output: json`, then use normal map/list navigation:
 ```yaml
 assertStatus:
   type: assert
-  expression: "${ACTIONS.callApi.output.status} == 'SUCCESS'"
+  description: API status is successful
+  assert: "${ACTIONS.callApi.output.result.status} == 'SUCCESS'"
+  expected: SUCCESS
+  actual: "${ACTIONS.callApi.output.result.status}"
 ```
 
 JSON duplicate object keys, malformed JSON, or a declared JSON output that cannot be parsed are ERROR even when the process exits 0.
@@ -717,22 +729,22 @@ Only repeated siblings are arrays, so indexes are used only for repeated nodes:
 ```yaml
 assertRootAttribute:
   type: assert
-  expression: "${ACTIONS.callApi.output.attributes.requestId} == 'R-100'"
+  assert: "${ACTIONS.callApi.output.result.attributes.requestId} == 'R-100'"
 assertStatusText:
   type: assert
-  expression: "${ACTIONS.callApi.output.Status.text} == 'SUCCESS'"
+  assert: "${ACTIONS.callApi.output.result.Status.text} == 'SUCCESS'"
 assertStatusCode:
   type: assert
-  expression: "${ACTIONS.callApi.output.Status.attributes.code} == '00'"
+  assert: "${ACTIONS.callApi.output.result.Status.attributes.code} == '00'"
 assertSecondMessage:
   type: assert
-  expression: "${ACTIONS.callApi.output.Messages.Message[1].text} == 'review later'"
+  assert: "${ACTIONS.callApi.output.result.Messages.Message[1].text} == 'review later'"
 assertSecondSeverity:
   type: assert
-  expression: "${ACTIONS.callApi.output.Messages.Message[1].attributes.severity} == 'WARN'"
+  assert: "${ACTIONS.callApi.output.result.Messages.Message[1].attributes.severity} == 'WARN'"
 ```
 
-With `xml.namespaceMode: ignore`, keys use local names. With `preserve`, namespace-aware names use Clark notation such as `{urn:payment}Status`. Keys containing braces, colons, dots, or spaces use quoted brackets, for example `${ACTIONS.callApi.output['{urn:payment}Status'].text}`. XML DTD, external entities, XInclude, and external resources are disabled.
+With `xml.namespaceMode: ignore`, keys use local names. With `preserve`, namespace-aware names use Clark notation such as `{urn:payment}Status`. Keys containing braces, colons, dots, or spaces use quoted brackets, for example `${ACTIONS.callApi.output.result['{urn:payment}Status'].text}`. XML DTD, external entities, XInclude, and external resources are disabled.
 
 A leaf without attributes becomes `ElementName: text`. Any element with attributes retains their names under `attributes`; therefore `<Item id="123"/>` becomes `Item: {attributes: {id: "123"}}`. Repeated same-name siblings become a list in source order; a singleton stays scalar/map. Empty elements become an empty string unless they have attributes. Text and CDATA are concatenated, trimmed at the boundary, and stored as `text` when child elements also exist. Comments and processing instructions are ignored. With namespace preservation, element and non-namespace attribute names use Clark notation, keeping equal local names from different namespaces distinct.
 
@@ -755,7 +767,7 @@ tools:
 ```yaml
 grepLogs:
   type: tool
-  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.outputFile}, keywords='PAYMENT,POSTED')}"
+  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords='PAYMENT,POSTED')}"
 ```
 
 The final value expands into two separate arguments, `PAYMENT` and `POSTED`. Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. The delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion.
@@ -767,7 +779,7 @@ Retry belongs to a tool action, not to a workflow or arbitrary stage:
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile})}"
+  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
   timeoutMs: 30000
   retry:
     maxAttempts: 3
@@ -775,7 +787,7 @@ callApi:
     exitCodes: [1, 75]
 ```
 
-`maxAttempts` includes the first attempt and defaults to 1. V2.2 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.2 has no delay/backoff fields, so eligible retries are immediate.
+`maxAttempts` includes the first attempt and defaults to 1. V2.3 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.3 has no delay/backoff fields, so eligible retries are immediate.
 
 Each attempt is recorded directly in the case log/action record; no `attempt-001` directory is created. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.
 
@@ -862,7 +874,7 @@ Action timeout overrides sidecar timeout, which overrides global timeout. CLI `-
 | Legacy global configuration (read compatibility) | `att-config/v2.1` | [att-config-v2.1.schema.json](../schemas/att-config-v2.1.schema.json) |
 | Tool group | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
-| Template descriptor | `att-template/v2.1` | [att-template-v2.1.schema.json](../schemas/att-template-v2.1.schema.json) |
+| Template descriptor | `att-template/v2.3` | [att-template-v2.3.schema.json](../schemas/att-template-v2.3.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) |
 | CI summary | `att-ci-summary/v2.1` | [att-ci-summary-v2.1.schema.json](../schemas/att-ci-summary-v2.1.schema.json) |
@@ -952,13 +964,13 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 |---|---|
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
-| render | requires `payload`, `saveAs`; optional `output`, `overwrite`, `assert`; no call/expression/message/level/fields/timeout/retry |
+| render | requires `payload`, `renderAs`; optional `assert`; no saveAs/overwrite/output/call/expression/message/level/fields/timeout/retry |
 | tool | requires `call`; optional `saveAs`, `overwrite`, `assert`, `timeoutMs`, `retry`; no render/assert-action/log-only fields |
-| assert | requires `expression`; no render/tool/log-only fields, timeout, or retry |
-| log | requires `message`; optional `level`, `fields`; no render/tool/assert-only fields, timeout, or retry |
+| assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
+| log | requires `message`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
 | retry | `maxAttempts`, `retryOn`, `exitCodes`; retryOn required and contains only `EXIT_CODE` |
 
-`maxAttempts` is 1–10; `exitCodes` values are 1–255. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root, action, and action `output` permit `x-*`; `fields` is an unconstrained log-field map.
+`renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. `maxAttempts` is 1–10; `exitCodes` values are 1–255. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence in V2.3 and is never an action configuration field.
 
 ### Tool contract
 
@@ -974,14 +986,14 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render payloads remain below the template; resolved `saveAs` output stays below the case log directory. ATT normalizes and checks root containment before writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and `renderAs: file` targets remain below the Case output directory. Tool-action `saveAs` stays below the case log directory. ATT normalizes and checks root containment before reads and writes.
 
 ### Validation JSON contract
 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.2.1",
+  "attVersion": "2.3.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1031,7 +1043,8 @@ CASE
         └── TEMPLATE
             └── ACTIONS
                 └── <actionId>
-                    ├── action metadata/output
+                    ├── id, type, description
+                    ├── output
                     └── TOOL
                         └── <toolName>
 ```
@@ -1045,22 +1058,22 @@ Common properties include:
 | CASE | `caseId`, `workbookId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, case data aliases |
 | STAGE | `key`, `name`, selector-map data, sidecar stage data, status, timing, error |
 | TEMPLATE | `name`, `path`, `description`, status, timing, error |
-| ACTION | `id`, `type`, status, timing, error, `output`, `outputFile`, assertion/log data |
+| ACTION | `id`, `type`, final `description`; nested `output.status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and assertion/log data |
 | TOOL | qualified configured name, optional group ID/tool key, `input`, logical/executed `argv`, optional SSH destination metadata, `stdout`, `stderr`, `rawOutput`, parsed `output`, status, exit code, duration, retry evidence, and optional `outputFile` when `saveAs` is used |
 
-Use `${ACTIONS.<id>...}` as a current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. The root `${TOOL...}` scope is reserved for invocation internals and is not a case-wide “latest tool” API. Authors must use `${ACTIONS.<id>...}` for later actions and the canonical CASE path across stages. Tool input/argv/stdout/stderr evidence is persisted below the action and written to the case log.
+Use `${output...}` for the current action while its runtime assertion, actual value, and final description are evaluated. Use `${ACTIONS.<id>...}` as a completed current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. The root `${TOOL...}` scope is reserved for invocation internals and is not a case-wide “latest tool” API. Tool input/argv/stdout/stderr evidence is persisted below the action and written to the case log.
 
 Map properties use dot navigation and lists use zero-based brackets:
 
 ```text
 ${CASE.amount}
 ${CASE.STAGES.invoke.channel}
-${ACTIONS.callApi.output.items[0].status}
+${ACTIONS.callApi.output.result.items[0].status}
 ```
 
 Dot notation navigates simple map keys. Lists accept bracket or numeric-dot indexes, so `${CASE.items[0].status}` and `${CASE.items.0.status}` are equivalent. Indexes are zero-based. Map keys containing dots, spaces, braces, or colons use quoted brackets, for example `${CASE.response['{urn:payment}Status'].text}`.
 
-An unresolved path renders as the empty string in ordinary template text. In an assertion, a missing value behaves as null, so `${CASE.missing} is null` is true. Invalid syntax produces an evaluation diagnostic. An action may read only data and earlier action outputs that exist at that execution point.
+For `description` and assert-action `expected`, validation resolves available static values and preserves unresolved placeholders verbatim. Runtime resolves the remainder after the current action outcome exists; unresolved descriptive/actual placeholders remain visible, while unresolved or invalid assertion values produce an evaluation ERROR. An action may read only case data, its local `output`, and earlier action outputs that exist at that execution point.
 
 ### Operators
 
@@ -1120,10 +1133,10 @@ Use built-ins for in-process transformations and time values; use tools for file
 Typical expressions:
 
 ```yaml
-expression: "${CASE.amount} > 0"
-expression: "${ACTIONS.callApi.output.status} == ${CASE.expectedStatus}"
-expression: "${ACTIONS.callApi.output.message} like 'PAYMENT%SUCCESS'"
-expression: "(${CASE.channel} == 'MOBILE') and (${CASE.amount} <= 1000)"
+assert: "${CASE.amount} > 0"
+assert: "${ACTIONS.callApi.output.result.status} == ${CASE.expectedStatus}"
+assert: "${ACTIONS.callApi.output.result.message} like 'PAYMENT%SUCCESS'"
+assert: "(${CASE.channel} == 'MOBILE') and (${CASE.amount} <= 1000)"
 ```
 
 ## 08 Report Reference
@@ -1148,13 +1161,13 @@ Run and Case IDs appear unchanged after validation. A final run directory repres
 
 `report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
 
-An expanded case contains the full Case ID and name, status and duration, expected and actual result, one row per recorded action result, the persisted Stage/Template/Action/Tool Context tree, detailed execution log, and artifact links. Depending on what ran, the tree/log show selected templates, executed or skipped stages/actions, assertion messages, tool arguments and argv, stdout/stderr, raw and parsed output, retry attempts, diagnostics, and saved payload/tool-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
+An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, the persisted Stage/Template/Action/Tool Context tree, detailed execution log, and artifact links. Expected is the ordered LF-joined non-blank descriptions and `expected` values from assert actions; Actual is the ordered LF-joined non-blank runtime `actual` values. Depending on what ran, the tree/log show selected templates, executed or skipped stages/actions, assertion messages, tool arguments and argv, stdout/stderr, raw and parsed output, retry attempts, diagnostics, and saved payload/tool-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
 
 `report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
 
 ### Result workbook
 
-ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Global `report.fileNamePattern` controls its filename. Sidecar `report.columns` changes workbook labels only.
+ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Global `report.fileNamePattern` controls its filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text.
 
 ### JUnit XML
 
@@ -1182,12 +1195,14 @@ Text is XML-escaped. JUnit XML and HTML use `report.junit.caseLogEmbedThresholdB
 
 | Command | Output/behavior |
 |---|---|
-| `docs` | Generates searchable offline package documentation at `build/docs/index.html` |
+| `docs` | Generates searchable offline package documentation at `build/docs/index.html`; Testcases are grouped by workbook and Sheet |
 | `report --run-id <id>` | Regenerates both HTML reports from completed evidence |
 | `build` | Archives the latest completed run without executing tests |
 | `clean` | Removes configured output directory, `build/docs`, and `build/att-*.tar.gz` |
 
 The build archive contains reports, workbooks, case logs, referenced artifacts, redacted configuration/template snapshots, manifest, and hashes. Exact YAML keys named `password`, `token`, `secret`, or `authorization` are redacted case-insensitively; this is not a general log/result redactor.
+
+The Testcases section renders one table per Sheet below each workbook heading. The Sheet column is omitted because the group heading supplies that context. Each table includes Expected Result, formed in stage/action order from every assert action's validation-time `description` and `expected`; unresolved runtime placeholders remain visible and line endings are normalized to LF.
 
 Clean never removes testcase, template, tool, configuration, documentation, schema, or other source files. It canonicalizes paths, rejects source/package roots and external symlink targets, is idempotent, and reports what it removed.
 

@@ -293,7 +293,7 @@ public final class FrameworkConfigLoader {
     }
     private static Map<String, String> reportColumns(Object value) {
         Map<String, String> result = stringMap(value);
-        java.util.Set<String> allowed = new java.util.LinkedHashSet<String>(java.util.Arrays.asList("result", "durationMs", "actualResult", "caseLog", "reportLink", "runTime"));
+        java.util.Set<String> allowed = new java.util.LinkedHashSet<String>(java.util.Arrays.asList("result", "durationMs", "expectedResult", "actualResult", "caseLog", "reportLink", "runTime"));
         for (Map.Entry<String, String> entry : result.entrySet()) {
             if (!allowed.contains(entry.getKey())) throw new IllegalArgumentException("Unknown report column key: " + entry.getKey());
             if (entry.getValue().trim().isEmpty()) throw new IllegalArgumentException("Report column header must not be blank: " + entry.getKey());

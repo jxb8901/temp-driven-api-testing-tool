@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:template:v2.3",
+  "type": "object",
+  "required": ["schemaVersion", "description", "actions"],
+  "properties": {
+    "schemaVersion": {"const": "att-template/v2.3"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "actions": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[^.]+$"}, "additionalProperties": {"$ref": "#/$defs/action"}}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "common": {
+      "type": "object",
+      "properties": {
+        "type": {"enum": ["render", "tool", "assert", "log"]},
+        "description": {"type": "string"},
+        "onFailure": {"enum": ["stop", "continue"]},
+        "payload": {"type": "string", "minLength": 1},
+        "renderAs": {"enum": ["file", "text", "json", "yaml", "xml"]},
+        "saveAs": {"type": "string", "minLength": 1},
+        "overwrite": {"type": "boolean", "default": false},
+        "call": {"type": "string", "minLength": 1},
+        "assert": {"type": "string", "minLength": 1},
+        "expected": {"type": "string"},
+        "actual": {"type": "string"},
+        "message": {"type": "string", "minLength": 1},
+        "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]},
+        "fields": {"type": "object"},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "retry": {"$ref": "#/$defs/retry"}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "retry": {
+      "type": "object",
+      "required": ["retryOn"],
+      "properties": {
+        "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 10},
+        "retryOn": {"type": "array", "uniqueItems": true, "items": {"const": "EXIT_CODE"}},
+        "exitCodes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 255}}
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "oneOf": [
+            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
+            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
+          ]
+        }
+      ]
+    }
+  }
+}

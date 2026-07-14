@@ -468,10 +468,23 @@ public class FrameworkEngine {
     }
 
     private static String joinExpected(List<ValidationResult> validations) {
-        return validations.stream().map(v -> v.name() + "=" + v.expected()).reduce((a, b) -> a + "; " + b).orElse("");
+        return joinReportValues(validations, true);
     }
 
     private static String joinActual(List<ValidationResult> validations) {
-        return validations.stream().map(v -> v.name() + "=" + v.actual()).reduce((a, b) -> a + "; " + b).orElse("");
+        return joinReportValues(validations, false);
+    }
+
+    private static String joinReportValues(List<ValidationResult> validations, boolean expected) {
+        StringBuilder result = new StringBuilder();
+        for (ValidationResult validation : validations) {
+            String value = expected ? validation.expected() : validation.actual();
+            if (value == null) continue;
+            value = value.replace("\r\n", "\n").replace('\r', '\n').trim();
+            if (value.isEmpty()) continue;
+            if (result.length() > 0) result.append('\n');
+            result.append(value);
+        }
+        return result.toString();
     }
 }

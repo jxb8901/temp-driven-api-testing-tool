@@ -40,4 +40,6 @@ report:
   columns:
     result: 測試結果
     durationMs: 耗時毫秒
+    expectedResult: 預期結果
+    actualResult: 實際結果
     runTime: 執行時間

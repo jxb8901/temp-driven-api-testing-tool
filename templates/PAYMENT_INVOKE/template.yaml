@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.1
+schemaVersion: att-template/v2.3
 name: PAYMENT_INVOKE
 description: Render payment request XML to a file and invoke the payment API.
 
@@ -6,16 +6,15 @@ actions:
   renderRequest:
     type: render
     payload: payload.xml
-    saveAs: request.xml
+    renderAs: file
 
   logRequest:
     type: log
     level: INFO
     message: "Rendered request for ${CASE.caseId}"
     fields:
-      requestFile: "${ACTIONS.renderRequest.outputFile}"
-      requestSha256: "${ACTIONS.renderRequest.outputSha256}"
+      requestFile: "${ACTIONS.renderRequest.output.targetFiles[0]}"
 
   callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.outputFile}, environment=${CASE.environment})}"
+    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"

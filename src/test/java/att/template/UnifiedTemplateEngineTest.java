@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Author: Jeffrey + ChatGPT. */
@@ -48,6 +49,13 @@ class UnifiedTemplateEngineTest {
     @Test void supportsQuotedCommaAndTypedBuiltInArguments() throws Exception {
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), new LinkedHashMap<String,Object>(), Collections.emptyMap(), null), tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
         assertEquals("hello, world:true:12.5", new UnifiedTemplateEngine(null).render("#{concat('hello, world', ':', true, ':', 12.5)}", context));
+    }
+
+    @Test void validationRenderingResolvesStaticCaseValuesAndPreservesRuntimeValues() {
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payments","payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+        assertEquals("Execute payments.payment.TC001; status=${output.status}", engine.renderValidationValues("Execute ${CASE.caseId}; status=${output.status}", context));
+        assertThrows(IllegalArgumentException.class, () -> engine.validateValueSyntax("broken ${CASE.caseId"));
     }
 
     @Test void supportsV22BuiltInsAndRejectsInvalidInputs() throws Exception {
@@ -106,7 +114,7 @@ class UnifiedTemplateEngineTest {
 
         assertEquals("ok", new UnifiedTemplateEngine(invoker).executeCall("#{echoOne('hello world')}", context, new CaseExecutionLog(tempDir.resolve("case.log")), "single"));
         assertEquals(Arrays.asList("echo", "hello world"), runner.calls.get(0));
-        assertEquals("hello world", context.resolve("ACTIONS.single.input.message"));
+        assertNull(context.resolve("ACTIONS.single"));
     }
 
     @Test void configuredToolReceivesContextTypesWithoutGuessing() throws Exception {
@@ -138,12 +146,14 @@ class UnifiedTemplateEngineTest {
         assertEquals(Arrays.asList("echo", "global"), runner.calls.get(0));
         assertEquals("ok", engine.executeCall("#{sample.echo()}", context, log, "grouped"));
         assertEquals(Arrays.asList("dispatch", "echo", "echo", "grouped"), runner.calls.get(1));
+        assertNull(context.resolve("ACTIONS.global"));
+        assertNull(context.resolve("ACTIONS.grouped"));
     }
 
     private static final class CapturingInvoker extends ToolInvoker {
         private Map<String,Object> input;
         CapturingInvoker(Path root){super(root,new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));}
-        @Override public ToolInvocationResult invoke(String invocationId,String toolName,Map<String,Object> input,CaseRuntimeContext context,CaseExecutionLog log){this.input=input;return new ToolInvocationResult(toolName,invocationId,"ok",Collections.<String,Object>emptyMap());}
+        @Override public ToolInvocationResult invokeAttempt(String invocationId,String toolName,Map<String,Object> input,CaseRuntimeContext context,CaseExecutionLog log,Long timeoutMs,String saveAs,boolean overwrite){this.input=input;return new ToolInvocationResult(toolName,invocationId,"ok",Collections.<String,Object>emptyMap());}
     }
 
     private static final class CapturingRunner extends CommandRunner {

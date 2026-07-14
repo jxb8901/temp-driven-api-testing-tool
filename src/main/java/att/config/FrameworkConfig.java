@@ -138,6 +138,7 @@ public final class FrameworkConfig {
         Map<String, String> columns = new LinkedHashMap<String, String>();
         columns.put("result", "Test Result");
         columns.put("durationMs", "Duration(ms)");
+        columns.put("expectedResult", "Expected Result");
         columns.put("actualResult", "Actual Result");
         columns.put("caseLog", "Case Log");
         columns.put("runTime", "Run Time");

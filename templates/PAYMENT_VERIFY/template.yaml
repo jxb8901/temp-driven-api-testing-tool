@@ -1,15 +1,21 @@
-schemaVersion: att-template/v2.1
+schemaVersion: att-template/v2.3
 name: PAYMENT_VERIFY
 description: Verify payment API response, CT records and application logs.
 
 actions:
   checkAPIResult:
     type: assert
-    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Status} == '${CASE.預期結果.status}'"
+    description: API status matches the expected status
+    assert: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.result.Status} == '${CASE.預期結果.status}'"
+    expected: "${CASE.預期結果.status}"
+    actual: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.result.Status}"
 
   checkRejectCode:
     type: assert
-    expression: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.RejectCode} == '${CASE.預期結果.rejectCode}'"
+    description: API reject code matches the expected code
+    assert: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.result.RejectCode} == '${CASE.預期結果.rejectCode}'"
+    expected: "${CASE.預期結果.rejectCode}"
+    actual: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.result.RejectCode}"
 
   selectTxn:
     type: tool
@@ -17,7 +23,10 @@ actions:
 
   checkCtxRecords:
     type: assert
-    expression: "${ACTIONS.selectTxn.output.effectRows} >= '${CASE.預期結果.effectRows}' and ${ACTIONS.selectTxn.output.record.status} like '%${CASE.預期結果.txnStatus}%'"
+    description: CT record count and status match the expectation
+    assert: "${ACTIONS.selectTxn.output.result.effectRows} >= '${CASE.預期結果.effectRows}' and ${ACTIONS.selectTxn.output.result.record.status} like '%${CASE.預期結果.txnStatus}%'"
+    expected: "effectRows>=${CASE.預期結果.effectRows}, status=${CASE.預期結果.txnStatus}"
+    actual: "effectRows=${ACTIONS.selectTxn.output.result.effectRows}, status=${ACTIONS.selectTxn.output.result.record.status}"
 
   getLogs:
     type: tool
@@ -25,17 +34,20 @@ actions:
 
   grepLogs:
     type: tool
-    call: "#{grepFromAppLogs(logText=${ACTIONS.getLogs.output}, keywords=${CASE.預期結果.keywords})}"
+    call: "#{grepFromAppLogs(logText=${ACTIONS.getLogs.output.result}, keywords=${CASE.預期結果.keywords})}"
     onFailure: continue
 
   checkLogs:
     type: assert
-    expression: "${ACTIONS.getLogs.output} like '%PAYMENT%POSTED%'"
+    description: Application logs contain the expected payment marker
+    assert: "${ACTIONS.getLogs.output.result} like '%PAYMENT%POSTED%'"
+    expected: PAYMENT...POSTED
+    actual: "${ACTIONS.getLogs.output.result}"
 
   logSummary:
     type: log
     level: INFO
     message: "Verified payment result for ${CASE.caseId}"
     fields:
-      apiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.Status}"
-      txnStatus: "${ACTIONS.selectTxn.output.record.status}"
+      apiStatus: "${CASE.STAGES.invoke.TEMPLATE.ACTIONS.callApi.output.result.Status}"
+      txnStatus: "${ACTIONS.selectTxn.output.result.record.status}"

@@ -15,16 +15,18 @@ public class TemplateAction {
     private final String key;
     private final String id;
     private final String type;
+    private final String description;
     private final String payload;
+    private final String renderAs;
     private final String call;
-    private final String expression;
     private final String message;
     private final String saveAs;
     private final String assertion;
+    private final String expected;
+    private final String actual;
     private final String onFailure;
     private final String level;
     private final Map<String, Object> fields;
-    private final Map<String, Object> output;
     private final Map<String, Object> raw;
     private final Map<String, Object> retry;
     private final Long timeoutMs;
@@ -36,16 +38,18 @@ public class TemplateAction {
         this.raw = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(data));
         this.id = text(data.get("id"), key);
         this.type = text(data.get("type"), "tool");
+        this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");
+        this.renderAs = text(data.get("renderAs"), "");
         this.call = text(data.get("call"), "");
-        this.expression = text(data.get("expression"), "");
         this.message = text(data.get("message"), "");
         this.saveAs = text(data.get("saveAs"), "");
         this.assertion = text(data.get("assert"), "");
+        this.expected = text(data.get("expected"), "");
+        this.actual = text(data.get("actual"), "");
         this.onFailure = failureMode(data.get("onFailure"));
         this.level = text(data.get("level"), "INFO");
         this.fields = map(data.get("fields"));
-        this.output = map(data.get("output"));
         this.retry = map(data.get("retry"));
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
         this.overwrite = data.get("overwrite") != null && Boolean.parseBoolean(String.valueOf(data.get("overwrite")));
@@ -54,17 +58,19 @@ public class TemplateAction {
     public String key() { return key; }
     public String id() { return id; }
     public String type() { return type; }
+    public String description() { return description; }
     public String payload() { return payload; }
+    public String renderAs() { return renderAs; }
     public String call() { return call; }
-    public String expression() { return expression; }
     public String message() { return message; }
     public String saveAs() { return saveAs; }
     public String assertion() { return assertion; }
+    public String expected() { return expected; }
+    public String actual() { return actual; }
     public boolean overwrite() { return overwrite; }
     public String onFailure() { return onFailure; }
     public String level() { return level; }
     public Map<String, Object> fields() { return fields; }
-    public Map<String, Object> output() { return output; }
     public Map<String, Object> raw() { return raw; }
     public Map<String, Object> retry() { return retry; }
     public Long timeoutMs() { return timeoutMs; }

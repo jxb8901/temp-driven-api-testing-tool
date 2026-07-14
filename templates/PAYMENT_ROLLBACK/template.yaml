@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.1
+schemaVersion: att-template/v2.3
 name: PAYMENT_ROLLBACK
 description: Failure-only compensation example used by cases that opt in to rollback.
 actions:

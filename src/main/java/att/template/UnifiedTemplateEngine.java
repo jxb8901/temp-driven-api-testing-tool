@@ -41,14 +41,48 @@ public class UnifiedTemplateEngine {
     }
 
     public String renderValues(String text, CaseRuntimeContext context) {
+        return renderValues(text, context, false, false);
+    }
+
+    public String renderValuesPreserving(String text, CaseRuntimeContext context) {
+        return renderValues(text, context, true, false);
+    }
+
+    public String renderValidationValues(String text, CaseRuntimeContext context) {
+        return renderValues(text, context, true, true);
+    }
+
+    private String renderValues(String text, CaseRuntimeContext context, boolean preserveMissing, boolean validationOnly) {
+        if (text == null || text.isEmpty()) return text == null ? "" : text;
         Matcher matcher = VALUE.matcher(text);
         StringBuffer output = new StringBuffer();
         while (matcher.find()) {
-            Object value = context.resolve(matcher.group(1));
-            matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+            String expression = matcher.group(1);
+            Object value = validationOnly && !(expression.startsWith("CASE.") && !expression.startsWith("CASE.STAGES.")) ? null : context.resolve(expression);
+            String replacement = value == null && preserveMissing ? matcher.group(0) : (value == null ? "" : String.valueOf(value));
+            matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(output);
         return output.toString();
+    }
+
+    public Object parseRendered(String text, String renderAs) throws Exception {
+        return "text".equalsIgnoreCase(renderAs) ? text : toolInvoker.parseOutput(text, renderAs);
+    }
+
+    public void validateValueSyntax(String text) {
+        if (text == null || text.isEmpty()) return;
+        int position = 0;
+        while (true) {
+            int start = text.indexOf("${", position);
+            if (start < 0) return;
+            Matcher matcher = VALUE.matcher(text);
+            matcher.region(start, text.length());
+            if (!matcher.lookingAt()) throw new IllegalArgumentException("Unclosed or invalid context reference in template value");
+            String path = matcher.group(1);
+            if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid context reference in template value: ${" + path + "}");
+            position = matcher.end();
+        }
     }
 
     public Object executeCall(String call, CaseRuntimeContext context) throws Exception {
@@ -84,7 +118,9 @@ public class UnifiedTemplateEngine {
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for tool invocation");
         }
-        att.exec.ToolInvocationResult result = attempt ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs, saveAs, overwrite) : toolInvoker.invoke(invocationId, parsed.name(), input, context, log);
+        att.exec.ToolInvocationResult result = attempt
+                ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs, saveAs, overwrite)
+                : toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, null, "", false);
         return attempt ? result : result.output();
     }
 

@@ -117,7 +117,7 @@ public class ToolInvoker {
         String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
         Exception parseFailure = null;
-        if (commandResult.exitCode() == 0 && !commandResult.timedOut()) try { parsed = parseOutput(rawOutput, tool.output()); } catch (Exception e) { parseFailure = e; }
+        if (!commandResult.timedOut()) try { parsed = parseOutput(rawOutput, tool.output()); } catch (Exception e) { parseFailure = e; }
 
         Map<String, Object> toolInvocation = new LinkedHashMap<String, Object>();
         toolInvocation.put("name", toolName);
@@ -156,6 +156,9 @@ public class ToolInvoker {
         invocation.put("rawOutput", rawOutput);
         invocation.put("stdout", commandResult.stdout());
         invocation.put("stderr", commandResult.stderr());
+        invocation.put("exitCode", commandResult.exitCode());
+        invocation.put("timeoutMs", timeoutMs);
+        invocation.put("command", command);
         invocation.put("logicalArgv", logicalArgv);
         invocation.put("argv", argv);
         if (saveAs != null && !saveAs.trim().isEmpty()) {
@@ -184,9 +187,6 @@ public class ToolInvoker {
 
         if (commandResult.timedOut()) {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
-        }
-        if (commandResult.exitCode() != 0) {
-            throw new ToolExecutionException("EXIT_CODE", "Tool failed: " + toolName + ", exitCode=" + commandResult.exitCode(), invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation);

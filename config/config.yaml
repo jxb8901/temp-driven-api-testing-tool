@@ -24,6 +24,7 @@ report:
   columns:
     result: Test Result
     durationMs: Duration(ms)
+    expectedResult: Expected Result
     actualResult: Actual Result
     caseLog: Case Log
     runTime: Run Time

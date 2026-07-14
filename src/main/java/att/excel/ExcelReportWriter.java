@@ -44,6 +44,7 @@ public class ExcelReportWriter {
         }
 
         try (InputStream input = Files.newInputStream(suitePath); Workbook workbook = WorkbookFactory.create(input); OutputStream output = Files.newOutputStream(reportPath)) {
+            Map<Short, org.apache.poi.ss.usermodel.CellStyle> wrappedStyles = new LinkedHashMap<Short, org.apache.poi.ss.usermodel.CellStyle>();
             for (SheetGroupConfig group : config.sheetGroups()) {
                 Sheet sheet = workbook.getSheet(group.sheetName());
                 Row header = sheet.getRow(config.headerRows() - 1);
@@ -57,7 +58,7 @@ public class ExcelReportWriter {
                     if (caseCell == null) continue;
                     String prefix = config.workbookId().isEmpty() ? group.id() : config.workbookId() + "." + group.id();
                     TestResult result = byCaseId.get(prefix + "." + caseCell.toString().trim());
-                    if (result != null) writeResult(row, resultColumns, result);
+                    if (result != null) writeResult(row, resultColumns, result, wrappedStyles);
                 }
             }
             workbook.write(output);
@@ -79,12 +80,23 @@ public class ExcelReportWriter {
         return columns;
     }
 
-    private void writeResult(Row row, Map<String, Integer> columns, TestResult result) {
+    private void writeResult(Row row, Map<String, Integer> columns, TestResult result, Map<Short, org.apache.poi.ss.usermodel.CellStyle> wrappedStyles) {
         for (Map.Entry<String, Integer> mapping : columns.entrySet()) {
             String field = mapping.getKey();
             Cell cell = row.getCell(mapping.getValue(), Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
             String text = value(field, result);
             cell.setCellValue(text);
+            if ("expectedResult".equals(field) || "actualResult".equals(field)) {
+                short baseIndex = cell.getCellStyle() == null ? 0 : cell.getCellStyle().getIndex();
+                org.apache.poi.ss.usermodel.CellStyle style = wrappedStyles.get(Short.valueOf(baseIndex));
+                if (style == null) {
+                    style = row.getSheet().getWorkbook().createCellStyle();
+                    if (cell.getCellStyle() != null) style.cloneStyleFrom(cell.getCellStyle());
+                    style.setWrapText(true);
+                    wrappedStyles.put(Short.valueOf(baseIndex), style);
+                }
+                cell.setCellStyle(style);
+            }
             if ("reportLink".equals(field)) {
                 org.apache.poi.ss.usermodel.Hyperlink link = row.getSheet().getWorkbook().getCreationHelper()
                         .createHyperlink(org.apache.poi.common.usermodel.HyperlinkType.FILE);
@@ -97,12 +109,15 @@ public class ExcelReportWriter {
     private String value(String field, TestResult result) {
         if ("result".equals(field)) return result.status().name();
         if ("durationMs".equals(field)) return String.valueOf(result.duration().toMillis());
-        if ("actualResult".equals(field)) return result.actual();
+        if ("expectedResult".equals(field)) return normalizeLines(result.expected());
+        if ("actualResult".equals(field)) return normalizeLines(result.actual());
         if ("caseLog".equals(field)) return result.caseLogPath() == null ? "" : result.caseLogPath().toString();
         if ("reportLink".equals(field)) return "../report/index.html#case-" + att.report.HtmlSupport.id(result.caseId());
         if ("runTime".equals(field)) return java.time.LocalDateTime.now().toString();
         return "";
     }
+
+    private String normalizeLines(String value) { return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n'); }
 
     private int columnIndex(Row header, String name) {
         for (Cell cell : header) {
