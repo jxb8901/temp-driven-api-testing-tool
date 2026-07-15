@@ -17,7 +17,7 @@ public final class CaseRuntimeContext {
     private int toolSequence;
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
-        this.caseOutputDir = caseOutputDir;
+        this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
         this.caseLogPath = caseLog.toAbsolutePath().normalize();
         caseNode.put("caseId", testCase.caseId());
         caseNode.put("workbookId", testCase.workbookId());
@@ -30,6 +30,9 @@ public final class CaseRuntimeContext {
         caseNode.put("status", "RUNNING");
         caseNode.put("startedAt", java.time.Instant.now().toString());
         caseNode.putAll(testCase.caseData());
+        // Framework-owned runtime metadata must not be replaceable by a
+        // same-named workbook column/case-data alias.
+        caseNode.put("outputDirectory", this.caseOutputDir.toString());
         caseNode.put("STAGES", new LinkedHashMap<String, Object>());
         root.put("CASE", caseNode);
         root.put("ACTIONS", actionsView);
@@ -97,7 +100,7 @@ public final class CaseRuntimeContext {
 
     public Map<String, Object> values() { return root; }
     public Map<String, Object> caseTree() { return caseNode; }
-    public Path caseOutputDirectory() { return caseOutputDir.toAbsolutePath().normalize(); }
+    public Path caseOutputDirectory() { return caseOutputDir; }
 
     public void setActionOutput(Map<String, Object> output) { root.put("output", output); }
     public void clearActionOutput() { root.remove("output"); }

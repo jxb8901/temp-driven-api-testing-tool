@@ -1,13 +1,13 @@
 # ATT V2.3 System Design
 
 Status: implementation contract
-Target release: 2.3.1
+Target release: 2.3.2
 
 ## 1. Scope
 
 V2.3 refactors template actions without changing the established workbook → testcase → ordered stage → template → ordered action → tool model. The release adds multi-file render actions, a single nested action-outcome contract, assertion-controlled action results, two-phase action text evaluation, and explicit Expected/Actual report values.
 
-The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; it does not change the template or tool-group schemas.
+The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; V2.3.2 adds the current Case output directory to Context and makes it the working directory of local tool processes. Neither update changes the template or tool-group schemas.
 
 V2.3 introduces `att-template/v2.3`. V2.3 packages use that template schema. Configuration and tool-group schemas remain at their V2.2 versions because their contracts do not change.
 
@@ -306,4 +306,25 @@ V2.3 is complete only when automated coverage includes:
 - migrated sample package validation and execution;
 - filesystem collision, missing-file, symlink boundary, and random-choice argument coverage;
 - executable FPP script tests for XML/YAML escaping, multiple SQLPlus rows, child exit propagation, and stdout/stderr capture;
+- reserved `${CASE.outputDirectory}` initialization, validation-time preservation, published-path rewriting, and local-tool working-directory coverage;
+- package-relative executable resolution from the package root after the process working directory changes to the Case output directory;
 - `mvn test`, `./build.sh`, built-package `validate --package`, docs generation, and `git diff --check`.
+
+## 13. V2.3.2 Case output directory contract
+
+`${CASE.outputDirectory}` is a reserved runtime Context property. It is the normalized absolute path of the current Case's physical output directory and is available before the first stage starts. Case data cannot replace this value.
+
+During execution the path points below `<outputDirectory>/.in-progress/<RunID>-<nonce>/<CaseID>/`. After successful atomic publication, ATT rewrites persisted text evidence to the completed `<outputDirectory>/<RunID>/<CaseID>/` path. Validation cannot know the runtime Run directory and therefore preserves `${CASE.outputDirectory}` rather than substituting a package-root placeholder.
+
+Every local configured tool process starts with `${CASE.outputDirectory}` as its current working directory. Relative files created or read by the tool therefore belong to that Case by default and move with the atomic Run publication. To preserve existing packages, a local executable configured with a leading `./` or `../` is resolved against the package root before process launch and recorded as the executed absolute argv value; bare executable names still use the operating-system `PATH`. Other relative argv values are intentionally interpreted by the tool from the Case working directory.
+
+ATT overrides two environment variables for every local tool process:
+
+| Variable | Value |
+|---|---|
+| `ATT_ROOT_DIR` | normalized absolute package root |
+| `ATT_CASE_OUTPUT_DIR` | the same runtime path as `${CASE.outputDirectory}` |
+
+These values are framework-owned and replace inherited variables with the same names. They let one script locate stable package resources and Case-local artifacts without depending on cwd. `ATT_CASE_OUTPUT_DIR` points to the physical in-progress Case directory while the process runs.
+
+For an SSH tool, `${CASE.outputDirectory}` remains available as local Context, but ATT does not issue a remote `cd` or inject the two local-path environment variables: local package and Case paths have no defined remote equivalents. The remote process continues to use the SSH account's default working directory. A tool that uses a shared filesystem or a dedicated remote directory must receive that path as an explicitly declared argument.

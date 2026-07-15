@@ -426,13 +426,26 @@ public class FrameworkEngine {
     private String sha256Bytes(byte[] bytes) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(bytes); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
 
     private void rewritePublishedPaths(Path workingDirectory, Path finalDirectory) throws Exception {
-        String from = workingDirectory.toString(), to = finalDirectory.toString();
+        String from = workingDirectory.toAbsolutePath().normalize().toString();
+        String to = finalDirectory.toAbsolutePath().normalize().toString();
+        // A child process may report a physical path while ATT uses a lexical
+        // path through a platform symlink (for example macOS /var ->
+        // /private/var). Rewrite the longer physical form first so the
+        // lexical replacement cannot duplicate the symlink prefix.
+        String physicalFrom = workingDirectory.toRealPath().toString();
+        Path finalParent = finalDirectory.toAbsolutePath().normalize().getParent();
+        String physicalTo = finalParent == null
+                ? to
+                : finalParent.toRealPath().resolve(finalDirectory.getFileName()).normalize().toString();
         try (java.util.stream.Stream<Path> files = Files.walk(workingDirectory)) {
             java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(this::isTextEvidence).iterator();
             while (iterator.hasNext()) {
                 Path file = iterator.next();
                 String content = new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
-                if (content.contains(from)) Files.write(file, content.replace(from, to).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String rewritten = content;
+                if (!physicalFrom.equals(from) && rewritten.contains(physicalFrom)) rewritten = rewritten.replace(physicalFrom, physicalTo);
+                if (rewritten.contains(from)) rewritten = rewritten.replace(from, to);
+                if (!rewritten.equals(content)) Files.write(file, rewritten.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
         }
     }

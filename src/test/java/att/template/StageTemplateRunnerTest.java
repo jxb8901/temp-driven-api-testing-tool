@@ -148,12 +148,12 @@ class StageTemplateRunnerTest {
         final boolean alwaysSuccess;
         SequencedRunner(boolean timeout) { this(timeout, false); }
         SequencedRunner(boolean timeout, boolean alwaysSuccess) { this.timeout = timeout; this.alwaysSuccess = alwaysSuccess; }
-        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory) { calls++; if (timeout) return new CommandResult(-1,"","",true); return alwaysSuccess || calls > 1 ? new CommandResult(0,"ok","",false) : new CommandResult(75,"first","retry",false); }
+        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { calls++; if (timeout) return new CommandResult(-1,"","",true); return alwaysSuccess || calls > 1 ? new CommandResult(0,"ok","",false) : new CommandResult(75,"first","retry",false); }
     }
     private static final class FixedRunner extends CommandRunner {
         private final int exitCode; private final String stdout;
         private FixedRunner(int exitCode, String stdout) { this.exitCode=exitCode; this.stdout=stdout; }
-        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory) { return new CommandResult(exitCode,stdout,"",false); }
+        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { return new CommandResult(exitCode,stdout,"",false); }
     }
     private Map<String,Object> map(Object... values){Map<String,Object> out=new LinkedHashMap<String,Object>();for(int i=0;i<values.length;i+=2)out.put(String.valueOf(values[i]),values[i+1]);return out;}
 }

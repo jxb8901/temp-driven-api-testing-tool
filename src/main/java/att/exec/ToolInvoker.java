@@ -54,7 +54,7 @@ public class ToolInvoker {
     }
 
     ToolInvoker(Path projectRoot, FrameworkConfig config, CommandRunner commandRunner, SshCommandRunner sshCommandRunner) {
-        this.projectRoot = projectRoot;
+        this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.config = config;
         this.commandRunner = commandRunner;
         this.sshCommandRunner = sshCommandRunner;
@@ -93,12 +93,16 @@ public class ToolInvoker {
         expandDelimitedArgument(tool, resolvedInput);
 
         List<String> logicalArgv = expandCommand(tool, resolvedInput);
-        List<String> argv = logicalArgv;
+        List<String> argv = tool.ssh() == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;
         String sshTransport = tool.ssh() == null ? "" : sshCommandRunner.transportName();
         CommandResult commandResult;
         long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
         try {
-            if (tool.ssh() == null) commandResult = commandRunner.run(argv, Duration.ofMillis(timeoutMs), projectRoot);
+            if (tool.ssh() == null) {
+                Files.createDirectories(context.caseOutputDirectory());
+                commandResult = commandRunner.run(argv, Duration.ofMillis(timeoutMs), context.caseOutputDirectory(),
+                        localToolEnvironment(context));
+            }
             else {
                 SshCommandRunner.Execution execution = sshCommandRunner.run(tool.ssh(), logicalArgv, Duration.ofMillis(timeoutMs), projectRoot);
                 commandResult = execution.result(); argv = execution.argv(); sshTransport = execution.transport();
@@ -279,6 +283,23 @@ public class ToolInvoker {
             return dispatched;
         }
         return argv;
+    }
+
+    private List<String> resolveLocalExecutable(List<String> logicalArgv) {
+        List<String> executed = new ArrayList<String>(logicalArgv);
+        if (executed.isEmpty()) return executed;
+        String executable = executed.get(0);
+        if (executable.startsWith("./") || executable.startsWith("../")) {
+            executed.set(0, projectRoot.resolve(executable).normalize().toString());
+        }
+        return executed;
+    }
+
+    private Map<String, String> localToolEnvironment(CaseRuntimeContext context) {
+        Map<String, String> environment = new LinkedHashMap<String, String>();
+        environment.put("ATT_ROOT_DIR", projectRoot.toString());
+        environment.put("ATT_CASE_OUTPUT_DIR", context.caseOutputDirectory().toString());
+        return environment;
     }
 
     private ToolArgumentConfig exactDelimitedPlaceholder(ToolConfig tool, String token) {

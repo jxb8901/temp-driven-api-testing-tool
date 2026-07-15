@@ -55,6 +55,8 @@ class UnifiedTemplateEngineTest {
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payments","payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
         assertEquals("Execute payments.payment.TC001; status=${output.status}", engine.renderValidationValues("Execute ${CASE.caseId}; status=${output.status}", context));
+        assertEquals("Directory=${CASE.outputDirectory}", engine.renderValidationValues("Directory=${CASE.outputDirectory}", context));
+        assertEquals("Directory=" + tempDir.toAbsolutePath().normalize(), engine.renderValues("Directory=${CASE.outputDirectory}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.validateValueSyntax("broken ${CASE.caseId"));
     }
 
@@ -158,7 +160,7 @@ class UnifiedTemplateEngineTest {
 
     private static final class CapturingRunner extends CommandRunner {
         private final List<List<String>> calls = new ArrayList<List<String>>();
-        @Override public CommandResult run(List<String> argv, Duration timeout, Path workingDirectory) {
+        @Override public CommandResult run(List<String> argv, Duration timeout, Path workingDirectory, Map<String,String> environment) {
             calls.add(new ArrayList<String>(argv));
             return new CommandResult(0, "ok", "", false);
         }

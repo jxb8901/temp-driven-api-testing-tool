@@ -58,7 +58,10 @@ public class UnifiedTemplateEngine {
         StringBuffer output = new StringBuffer();
         while (matcher.find()) {
             String expression = matcher.group(1);
-            Object value = validationOnly && !(expression.startsWith("CASE.") && !expression.startsWith("CASE.STAGES.")) ? null : context.resolve(expression);
+            boolean validationValueAvailable = expression.startsWith("CASE.")
+                    && !expression.startsWith("CASE.STAGES.")
+                    && !"CASE.outputDirectory".equals(expression);
+            Object value = validationOnly && !validationValueAvailable ? null : context.resolve(expression);
             String replacement = value == null && preserveMissing ? matcher.group(0) : (value == null ? "" : String.valueOf(value));
             matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
         }

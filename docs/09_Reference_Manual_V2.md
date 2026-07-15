@@ -1,7 +1,7 @@
-# ATT V2.3.1 User Manual and Reference
+# ATT V2.3.2 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.3.1
+Version: 2.3.2
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -495,6 +495,17 @@ The shipped `fpp` group is a reference implementation rather than an FPP product
 
 V2.2 normalizes every command to an argv template list. A scalar command is tokenized once with the legacy tokenizer. A YAML list is already normalized: each item is exactly one argv value and is never tokenized. An ordinary declared argument therefore remains atomic regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. A final argument with `delimit` is the only form that may intentionally expand into zero or more argv values. Resolved values are never tokenized again. ATT does not invoke a local shell.
 
+V2.3.2 starts every local tool process with `${CASE.outputDirectory}` as its current working directory. A configured executable beginning with `./` or `../` remains package-relative: ATT resolves that first argv value against the package root before launch. A bare executable name still uses `PATH`. All other relative argv paths are intentionally interpreted by the tool from the Case output directory. This makes relative tool artifacts part of the Case output without requiring every action to build an absolute path.
+
+ATT supplies and owns these local-process environment variables:
+
+| Variable | Contract |
+|---|---|
+| `ATT_ROOT_DIR` | normalized absolute ATT package root |
+| `ATT_CASE_OUTPUT_DIR` | normalized absolute current Case output directory; identical to `${CASE.outputDirectory}` at process launch |
+
+Inherited values with these names are replaced. POSIX scripts use forms such as `$ATT_CASE_OUTPUT_DIR`; Windows batch scripts use `%ATT_CASE_OUTPUT_DIR%`.
+
 | Command text | Effect |
 |---|---|
 | whitespace outside quotes | separates argv elements |
@@ -547,6 +558,8 @@ ssh:
 ```
 
 Root `ssh` applies only to inline global tools; a group uses only its own `ssh` and does not inherit the root value. Host/user are required, port defaults to 22, and the key is optional. Password fields are unsupported. ATT prefers local OpenSSH with `BatchMode=yes` and `StrictHostKeyChecking=yes`. If `PATH` has no executable `ssh`, ATT warns that it will use the bundled mwiede/jsch Java library. The fallback uses a strict `~/.ssh/known_hosts`, does not inherit the OpenSSH agent or `~/.ssh/config`, and normally requires `identityFile`. Both transports safely single-quote the logical argv into one POSIX remote command string. Remote connectivity and executable presence cannot be proven by package validation. SSH stdout/stderr/status/timeout/retry/assert/saveAs behavior matches local tools, and evidence records `transport: openssh|mwiede/jsch`.
+
+The Case output working-directory and two environment-variable rules apply to local tool processes only. ATT does not prepend `cd` or inject local filesystem paths into an SSH remote command because `${CASE.outputDirectory}` and the package root have no defined remote mappings. The remote process uses the SSH account's default directory. Pass a shared-filesystem or remote directory as an explicitly declared tool argument when required.
 
 #### Input, output, timeout, and status
 
@@ -1009,7 +1022,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.1",
+  "attVersion": "2.3.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1051,6 +1064,7 @@ The persisted runtime tree has one authoritative root:
 ```text
 CASE
 ├── caseId, workbookId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
+├── outputDirectory
 ├── environment, status, startedAt, durationMs, error
 ├── <case data aliases>
 └── STAGES
@@ -1071,13 +1085,15 @@ Common properties include:
 
 | Scope | Examples |
 |---|---|
-| CASE | `caseId`, `workbookId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, case data aliases |
+| CASE | `caseId`, `workbookId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, reserved `outputDirectory`, case data aliases |
 | STAGE | `key`, `name`, selector-map data, sidecar stage data, status, timing, error |
 | TEMPLATE | `name`, `path`, `description`, status, timing, error |
 | ACTION | `id`, `type`, final `description`; nested `output.status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and assertion/log data |
 | TOOL | qualified configured name, optional group ID/tool key, `input`, logical/executed `argv`, optional SSH destination metadata, `stdout`, `stderr`, `rawOutput`, parsed `output`, status, exit code, duration, retry evidence, and optional `outputFile` when `saveAs` is used |
 
 Use `${output...}` for the current action while its runtime assertion, actual value, and final description are evaluated. Use `${ACTIONS.<id>...}` as a completed current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. The root `${TOOL...}` scope is reserved for invocation internals and is not a case-wide “latest tool” API. Tool input/argv/stdout/stderr evidence is persisted below the action and written to the case log.
+
+`${CASE.outputDirectory}` is a reserved, normalized absolute path and Case data cannot override it. It exists before the first stage. During execution it is the physical `.in-progress/<RunID>-<nonce>/<CaseID>` directory; after successful publication ATT rewrites persisted text evidence to `<outputDirectory>/<RunID>/<CaseID>`. Validation preserves the placeholder because no runtime Run directory exists yet.
 
 Map properties use dot navigation and lists use zero-based brackets:
 
@@ -1156,7 +1172,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.1 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.2 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 

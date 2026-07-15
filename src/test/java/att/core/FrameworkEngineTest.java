@@ -35,7 +35,7 @@ class FrameworkEngineTest {
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
                 "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    description: API status\n    assert: \"${ACTIONS.callApi.output.result.Status} == 'SUCCESS'\"\n    expected: SUCCESS\n    actual: \"${ACTIONS.callApi.output.result.Status}\"\n");
-        writeTool(projectRoot.resolve("tools/invoke.sh"), "printf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
+        writeTool(projectRoot.resolve("tools/invoke.sh"), "printf '%s\\n' \"$PWD\" > tool-cwd.txt\nprintf '%s\\n%s\\n' \"$ATT_ROOT_DIR\" \"$ATT_CASE_OUTPUT_DIR\" > tool-env.txt\nprintf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
                 "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
@@ -67,6 +67,17 @@ class FrameworkEngineTest {
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/payments.payment.TC001.TEST.V2.001.log")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/case.yaml")));
+        Path caseDirectory = projectRoot.resolve("output/TEST-V2/payments.payment.TC001").toAbsolutePath().normalize();
+        Path cwdEvidence = caseDirectory.resolve("tool-cwd.txt");
+        assertTrue(Files.exists(cwdEvidence));
+        assertEquals(caseDirectory.toRealPath().toString() + "\n", new String(Files.readAllBytes(cwdEvidence), "UTF-8"));
+        java.util.List<String> environment = Files.readAllLines(caseDirectory.resolve("tool-env.txt"), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(projectRoot.toAbsolutePath().normalize().toString(), environment.get(0));
+        assertEquals(caseDirectory.toRealPath(), Paths.get(environment.get(1)).toRealPath());
+        String caseYaml = new String(Files.readAllBytes(caseDirectory.resolve("case.yaml")), "UTF-8");
+        Map<?, ?> persistedCase = (Map<?, ?>) new org.yaml.snakeyaml.Yaml().load(caseYaml);
+        assertEquals(caseDirectory.toRealPath(), Paths.get(String.valueOf(persistedCase.get("outputDirectory"))).toRealPath());
+        assertFalse(caseYaml.contains(".in-progress"));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/events.jsonl")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/summary.json")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.xml")));

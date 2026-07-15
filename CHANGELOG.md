@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.2 - 2026-07-15
+
+- Added reserved `${CASE.outputDirectory}` Context containing the normalized absolute current Case output directory, with validation-time placeholder preservation and completed-run path rewriting in persisted text evidence.
+- Changed local configured tools to run from the current Case output directory so relative tool artifacts are captured with the Case, while preserving package-root resolution for `./` and `../` executables and retaining PATH lookup for bare commands.
+- Added framework-owned `ATT_ROOT_DIR` and `ATT_CASE_OUTPUT_DIR` environment variables to every local tool process.
+- Documented that SSH remote commands keep the remote account's default working directory because local Case paths have no implicit remote mapping.
+
 ## 2.3.1 - 2026-07-14
 
 - Added local filesystem built-ins for regular-file/directory existence, file size, directory creation, collision-safe copy/move, and delete operations, with normalized path results and explicit overwrite/missing-file controls.

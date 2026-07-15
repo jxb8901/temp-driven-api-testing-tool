@@ -10,7 +10,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,9 +29,16 @@ public class CommandRunner {
 
     /** Runs an already constructed argv without any further tokenization. */
     public CommandResult run(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory) throws IOException, InterruptedException {
+        return run(commandArguments, timeout, workingDirectory, Collections.<String, String>emptyMap());
+    }
+
+    /** Runs argv with explicit framework-owned environment overrides. */
+    public CommandResult run(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory,
+                             Map<String, String> environment) throws IOException, InterruptedException {
         if (commandArguments.isEmpty()) throw new IOException("Tool command is blank");
         ProcessBuilder builder = new ProcessBuilder(commandArguments);
         if (workingDirectory != null) builder.directory(workingDirectory.toFile());
+        if (environment != null && !environment.isEmpty()) builder.environment().putAll(environment);
         Process process = builder.start();
         // Drain both streams concurrently so a verbose script cannot block on a full pipe.
         StreamCollector stdout = new StreamCollector(process.getInputStream());

@@ -1,6 +1,6 @@
-# ATT 2.3.1 - Automated Testing Tool
+# ATT 2.3.2 - Automated Testing Tool
 
-ATT V2.3.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.3.2 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
 V2.3 retains the V2 Case → Stage → Template → Action → Tool model and all V2.2 tool-group, argv-list, SSH, Windows, shorthand, and built-in capabilities. It adds multi-file render globs and typed render results, nests every action outcome under `action.output`, lets `assert` decide non-assert action PASS/FAIL, partially evaluates action descriptions during validation, and records explicit Expected/Actual report values. Templates use `att-template/v2.3`; configuration/tool-group schemas remain V2.2 and sidecar/run/CI schemas retain their existing versions.
 
@@ -62,6 +62,7 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 - Assert actions use required `assert` instead of `expression` and may declare validation-time `expected` plus runtime `actual`. Only assert actions contribute ordered, LF-preserving Expected/Actual report text.
 - Every action supports an expression-bearing `description`; validation resolves known static Case values and preserves runtime placeholders for final evaluation after the action outcome exists.
 - Render, tool, and log actions may use `assert` to decide PASS/FAIL. Operational exceptions stay ERROR; a tool's exit code is evidence at `output.exitCode`, not an automatic status decision.
+- `${CASE.outputDirectory}` exposes the normalized absolute current Case output directory. Local tools run with that directory as cwd and receive framework-owned `ATT_ROOT_DIR` and `ATT_CASE_OUTPUT_DIR` environment variables, while package-relative `./`/`../` executables are still resolved from the package root. SSH remote cwd remains the remote account default and local-path variables are not injected remotely.
 
 - Global configuration uses `att-config/v2.2`; each file in `toolGroups` uses `att-tool-group/v2.2` and a package-unique `id`. Grouped tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
 - Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
@@ -94,4 +95,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.3 System Design](docs/02_System_Design_V2.3.md) for the normative specification.
-See the [ATT V2.3.1 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.1 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.3.2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

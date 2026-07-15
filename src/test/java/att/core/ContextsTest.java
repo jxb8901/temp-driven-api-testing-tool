@@ -20,6 +20,7 @@ class ContextsTest {
     void buildsUppercaseConceptTreeWithCamelCaseProperties() {
         Map<String, Object> data = new LinkedHashMap<String, Object>();
         data.put("amount", "100");
+        data.put("outputDirectory", "must-not-replace-framework-value");
         Map<String, Object> stageValues = new LinkedHashMap<String, Object>();
         stageValues.put("name", "PAYMENT_INVOKE");
         stageValues.put("channel", "MOBILE");
@@ -36,6 +37,8 @@ class ContextsTest {
         assertEquals("SUCCESS", context.resolve("CASE.response['{urn:payment}Status']"));
         assertEquals("payments", context.resolve("CASE.workbookId"));
         assertEquals("100", context.resolve("CASE.amount"));
+        assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("CASE.outputDirectory"));
+        assertEquals(tempDir.toAbsolutePath().normalize(), context.caseOutputDirectory());
         assertEquals("MOBILE", context.resolve("CASE.STAGES.invoke.channel"));
     }
 

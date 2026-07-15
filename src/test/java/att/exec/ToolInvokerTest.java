@@ -95,6 +95,10 @@ class ToolInvokerTest {
         new ToolInvoker(tempDir, config, runner).invokeAttempt("call", "grep", input, context, new CaseExecutionLog(tempDir.resolve("case.log")), 1234L);
         assertEquals(Collections.singletonList("echo"), runner.argv);
         assertEquals(Duration.ofMillis(1234), runner.timeout);
+        assertEquals(context.caseOutputDirectory(), runner.workingDirectory);
+        assertEquals(tempDir.toAbsolutePath().normalize().toString(), runner.environment.get("ATT_ROOT_DIR"));
+        assertEquals(context.caseOutputDirectory().toString(), runner.environment.get("ATT_CASE_OUTPUT_DIR"));
+        assertEquals(2, runner.environment.size());
     }
 
     @Test void resolvedArgumentsRemainAtomicArgvValues() throws Exception {
@@ -123,8 +127,11 @@ class ToolInvokerTest {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         CaseRuntimeContext context = context(); CapturingRunner runner = new CapturingRunner();
         ToolInvocationResult result = new ToolInvoker(tempDir,config,runner).invokeAttempt("call","database.select",Collections.<String,Object>singletonMap("id","A B"),context,new CaseExecutionLog(tempDir.resolve("case.log")),1000L);
-        assertEquals(Arrays.asList("./tools/dispatch", "--safe", "select", "query", "--id", "A B"), runner.argv);
-        assertEquals(runner.argv, result.invocation().get("logicalArgv"));
+        List<String> logical = Arrays.asList("./tools/dispatch", "--safe", "select", "query", "--id", "A B");
+        assertEquals(Arrays.asList(tempDir.resolve("tools/dispatch").toString(), "--safe", "select", "query", "--id", "A B"), runner.argv);
+        assertEquals(logical, result.invocation().get("logicalArgv"));
+        assertEquals(runner.argv, result.invocation().get("argv"));
+        assertEquals(context.caseOutputDirectory(), runner.workingDirectory);
         assertNotNull(((Map<?,?>)((Map<?,?>)result.invocation().get("TOOL")).get("database")).get("select"));
     }
 
@@ -143,6 +150,7 @@ class ToolInvokerTest {
         ToolInvocationResult result = new ToolInvoker(tempDir,config,runner,sshRunner).invokeAttempt("call","remote.echo",Collections.<String,Object>singletonMap("value",hostile),context,new CaseExecutionLog(tempDir.resolve("case.log")),1000L);
         assertEquals(Arrays.asList("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-p", "2222", "-i", tempDir.resolve("keys/id_ed25519").toString(), "--", "att@tools.example", "'printf' '%s' 'A B O'\"'\"'Reilly;$(ignored)'"), runner.argv);
         assertEquals(Arrays.asList("printf", "%s", hostile), result.invocation().get("logicalArgv"));
+        assertTrue(runner.environment.isEmpty());
         Map<?,?> toolEvidence = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.invocation().get("TOOL")).get("remote")).get("echo");
         assertEquals("att@tools.example", ((Map<?,?>) toolEvidence.get("ssh")).get("destination"));
         assertEquals("openssh", ((Map<?,?>) toolEvidence.get("ssh")).get("transport"));
@@ -184,11 +192,24 @@ class ToolInvokerTest {
     private static final class CapturingRunner extends CommandRunner {
         private List<String> argv;
         private Duration timeout;
+        private Path workingDirectory;
+        private Map<String, String> environment = Collections.emptyMap();
 
         @Override
         public CommandResult run(List<String> argv, Duration timeout, java.nio.file.Path workingDirectory) {
+            return capture(argv, timeout, workingDirectory, Collections.<String, String>emptyMap());
+        }
+
+        @Override
+        public CommandResult run(List<String> argv, Duration timeout, Path workingDirectory, Map<String, String> environment) {
+            return capture(argv, timeout, workingDirectory, environment);
+        }
+
+        private CommandResult capture(List<String> argv, Duration timeout, Path workingDirectory, Map<String, String> environment) {
             this.argv = new ArrayList<String>(argv);
             this.timeout = timeout;
+            this.workingDirectory = workingDirectory;
+            this.environment = new LinkedHashMap<String, String>(environment);
             return new CommandResult(0, "", "", false);
         }
     }
