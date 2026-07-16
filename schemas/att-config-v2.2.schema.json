@@ -23,7 +23,7 @@
   "$defs": {
     "command": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "array", "minItems": 1, "items": {"type": "string"}}]},
     "ssh": {"type": "object", "required": ["host", "user"], "properties": {"host": {"type": "string", "minLength": 1}, "user": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 22}, "identityFile": {"type": "string", "minLength": 1}}, "additionalProperties": false},
-    "argument": {"type": "object", "required": ["name", "description", "required"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "required": {"type": "boolean"}, "delimit": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "argument": {"type": "object", "required": ["name", "description", "required"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "required": {"type": "boolean"}, "delimit": {"type": "string", "minLength": 1}, "argName": {"type": "string", "pattern": "^\\S*$"}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "tool": {"type": "object", "required": ["name", "description", "command"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "command": {"$ref": "#/$defs/command"}, "output": {"enum": ["txt", "yaml", "json", "xml"]}, "arguments": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "additionalProperties": {"$ref": "#/$defs/argument"}}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}
   }
 }

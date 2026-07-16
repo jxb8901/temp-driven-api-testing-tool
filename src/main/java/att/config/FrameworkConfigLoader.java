@@ -142,15 +142,26 @@ public final class FrameworkConfigLoader {
                 }
             }
             for (ToolArgumentConfig argument : arguments.values()) {
-                if (!argument.multiValue()) continue;
                 String direct = "${" + argument.key() + "}";
                 String input = "${input." + argument.key() + "}";
                 String legacy = "${TOOL.input." + argument.key() + "}";
+                int references = 0;
+                int exactReferences = 0;
                 for (String token : tokens) {
-                    if ((token.contains(direct) || token.contains(input) || token.contains(legacy))
-                            && !(token.equals(direct) || token.equals(input) || token.equals(legacy))) {
+                    java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\$\\{([^}]+)}").matcher(token);
+                    while (matcher.find()) {
+                        String expression = matcher.group(1);
+                        String key = expression.startsWith("TOOL.input.") ? expression.substring(11) : expression.startsWith("input.") ? expression.substring(6) : expression;
+                        if (argument.key().equals(key)) references++;
+                    }
+                    boolean exact = token.equals(direct) || token.equals(input) || token.equals(legacy);
+                    if (exact) exactReferences++;
+                    if (argument.multiValue() && (token.contains(direct) || token.contains(input) || token.contains(legacy)) && !exact) {
                         throw new IllegalArgumentException("Delimited argument placeholder must occupy one complete argv token: " + tool + "." + argument.key());
                     }
+                }
+                if (argument.namedArgv() && (references != 1 || exactReferences != 1)) {
+                    throw new IllegalArgumentException("argName argument placeholder must occupy exactly one complete argv token: " + tool + "." + argument.key());
                 }
             }
     }
@@ -249,13 +260,17 @@ public final class FrameworkConfigLoader {
             if (!key.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Tool argument name must match [A-Za-z_][A-Za-z0-9_]*: " + toolKey + "." + key);
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Argument descriptor must be a map: " + toolKey + "." + key);
             Map<?, ?> descriptor = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key, "name", "description", "required", "delimit");
+            SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key, "name", "description", "required", "delimit", "argName");
             if (!descriptor.containsKey("required")) throw new IllegalArgumentException("required is mandatory for argument: " + toolKey + "." + key);
             String delimit = descriptor.get("delimit") == null ? "" : SchemaSupport.string(descriptor.get("delimit"), "tools." + toolKey + ".arguments." + key + ".delimit", true);
+            Object argNameValue = descriptor.get("argName");
+            if (argNameValue != null && !(argNameValue instanceof String)) throw new IllegalArgumentException("argName must be a string: " + toolKey + "." + key);
+            String argName = argNameValue == null ? "" : (String) argNameValue;
             if (!delimit.isEmpty() && index != size) throw new IllegalArgumentException("delimit is allowed only on the final argument: " + toolKey + "." + key);
+            if (!argName.isEmpty() && argName.matches(".*[\\s\\p{Cntrl}].*")) throw new IllegalArgumentException("argName must be one non-blank argv token: " + toolKey + "." + key);
             result.put(key, new ToolArgumentConfig(key, required(descriptor, "name", "argument " + key),
                     required(descriptor, "description", "argument " + key), booleanValue(descriptor.get("required"), false,
-                    "required for argument " + toolKey + "." + key), delimit));
+                    "required for argument " + toolKey + "." + key), delimit, argName));
         }
         return result;
     }

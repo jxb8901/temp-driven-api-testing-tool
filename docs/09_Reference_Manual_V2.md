@@ -1,7 +1,7 @@
-# ATT V2.3.2 User Manual and Reference
+# ATT V2.3.3 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.3.2
+Version: 2.3.3
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -541,6 +541,20 @@ command:
   - Payment regression
 ```
 
+An argument may define an optional atomic `argName` token. Its placeholder determines the insertion position and must occupy exactly one complete command token when `argName` is non-empty:
+
+```yaml
+command:
+  - ./tools/send.sh
+  - "${requestFile}"
+  - "${reference}"
+arguments:
+  requestFile: {name: Request File, description: Input file, required: true}
+  reference: {name: Reference, description: Optional reference, required: false, argName: --reference}
+```
+
+With `reference='REF 123'`, the final portion of logical argv is `--reference`, `REF 123`; the value remains one atomic argument. If the optional value is missing or normalizes to blank, neither token is emitted. Omitting `argName` or setting `argName: ''` makes the argument positional: an exact-token placeholder emits only its value, or emits no argv when the optional value is blank. An embedded placeholder such as `--reference=${reference}` remains one ordinary rendered token and cannot use a non-empty `argName`.
+
 Prefer the shortest declared-argument placeholder, such as `${keywords}`; use `${input.keywords}` when an explicit namespace improves clarity. Both forms are case-sensitive and must exactly match the argument key. `${TOOL.input.keywords}` remains supported but is not the preferred authoring style. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
 
 Global tool commands may reference only their declared arguments. They cannot reference `${CASE...}`, `${ACTIONS...}`, or other runtime Context scopes. Pass runtime data explicitly in the action call, then reference that declared argument in the command. This keeps the global tool independent and its dependencies statically validateable.
@@ -799,7 +813,7 @@ grepLogs:
   call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords='PAYMENT,POSTED')}"
 ```
 
-The final value expands into two separate arguments, `PAYMENT` and `POSTED`. Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. The delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion.
+The final value expands into two separate arguments, `PAYMENT` and `POSTED`. Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. The delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion. If the delimited argument also defines `argName`, ATT emits that token once before all expanded values; an empty optional list emits neither the name nor values.
 
 ### Retry selected exit codes
 
@@ -968,7 +982,7 @@ Allowed global object properties are:
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 | `tools.<key>` | `name`, `description`, `command`, `output`, `arguments`, `x-*` |
-| `arguments.<key>` | `name`, `description`, `required`, `delimit`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, `argName`, `delimit`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
@@ -1003,7 +1017,7 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 
 ### Tool contract
 
-Each tool requires `name`, `description`, and `command`. `command` is either a non-blank scalar or a non-empty string list. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. Only the final declared argument may define a non-empty `delimit`.
+Each tool requires `name`, `description`, and `command`. `command` is either a non-blank scalar or a non-empty string list. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder for that argument. Only the final declared argument may define a non-empty `delimit`.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
@@ -1022,7 +1036,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.2",
+  "attVersion": "2.3.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1172,7 +1186,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.2 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.3 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 

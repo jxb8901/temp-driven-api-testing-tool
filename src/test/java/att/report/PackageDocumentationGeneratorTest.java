@@ -19,7 +19,9 @@ class PackageDocumentationGeneratorTest {
     @Test void generatesModernSinglePageAndUniqueUnicodeIds() throws Exception {
         Files.createDirectories(tempDir.resolve("testcase")); Files.createDirectories(tempDir.resolve("templates"));
         LinkedHashMap<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("echo", new ToolConfig("echo", "Echo", "Global echo", "echo ok", "txt", Collections.<String,ToolArgumentConfig>emptyMap()));
+        LinkedHashMap<String,ToolArgumentConfig> echoArguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        echoArguments.put("value", new ToolArgumentConfig("value", "Value", "Optional value", false, "", "--value"));
+        tools.put("echo", new ToolConfig("echo", "Echo", "Global echo", "echo ${value}", "txt", echoArguments));
         tools.put("sample.date", new ToolConfig("sample.date", "date", "sample", "Date", "Grouped date", Arrays.asList("date"), Arrays.asList("dispatch"), "txt", Collections.<String,ToolArgumentConfig>emptyMap(), null));
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
                 Paths.get("templates"), tools, null, new RunConfig("timestamp", "yyyyMMdd"));
@@ -38,6 +40,8 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("Global tools"));
         assertTrue(html.contains("Tool group: sample"));
         assertTrue(html.contains("sample.date"));
+        assertTrue(html.contains("<th>argName</th>"));
+        assertTrue(html.contains("<td>--value</td>"));
         assertTrue(html.contains("nvl(value, defaultValue)"));
         assertTrue(html.contains("iif(condition, trueValue, falseValue)"));
         assertTrue(html.contains("nchar(count, value)"));

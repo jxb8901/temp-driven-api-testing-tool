@@ -259,10 +259,19 @@ public class ToolInvoker {
         List<String> tokens = tool.commandArgv();
         List<String> argv = new ArrayList<String>();
         for (String token : tokens) {
-            ToolArgumentConfig delimited = exactDelimitedPlaceholder(tool, token);
-            if (delimited != null) {
-                Object value = input.get(delimited.key());
-                if (value instanceof List) for (Object item : (List<?>) value) argv.add(item == null ? "" : String.valueOf(item));
+            ToolArgumentConfig exact = exactArgumentPlaceholder(tool, token);
+            if (exact != null) {
+                Object value = input.get(exact.key());
+                if (!provided(value)) {
+                    if (exact.required()) throw new IllegalArgumentException("Missing required argument '" + exact.key() + "' for tool " + tool.key());
+                    continue;
+                }
+                if (exact.namedArgv()) argv.add(exact.argName());
+                if (value instanceof List) {
+                    for (Object item : (List<?>) value) argv.add(item == null ? "" : String.valueOf(item));
+                } else {
+                    argv.add(String.valueOf(value));
+                }
                 continue;
             }
             Matcher matcher = VALUE.matcher(token);
@@ -302,11 +311,15 @@ public class ToolInvoker {
         return environment;
     }
 
-    private ToolArgumentConfig exactDelimitedPlaceholder(ToolConfig tool, String token) {
+    private ToolArgumentConfig exactArgumentPlaceholder(ToolConfig tool, String token) {
         Matcher matcher = VALUE.matcher(token);
         if (!matcher.matches()) return null;
-        ToolArgumentConfig argument = tool.arguments().get(argumentKey(matcher.group(1)));
-        return argument != null && argument.multiValue() ? argument : null;
+        return tool.arguments().get(argumentKey(matcher.group(1)));
+    }
+
+    private boolean provided(Object value) {
+        if (value instanceof List) return !((List<?>) value).isEmpty();
+        return !blank(value);
     }
 
     private String argumentKey(String expression) {

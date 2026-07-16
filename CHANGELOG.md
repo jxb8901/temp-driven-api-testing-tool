@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.3 - 2026-07-16
+
+- Added optional tool-argument `argName` expansion: a provided value emits `[argName, value]`, while a missing or normalized-blank optional value emits no argv; omitted or empty `argName` keeps positional-argument behavior.
+- Applied the same atomic expansion to local, grouped, and SSH logical argv, including one `argName` followed by all values of a delimited argument.
+- Added strict schema/loader validation, generated tool-documentation output, and regression coverage for named, positional, delimited, blank, malformed, and grouped argument cases.
+
 ## 2.3.2 - 2026-07-15
 
 - Added reserved `${CASE.outputDirectory}` Context containing the normalized absolute current Case output directory, with validation-time placeholder preservation and completed-run path rewriting in persisted text evidence.

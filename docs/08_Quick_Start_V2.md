@@ -1,8 +1,8 @@
-# ATT V2.3.2 新手入門
+# ATT V2.3.3 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.3.2 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.2 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.3.3 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.3 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.2 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.3 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -90,10 +90,12 @@ tools:
       - ./tools/invoke_payment_api.sh
       - "${requestFile}"
       - "${environment}"
+      - "${traceId}"
     output: json
     arguments:
       requestFile: {name: Request File, description: 已渲染 XML, required: true}
       environment: {name: Environment, description: 執行環境, required: true}
+      traceId: {name: Trace ID, description: 可選追蹤 ID, required: false, argName: --trace-id}
 ```
 
 `schemaVersion` 必填。V2.2 對 config、tool group、sidecar、template 和 action 採嚴格 schema：未定義字段會在 validate 報錯；若要保存工具自訂但 ATT 不解讀的資料，字段必須以 `x-` 開頭。既有 `tools` 仍是全局工具，可繼續使用未加前綴的調用名稱。
@@ -102,7 +104,7 @@ tools:
 
 Case log 中 `ERROR`、`FAIL`、`INVALID` 區塊會以 `【!!!!!】` 開頭，例如 `【!!!!!】[ACTION invokeApi]`。可直接搜尋 `【!!!!!】` 快速定位異常日誌。
 
-工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，只有最後一個參數可增加 `delimit`。
+工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，可選 `argName`，且只有最後一個參數可增加 `delimit`。例如 `traceId` 有值時產生 `--trace-id <value>` 兩個 argv；缺少或空白時兩者都不產生。省略 `argName` 或設為空字串代表 positional argument，optional positional 值為空時也不產生 argv。
 
 `command` 推薦使用多行 argv list：每一項就是一個 argv，不會再次分詞。原有單行字串仍支持，ATT 只在載入時拆分一次，再統一轉為 argv list。具名參數優先以 `${requestFile}` 直接引用，需要明確命名空間時使用 `${input.requestFile}`；名稱大小寫必須與 arguments key 完全一致。command 只能引用已聲明參數，不能直接引用 `${CASE...}` 或 `${ACTIONS...}`。本地工具以當前 Case 輸出目錄作為工作目錄；以 `./` 或 `../` 開頭的 executable 仍相對套件根目錄解析，其他相對 argv 路徑則由工具從 Case 目錄解讀。工具將結果寫到 stdout、診斷寫到 stderr。只有 action 明確設定 `saveAs` 時才另存 raw stdout。
 
@@ -356,7 +358,7 @@ ATT 內置函數包括：
 #{fpp.runScript(script=${CASE.script}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`runScript` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML，並把完整 stdout/stderr 寫入指定文件。完整函數、工具契約及平台限制見 [Reference Manual V2.3.2](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`runScript` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML，並把完整 stdout/stderr 寫入指定文件。完整函數、工具契約及平台限制見 [Reference Manual V2.3.3](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -403,7 +405,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.2",
+  "attVersion": "2.3.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -529,7 +531,7 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 #{boolean(yes)}
 ```
 
-外部工具只接受已在 `config/config.yaml` 或其 `toolGroups` 文件宣告的命名參數。全局工具使用 `tool(...)`，組內工具使用 `group.tool(...)`。最後一個參數可使用 `delimit`，例如把 `PAYMENT,POSTED` 解析為有順序的多個命令參數。
+外部工具只接受已在 `config/config.yaml` 或其 `toolGroups` 文件宣告的命名參數。全局工具使用 `tool(...)`，組內工具使用 `group.tool(...)`。參數可用 `argName: --reference` 在有值時生成名稱和值兩個 argv；optional 空值會連名稱一起省略。省略／清空 `argName` 表示 process positional argument。最後一個參數可使用 `delimit`，例如把 `PAYMENT,POSTED` 解析為有順序的多個命令參數。
 
 ### 11.4 V2.3 開發檢查表
 

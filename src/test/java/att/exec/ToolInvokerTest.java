@@ -101,6 +101,59 @@ class ToolInvokerTest {
         assertEquals(2, runner.environment.size());
     }
 
+    @Test void emitsArgNameAndValueTogetherOnlyWhenOptionalArgumentIsProvided() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("reference", new ToolArgumentConfig("reference", "Reference", "Optional reference", false, "", "--reference"));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "capture", "", "Capture", "Capture optional argv", Arrays.asList("capture", "${reference}"), Collections.<String>emptyList(), "txt", arguments, null));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, config, runner);
+
+        invoker.invokeAttempt("missing", "capture", Collections.<String,Object>emptyMap(), context(), new CaseExecutionLog(tempDir.resolve("missing.log")), 1000L);
+        assertEquals(Collections.singletonList("capture"), runner.argv);
+
+        invoker.invokeAttempt("blank", "capture", Collections.<String,Object>singletonMap("reference", "N/A"), context(), new CaseExecutionLog(tempDir.resolve("blank.log")), 1000L);
+        assertEquals(Collections.singletonList("capture"), runner.argv);
+
+        String value = "A B O'Reilly;$(ignored)";
+        ToolInvocationResult result = invoker.invokeAttempt("present", "capture", Collections.<String,Object>singletonMap("reference", value), context(), new CaseExecutionLog(tempDir.resolve("present.log")), 1000L);
+        assertEquals(Arrays.asList("capture", "--reference", value), runner.argv);
+        assertEquals(runner.argv, result.invocation().get("logicalArgv"));
+    }
+
+    @Test void emitsArgNameOnceBeforeDelimitedValuesAndOmitsAnEmptyList() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("tags", new ToolArgumentConfig("tags", "Tags", "Optional tags", false, ",", "--tags"));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "capture", "", "Capture", "Capture optional list", Arrays.asList("capture", "${tags}"), Collections.<String>emptyList(), "txt", arguments, null));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, config, runner);
+
+        invoker.invokeAttempt("empty", "capture", Collections.<String,Object>singletonMap("tags", "N/A,NULL"), context(), new CaseExecutionLog(tempDir.resolve("empty-list.log")), 1000L);
+        assertEquals(Collections.singletonList("capture"), runner.argv);
+
+        invoker.invokeAttempt("values", "capture", Collections.<String,Object>singletonMap("tags", "PAYMENT, POSTED"), context(), new CaseExecutionLog(tempDir.resolve("values.log")), 1000L);
+        assertEquals(Arrays.asList("capture", "--tags", "PAYMENT", "POSTED"), runner.argv);
+    }
+
+    @Test void treatsMissingOrEmptyArgNameAsAnOptionalPositionalArgument() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("reference", new ToolArgumentConfig("reference", "Reference", "Optional positional reference", false, "", ""));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "capture", "", "Capture", "Capture optional positional argv", Arrays.asList("capture", "${reference}"), Collections.<String>emptyList(), "txt", arguments, null));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, config, runner);
+
+        invoker.invokeAttempt("missing", "capture", Collections.<String,Object>emptyMap(), context(), new CaseExecutionLog(tempDir.resolve("positional-missing.log")), 1000L);
+        assertEquals(Collections.singletonList("capture"), runner.argv);
+
+        invoker.invokeAttempt("present", "capture", Collections.<String,Object>singletonMap("reference", "REF 123"), context(), new CaseExecutionLog(tempDir.resolve("positional-present.log")), 1000L);
+        assertEquals(Arrays.asList("capture", "REF 123"), runner.argv);
+    }
+
     @Test void resolvedArgumentsRemainAtomicArgvValues() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("value", new ToolArgumentConfig("value", "Value", "Free text", true, ""));
@@ -120,9 +173,9 @@ class ToolInvokerTest {
 
     @Test void prependsGroupScriptAndWritesQualifiedEvidenceTree() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
-        arguments.put("id", new ToolArgumentConfig("id", "ID", "ID", true, ""));
+        arguments.put("id", new ToolArgumentConfig("id", "ID", "ID", true, "", "--id"));
         ToolConfig grouped = new ToolConfig("database.select", "select", "database", "Select", "Select row",
-                Arrays.asList("query", "--id", "${id}"), Arrays.asList("./tools/dispatch", "--safe"), "txt", arguments, null);
+                Arrays.asList("query", "${id}"), Arrays.asList("./tools/dispatch", "--safe"), "txt", arguments, null);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>(); tools.put(grouped.key(), grouped);
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         CaseRuntimeContext context = context(); CapturingRunner runner = new CapturingRunner();
@@ -137,7 +190,7 @@ class ToolInvokerTest {
 
     @Test void wrapsLogicalArgvForSshWithSafeRemoteQuoting() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
-        arguments.put("value", new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        arguments.put("value", new ToolArgumentConfig("value", "Value", "Value", true, "", "--value"));
         SshConfig ssh = new SshConfig("tools.example", "att", 2222, "keys/id_ed25519");
         ToolConfig tool = new ToolConfig("remote.echo", "echo", "remote", "Echo", "Remote echo",
                 Arrays.asList("printf", "%s", "${value}"), Collections.<String>emptyList(), "txt", arguments, ssh);
@@ -148,8 +201,8 @@ class ToolInvokerTest {
                 (target, command, timeout, root) -> { throw new AssertionError("Java fallback must not run"); }, System.err);
         String hostile = "A B O'Reilly;$(ignored)";
         ToolInvocationResult result = new ToolInvoker(tempDir,config,runner,sshRunner).invokeAttempt("call","remote.echo",Collections.<String,Object>singletonMap("value",hostile),context,new CaseExecutionLog(tempDir.resolve("case.log")),1000L);
-        assertEquals(Arrays.asList("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-p", "2222", "-i", tempDir.resolve("keys/id_ed25519").toString(), "--", "att@tools.example", "'printf' '%s' 'A B O'\"'\"'Reilly;$(ignored)'"), runner.argv);
-        assertEquals(Arrays.asList("printf", "%s", hostile), result.invocation().get("logicalArgv"));
+        assertEquals(Arrays.asList("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-p", "2222", "-i", tempDir.resolve("keys/id_ed25519").toString(), "--", "att@tools.example", "'printf' '%s' '--value' 'A B O'\"'\"'Reilly;$(ignored)'"), runner.argv);
+        assertEquals(Arrays.asList("printf", "%s", "--value", hostile), result.invocation().get("logicalArgv"));
         assertTrue(runner.environment.isEmpty());
         Map<?,?> toolEvidence = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.invocation().get("TOOL")).get("remote")).get("echo");
         assertEquals("att@tools.example", ((Map<?,?>) toolEvidence.get("ssh")).get("destination"));

@@ -41,8 +41,8 @@ class FrameworkConfigLoaderTest {
                 "script: [./tools/dispatch.sh, --read-only]\n" +
                 "ssh: {host: db.example, user: att, port: 2222, identityFile: keys/id_ed25519}\n" +
                 "tools:\n  select:\n    name: Select\n    description: Query row\n" +
-                "    command: [query, --id, '${id}']\n    output: json\n" +
-                "    arguments:\n      id: {name: ID, description: Row ID, required: true}\n").getBytes("UTF-8"));
+                "    command: [query, '${id}']\n    output: json\n" +
+                "    arguments:\n      id: {name: ID, description: Row ID, required: true, argName: --id}\n").getBytes("UTF-8"));
         Files.write(configDirectory.resolve("tools/logs.yaml"), ("schemaVersion: att-tool-group/v2.2\n" +
                 "id: logs\nname: Logs\ndescription: Log tools\n" +
                 "tools:\n  tail:\n    name: Tail\n    description: Tail logs\n    command: [./tools/tail.sh]\n").getBytes("UTF-8"));
@@ -51,19 +51,36 @@ class FrameworkConfigLoaderTest {
                 "ssh: {host: global.example, user: runner}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo value\n" +
                 "    command:\n      - /usr/bin/printf\n      - '%s\\n'\n      - '${value}'\n" +
-                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+                "    arguments:\n      value: {name: Value, description: Value, required: true, argName: ''}\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfigLoader().load(configDirectory.resolve("config.yaml"));
         assertEquals(java.util.Arrays.asList("/usr/bin/printf", "%s\\n", "${value}"), config.tool("echo").commandArgv());
+        assertEquals("", config.tool("echo").arguments().get("value").argName());
         assertEquals("runner@global.example", config.tool("echo").ssh().destination());
         ToolConfig grouped = config.tool("database.select");
         assertEquals("database", grouped.groupId());
         assertEquals("select", grouped.localKey());
         assertEquals(java.util.Arrays.asList("./tools/dispatch.sh", "--read-only"), grouped.groupScriptArgv());
-        assertEquals(java.util.Arrays.asList("query", "--id", "${id}"), grouped.commandArgv());
+        assertEquals(java.util.Arrays.asList("query", "${id}"), grouped.commandArgv());
+        assertEquals("--id", grouped.arguments().get("id").argName());
         assertEquals(2222, grouped.ssh().port());
         assertEquals(configDirectory.resolve("tools/database.yaml").toRealPath(), grouped.sourceFile());
         assertNotNull(config.tool("logs.tail"));
         assertNull(config.tool("logs.tail").ssh());
+    }
+
+    @Test void rejectsInvalidArgNameDefinitions() throws Exception {
+        String prefix = "schemaVersion: att-config/v2.2\ntools:\n  sample:\n    name: Sample\n    description: Sample\n";
+        Path embedded = tempDir.resolve("embedded.yaml");
+        Files.write(embedded, (prefix + "    command: [echo, 'value=${value}']\n    arguments:\n      value: {name: Value, description: Value, required: false, argName: --value}\n").getBytes("UTF-8"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(embedded)).getMessage().contains("exactly one complete argv token"));
+
+        Path duplicate = tempDir.resolve("duplicate-arg-name.yaml");
+        Files.write(duplicate, (prefix + "    command: [echo, '${value}', '${input.value}']\n    arguments:\n      value: {name: Value, description: Value, required: false, argName: --value}\n").getBytes("UTF-8"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(duplicate)).getMessage().contains("exactly one complete argv token"));
+
+        Path unused = tempDir.resolve("unused-arg-name.yaml");
+        Files.write(unused, (prefix + "    command: [echo]\n    arguments:\n      value: {name: Value, description: Value, required: false, argName: --value}\n").getBytes("UTF-8"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(unused)).getMessage().contains("exactly one complete argv token"));
     }
 
     @Test void rejectsDuplicateGroupIdsUnsafePathsAndReservedGlobalNames() throws Exception {

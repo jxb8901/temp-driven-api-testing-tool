@@ -1,6 +1,6 @@
-# ATT 2.3.2 - Automated Testing Tool
+# ATT 2.3.3 - Automated Testing Tool
 
-ATT V2.3.2 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.3.3 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
 V2.3 retains the V2 Case → Stage → Template → Action → Tool model and all V2.2 tool-group, argv-list, SSH, Windows, shorthand, and built-in capabilities. It adds multi-file render globs and typed render results, nests every action outcome under `action.output`, lets `assert` decide non-assert action PASS/FAIL, partially evaluates action descriptions during validation, and records explicit Expected/Actual report values. Templates use `att-template/v2.3`; configuration/tool-group schemas remain V2.2 and sidecar/run/CI schemas retain their existing versions.
 
@@ -67,6 +67,7 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 - Global configuration uses `att-config/v2.2`; each file in `toolGroups` uses `att-tool-group/v2.2` and a package-unique `id`. Grouped tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
 - Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
 - Tool `command` and group `script` accept a scalar or argv list. Lists preserve each YAML item as one argument; scalar commands use the existing tokenizer once. Group scripts receive `<tool key> <tool command argv>` after the script argv.
+- An argument may declare `argName`, such as `--reference`. When its exact-token placeholder has a non-blank value, ATT emits the name and value as separate atomic argv; a missing/blank optional value emits neither. Omitted or empty `argName` is positional, and optional positional placeholders are likewise omitted when blank.
 - Root `ssh` applies to inline global tools; a group's `ssh` applies only to that group. ATT prefers local OpenSSH and automatically warns/falls back to the bundled mwiede/jsch Java client when `ssh` is unavailable. Both use strict host-key checking, optional key files, and a safely quoted remote command; see Reference Manual Chapter 09 for Java algorithm limits.
 - Built-ins remain unqualified. V2.3.1 adds regular-file/directory checks, file size, directory creation, copy/move/delete operations, and `randomChoice`; it also includes the V2.3 string, date, conversion, `nvl`, `iif`, and `nchar` functions. File writes reject collisions unless their explicit overwrite option is true, and custom Java built-in providers are not loaded.
 - The shipped `fpp` tool group provides POSIX reference scripts for an API-adapter skeleton, SQLPlus pipe-delimited output to XML, and child-script execution with YAML status plus captured stdout/stderr. Replace the API script's marked integration block before production use; provide equivalent commands on Windows.
@@ -91,8 +92,8 @@ test case --1:n stage--> template --1:n action--> tool
 - `runWhen` defaults to `normal` and stage/action `onFailure` defaults to `stop`; action `onFailure` accepts only `stop` or `continue`.
 - Context properties are available under uppercase `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and `TOOL` nodes; the complete built-in property reference is in the V2 Reference Manual.
 - Runtime data is persisted under the `CASE.STAGES.<key>.TEMPLATE.ACTIONS.<actionId>` tree.
-- Tool argument descriptors contain `name`, `description`, `required`, and optional final-argument `delimit`.
+- Tool argument descriptors contain `name`, `description`, `required`, optional `argName`, and optional final-argument `delimit`.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.3 System Design](docs/02_System_Design_V2.3.md) for the normative specification.
-See the [ATT V2.3.2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.3.3 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.3 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

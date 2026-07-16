@@ -41,9 +41,11 @@ class JsonSchemaVerifierTest {
 
     @Test void productionV22SchemasAcceptArgvGroupsAndRejectMalformedSsh() throws Exception {
         Path config = Paths.get("schemas/att-config-v2.2.schema.json");
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"toolGroups\":[\"config/tools/db.yaml\"],\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"a b\"]}}}"));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"toolGroups\":[\"config/tools/db.yaml\"],\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--value\"}}}}}"));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"\"}}}}}"));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--bad name\"}}}}}"));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"ssh\":{\"host\":\"x\",\"user\":\"u\",\"password\":\"secret\"}}"));
         Path group = Paths.get("schemas/att-tool-group-v2.2.schema.json");
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group, "{\"schemaVersion\":\"att-tool-group/v2.2\",\"id\":\"db\",\"name\":\"DB\",\"description\":\"DB tools\",\"script\":[\"dispatch\"],\"tools\":{\"select\":{\"name\":\"Select\",\"description\":\"Select\",\"command\":[\"query\"]}}}"));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group, "{\"schemaVersion\":\"att-tool-group/v2.2\",\"id\":\"db\",\"name\":\"DB\",\"description\":\"DB tools\",\"script\":[\"dispatch\"],\"tools\":{\"select\":{\"name\":\"Select\",\"description\":\"Select\",\"command\":[\"query\",\"${id}\"],\"arguments\":{\"id\":{\"name\":\"ID\",\"description\":\"ID\",\"required\":true,\"argName\":\"--id\"}}}}}"));
     }
 }
