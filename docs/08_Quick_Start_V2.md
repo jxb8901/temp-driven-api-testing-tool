@@ -355,10 +355,10 @@ ATT 內置函數包括：
 ```text
 #{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
 #{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
-#{fpp.runScript(script=${CASE.script}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
+#{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`runScript` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML，並把完整 stdout/stderr 寫入指定文件。完整函數、工具契約及平台限制見 [Reference Manual V2.3.4](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.3.4](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 

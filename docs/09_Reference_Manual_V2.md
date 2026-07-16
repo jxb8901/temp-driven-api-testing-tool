@@ -481,15 +481,15 @@ The shipped `fpp` group is a reference implementation rather than an FPP product
 |---|---|---|
 | `fpp.invokeApi` | `requestId`, `requestType`, absolute request-file path, API-log path | XML with request metadata, `ResultCode`, and `ResultMessage` |
 | `fpp.sqlplusToXml` | SQLPlus output-file path | XML rows and columns plus `RowCount` |
-| `fpp.runScript` | child script, stdout path, stderr path | YAML with child `exitCode`, `success`, `errorMessage`, and output paths |
+| `fpp.execCommand` | command, optional stdout path, optional stderr path, optional pipe-delimited arguments | YAML with child `exitCode`, `success`, `errorMessage`, and output paths |
 
 ```text
 #{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
 #{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
-#{fpp.runScript(script=${CASE.script}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
+#{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`tools/fpp_invoke_api.sh` validates and XML-escapes its inputs, records a correlation line in the requested log, and deliberately returns `ResultCode=NOT_IMPLEMENTED` until its marked integration block is replaced with an approved API client. A missing request file returns `INPUT_FILE_NOT_FOUND`. `tools/fpp_sqlplus_to_xml.sh` expects the first non-blank line to contain pipe-separated column names and converts one or more subsequent records; separator and SQLPlus footer lines are ignored. A safe ASCII XML name such as `name` is emitted directly as `<name>value</name>`; names with spaces, an invalid first character, or the reserved case-insensitive `xml` prefix use the valid fallback `<Column name="original">value</Column>`. `tools/fpp_run_script.sh` captures the complete child stdout/stderr, reports missing/non-executable scripts as child exit codes 127/126, and exits successfully after producing valid YAML, so assertions should inspect `${output.result.exitCode}` rather than the tool process exit code. These scripts require a POSIX shell; Windows packages may point an equivalent tool group at `.bat`, PowerShell, or native commands.
+`tools/fpp_invoke_api.sh` validates and XML-escapes its inputs, records a correlation line in the requested log, and deliberately returns `ResultCode=NOT_IMPLEMENTED` until its marked integration block is replaced with an approved API client. A missing request file returns `INPUT_FILE_NOT_FOUND`. `tools/fpp_sqlplus_to_xml.sh` expects the first non-blank line to contain pipe-separated column names and converts one or more subsequent records; separator and SQLPlus footer lines are ignored. A safe ASCII XML name such as `name` is emitted directly as `<name>value</name>`; names with spaces, an invalid first character, or the reserved case-insensitive `xml` prefix use the valid fallback `<Column name="original">value</Column>`. `tools/fpp_exec_command.sh` executes an executable name from `PATH` or an executable path with atomic arguments, captures the complete child stdout/stderr, reports missing/non-executable commands as child exit codes 127/126, and exits successfully after producing valid YAML, so assertions should inspect `${output.result.exitCode}` rather than the tool process exit code. `stdoutPath` and `stderrPath` use `argName`; when either optional value is omitted, its flag is omitted too and the corresponding stream is written to the current Case log. These scripts require a POSIX shell; Windows packages may point an equivalent tool group at `.bat`, PowerShell, or native commands.
 
 #### Command processing
 

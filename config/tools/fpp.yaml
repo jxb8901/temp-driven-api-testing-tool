@@ -1,7 +1,7 @@
 schemaVersion: att-tool-group/v2.2
 id: fpp
 name: FPP reference tools
-description: Reference script contracts for FPP API, SQLPlus, and controlled script execution integrations
+description: Reference command contracts for FPP API, SQLPlus, and controlled command execution integrations
 tools:
   invokeApi:
     name: Invoke FPP API
@@ -35,27 +35,29 @@ tools:
         name: SQLPlus Output File
         description: SQLPlus output using SET COLSEP '|' with one header row and zero or more data rows
         required: true
-  runScript:
-    name: Run script and capture streams
-    description: Execute one script with optional pipe-delimited atomic arguments, persist both streams, and return a YAML outcome
-    command: [./tools/fpp_run_script.sh, "${script}", "${stdoutPath}", "${stderrPath}", "${arguments}"]
+  execCommand:
+    name: Execute command and capture streams
+    description: Execute one command with optional pipe-delimited atomic arguments, optionally persist streams, and return a YAML outcome
+    command: [./tools/fpp_exec_command.sh, "${stdoutPath}", "${stderrPath}", --, "${command}", "${arguments}"]
     output: yaml
     arguments:
-      script:
-        name: Script
-        description: Full path of the executable script to run without arguments
+      command:
+        name: Command
+        description: Executable name resolved from PATH or executable path, without arguments
         required: true
       stdoutPath:
         name: Stdout Path
-        description: Full target path for the script standard output
-        required: true
+        description: Optional target path for standard output; when omitted, output is written to the current Case log
+        required: false
+        argName: --stdout
       stderrPath:
         name: Stderr Path
-        description: Full target path for the script standard error
-        required: true
+        description: Optional target path for standard error; when omitted, output is written to the current Case log
+        required: false
+        argName: --stderr
       arguments:
         name: Arguments
-        description: Optional pipe-delimited script arguments; use an empty value for no arguments
+        description: Optional pipe-delimited command arguments; use an empty value for no arguments
         required: false
         delimit: "|"
   moveFiles:

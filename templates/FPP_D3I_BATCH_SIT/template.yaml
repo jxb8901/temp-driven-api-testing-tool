@@ -25,7 +25,7 @@ actions:
   runJob2D3i:
     type: tool
     description: "2. Execute Job2Handler.sh D3 for FPSPD3I"
-    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-d3i.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-d3i.stderr.log', arguments='D3')}"
+    call: "#{fpp.execCommand(command=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-d3i.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-d3i.stderr.log', arguments='D3')}"
 
   assertJob2D3i:
     type: assert
@@ -79,7 +79,7 @@ actions:
   runJob3D3i:
     type: tool
     description: "3. Execute Job3Handler_iff.sh -104"
-    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-104.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-104.stderr.log', arguments='-104')}"
+    call: "#{fpp.execCommand(command=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-104.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-104.stderr.log', arguments='-104')}"
 
   assertJob3D3i:
     type: assert
@@ -143,7 +143,7 @@ actions:
   convertD3Rlt:
     type: tool
     description: "4.1 Convert AFTD3RLT012 AcDate XML to IFF text"
-    call: "#{fpp.runScript(script=${CASE.xml2IffScript}, stdoutPath='${CASE.artifactDirectory}/xml2iff.stdout.log', stderrPath='${CASE.artifactDirectory}/xml2iff.stderr.log', arguments='${CASE.d3rltXmlFile}|${CASE.d3rltTextFile}')}"
+    call: "#{fpp.execCommand(command=${CASE.xml2IffScript}, stdoutPath='${CASE.artifactDirectory}/xml2iff.stdout.log', stderrPath='${CASE.artifactDirectory}/xml2iff.stderr.log', arguments='${CASE.d3rltXmlFile}|${CASE.d3rltTextFile}')}"
 
   assertConvertD3Rlt:
     type: assert
@@ -167,7 +167,7 @@ actions:
   runJob2Rlt:
     type: tool
     description: "5. Execute Job2Handler.sh D3 for RLT012"
-    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-rlt.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-rlt.stderr.log', arguments='D3')}"
+    call: "#{fpp.execCommand(command=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-rlt.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-rlt.stderr.log', arguments='D3')}"
 
   assertJob2Rlt:
     type: assert
@@ -219,7 +219,7 @@ actions:
   runJob3Rlt:
     type: tool
     description: "6. Execute Job3Handler_iff.sh -105"
-    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-105.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-105.stderr.log', arguments='-105')}"
+    call: "#{fpp.execCommand(command=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-105.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-105.stderr.log', arguments='-105')}"
 
   assertJob3Rlt:
     type: assert
@@ -295,7 +295,7 @@ actions:
   runJob2Drr:
     type: tool
     description: "8. Execute Job2Handler.sh D3 for DRR"
-    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-drr.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-drr.stderr.log', arguments='D3')}"
+    call: "#{fpp.execCommand(command=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-drr.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-drr.stderr.log', arguments='D3')}"
 
   assertJob2Drr:
     type: assert
@@ -347,7 +347,7 @@ actions:
   runJob3Drr:
     type: tool
     description: "9. Execute Job3Handler_iff.sh -106"
-    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-106.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-106.stderr.log', arguments='-106')}"
+    call: "#{fpp.execCommand(command=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-106.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-106.stderr.log', arguments='-106')}"
 
   assertJob3Drr:
     type: assert
@@ -423,7 +423,7 @@ actions:
   runJob2Dsr:
     type: tool
     description: "11. Execute Job2Handler.sh D3 for DSR"
-    call: "#{fpp.runScript(script=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-dsr.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-dsr.stderr.log', arguments='D3')}"
+    call: "#{fpp.execCommand(command=${CASE.job2HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job2-dsr.stdout.log', stderrPath='${CASE.artifactDirectory}/job2-dsr.stderr.log', arguments='D3')}"
 
   assertJob2Dsr:
     type: assert
@@ -475,7 +475,7 @@ actions:
   runJob3Dsr:
     type: tool
     description: "12. Execute Job3Handler_iff.sh -107"
-    call: "#{fpp.runScript(script=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-107.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-107.stderr.log', arguments='-107')}"
+    call: "#{fpp.execCommand(command=${CASE.job3HandlerScript}, stdoutPath='${CASE.artifactDirectory}/job3-107.stdout.log', stderrPath='${CASE.artifactDirectory}/job3-107.stderr.log', arguments='-107')}"
 
   assertJob3Dsr:
     type: assert
