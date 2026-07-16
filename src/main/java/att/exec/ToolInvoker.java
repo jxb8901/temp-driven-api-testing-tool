@@ -90,7 +90,7 @@ public class ToolInvoker {
         Map<String, Object> resolvedInput = resolveMap(input, context);
         normalizeSinglePositionalArgument(tool, resolvedInput);
         validateArguments(tool, resolvedInput);
-        expandDelimitedArgument(tool, resolvedInput);
+        expandDelimitedArguments(tool, resolvedInput);
 
         List<String> logicalArgv = expandCommand(tool, resolvedInput);
         List<String> argv = tool.ssh() == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;
@@ -231,26 +231,21 @@ public class ToolInvoker {
         input.put(declaredKey, value);
     }
 
-    private void expandDelimitedArgument(ToolConfig tool, Map<String, Object> input) {
-        ToolArgumentConfig last = lastArgument(tool);
-        if (last == null || !last.multiValue() || !input.containsKey(last.key())) return;
-        String raw = input.get(last.key()) == null ? "" : String.valueOf(input.get(last.key()));
-        List<String> values = new ArrayList<String>();
-        boolean hasNonBlank = false;
-        if (!raw.isEmpty()) {
-            for (String item : raw.split(Pattern.quote(last.delimit()), -1)) {
-                String normalized = att.core.ValueNormalizer.normalize(item);
-                if (!normalized.isEmpty()) hasNonBlank = true;
-                values.add(normalized);
+    private void expandDelimitedArguments(ToolConfig tool, Map<String, Object> input) {
+        for (ToolArgumentConfig argument : tool.arguments().values()) {
+            if (!argument.multiValue() || !input.containsKey(argument.key())) continue;
+            String raw = input.get(argument.key()) == null ? "" : String.valueOf(input.get(argument.key()));
+            List<String> values = new ArrayList<String>();
+            boolean hasNonBlank = false;
+            if (!raw.isEmpty()) {
+                for (String item : raw.split(Pattern.quote(argument.delimit()), -1)) {
+                    String normalized = att.core.ValueNormalizer.normalize(item);
+                    if (!normalized.isEmpty()) hasNonBlank = true;
+                    values.add(normalized);
+                }
             }
+            input.put(argument.key(), hasNonBlank ? values : new ArrayList<String>());
         }
-        input.put(last.key(), hasNonBlank ? values : new ArrayList<String>());
-    }
-
-    private ToolArgumentConfig lastArgument(ToolConfig tool) {
-        ToolArgumentConfig last = null;
-        for (ToolArgumentConfig value : tool.arguments().values()) last = value;
-        return last;
     }
 
     private boolean blank(Object value) { return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty(); }
@@ -266,10 +261,14 @@ public class ToolInvoker {
                     if (exact.required()) throw new IllegalArgumentException("Missing required argument '" + exact.key() + "' for tool " + tool.key());
                     continue;
                 }
-                if (exact.namedArgv()) argv.add(exact.argName());
                 if (value instanceof List) {
-                    for (Object item : (List<?>) value) argv.add(item == null ? "" : String.valueOf(item));
+                    if (exact.namedArgv() && !exact.repeatArgName()) argv.add(exact.argName());
+                    for (Object item : (List<?>) value) {
+                        if (exact.namedArgv() && exact.repeatArgName()) argv.add(exact.argName());
+                        argv.add(item == null ? "" : String.valueOf(item));
+                    }
                 } else {
+                    if (exact.namedArgv()) argv.add(exact.argName());
                     argv.add(String.valueOf(value));
                 }
                 continue;

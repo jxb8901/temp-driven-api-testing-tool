@@ -9,18 +9,24 @@ public final class ToolArgumentConfig {
     private final boolean required;
     private final String delimit;
     private final String argName;
+    private final String argNameMode;
 
     public ToolArgumentConfig(String key, String name, String description, boolean required, String delimit) {
-        this(key, name, description, required, delimit, "");
+        this(key, name, description, required, delimit, "", "once");
     }
 
     public ToolArgumentConfig(String key, String name, String description, boolean required, String delimit, String argName) {
+        this(key, name, description, required, delimit, argName, "once");
+    }
+
+    public ToolArgumentConfig(String key, String name, String description, boolean required, String delimit, String argName, String argNameMode) {
         this.key = key;
         this.name = name;
         this.description = description;
         this.required = required;
         this.delimit = delimit == null ? "" : delimit;
         this.argName = argName == null ? "" : argName;
+        this.argNameMode = argNameMode == null ? "once" : argNameMode;
     }
 
     public String key() { return key; }
@@ -29,6 +35,8 @@ public final class ToolArgumentConfig {
     public boolean required() { return required; }
     public String delimit() { return delimit; }
     public String argName() { return argName; }
+    public String argNameMode() { return argNameMode; }
     public boolean multiValue() { return !delimit.isEmpty(); }
     public boolean namedArgv() { return !argName.isEmpty(); }
+    public boolean repeatArgName() { return "repeat".equals(argNameMode); }
 }

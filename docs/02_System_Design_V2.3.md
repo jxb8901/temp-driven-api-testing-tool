@@ -1,13 +1,13 @@
 # ATT V2.3 System Design
 
 Status: implementation contract
-Target release: 2.3.3
+Target release: 2.3.4
 
 ## 1. Scope
 
 V2.3 refactors template actions without changing the established workbook → testcase → ordered stage → template → ordered action → tool model. The release adds multi-file render actions, a single nested action-outcome contract, assertion-controlled action results, two-phase action text evaluation, and explicit Expected/Actual report values.
 
-The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; V2.3.2 adds the current Case output directory to Context and makes it the working directory of local tool processes; V2.3.3 adds optional `argName` expansion to declared tool arguments. These updates retain the V2.2 config and tool-group schema identifiers.
+The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; V2.3.2 adds the current Case output directory to Context and makes it the working directory of local tool processes; V2.3.3 adds optional `argName` expansion to declared tool arguments; V2.3.4 allows multiple delimited arguments and adds named-list expansion modes. These updates retain the V2.2 config and tool-group schema identifiers.
 
 V2.3 introduces `att-template/v2.3`. V2.3 packages use that template schema. Configuration and tool-group schemas remain at their V2.2 versions because their contracts do not change.
 
@@ -308,7 +308,7 @@ V2.3 is complete only when automated coverage includes:
 - executable FPP script tests for XML/YAML escaping, multiple SQLPlus rows, child exit propagation, and stdout/stderr capture;
 - reserved `${CASE.outputDirectory}` initialization, validation-time preservation, published-path rewriting, and local-tool working-directory coverage;
 - package-relative executable resolution from the package root after the process working directory changes to the Case output directory;
-- `argName` named/positional expansion, blank optional omission, atomic values, delimited lists, grouped dispatch, SSH logical argv, and malformed-placeholder rejection;
+- `argName` named/positional expansion, `once`/`repeat` named-list modes, multiple delimited arguments, blank optional omission, atomic values, grouped dispatch, SSH logical argv, and malformed-placeholder rejection;
 - `mvn test`, `./build.sh`, built-package `validate --package`, docs generation, and `git diff --check`.
 
 ## 13. V2.3.2 Case output directory contract
@@ -335,3 +335,9 @@ For an SSH tool, `${CASE.outputDirectory}` remains available as local Context, b
 A declared tool argument may set `argName` to one static whitespace-free argv token such as `--reference`. The argument placeholder supplies the deterministic insertion point and, for a non-empty `argName`, must be the only placeholder in exactly one complete command token. A provided non-blank scalar expands to `[argName, value]`; a delimited value expands to `[argName, value1, value2, ...]`. Values remain atomic and are never shell-tokenized.
 
 If an optional value is absent or normalizes to blank, its complete-token placeholder emits zero argv, including no `argName`. An omitted or explicitly empty `argName` denotes a positional process argument and emits only the non-blank value. Required blank values remain validation errors. Expansion occurs before group-script dispatch and SSH transport wrapping, so local, grouped, OpenSSH, and mwiede/jsch executions share the same logical argv contract.
+
+## 15. V2.3.4 multiple delimited arguments and argName modes
+
+Multiple arguments may independently declare `delimit`; each exact-token placeholder expands its own normalized ordered list at that position.
+
+For a delimited argument with a non-empty `argName`, `argNameMode` accepts `once` or `repeat` and defaults to `once` to preserve V2.3.3 behavior. `once` expands to `[argName, value1, value2, ...]`; `repeat` expands to `[argName, value1, argName, value2, ...]`. The mode does not affect a scalar value and has no output effect when `argName` is omitted or empty.

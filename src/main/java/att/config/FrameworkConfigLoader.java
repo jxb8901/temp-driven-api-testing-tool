@@ -251,26 +251,24 @@ public final class FrameworkConfigLoader {
         Map<String, ToolArgumentConfig> result = new LinkedHashMap<String, ToolArgumentConfig>();
         if (value == null) return result;
         if (!(value instanceof Map)) throw new IllegalArgumentException("arguments must be a map for tool: " + toolKey);
-        int index = 0;
-        int size = ((Map<?, ?>) value).size();
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Tool argument keys must be strings: " + toolKey);
-            index++;
             String key = String.valueOf(entry.getKey());
             if (!key.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Tool argument name must match [A-Za-z_][A-Za-z0-9_]*: " + toolKey + "." + key);
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Argument descriptor must be a map: " + toolKey + "." + key);
             Map<?, ?> descriptor = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key, "name", "description", "required", "delimit", "argName");
+            SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key, "name", "description", "required", "delimit", "argName", "argNameMode");
             if (!descriptor.containsKey("required")) throw new IllegalArgumentException("required is mandatory for argument: " + toolKey + "." + key);
             String delimit = descriptor.get("delimit") == null ? "" : SchemaSupport.string(descriptor.get("delimit"), "tools." + toolKey + ".arguments." + key + ".delimit", true);
             Object argNameValue = descriptor.get("argName");
             if (argNameValue != null && !(argNameValue instanceof String)) throw new IllegalArgumentException("argName must be a string: " + toolKey + "." + key);
             String argName = argNameValue == null ? "" : (String) argNameValue;
-            if (!delimit.isEmpty() && index != size) throw new IllegalArgumentException("delimit is allowed only on the final argument: " + toolKey + "." + key);
             if (!argName.isEmpty() && argName.matches(".*[\\s\\p{Cntrl}].*")) throw new IllegalArgumentException("argName must be one non-blank argv token: " + toolKey + "." + key);
+            String argNameMode = descriptor.get("argNameMode") == null ? "once" : SchemaSupport.string(descriptor.get("argNameMode"), "tools." + toolKey + ".arguments." + key + ".argNameMode", true);
+            if (!("once".equals(argNameMode) || "repeat".equals(argNameMode))) throw new IllegalArgumentException("argNameMode must be once or repeat: " + toolKey + "." + key);
             result.put(key, new ToolArgumentConfig(key, required(descriptor, "name", "argument " + key),
                     required(descriptor, "description", "argument " + key), booleanValue(descriptor.get("required"), false,
-                    "required for argument " + toolKey + "." + key), delimit, argName));
+                    "required for argument " + toolKey + "." + key), delimit, argName, argNameMode));
         }
         return result;
     }

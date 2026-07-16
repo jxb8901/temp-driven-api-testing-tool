@@ -81,6 +81,27 @@ class FrameworkConfigLoaderTest {
         Path unused = tempDir.resolve("unused-arg-name.yaml");
         Files.write(unused, (prefix + "    command: [echo]\n    arguments:\n      value: {name: Value, description: Value, required: false, argName: --value}\n").getBytes("UTF-8"));
         assertTrue(assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(unused)).getMessage().contains("exactly one complete argv token"));
+
+        Path invalidMode = tempDir.resolve("invalid-arg-name-mode.yaml");
+        Files.write(invalidMode, (prefix + "    command: [echo, '${value}']\n    arguments:\n      value: {name: Value, description: Value, required: false, argName: --value, argNameMode: sometimes}\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidMode));
+    }
+
+    @Test void loadsMultipleDelimitedArgumentsAndArgNameModes() throws Exception {
+        Path config = tempDir.resolve("multiple-delimited.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.2\n" +
+                "tools:\n  capture:\n    name: Capture\n    description: Capture lists\n" +
+                "    command: [capture, '${keywords}', '${types}']\n" +
+                "    arguments:\n" +
+                "      keywords: {name: Keywords, description: Search words, required: true, delimit: ',', argName: --keyword, argNameMode: repeat}\n" +
+                "      types: {name: Types, description: Transaction types, required: true, delimit: '|', argName: --types}\n").getBytes("UTF-8"));
+
+        ToolConfig tool = new FrameworkConfigLoader().load(config).tool("capture");
+
+        assertEquals(",", tool.arguments().get("keywords").delimit());
+        assertEquals("repeat", tool.arguments().get("keywords").argNameMode());
+        assertEquals("|", tool.arguments().get("types").delimit());
+        assertEquals("once", tool.arguments().get("types").argNameMode());
     }
 
     @Test void rejectsDuplicateGroupIdsUnsafePathsAndReservedGlobalNames() throws Exception {

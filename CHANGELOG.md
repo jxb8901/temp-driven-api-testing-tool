@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.4 - 2026-07-16
+
+- Allowed multiple declared arguments in one tool to use `delimit`, with independent ordered expansion before local, grouped, or SSH execution.
+- Added `argNameMode: once|repeat` for delimited values. The backward-compatible default `once` emits `[argName, value1, value2]`; explicit `repeat` emits `[argName, value1, argName, value2]`.
+- Updated strict schemas, generated tool documentation, user/developer documentation, and regression coverage for multiple delimited arguments and both naming modes.
+
 ## 2.3.3 - 2026-07-16
 
 - Added optional tool-argument `argName` expansion: a provided value emits `[argName, value]`, while a missing or normalized-blank optional value emits no argv; omitted or empty `argName` keeps positional-argument behavior.

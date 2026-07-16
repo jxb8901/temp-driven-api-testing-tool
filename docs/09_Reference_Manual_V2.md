@@ -1,7 +1,7 @@
-# ATT V2.3.3 User Manual and Reference
+# ATT V2.3.4 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.3.3
+Version: 2.3.4
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -493,7 +493,7 @@ The shipped `fpp` group is a reference implementation rather than an FPP product
 
 #### Command processing
 
-V2.2 normalizes every command to an argv template list. A scalar command is tokenized once with the legacy tokenizer. A YAML list is already normalized: each item is exactly one argv value and is never tokenized. An ordinary declared argument therefore remains atomic regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. A final argument with `delimit` is the only form that may intentionally expand into zero or more argv values. Resolved values are never tokenized again. ATT does not invoke a local shell.
+V2.2 normalizes every command to an argv template list. A scalar command is tokenized once with the legacy tokenizer. A YAML list is already normalized: each item is exactly one argv value and is never tokenized. An ordinary declared argument therefore remains atomic regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. Any declared argument with `delimit` may intentionally expand into zero or more argv values, and multiple arguments in one tool may do so independently. Resolved values are never tokenized again. ATT does not invoke a local shell.
 
 V2.3.2 starts every local tool process with `${CASE.outputDirectory}` as its current working directory. A configured executable beginning with `./` or `../` remains package-relative: ATT resolves that first argv value against the package root before launch. A bare executable name still uses `PATH`. All other relative argv paths are intentionally interpreted by the tool from the Case output directory. This makes relative tool artifacts part of the Case output without requiring every action to build an absolute path.
 
@@ -553,7 +553,7 @@ arguments:
   reference: {name: Reference, description: Optional reference, required: false, argName: --reference}
 ```
 
-With `reference='REF 123'`, the final portion of logical argv is `--reference`, `REF 123`; the value remains one atomic argument. If the optional value is missing or normalizes to blank, neither token is emitted. Omitting `argName` or setting `argName: ''` makes the argument positional: an exact-token placeholder emits only its value, or emits no argv when the optional value is blank. An embedded placeholder such as `--reference=${reference}` remains one ordinary rendered token and cannot use a non-empty `argName`.
+With `reference='REF 123'`, the final portion of logical argv is `--reference`, `REF 123`; the value remains one atomic argument. If the optional value is missing or normalizes to blank, neither token is emitted. Omitting `argName` or setting `argName: ''` makes the argument positional: an exact-token placeholder emits only its value, or emits no argv when the optional value is blank. An embedded placeholder such as `--reference=${reference}` remains one ordinary rendered token and cannot use a non-empty `argName`. For delimited values, `argNameMode` controls whether the name is emitted `once` (the backward-compatible default) before the complete list or `repeat` before every value; it has no output effect for positional arguments.
 
 Prefer the shortest declared-argument placeholder, such as `${keywords}`; use `${input.keywords}` when an explicit namespace improves clarity. Both forms are case-sensitive and must exactly match the argument key. `${TOOL.input.keywords}` remains supported but is not the preferred authoring style. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
 
@@ -793,27 +793,92 @@ A leaf without attributes becomes `ElementName: text`. Any element with attribut
 
 ### Pass a list as separate process arguments
 
-Only the final declared tool argument may use `delimit`:
+Multiple declared tool arguments may use `delimit`. The following example also shows both `argNameMode` values:
 
 ```yaml
 tools:
   grepFromAppLogs:
     name: Grep application logs
-    description: Search one or more keywords
-    command: "./tools/grep_from_app_logs.sh '${logFile}' ${keywords}"
+    description: Search one or more keywords and log levels
+    command:
+      - ./tools/grep_from_app_logs.sh
+      - "${logFile}"
+      - "${keywords}"
+      - "${levels}"
     output: yaml
     arguments:
       logFile: {name: Log File, description: Source log, required: true}
-      keywords: {name: Keywords, description: Comma-delimited values, required: true, delimit: ","}
+      keywords: {name: Keywords, description: Comma-delimited values, required: true, delimit: ",", argName: --keyword, argNameMode: repeat}
+      levels: {name: Levels, description: Pipe-delimited levels, required: false, delimit: "|", argName: --levels, argNameMode: once}
 ```
 
 ```yaml
 grepLogs:
   type: tool
-  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords='PAYMENT,POSTED')}"
+  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords='PAYMENT,POSTED', levels='ERROR|WARN')}"
 ```
 
-The final value expands into two separate arguments, `PAYMENT` and `POSTED`. Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. The delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion. If the delimited argument also defines `argName`, ATT emits that token once before all expanded values; an empty optional list emits neither the name nor values.
+The resulting tail of logical argv is `--keyword`, `PAYMENT`, `--keyword`, `POSTED`, `--levels`, `ERROR`, `WARN`. Explicit `repeat` repeats `--keyword` for every keyword. `once` is the default and may be omitted; it emits `--levels` only once before the complete levels list. Each delimited argument expands independently at its own command-placeholder position.
+
+#### Linux Bash parsing examples
+
+The following focused snippets assume any earlier positional arguments have already been consumed. For `argNameMode: repeat`, each option occurrence owns exactly one following value. A Bash script can append every occurrence to an array, including values that begin with `-` or `--`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+keywords=()
+while (($#)); do
+  case "$1" in
+    --keyword)
+      [[ $# -ge 2 ]] || { echo "--keyword requires a value" >&2; exit 2; }
+      keywords+=("$2")
+      shift 2
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+for keyword in "${keywords[@]}"; do
+  printf 'keyword=%s\n' "$keyword"
+done
+```
+
+Given `--keyword PAYMENT --keyword POSTED`, the array contains `PAYMENT` and `POSTED` in order.
+
+For `argNameMode: once`, one option introduces all following values. The clearest contract is to place that multi-value argument last in the tool command, as `levels` is in the preceding configuration, and consume the remaining argv:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+levels=()
+while (($#)); do
+  case "$1" in
+    --levels)
+      shift
+      levels=("$@")
+      break
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+for level in "${levels[@]}"; do
+  printf 'level=%s\n' "$level"
+done
+```
+
+Given `--levels ERROR WARN`, the array contains `ERROR` and `WARN`. If a `once` list is not last, the script needs an unambiguous boundary defined by its own protocol, such as a fixed item count or an explicit terminator argument. Do not infer the boundary merely from the next value beginning with `--`: ATT preserves leading dashes as data, so a legitimate list value may also begin with `--`. Use `repeat` when each option-value pair must be independently parseable.
+
+Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. Every delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion. An empty optional list emits neither its `argName` nor values.
 
 ### Retry selected exit codes
 
@@ -982,7 +1047,7 @@ Allowed global object properties are:
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 | `tools.<key>` | `name`, `description`, `command`, `output`, `arguments`, `x-*` |
-| `arguments.<key>` | `name`, `description`, `required`, `argName`, `delimit`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, `argName`, `argNameMode`, `delimit`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
@@ -1017,7 +1082,7 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 
 ### Tool contract
 
-Each tool requires `name`, `description`, and `command`. `command` is either a non-blank scalar or a non-empty string list. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder for that argument. Only the final declared argument may define a non-empty `delimit`.
+Each tool requires `name`, `description`, and `command`. `command` is either a non-blank scalar or a non-empty string list. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder for that argument. `argNameMode` accepts `once` or `repeat` and defaults to `once` for V2.3.3 compatibility. Any number of declared arguments may define a non-empty `delimit`, and every delimited placeholder must occupy one complete command token.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
@@ -1036,7 +1101,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.3",
+  "attVersion": "2.3.4",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1186,7 +1251,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.3 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.4 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 

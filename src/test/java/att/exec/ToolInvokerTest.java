@@ -79,7 +79,7 @@ class ToolInvokerTest {
         assertFalse(Files.exists(saved.getParent().resolve("input.yaml")));
     }
 
-    @Test void dropsBlankDelimitedValuesFromFinalArray() throws Exception {
+    @Test void dropsBlankDelimitedValuesFromArgumentArray() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("keywords", new ToolArgumentConfig("keywords", "Keywords", "Search values", false, ","));
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
@@ -122,7 +122,7 @@ class ToolInvokerTest {
         assertEquals(runner.argv, result.invocation().get("logicalArgv"));
     }
 
-    @Test void emitsArgNameOnceBeforeDelimitedValuesAndOmitsAnEmptyList() throws Exception {
+    @Test void emitsArgNameOnceByDefaultBeforeDelimitedValuesAndOmitsAnEmptyList() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("tags", new ToolArgumentConfig("tags", "Tags", "Optional tags", false, ",", "--tags"));
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
@@ -136,6 +136,23 @@ class ToolInvokerTest {
 
         invoker.invokeAttempt("values", "capture", Collections.<String,Object>singletonMap("tags", "PAYMENT, POSTED"), context(), new CaseExecutionLog(tempDir.resolve("values.log")), 1000L);
         assertEquals(Arrays.asList("capture", "--tags", "PAYMENT", "POSTED"), runner.argv);
+    }
+
+    @Test void expandsMultipleDelimitedArgumentsAndRepeatsArgNameByDefault() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("keywords", new ToolArgumentConfig("keywords", "Keywords", "Search words", true, ",", "--keyword", "repeat"));
+        arguments.put("types", new ToolArgumentConfig("types", "Types", "Transaction types", true, "|", "--types", "once"));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "capture", "", "Capture", "Capture two lists", Arrays.asList("capture", "${keywords}", "${types}"), Collections.<String>emptyList(), "txt", arguments, null));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CapturingRunner runner = new CapturingRunner();
+        Map<String,Object> input = new LinkedHashMap<String,Object>();
+        input.put("keywords", "PAYMENT, POSTED");
+        input.put("types", "CARD|TRANSFER");
+
+        new ToolInvoker(tempDir, config, runner).invokeAttempt("values", "capture", input, context(), new CaseExecutionLog(tempDir.resolve("multiple-lists.log")), 1000L);
+
+        assertEquals(Arrays.asList("capture", "--keyword", "PAYMENT", "--keyword", "POSTED", "--types", "CARD", "TRANSFER"), runner.argv);
     }
 
     @Test void treatsMissingOrEmptyArgNameAsAnOptionalPositionalArgument() throws Exception {
