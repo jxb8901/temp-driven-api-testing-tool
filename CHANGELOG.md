@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.5 - 2026-07-17
+
+- Reworked user-facing failures into typed, actionable diagnostics for command-line, global/tool configuration, workbook/sidecar/Case loading, template/action execution, Context lookup, built-in invocation, and external-tool execution. Diagnostics now preserve stable codes, precise locations, detailed causes, available choices, likely corrections, and repair guidance instead of inferring categories from message text.
+- Tightened validate/run parity by parsing render-payload `#{...}` calls with the runtime grammar, validating built-in/tool signatures and Context references, checking selected-scope inline-tool executables, and rejecting unknown Context scopes, `RUN` variables, Case stage keys, and unavailable action references before execution. Package validation applies static Context/action-order checks even to templates that no Case references. Unknown Context paths now raise `ATT-CTX-001` instead of silently becoming empty text.
+- Simplified normal human run logging to the final summary and report path. `--verbose` now shows lifecycle progress and mirrors every complete Case-log block, including template/tool invocation evidence; `--quiet` continues to suppress normal output.
+- Added an optional positional or named Java `DateTimeFormatter` pattern to `sysdate` and `systimestamp`, retaining their existing default formats and returning detailed `ATT-BUILTIN-001` diagnostics for invalid or incompatible patterns.
+- Added `type: assign` for evaluating a `${...}`/`#{...}` text expression into a unique `${CASE.VARS.<name>}` value shared by later actions/stages/templates in the same Test Case, with canonical action evidence, optional assertion, and collision/order validation.
+- Updated V2.3 design, Quick Start, Reference Manual, README, diagnostic catalog, generated built-in documentation, and focused regression coverage for V2.3.5.
+
 ## 2.3.4 - 2026-07-16
 
 - Allowed multiple declared arguments in one tool to use `delimit`, with independent ordered expansion before local, grouped, or SSH execution.

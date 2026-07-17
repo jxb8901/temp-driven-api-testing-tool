@@ -48,7 +48,7 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("iif(condition, trueValue, falseValue)"));
         assertTrue(html.contains("nchar(count, value)"));
         assertTrue(html.contains("substr(value, start[, length])"));
-        assertTrue(html.contains("systimestamp()"));
+        assertTrue(html.contains("systimestamp([format])"));
         assertTrue(html.contains("dateAdd(value, amount, unit)"));
         assertTrue(html.contains("fileExists(path)"));
         assertTrue(html.contains("copyFile(source, target[, overwrite])"));
@@ -65,11 +65,15 @@ class PackageDocumentationGeneratorTest {
                 "name: VERIFY\n" +
                 "description: Verify expected status\n" +
                 "actions:\n" +
+                "  buildReference:\n" +
+                "    type: assign\n" +
+                "    name: reference\n" +
+                "    expression: \"#{echo(${CASE.caseId})}\"\n" +
                 "  check:\n" +
                 "    type: assert\n" +
                 "    description: Check ${CASE.caseId}\n" +
                 "    assert: \"true\"\n" +
-                "    expected: \"${CASE.expectedStatus}\\r\\nready\"\n" +
+                "    expected: \"${CASE.expectedStatus}\\r\\n${CASE.VARS.reference}\"\n" +
                 "    actual: \"${output.success}\"\n").getBytes("UTF-8"));
         Files.write(tempDir.resolve("testcase/suite.yaml"), (
                 "schemaVersion: att-sidecar/v2.1\n" +
@@ -86,8 +90,11 @@ class PackageDocumentationGeneratorTest {
                 "    onFailure: stop\n" +
                 "    runWhen: normal\n").getBytes("UTF-8"));
         writeWorkbook(tempDir.resolve("testcase/suite.xlsx"));
+        LinkedHashMap<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("echo", new ToolConfig("echo","Echo","Echo","echo","txt",
+                Collections.singletonMap("value",new ToolArgumentConfig("value","Value","Value",true,""))));
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
-                Paths.get("templates"), Collections.<String,ToolConfig>emptyMap(), null, new RunConfig("timestamp", "yyyyMMdd"));
+                Paths.get("templates"), tools, null, new RunConfig("timestamp", "yyyyMMdd"));
 
         String html = new String(Files.readAllBytes(new PackageDocumentationGenerator().generate(tempDir, config)), "UTF-8");
 
@@ -96,7 +103,8 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("<h3>Sheet: Sheet B</h3>"));
         assertTrue(html.contains("<th>Stages → Templates</th><th>Expected Result</th>"));
         assertFalse(html.contains("<th>Sheet</th>"));
-        assertTrue(html.contains("<td class=\"multiline\">Check workbook.first.TC1\nSUCCESS\nready</td>"));
+        assertTrue(html.contains("<td class=\"multiline\">Check workbook.first.TC1\nSUCCESS\n${CASE.VARS.reference}</td>"));
+        assertTrue(html.contains("data-tool=\"echo\""));
         assertTrue(html.contains("data-sheet=\"Sheet A\""));
         assertTrue(html.indexOf("workbook.first.TC1") < html.indexOf("<h3>Sheet: Sheet B</h3>"));
     }

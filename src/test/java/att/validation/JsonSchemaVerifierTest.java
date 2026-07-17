@@ -39,6 +39,15 @@ class JsonSchemaVerifierTest {
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assertion.replace("\"actual\"","\"actural\"")));
     }
 
+    @Test void v23TemplateSchemaAcceptsOnlyCanonicalAssignContract() throws Exception {
+        Path schema=Paths.get("schemas/att-template-v2.3.schema.json");
+        String assign="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"seq\":{\"type\":\"assign\",\"name\":\"txnSeq\",\"expression\":\"ATT#{sysdate('yyyyMMdd')}\",\"assert\":\"${output.result} != ''\"}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,assign));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assign.replace("\"txnSeq\"","\"txn.seq\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assign.replace(",\"expression\":\"ATT#{sysdate('yyyyMMdd')}\"","")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assign.replace("\"assert\":\"${output.result} != ''\"","\"call\":\"#{send()}\"")));
+    }
+
     @Test void productionV22SchemasAcceptArgvGroupsAndRejectMalformedSsh() throws Exception {
         Path config = Paths.get("schemas/att-config-v2.2.schema.json");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"toolGroups\":[\"config/tools/db.yaml\"],\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--value\"}}}}}"));

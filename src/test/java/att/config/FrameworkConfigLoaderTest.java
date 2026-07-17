@@ -87,6 +87,23 @@ class FrameworkConfigLoaderTest {
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidMode));
     }
 
+    @Test void reportsToolConfigurationCodeFileFieldAndRepairHint() throws Exception {
+        Path config = tempDir.resolve("bad-tool.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.2\n" +
+                "tools:\n  sample:\n    name: Sample\n    description: Sample\n" +
+                "    command: [echo, '${missing}']\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
+                () -> new FrameworkConfigLoader().load(config));
+
+        assertEquals(att.validation.DiagnosticCodes.TOOL_INVALID, error.code());
+        assertEquals(config.toString(), error.file());
+        assertTrue(error.field().contains("tools"));
+        assertTrue(error.detail().contains("missing"));
+        assertNotNull(error.suggestion());
+    }
+
     @Test void loadsMultipleDelimitedArgumentsAndArgNameModes() throws Exception {
         Path config = tempDir.resolve("multiple-delimited.yaml");
         Files.write(config, ("schemaVersion: att-config/v2.2\n" +

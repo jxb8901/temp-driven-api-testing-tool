@@ -1,13 +1,13 @@
 # ATT V2.3 System Design
 
 Status: implementation contract
-Target release: 2.3.4
+Target release: 2.3.5
 
 ## 1. Scope
 
 V2.3 refactors template actions without changing the established workbook → testcase → ordered stage → template → ordered action → tool model. The release adds multi-file render actions, a single nested action-outcome contract, assertion-controlled action results, two-phase action text evaluation, and explicit Expected/Actual report values.
 
-The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; V2.3.2 adds the current Case output directory to Context and makes it the working directory of local tool processes; V2.3.3 adds optional `argName` expansion to declared tool arguments; V2.3.4 allows multiple delimited arguments and adds named-list expansion modes. These updates retain the V2.2 config and tool-group schema identifiers.
+The V2.2 tool groups, argv, SSH transports, retry policy, Case IDs, and run lifecycle remain unchanged unless this document says otherwise. V2.3.1 extends only the ATT-owned built-in catalog and ships a reference FPP tool group; V2.3.2 adds the current Case output directory to Context and makes it the working directory of local tool processes; V2.3.3 adds optional `argName` expansion to declared tool arguments; V2.3.4 allows multiple delimited arguments and adds named-list expansion modes; V2.3.5 makes diagnostics actionable, moves detailed execution logging behind `--verbose`, and adds optional formatting to `sysdate` and `systimestamp`. These updates retain the V2.2 config and tool-group schema identifiers.
 
 V2.3 introduces `att-template/v2.3`. V2.3 packages use that template schema. Configuration and tool-group schemas remain at their V2.2 versions because their contracts do not change.
 
@@ -23,11 +23,11 @@ An action remains an ordered entry whose map key is its Action ID. All action ty
 
 | Field | Required | Meaning |
 |---|---:|---|
-| `type` | yes | `render`, `tool`, `assert`, or `log` |
+| `type` | yes | `render`, `tool`, `assert`, `log`, or `assign` |
 | `description` | no | Human-readable text; supports two-phase `${...}` evaluation |
 | `onFailure` | no | `stop` by default; `continue` keeps running later actions |
 
-Every non-assert action may additionally define `assert`. For an assert action, `assert` is its required primary expression. `expression` is removed.
+Every non-assert action may additionally define `assert`. For an assert action, `assert` is its required primary expression. `expression` is removed from the original four action types; V2.3.5 uses it only as the required value-producing field of an `assign` action.
 
 An assert action may define:
 
@@ -56,6 +56,11 @@ actions:
     description: Invoke the payment API
     call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
     assert: "${output.exitCode} == 0 and ${output.result.Status} == 'SUCCESS'"
+
+  buildTxnSeq:
+    type: assign
+    name: txnSeq
+    expression: "ATT00#{sysdate('yyyyMMdd')}#{sample.getSeq(10)}"
 
   verifyStatus:
     type: assert
@@ -96,6 +101,21 @@ Runtime starts from the validation-phase text and resolves the remaining placeho
 `${output...}` is the action-local scope for the current action's outcome. `${ACTIONS.<actionId>.output...}` accesses a completed action in the current template. The durable path remains `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<actionId>.output...}`.
 
 Unknown runtime placeholders are errors for `assert` evaluation. For descriptive text and optional `actual`, unresolved placeholders are retained so the log shows the missing runtime reference rather than silently deleting it.
+
+### 4.3 Assign actions and Case-scoped variables
+
+An assign action evaluates one string expression and publishes it under the Case scope:
+
+```yaml
+buildTxnSeq:
+  type: assign
+  name: txnSeq
+  expression: "ATT00#{sysdate('yyyyMMdd')}#{sample.getSeq(10)}"
+```
+
+After the action evaluates successfully, later actions and later stages in the same Case may use `${CASE.VARS.txnSeq}`. The canonical action evidence records `output.name=txnSeq` and the assigned text at `${ACTIONS.buildTxnSeq.output.result}` in the current template and under the durable stage/template action path.
+
+`CASE.VARS` is initialized once per Test Case, survives stage/template changes, and is discarded with that Case. `name` is a case-sensitive simple Context field name and must be unique for the entire Case. Assign never overwrites an earlier assignment; the namespace keeps workbook data and framework-owned Case metadata separate. `expression` uses the normal `${...}` plus `#{...}` grammar; inline configured tools are validated without execution during validate and are executed and logged during run. The assigned value is text. An optional `assert` evaluates after the value has entered `CASE.VARS`, so it may reference either `${CASE.VARS.txnSeq}` or `${output.result}`. Assertion FAIL/ERROR changes the action outcome but does not roll back a successfully evaluated assignment. An expression failure produces ERROR and does not create the variable.
 
 ## 5. Render actions
 
@@ -234,6 +254,7 @@ The V2.3 template schema is strict:
 | tool | `type`, `call` | `description`, `assert`, `saveAs`, `overwrite`, `timeoutMs`, `retry`, `onFailure` | `payload`, `renderAs`, `expression`, assert-only/report fields, log fields |
 | assert | `type`, `assert` | `description`, `expected`, `actual`, `onFailure` | `expression`, render/tool/log fields |
 | log | `type`, `message` | `description`, `level`, `fields`, `assert`, `onFailure` | render/tool/assert-action fields |
+| assign | `type`, `name`, `expression` | `description`, `assert`, `onFailure` | render/tool/assert-action/log fields, retry, timeout |
 
 Tool `saveAs`/`overwrite` remain unchanged in V2.3. Their removal applies to render actions, where `renderAs: file` and source-relative target names replace explicit filenames. This avoids inventing a new naming contract for persisted tool stdout.
 
@@ -301,7 +322,8 @@ V2.3 is complete only when automated coverage includes:
 - nested outcome fields for PASS, FAIL, ERROR, retry, timeout, and continued execution;
 - tool non-zero exit with assertion true/false and without assertion;
 - validation partial evaluation and runtime completion of `description`, `expected`, and `actual`;
-- canonical `assert` migration and rejection of `expression`, `acture`, and `actural`;
+- canonical `assert` migration and rejection of `expression` on non-assign action types plus rejection of `acture` and `actural`;
+- assign schema/field rejection, inline built-in/tool evaluation, `${CASE.VARS.<name>}` cross-stage lifetime, pre-assignment validation, duplicate-name rejection, expression ERROR without publication, and non-rollback after assertion FAIL/ERROR;
 - Expected/Actual ordering, missing optionals, multiline normalization, escaping, HTML, Excel, JSON, JUnit, and report regeneration;
 - migrated sample package validation and execution;
 - filesystem collision, missing-file, symlink boundary, and random-choice argument coverage;
@@ -341,3 +363,39 @@ If an optional value is absent or normalizes to blank, its complete-token placeh
 Multiple arguments may independently declare `delimit`; each exact-token placeholder expands its own normalized ordered list at that position.
 
 For a delimited argument with a non-empty `argName`, `argNameMode` accepts `once` or `repeat` and defaults to `once` to preserve V2.3.3 behavior. `once` expands to `[argName, value1, value2, ...]`; `repeat` expands to `[argName, value1, argName, value2, ...]`. The mode does not affect a scalar value and has no output effect when `argName` is omitted or empty.
+
+## 16. V2.3.5 diagnostics, console logging, and system-time formatting
+
+### 16.1 Actionable diagnostics
+
+ATT MUST carry diagnostic identity as typed data rather than infer a code from free-form exception text. Every user-correctable error exposed by the CLI, validation output, Case result, or Case log contains:
+
+- one stable diagnostic code and category;
+- a concise summary of what failed;
+- the most specific available location: file, field, Sheet, row, column, template, and action;
+- the rejected value or underlying cause when it is safe to display;
+- a concrete correction suggestion.
+
+The required categories cover CLI usage, global configuration, workbook/sidecar/Case data, template/action contracts, Context resolution, built-in arguments, tool descriptors/calls/execution, paths, package integrity, and run lifecycle. Boundary components enrich an existing typed diagnostic instead of replacing it with a generic `IllegalArgumentException`. Unknown internal failures retain their cause chain and are reported as `ATT-RUN-001` with the failing operation.
+
+Runtime Context lookup is strict. A `${...}` reference whose path or case-sensitive segment does not exist is `ATT-CTX-001`, not an empty string. The diagnostic names the full reference, the missing segment, its parent scope, available sibling keys, and the nearest case-sensitive suggestion when one exists. Validation checks statically available `CASE` fields; references that legitimately depend on future Stage/Action/Tool output remain preserved until runtime.
+
+Tool diagnostics distinguish descriptor errors from call/execution errors. They include the qualified tool name, source configuration file where available, argument name, expected argument contract, logical argv/executable information where safe, and the underlying launch/parser cause. Workbook diagnostics include the workbook, Sheet, one-based row and column/header whenever available.
+
+### 16.2 Console log modes
+
+Human console output has three explicit modes:
+
+| Mode | Contract |
+|---|---|
+| default | print validation warnings/errors and the final run summary/report path only |
+| `--verbose` | print the former progress sequence plus run/suite/case/stage/action lifecycle and every Case-log block, including template/tool invocation evidence |
+| `--quiet` | suppress normal human progress and completion output |
+
+`--verbose` and `--quiet` remain mutually exclusive. JSON mode remains machine-clean and never mixes verbose text into stdout. Because verbose Case-log mirroring includes resolved inputs, argv, stdout, stderr, and parsed results, operators MUST treat verbose console output as test evidence with the same sensitivity as Case logs.
+
+The persisted Case log is authoritative and unchanged by console mode. Verbose output mirrors complete blocks as they are appended; it does not reconstruct or truncate them.
+
+### 16.3 `sysdate` and `systimestamp` format
+
+`sysdate([format])` and `systimestamp([format])` accept zero arguments or one positional/named `format` argument. Without `format`, their existing defaults remain `yyyy-MM-dd` and `yyyy-MM-dd'T'HH:mm:ss.SSSXXX`. A supplied non-blank value is a locale-independent Java `DateTimeFormatter` pattern evaluated in the JVM system zone. An empty, unknown, mixed, or incompatible pattern produces a detailed built-in diagnostic containing the function, `format` argument, supplied pattern, and formatter cause.

@@ -1,7 +1,7 @@
-# ATT V2.3.4 User Manual and Reference
+# ATT V2.3.5 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.3.4
+Version: 2.3.5
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -49,7 +49,7 @@ The four concepts you need first are:
 | Template | A reusable ordered list of actions |
 | Tool | A globally configured external executable with named inputs and one declared output format |
 
-An action can render a payload, call a tool, assert an expression, or write a structured log. ATT validates the selected package before executing external tools and records the resulting evidence below one completed run directory.
+An action can render a payload, call a tool, assert an expression, write a structured log, or assign a Case-scoped runtime variable. ATT validates the selected package before executing external tools and records the resulting evidence below one completed run directory.
 
 ### What V2.3 guarantees
 
@@ -377,6 +377,10 @@ schemaVersion: att-template/v2.3
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
+  buildReference:
+    type: assign
+    name: paymentReference
+    expression: "PAY-#{sysdate('yyyyMMdd')}-#{sample.getSeq(10)}"
   renderRequest:
     type: render
     description: "Render request for ${CASE.caseId}; status=${output.status}"
@@ -405,14 +409,17 @@ actions:
 | `tool` | Invoke a configured external tool | `type`, `call` | nested typed result and process evidence |
 | `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
 | `log` | Write a rendered structured message | `type`, `message` | message and rendered fields |
+| `assign` | Evaluate text and publish a Case-scoped value | `type`, `name`, `expression` | `${CASE.VARS.<name>}`, `output.name`, and `output.result` |
 
 Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
 
-Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log fields. Retry and timeout are valid only for tool actions. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid. A log action may use `level` and `fields`. Unsupported fields are errors rather than ignored values.
+Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log fields. Retry and timeout are valid only for tool actions. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 
 Every action supports expression-bearing `description`. Validation partially resolves static Case values and preserves unavailable runtime placeholders exactly. After execution, ATT resolves the remaining placeholders against the current action-local `${output...}` scope before persisting the final description.
+
+An assign action evaluates `expression` with the normal Context, built-in, and configured-tool grammar. Its `name` must match `[A-Za-z_][A-Za-z0-9_]*`, is case-sensitive, and must not already exist below `CASE.VARS` for the current Case. `CASE.VARS` is created once per Test Case, survives stage/template changes, and keeps runtime assignments separate from Excel and framework-owned Case fields. A successful assignment remains available to later actions and later stages as `${CASE.VARS.<name>}`. The same value is retained in `${ACTIONS.<assignActionId>.output.result}`. Assign supports optional `description`, `assert`, and `onFailure`, but not render, tool-action, log, report-only, retry, timeout, `saveAs`, or `overwrite` fields. Assertion FAIL/ERROR does not roll back a value whose expression already evaluated successfully; expression failure creates no variable.
 
 Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. `renderAs: file` writes the rendered result under the Case output directory using that same relative path; collisions are ERROR. Other render modes write no file and store one typed value, or an ordered relative-path-to-value map for multiple matches, in `output.result`.
 
@@ -639,7 +646,7 @@ An empty selection is an error. `--rerun-failed` is itself a valid selection and
 
 `--dry-run` validates/plans and records selected cases as SKIPPED without invoking tools. `--fail-fast` stops scheduling further cases after the first FAIL or ERROR. `--output-dir` overrides the output root for one command.
 
-`--quiet` suppresses normal progress/completion output. `--verbose` adds safe run/suite/case/stage/action lifecycle information but never prints payloads, commands, arguments, environment variables, stdout, or stderr. The two options are mutually exclusive.
+The default human run prints only its final result counts and report path. `--quiet` suppresses that normal output. `--verbose` adds run/suite/Case/stage/action lifecycle progress and mirrors every complete Case-log block to the console, including template/tool input, logical and executed argv, stdout, stderr, payload, and action evidence. Verbose output can therefore contain secrets or personal data and must be enabled only in an appropriately protected terminal. The two options are mutually exclusive.
 
 #### Result and exit code
 
@@ -938,8 +945,8 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --output-dir <dir>` | Override output root |
 | `./att.sh run <selection> --ci-output junit,json` | Write CI XML/JSON plus JUnit HTML |
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
-| `./att.sh run <selection> --quiet` | Suppress normal progress |
-| `./att.sh run <selection> --verbose` | Add safe lifecycle progress |
+| `./att.sh run <selection> --quiet` | Suppress normal completion output |
+| `./att.sh run <selection> --verbose` | Show lifecycle progress and mirror complete Case logs |
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
@@ -1076,6 +1083,7 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 | tool | requires `call`; optional `saveAs`, `overwrite`, `assert`, `timeoutMs`, `retry`; no render/assert-action/log-only fields |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires `message`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
+| assign | requires `name`, `expression`; optional `assert`; name is unique below `CASE.VARS` for the entire Case; no render/tool/assert-action/log-only fields, timeout, retry, saveAs, or overwrite |
 | retry | `maxAttempts`, `retryOn`, `exitCodes`; retryOn required and contains only `EXIT_CODE` |
 
 `renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. `maxAttempts` is 1–10; `exitCodes` values are 1–255. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence in V2.3 and is never an action configuration field.
@@ -1101,7 +1109,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.4",
+  "attVersion": "2.3.5",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1146,6 +1154,8 @@ CASE
 ├── outputDirectory
 ├── environment, status, startedAt, durationMs, error
 ├── <case data aliases>
+├── VARS
+│   └── <assignName> (runtime text value shared by later stages/templates)
 └── STAGES
     └── <stageKey>
         ├── name and stage-private data
@@ -1158,13 +1168,13 @@ CASE
                         └── <toolName>
 ```
 
-Keywords are uppercase: `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, `TOOL`. Metadata remains camelCase. There are no `CASE.fields`, `CASE.data`, or `TOOLS` nodes.
+Keywords are uppercase: `CASE`, `VARS`, `STAGES`, `TEMPLATE`, `ACTIONS`, `TOOL`. Metadata remains camelCase. There are no `CASE.fields`, `CASE.data`, or `TOOLS` nodes.
 
 Common properties include:
 
 | Scope | Examples |
 |---|---|
-| CASE | `caseId`, `workbookId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, reserved `outputDirectory`, case data aliases |
+| CASE | `caseId`, `workbookId`, `groupId`, `rowCaseId`, `workbook`, `sheet`, `rowNumber`, `tags`, `environment`, reserved `outputDirectory`, case data aliases, runtime `VARS` |
 | STAGE | `key`, `name`, selector-map data, sidecar stage data, status, timing, error |
 | TEMPLATE | `name`, `path`, `description`, status, timing, error |
 | ACTION | `id`, `type`, final `description`; nested `output.status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and assertion/log data |
@@ -1172,7 +1182,7 @@ Common properties include:
 
 Use `${output...}` for the current action while its runtime assertion, actual value, and final description are evaluated. Use `${ACTIONS.<id>...}` as a completed current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. The root `${TOOL...}` scope is reserved for invocation internals and is not a case-wide “latest tool” API. Tool input/argv/stdout/stderr evidence is persisted below the action and written to the case log.
 
-`${CASE.outputDirectory}` is a reserved, normalized absolute path and Case data cannot override it. It exists before the first stage. During execution it is the physical `.in-progress/<RunID>-<nonce>/<CaseID>` directory; after successful publication ATT rewrites persisted text evidence to `<outputDirectory>/<RunID>/<CaseID>`. Validation preserves the placeholder because no runtime Run directory exists yet.
+`${CASE.outputDirectory}` is a reserved, normalized absolute path and Case data cannot override it. `CASE.VARS` is likewise framework-owned, so a sidecar `excel.dataColumns` alias cannot be named `VARS`. Both exist before the first stage. During execution `outputDirectory` is the physical `.in-progress/<RunID>-<nonce>/<CaseID>` directory; after successful publication ATT rewrites persisted text evidence to `<outputDirectory>/<RunID>/<CaseID>`. Validation preserves the output-directory placeholder because no runtime Run directory exists yet.
 
 Map properties use dot navigation and lists use zero-based brackets:
 
@@ -1184,7 +1194,7 @@ ${ACTIONS.callApi.output.result.items[0].status}
 
 Dot notation navigates simple map keys. Lists accept bracket or numeric-dot indexes, so `${CASE.items[0].status}` and `${CASE.items.0.status}` are equivalent. Indexes are zero-based. Map keys containing dots, spaces, braces, or colons use quoted brackets, for example `${CASE.response['{urn:payment}Status'].text}`.
 
-For `description` and assert-action `expected`, validation resolves available static values and preserves unresolved placeholders verbatim. Runtime resolves the remainder after the current action outcome exists; unresolved descriptive/actual placeholders remain visible, while unresolved or invalid assertion values produce an evaluation ERROR. An action may read only case data, its local `output`, and earlier action outputs that exist at that execution point.
+Validation resolves available static values and preserves only values that are legitimately runtime-dependent. Runtime resolves every remaining reference at its defined execution point. An unknown Context path is never converted silently to empty text: it produces `ATT-CTX-001` with the exact path, nearby available fields, and a likely case-sensitive correction. A declared optional Case field whose actual value is blank remains a valid empty string. An action may read only case data, its local `output` where supported, and action outputs that exist at that execution point; validation rejects unknown stage IDs and current/future action references used before they become available.
 
 ### Operators
 
@@ -1198,7 +1208,7 @@ Supported assertion operators are `==`, `!=`, `>`, `>=`, `<`, `<=`, `like`, `is 
 
 The current implementation translates `%` to Java regular-expression `.*` and `_` to `.`. Other regular-expression metacharacters such as `.`, `+`, `*`, `[`, `]`, `(`, `)`, `?`, `^`, `$`, `|`, and backslash retain their regular-expression meaning instead of being escaped automatically. Use `like` with ordinary literal text plus `%`/`_`; use `==` for exact text.
 
-Comparison first recognizes boolean literals. If both operands are valid decimal numbers, ATT compares them as arbitrary-precision decimals, including ordinary Excel strings such as `"100"`; numeric equality also uses this coercion, so `1.0 == 1` is true. Otherwise ATT compares the rendered strings lexicographically and case-sensitively. Blank or missing values render as empty strings outside `is null`; use `is null`/`is not null` when absence matters. Use `#{number(...)}` when invalid numeric text should become an explicit evaluation error instead of a string comparison.
+Comparison first recognizes boolean literals. If both operands are valid decimal numbers, ATT compares them as arbitrary-precision decimals, including ordinary Excel strings such as `"100"`; numeric equality also uses this coercion, so `1.0 == 1` is true. Otherwise ATT compares the rendered strings lexicographically and case-sensitively. A present blank value compares as an empty string; a missing Context path is `ATT-CTX-001`, not an implicit null/empty value. Use `is null` only for a path that exists with a null value, and use `#{number(...)}` when invalid numeric text should become an explicit evaluation error instead of a string comparison.
 
 ### Built-in functions
 
@@ -1228,8 +1238,8 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 | `replace` | Replace every literal target | `#{replace(${CASE.reference}, '-', '')}` |
 | `padLeft` | Pad to a minimum length | `#{padLeft(${CASE.sequence}, 8, '0')}` |
 | `padRight` | Pad to a minimum length | `#{padRight(${CASE.code}, 5, '_')}` |
-| `sysdate` | Return system-zone ISO date | `#{sysdate()}` |
-| `systimestamp` | Return system-zone offset timestamp | `#{systimestamp()}` |
+| `sysdate` | Return system-zone date, optionally formatted | `#{sysdate('yyyyMMdd')}` |
+| `systimestamp` | Return system-zone timestamp, optionally formatted | `#{systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
 | `formatDate` | Format an ISO-8601 value | `#{formatDate(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `dateAdd` | Add a calendar/time amount | `#{dateAdd(${CASE.businessDate}, 1, 'day')}` |
 | `fileExists` | Test whether a regular file exists | `#{fileExists(${CASE.requestFile})}` |
@@ -1245,13 +1255,13 @@ Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are
 
 `substr(value, start[, length])` uses zero-based UTF-16 indexes. A negative start counts from the end; an out-of-range start or negative length is an error, while an overlong length stops at the end. `indexOf` is case-sensitive, accepts an optional zero-based `fromIndex`, and returns `-1` when absent. Match and replacement functions are case-sensitive and literal, not regular expressions. Padding defaults to one space, never truncates an already long value, rejects an empty pad, and limits target length to 10000.
 
-`sysdate()` returns `yyyy-MM-dd`. `systimestamp()` returns `yyyy-MM-dd'T'HH:mm:ss.SSSXXX`; both use the JVM system zone at invocation time. `formatDate` accepts ISO local dates, local date-times, offset/zoned timestamps, and UTC instants, then applies a locale-independent Java `DateTimeFormatter` pattern. `zoneId` accepts an IANA name such as `Asia/Hong_Kong` or an offset such as `+08:00`; it converts instant/offset/zoned values and attaches a zone to a local date-time. `dateAdd` preserves the input ISO shape and accepts singular/plural `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, or `millisecond`; incompatible combinations such as hours plus a date-only value are errors.
+`sysdate()` returns `yyyy-MM-dd`. `systimestamp()` returns `yyyy-MM-dd'T'HH:mm:ss.SSSXXX`; both use the JVM system zone at invocation time. Each accepts zero arguments or one positional/named `format` argument using a locale-independent Java `DateTimeFormatter` pattern. Blank, invalid, or incompatible patterns are `ATT-BUILTIN-001` errors that identify the function, argument, supplied value, and formatter cause. `formatDate` accepts ISO local dates, local date-times, offset/zoned timestamps, and UTC instants, then applies the same pattern rules. `zoneId` accepts an IANA name such as `Asia/Hong_Kong` or an offset such as `+08:00`; it converts instant/offset/zoned values and attaches a zone to a local date-time. `dateAdd` preserves the input ISO shape and accepts singular/plural `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, or `millisecond`; incompatible combinations such as hours plus a date-only value are errors.
 
 Filesystem built-ins resolve relative paths against the ATT JVM working directory and return normalized absolute paths from create/copy/move operations. Existence and size functions accept only their documented regular-file or directory type and do not follow the final symbolic link. Copy and move reject symbolic-link sources/targets, create missing target parents, and default `overwrite` to `false`; an existing target is an error unless `overwrite=true`. `deleteFile` rejects directories, may delete a file or symbolic link itself, and defaults `missingOk` to `false`. Filesystem errors produce action ERROR and these in-process operations create no TOOL process artifacts.
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.4 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.5 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -1365,9 +1375,9 @@ Yes. Give sheets different group IDs, producing IDs such as `payment.payment.TC0
 
 ATT normalizes `N/A`, `NA`, `NULL`, `NONE`, empty, and whitespace-only values to blank before data mapping and stage selection.
 
-#### Why is my optional Context value empty?
+#### Why does an unknown Context variable now fail?
 
-Optional missing/blank data resolves to the empty string. Check the physical header, alias, `(yaml)` marker, stage scope, and when the referenced action becomes available.
+V2.3.5 treats an absent path as an authoring/runtime error instead of silently rendering it as empty. Follow `ATT-CTX-001` to check the case-sensitive scope, physical header/alias, stage key, action ID, and when that action becomes available. A declared optional field with a blank value is still valid and renders as the empty string.
 
 #### Why did a FAIL become ERROR?
 

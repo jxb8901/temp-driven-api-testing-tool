@@ -6,9 +6,13 @@ public final class DiagnosticCodes {
     public static final String CONFIG_INVALID = "ATT-CFG-001";
     public static final String TESTCASE_INVALID = "ATT-TC-001";
     public static final String SELECTION_EMPTY = "ATT-TC-EMPTY";
+    public static final String STAGE_INVALID = "ATT-STG-001";
     public static final String TEMPLATE_INVALID = "ATT-TPL-001";
+    public static final String CONTEXT_INVALID = "ATT-CTX-001";
+    public static final String BUILTIN_INVALID = "ATT-BUILTIN-001";
     public static final String ASSERTION_FAILED = "ATT-ASSERT-001";
     public static final String TOOL_INVALID = "ATT-TOOL-001";
+    public static final String TOOL_EXECUTION = "ATT-TOOL-002";
     public static final String PATH_INVALID = "ATT-PATH-001";
     public static final String RUN_FAILED = "ATT-RUN-001";
     public static final String PACKAGE_INVALID = "ATT-PKG-001";

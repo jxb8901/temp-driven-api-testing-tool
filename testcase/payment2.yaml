@@ -1,40 +1,18 @@
 schemaVersion: att-sidecar/v2.1
 id: payment2
 excel:
-  sheet: payment=支付測試案例集, batch=批量測試案例集
+  sheet: CT
   headerRows: 2
   caseId: 案例編號
   tags: 標籤
   dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, creditAccount=入賬帳號, amount=金額, currency=幣別, 預期結果(yaml)
 
 stages:
-  - key: prepare
-    template: 準備模板
-    required: false
-    onFailure: stop
-    runWhen: normal
   - key: invoke
     template: 執行模板
-    dataColumns: channel=渠道, 執行參數(yaml)
     required: true
     onFailure: stop
     runWhen: normal
-  - key: verify
-    template: 驗證模板
-    dataColumns: 驗證參數(yaml)
-    required: true
-    onFailure: stop
-    runWhen: onSuccess
-  - key: rollback
-    template: 回滾模板
-    required: false
-    onFailure: continue
-    runWhen: onFailure
-  - key: cleanup
-    template: 清理模板
-    required: false
-    onFailure: continue
-    runWhen: always
 
 report:
   columns:

@@ -4,9 +4,13 @@ codes:
   ATT-CFG-001: Invalid global configuration or schema
   ATT-TC-001: Invalid workbook, sidecar, sheet, row, or testcase
   ATT-TC-EMPTY: No testcase matches the selected validation plan
+  ATT-STG-001: Invalid stage selector, stage data, or stage lifecycle
   ATT-TPL-001: Invalid template or action contract
+  ATT-CTX-001: Unknown or unavailable runtime Context reference
+  ATT-BUILTIN-001: Invalid built-in function call or argument
   ATT-ASSERT-001: Business assertion evaluated to false
   ATT-TOOL-001: Invalid tool descriptor, executable, or call contract
+  ATT-TOOL-002: Tool launch, timeout, output, or execution failure
   ATT-PATH-001: Unsafe identifier or filesystem path
   ATT-RUN-001: Runtime or run lifecycle failure
   ATT-PKG-001: Package integrity, build, or archive failure

@@ -40,12 +40,30 @@ public final class FrameworkConfigLoader {
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
-            addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", null);
-            if (v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
+            try {
+                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", path);
+                if (v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
+            } catch (Exception e) {
+                throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
+                        "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
+                        "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
+            }
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
                     templatesRoot(map), testcasesRoot(map), tools, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map));
+        } catch (att.validation.DiagnosticException e) {
+            throw e;
+        } catch (Exception e) {
+            att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
+            String field = schema == null ? "config" : schema.field();
+            boolean toolField = field != null && (field.contains("tools") || field.contains("toolGroups") || field.contains("ssh"));
+            throw new att.validation.DiagnosticException(toolField ? att.validation.DiagnosticCodes.TOOL_INVALID : att.validation.DiagnosticCodes.CONFIG_INVALID,
+                    toolField ? "Invalid tool configuration" : "Invalid global configuration",
+                    e.getMessage(), path.toString(), field, null, null, null, null, null,
+                    toolField
+                            ? "Check the qualified tool/group name, descriptor fields, argument declarations, and command argv contract."
+                            : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
         }
     }
 
@@ -180,6 +198,12 @@ public final class FrameworkConfigLoader {
             Path file = logical.toRealPath();
             if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
             if (!paths.add(file)) throw new IllegalArgumentException("Duplicate tool group path: " + value);
+            loadToolGroup(file, projectRoot, tools, ids);
+        }
+    }
+
+    private static void loadToolGroup(Path file, Path projectRoot, Map<String, ToolConfig> tools, Set<String> ids) {
+        try {
             Map<?, ?> group = yaml(file, "Tool group");
             Path schema = schema(projectRoot, "att-tool-group-v2.2.schema.json");
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, group); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
@@ -198,6 +222,14 @@ public final class FrameworkConfigLoader {
             SshConfig ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
             addTools(group.get("tools"), tools, id, script, ssh, "tool group " + id + ".tools", file);
+        } catch (att.validation.DiagnosticException e) {
+            throw e;
+        } catch (Exception e) {
+            att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
+                    "Invalid tool group configuration", e.getMessage(), file.toString(),
+                    schema == null ? "toolGroup" : schema.field(), null, null, null, null, null,
+                    "Correct the reported group metadata, script/SSH settings, tool descriptor, arguments, or command argv.", e);
         }
     }
 

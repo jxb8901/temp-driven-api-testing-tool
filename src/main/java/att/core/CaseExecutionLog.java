@@ -21,14 +21,20 @@ import java.util.Map;
 public class CaseExecutionLog {
     private final Path path;
     private final boolean yamlAnchors;
+    private final java.util.function.Consumer<String> mirror;
 
     public CaseExecutionLog(Path path) throws IOException {
         this(path, false);
     }
 
     public CaseExecutionLog(Path path, boolean yamlAnchors) throws IOException {
+        this(path, yamlAnchors, null);
+    }
+
+    public CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror) throws IOException {
         this.path = path;
         this.yamlAnchors = yamlAnchors;
+        this.mirror = mirror;
         Files.createDirectories(path.getParent());
         Files.write(path, new byte[0]);
     }
@@ -50,6 +56,7 @@ public class CaseExecutionLog {
             text.append(new Yaml().dump(serializable)).append("\n");
         }
         Files.write(path, text.toString().getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.APPEND);
+        if (mirror != null) mirror.accept(text.toString());
     }
 
     private boolean abnormal(String section, Object data) {

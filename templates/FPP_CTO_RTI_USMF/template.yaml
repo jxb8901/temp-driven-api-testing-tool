@@ -1,5 +1,5 @@
 schemaVersion: att-template/v2.3
-name: FPP_CTO_RTI_USMF
+name: CTO/RTI流程模板
 description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
 
 # CASE message inputs:
@@ -12,18 +12,38 @@ description: USMF CTO success plus RTI success transaction flow with API, log, a
 # Every *SqlFile must print one summary row with RECORD_COUNT, MATCH_COUNT,
 # and RESULT_SUMMARY. MATCH_COUNT covers the business condition named below.
 actions:
+  buildTxnSeq:
+    type: assign
+    name: TxnSeq
+    expression: ATT000${CASE.caseId}#{sysdate('yyyyMMdd')}#{sample.getSeq(6)}
+
+  renderPrecheckRequest:
+    type: render
+    description: "0. Render CT001 Precheck request file with testcase amount"
+    payload: CT001_Precheck.xml
+    renderAs: file
+
+  log1:
+    type: log
+    level: INFO
+    message: "====================== Starting testcase ${CASE.caseId} ======================"
+    fields:
+      precheckResult: "${ACTIONS.buildTxnSeq.output}"
+      confirmResult: "${ACTIONS.renderPrecheckRequest.output}"
+
   invokePrecheck:
     type: tool
     description: "1. Send CT001 Precheck"
-    call: "#{fpp.invokeApi(requestId=${CASE.precheckRequestId}, requestType=${CASE.precheckRequestType}, requestFile=${CASE.precheckRequestFile}, apiLogPath=${CASE.apiLogPath})}"
+    call: "#{fpp.invokeApi(requestId=${CASE.VARS.TxnSeq}, requestType='fromchannel', requestFile=${ACTIONS.renderPrecheckRequest.output.targetFiles[0]}, apiLogPath=${CASE.outputDirectory}/invokePrecheck.log)}"
 
   assertPrecheck:
     type: assert
     description: CT001 Precheck succeeds
-    assert: "${ACTIONS.invokePrecheck.output.exitCode} == 0 and ${ACTIONS.invokePrecheck.output.result.ResultCode} == '${CASE.apiSuccessCode}'"
-    expected: "ResultCode=${CASE.apiSuccessCode}"
+    assert: "${ACTIONS.invokePrecheck.output.exitCode} == 0 and ${ACTIONS.invokePrecheck.output.result.ResultCode} == 'SUCCESS'"
+    expected: "ResultCode=SUCCESS, message=Precheck successful"
     actual: "ResultCode=${ACTIONS.invokePrecheck.output.result.ResultCode}, message=${ACTIONS.invokePrecheck.output.result.ResultMessage}"
 
+x-staged:
   searchPrecheckLog:
     type: tool
     description: "1.2 Check CT001 Precheck transaction log keyword"

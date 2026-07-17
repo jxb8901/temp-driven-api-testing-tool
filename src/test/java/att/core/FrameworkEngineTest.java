@@ -59,7 +59,18 @@ class FrameworkEngineTest {
         assertTrue(verbose.contains("[CASE] id=payments.payment.TC001 status=START"));
         assertTrue(verbose.contains("[STAGE] case=payments.payment.TC001 stage=invoke"));
         assertTrue(verbose.contains("[ACTION] case=payments.payment.TC001 stage=invoke action=callApi status=PASS"));
-        assertFalse(verbose.contains("<Response>"));
+        assertTrue(verbose.contains("[CASE-LOG] case=payments.payment.TC001"));
+        assertTrue(verbose.contains("<Response>"));
+
+        ExecutionOptions defaultOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-DEFAULT"});
+        java.io.ByteArrayOutputStream defaultConsole = new java.io.ByteArrayOutputStream();
+        try {
+            System.setOut(new java.io.PrintStream(defaultConsole));
+            new FrameworkEngine(projectRoot, globalConfig()).run(defaultOptions);
+        } finally {
+            System.setOut(previous);
+        }
+        assertEquals("", defaultConsole.toString("UTF-8").trim());
 
         assertEquals(1, summary.passed());
         assertEquals("API status\nSUCCESS", summary.results().get(0).expected());

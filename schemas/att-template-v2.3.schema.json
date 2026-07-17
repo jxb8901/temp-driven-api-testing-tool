@@ -15,9 +15,11 @@
     "common": {
       "type": "object",
       "properties": {
-        "type": {"enum": ["render", "tool", "assert", "log"]},
+        "type": {"enum": ["render", "tool", "assert", "log", "assign"]},
         "description": {"type": "string"},
         "onFailure": {"enum": ["stop", "continue"]},
+        "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "expression": {"type": "string", "minLength": 1},
         "payload": {"type": "string", "minLength": 1},
         "renderAs": {"enum": ["file", "text", "json", "yaml", "xml"]},
         "saveAs": {"type": "string", "minLength": 1},
@@ -50,10 +52,11 @@
         {"$ref": "#/$defs/common"},
         {
           "oneOf": [
-            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
-            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
+            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
+            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "assign"}}, "required": ["type", "name", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
           ]
         }
       ]

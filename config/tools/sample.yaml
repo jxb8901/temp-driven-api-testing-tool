@@ -10,3 +10,15 @@ tools:
     command: [./tools/get_ac_date.sh]
     output: txt
     arguments: {}
+
+
+  getSeq:
+    name: Get sequence
+    description: Generate a new sequence value
+    command: [./tools/get_seq.sh, "${seqLen}"]
+    output: txt
+    arguments:
+      seqLen:
+        name: Sequence Length
+        description: Sequence length in digits
+        required: true

@@ -27,32 +27,43 @@ public final class SuiteConfigResolver {
 
     public FrameworkConfig resolve(Path suitePath) throws Exception {
         Path sidecar = sidecarPath(suitePath);
-        if (!Files.exists(sidecar)) throw new IllegalArgumentException("Missing mandatory V2 sidecar: " + sidecar);
-        Map<String, Object> map = load(sidecar);
-        Path schema = projectRoot.resolve("schemas/att-sidecar-v2.1.schema.json");
-        if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
-        SchemaSupport.requireVersion(map, Version.SIDECAR_SCHEMA, "sidecar");
-        SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "id", "excel", "stages", "report", "timeoutMs");
-        String workbookId = required(map, "id");
-        att.core.IdentifierValidator.workbookId(workbookId);
-        Object excelValue = map.get("excel");
-        if (!(excelValue instanceof Map)) throw new IllegalArgumentException("excel is required in sidecar: " + sidecar);
-        Map<?, ?> excel = (Map<?, ?>) excelValue;
-        SchemaSupport.rejectUnknown(excel, "sidecar.excel", "sheet", "headerRows", "caseId", "tags", "dataColumns");
-        String sheet = required(excel, "sheet");
-        String caseId = required(excel, "caseId");
-        String tags = required(excel, "tags");
-        int headerRows = positiveInteger(excel.get("headerRows"), 1, "excel.headerRows");
-        List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(optionalString(excel.get("dataColumns"), "excel.dataColumns"));
-        rejectReserved(dataColumns, new String[]{"caseId", "workbookId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "STAGES"}, "excel.dataColumns");
-        List<StageConfig> stages = stages(map.get("stages"));
-        if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
+        try {
+            if (!Files.exists(sidecar)) throw new IllegalArgumentException("Mandatory sidecar does not exist: " + sidecar);
+            Map<String, Object> map = load(sidecar);
+            Path schema = projectRoot.resolve("schemas/att-sidecar-v2.1.schema.json");
+            if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
+            SchemaSupport.requireVersion(map, Version.SIDECAR_SCHEMA, "sidecar");
+            SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "id", "excel", "stages", "report", "timeoutMs");
+            String workbookId = required(map, "id");
+            att.core.IdentifierValidator.workbookId(workbookId);
+            Object excelValue = map.get("excel");
+            if (!(excelValue instanceof Map)) throw new IllegalArgumentException("excel is required in sidecar: " + sidecar);
+            Map<?, ?> excel = (Map<?, ?>) excelValue;
+            SchemaSupport.rejectUnknown(excel, "sidecar.excel", "sheet", "headerRows", "caseId", "tags", "dataColumns");
+            String sheet = required(excel, "sheet");
+            String caseId = required(excel, "caseId");
+            String tags = required(excel, "tags");
+            int headerRows = positiveInteger(excel.get("headerRows"), 1, "excel.headerRows");
+            List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(optionalString(excel.get("dataColumns"), "excel.dataColumns"));
+            rejectReserved(dataColumns, new String[]{"caseId", "workbookId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "VARS", "STAGES"}, "excel.dataColumns");
+            List<StageConfig> stages = stages(map.get("stages"));
+            if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
-        ReportConfig report = mergeReport(map.get("report"));
-        int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
-        return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
-                global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
-                global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors());
+            ReportConfig report = mergeReport(map.get("report"));
+            int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
+            return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
+                    global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
+                    global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors());
+        } catch (att.validation.DiagnosticException e) {
+            throw e;
+        } catch (Exception e) {
+            att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
+            String field = schema == null ? "sidecar" : schema.field();
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TESTCASE_INVALID,
+                    "Invalid workbook sidecar for '" + suitePath.getFileName() + "'", e.getMessage(),
+                    sidecar.toString(), field, null, null, null, null, null,
+                    "Correct the reported sidecar field, type, stage declaration, or workbook ID.", e);
+        }
     }
 
     private List<StageConfig> stages(Object value) {

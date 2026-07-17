@@ -61,7 +61,17 @@ public class UnifiedTemplateEngine {
             boolean validationValueAvailable = expression.startsWith("CASE.")
                     && !expression.startsWith("CASE.STAGES.")
                     && !"CASE.outputDirectory".equals(expression);
-            Object value = validationOnly && !validationValueAvailable ? null : context.resolve(expression);
+            Object value;
+            if (validationOnly) {
+                boolean runtimeDependent = expression.startsWith("CASE.STAGES.") || expression.startsWith("ACTIONS.")
+                        || expression.startsWith("TOOL.") || expression.equals("output") || expression.startsWith("output.");
+                if (validationValueAvailable) value = context.require(expression);
+                else if (context.contains(expression)) value = null;
+                else if (runtimeDependent) value = null;
+                else value = context.require(expression);
+            }
+            else if (preserveMissing) value = context.resolve(expression);
+            else value = context.require(expression);
             String replacement = value == null && preserveMissing ? matcher.group(0) : (value == null ? "" : String.valueOf(value));
             matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
         }
@@ -86,6 +96,16 @@ public class UnifiedTemplateEngine {
             if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid context reference in template value: ${" + path + "}");
             position = matcher.end();
         }
+    }
+
+    /** Returns Context paths using the same value-reference grammar as rendering. */
+    public java.util.List<String> parseValuePaths(String text) {
+        java.util.List<String> paths = new java.util.ArrayList<String>();
+        if (text == null || text.isEmpty()) return paths;
+        validateValueSyntax(text);
+        Matcher matcher = VALUE.matcher(text);
+        while (matcher.find()) paths.add(matcher.group(1));
+        return paths;
     }
 
     public Object executeCall(String call, CaseRuntimeContext context) throws Exception {
@@ -148,6 +168,22 @@ public class UnifiedTemplateEngine {
         return output.toString();
     }
 
+    /** Parses every inline call exactly as runtime rendering would, without invoking it. */
+    public java.util.List<ToolCallParser.ParsedCall> parseCalls(String text) {
+        java.util.List<ToolCallParser.ParsedCall> calls = new java.util.ArrayList<ToolCallParser.ParsedCall>();
+        if (text == null || text.isEmpty()) return calls;
+        int index = 0;
+        while (index < text.length()) {
+            int start = text.indexOf("#{", index);
+            if (start < 0) break;
+            int end = findToolEnd(text, start + 2);
+            if (end < 0) throw new IllegalArgumentException("Unclosed tool/function call: " + text.substring(start));
+            calls.add(callParser.parse(text.substring(start, end + 1)));
+            index = end + 1;
+        }
+        return calls;
+    }
+
     private int findToolEnd(String text, int bodyStart) {
         // Tool calls may contain ${...} arguments, so a plain "next }" search would stop too early.
         int nestedValueDepth = 0;
@@ -174,7 +210,7 @@ public class UnifiedTemplateEngine {
         for (ToolCallParser.Argument argument : call.arguments()) {
             String expression = argument.expression().trim();
             Matcher exact = VALUE.matcher(expression);
-            Object value = exact.matches() ? context.resolve(exact.group(1)) : callParser.literal(renderValues(expression, context));
+            Object value = exact.matches() ? context.require(exact.group(1)) : callParser.literal(renderValues(expression, context));
             putNested(input, argument.key(), value == null ? "" : value);
         }
         return input;

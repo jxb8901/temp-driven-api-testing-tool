@@ -43,4 +43,13 @@ class StageTemplateLoaderTest {
         TemplateAction action = new StageTemplateLoader(tempDir, Paths.get("templates")).load("timeout").actions().get(0);
         assertEquals(Long.valueOf(1234), action.timeoutMs());
     }
+
+    @Test void loadsAssignNameAndExpression() throws Exception {
+        Path dir=tempDir.resolve("templates/assign"); Files.createDirectories(dir);
+        Files.write(dir.resolve("template.yaml"), ("schemaVersion: att-template/v2.3\nname: assign\ndescription: test\nactions:\n"
+                + "  build: {type: assign, name: txnSeq, expression: \"ATT#{sysdate('yyyyMMdd')}\"}\n").getBytes("UTF-8"));
+        TemplateAction action = new StageTemplateLoader(tempDir, Paths.get("templates")).load("assign").actions().get(0);
+        assertEquals("txnSeq", action.name());
+        assertEquals("ATT#{sysdate('yyyyMMdd')}", action.expression());
+    }
 }

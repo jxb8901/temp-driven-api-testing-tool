@@ -1,6 +1,6 @@
-# ATT 2.3.4 - Automated Testing Tool
+# ATT 2.3.5 - Automated Testing Tool
 
-ATT V2.3.4 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.3.5 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
 V2.3 retains the V2 Case → Stage → Template → Action → Tool model and all V2.2 tool-group, argv-list, SSH, Windows, shorthand, and built-in capabilities. It adds multi-file render globs and typed render results, nests every action outcome under `action.output`, lets `assert` decide non-assert action PASS/FAIL, partially evaluates action descriptions during validation, and records explicit Expected/Actual report values. Templates use `att-template/v2.3`; configuration/tool-group schemas remain V2.2 and sidecar/run/CI schemas retain their existing versions.
 
@@ -74,6 +74,10 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 - A built-in that accepts exactly one value may be written as `#{upper(${CASE.currency})}` instead of `value=...`. A configured tool may omit its argument name only when its configuration declares exactly one argument, for example `#{getAppLogs(${CASE.caseId})}`; multi-argument tools still require names.
 - `schemaVersion` is mandatory in global configuration, tool groups, workbook sidecars, and templates. V2.3 templates use `att-template/v2.3`; unknown non-`x-*` fields are validation errors.
 - `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
+- Validation parses the same Context references and inline `#{...}` calls used at runtime. Unknown Context names, stage/action references, built-ins, configured tools, arguments, and render-payload calls fail before execution with a stable code, precise location, detail, and repair hint.
+- `type: assign` evaluates a text `expression` and publishes it under a unique Case-scoped `name`, for example `${CASE.VARS.txnSeq}`, while retaining the same value at `${ACTIONS.<id>.output.result}`. `CASE.VARS` persists across stages/templates but is isolated per Test Case; an optional assertion does not roll back a successfully evaluated assignment.
+- A normal human run prints only the final summary and report path. `--verbose` adds lifecycle progress and mirrors every complete Case-log block, including template/tool input, argv, stdout, stderr, and payload evidence; use it only where sensitive Case data may be displayed safely. `--quiet` suppresses normal output.
+- `sysdate([format])` and `systimestamp([format])` retain their ISO defaults and accept one positional or named Java `DateTimeFormatter` pattern, for example `#{sysdate('yyyyMMdd')}`.
 - Timeouts use milliseconds with range 1–3,600,000 and default 10,000: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence.
 - Retry is available only on a tool action and only for `retryOn: [EXIT_CODE]`; retries run immediately and timeout is never retried.
 - A valid Run ID and full Case ID are used directly as `output/<RunID>/<CaseID>/` directory names. They must not contain path separators, control characters, or platform-reserved names.
@@ -96,4 +100,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.3 System Design](docs/02_System_Design_V2.3.md) for the normative specification.
-See the [ATT V2.3.4 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.4 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.3.5 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.5 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

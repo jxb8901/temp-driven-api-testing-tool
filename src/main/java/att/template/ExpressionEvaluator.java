@@ -43,7 +43,7 @@ public class ExpressionEvaluator {
         Matcher matcher = CONTEXT.matcher(expression);
         StringBuffer rendered = new StringBuffer();
         while (matcher.find()) {
-            Object value = context.resolve(matcher.group(1));
+            Object value = context.require(matcher.group(1));
             char activeQuote = activeQuote(expression, matcher.start());
             String replacement = activeQuote != 0 ? escapeInside(value, activeQuote) : literal(value);
             matcher.appendReplacement(rendered, Matcher.quoteReplacement(replacement));

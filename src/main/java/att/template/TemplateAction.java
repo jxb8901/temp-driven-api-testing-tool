@@ -18,6 +18,8 @@ public class TemplateAction {
     private final String description;
     private final String payload;
     private final String renderAs;
+    private final String name;
+    private final String expression;
     private final String call;
     private final String message;
     private final String saveAs;
@@ -41,6 +43,8 @@ public class TemplateAction {
         this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");
         this.renderAs = text(data.get("renderAs"), "");
+        this.name = text(data.get("name"), "");
+        this.expression = text(data.get("expression"), "");
         this.call = text(data.get("call"), "");
         this.message = text(data.get("message"), "");
         this.saveAs = text(data.get("saveAs"), "");
@@ -61,6 +65,8 @@ public class TemplateAction {
     public String description() { return description; }
     public String payload() { return payload; }
     public String renderAs() { return renderAs; }
+    public String name() { return name; }
+    public String expression() { return expression; }
     public String call() { return call; }
     public String message() { return message; }
     public String saveAs() { return saveAs; }

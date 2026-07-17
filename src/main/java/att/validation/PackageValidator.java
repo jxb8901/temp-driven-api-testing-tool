@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 public final class PackageValidator {
     private final ToolCallParser callParser = new ToolCallParser();
     private final att.template.ExpressionEvaluator expressionEvaluator = new att.template.ExpressionEvaluator();
+    private final att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
     private final FrameworkConfig global;
@@ -77,10 +78,11 @@ public final class PackageValidator {
                             "Duplicate full Case ID '" + testCase.caseId() + "'; first declared at " + previousCase,
                             resolved.toString(), testCase.sheetName(), testCase.rowNumber(), null, null, null));
                     cases++;
+                    Set<String> assignedCaseVariables = new LinkedHashSet<String>();
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
                             StageTemplate template = loader.load(stage.templateName());
-                            validateTemplateValues(template, testCase, stage, config);
+                            validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables);
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
                             validateTemplate(template, config);
@@ -105,11 +107,27 @@ public final class PackageValidator {
     }
 
     private void validateReferencedTools(StageTemplate template, FrameworkConfig config) {
-        for (TemplateAction action : template.actions()) if ("tool".equalsIgnoreCase(action.type())) {
-            ToolCallParser.ParsedCall call = callParser.parse(action.call());
-            ToolConfig tool = config.tool(call.name());
-            if (tool != null) validateToolExecutable(tool);
+        att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
+        for (TemplateAction action : template.actions()) {
+            if ("tool".equalsIgnoreCase(action.type())) validateReferencedCall(callParser.parse(action.call()), config);
+            if ("assign".equalsIgnoreCase(action.type())) {
+                for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.expression())) validateReferencedCall(call, config);
+            }
+            if ("render".equalsIgnoreCase(action.type())) try {
+                for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
+                    String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                    for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateReferencedCall(call, config);
+                }
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Unable to inspect render payload calls for action " + action.id() + ": " + e.getMessage(), e);
+            }
         }
+    }
+
+    private void validateReferencedCall(ToolCallParser.ParsedCall call, FrameworkConfig config) {
+        if (BUILT_INS.contains(call.name().toLowerCase(java.util.Locale.ROOT))) return;
+        ToolConfig tool = config.tool(call.name());
+        if (tool != null) validateToolExecutable(tool);
     }
 
     @SuppressWarnings("unchecked")
@@ -208,20 +226,45 @@ public final class PackageValidator {
 
     private ValidationSummary invalid(String mode, List<Diagnostic> diagnostics) { return new ValidationSummary(mode, 0, 0, 0, global.tools().size(), diagnostics); }
     private Diagnostic diagnostic(String code, Exception exception, Path file) {
+        DiagnosticException typed = DiagnosticException.find(exception);
+        if (typed != null) {
+            String locatedFile = typed.file() == null ? portable(file) : portable(java.nio.file.Paths.get(typed.file()));
+            String message = typed.detail() == null ? typed.summary() : typed.summary() + ": " + typed.detail();
+            return new Diagnostic(typed.code(), Diagnostic.Severity.ERROR, message, locatedFile, typed.field(),
+                    typed.sheet(), typed.row(), typed.column(), typed.template(), typed.action(), typed.suggestion());
+        }
         String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
         LocatedValidationException located = exception instanceof LocatedValidationException ? (LocatedValidationException) exception : null;
-        return new Diagnostic(code, Diagnostic.Severity.ERROR, message, file == null ? null : projectRoot.toAbsolutePath().normalize().relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/'), located == null ? null : located.field, null, null, null, located == null ? null : located.template, located == null ? null : located.action, null);
+        return new Diagnostic(code, Diagnostic.Severity.ERROR, message, portable(file), located == null ? null : located.field, null, null, null, located == null ? null : located.template, located == null ? null : located.action, suggestion(code));
+    }
+
+    private String portable(Path file) {
+        if (file == null) return null;
+        Path absolute = file.isAbsolute() ? file.toAbsolutePath().normalize() : projectRoot.resolve(file).toAbsolutePath().normalize();
+        Path root = projectRoot.toAbsolutePath().normalize();
+        return absolute.startsWith(root) ? root.relativize(absolute).toString().replace('\\', '/') : absolute.toString();
+    }
+
+    private String suggestion(String code) {
+        if (DiagnosticCodes.CONFIG_INVALID.equals(code)) return "Check the reported config field against the strict configuration schema.";
+        if (DiagnosticCodes.TESTCASE_INVALID.equals(code)) return "Check the workbook, sidecar, Sheet, row, and required headers at the reported location.";
+        if (DiagnosticCodes.TEMPLATE_INVALID.equals(code)) return "Check the template/action field and every referenced Context variable or inline call.";
+        if (DiagnosticCodes.TOOL_INVALID.equals(code)) return "Check the qualified tool name, descriptor, declared arguments, command placeholders, and executable.";
+        if (DiagnosticCodes.PATH_INVALID.equals(code)) return "Use a safe path below the ATT package root and avoid symbolic-link escapes.";
+        return null;
     }
 
     private void validateTemplate(StageTemplate template, FrameworkConfig config) {
         Set<String> actionIds = new LinkedHashSet<String>();
+        Set<String> completedActions = new LinkedHashSet<String>();
+        Set<String> assignmentNames = new LinkedHashSet<String>();
+        att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
           try {
             if (action.id().contains(".")) throw new IllegalArgumentException("Action ID must not contain '.': " + action.id());
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
-            if (!("render".equals(type) || "tool".equals(type) || "assert".equals(type) || "log".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
-            att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
+            if (!("render".equals(type) || "tool".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
             syntaxEngine.validateValueSyntax(action.description());
             syntaxEngine.validateValueSyntax(action.expected());
             syntaxEngine.validateValueSyntax(action.actual());
@@ -229,44 +272,285 @@ public final class PackageValidator {
                 require(action.payload(), "payload is required for render action " + action.id());
                 require(action.renderAs(), "renderAs is required for render action " + action.id());
                 if (!java.util.Arrays.asList("file", "text", "json", "yaml", "xml").contains(action.renderAs().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Invalid renderAs: " + action.renderAs());
-                forbid(action, "saveAs", "overwrite", "output", "call", "expression", "expected", "actual", "message", "level", "fields", "retry", "timeoutMs");
+                forbid(action, "name", "saveAs", "overwrite", "output", "call", "expression", "expected", "actual", "message", "level", "fields", "retry", "timeoutMs");
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
-                if (!"file".equalsIgnoreCase(action.renderAs())) for (Path payload : payloads) {
-                    String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
-                    if (!content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
+                for (Path payload : payloads) {
+                    try {
+                        String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                        validateStaticContextStructure(content, syntaxEngine, completedActions, false);
+                        for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config, false);
+                        if (!"file".equalsIgnoreCase(action.renderAs()) && !content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
+                    } catch (DiagnosticException e) {
+                        throw e.withLocation(payload.toString(), "actions." + action.id() + ".payload", null, null, null, template.name(), action.id());
+                    }
                 }
                 if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "payload", "renderAs", "expression", "expected", "actual", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion()); }
-            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.assertion()); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "expression", "expected", "actual", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion()); }
+            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.assertion()); }
             if ("log".equals(type)) {
                 require(action.message(), "message is required for log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
-                forbid(action, "payload", "renderAs", "saveAs", "overwrite", "call", "expression", "expected", "actual", "retry", "timeoutMs");
+                forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "call", "expression", "expected", "actual", "retry", "timeoutMs");
                 for (Object key : action.fields().keySet()) if (!(key instanceof String)) throw new IllegalArgumentException("Log fields keys must be strings: " + action.id());
                 if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
-          } catch (LocatedValidationException e) { throw e; }
+            if ("assign".equals(type)) {
+                require(action.name(), "name is required for assign action " + action.id());
+                require(action.expression(), "expression is required for assign action " + action.id());
+                if (!action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Assign name must match [A-Za-z_][A-Za-z0-9_]*: " + action.name());
+                if (!assignmentNames.add(action.name())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                        "Duplicate CASE.VARS assignment '${CASE.VARS." + action.name() + "}'",
+                        "The same variable name is assigned more than once in template '" + template.name() + "'.",
+                        null, "name", null, null, null, template.name(), action.id(),
+                        "Use a unique Case-scoped variable name; assign does not overwrite.", null);
+                forbid(action, "output", "payload", "renderAs", "saveAs", "overwrite", "call", "expected", "actual", "message", "level", "fields", "retry", "timeoutMs");
+                syntaxEngine.validateValueSyntax(action.expression());
+                validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false);
+                for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.expression())) validateCall(call, config, false);
+                if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
+            }
+
+            Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
+            afterCurrentAction.add(action.id());
+            validateStaticContextStructure(action.description(), syntaxEngine, afterCurrentAction, true);
+            validateStaticContextStructure(action.assertion(), syntaxEngine, afterCurrentAction, true);
+            validateStaticContextStructure(action.actual(), syntaxEngine, afterCurrentAction, true);
+            validateStaticContextStructure(action.expected(), syntaxEngine, completedActions, false);
+            if ("tool".equals(type)) {
+                validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false);
+                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false);
+            }
+            if ("log".equals(type)) {
+                validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false);
+                for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false);
+            }
+          } catch (DiagnosticException e) { throw e.withLocation(null, "actions." + action.id(), null, null, null, template.name(), action.id()); }
+          catch (LocatedValidationException e) { throw e; }
           catch (Exception e) { throw new LocatedValidationException(e.getMessage(), template.name(), action.id(), "actions." + action.id(), e); }
+          completedActions.add(action.id());
         }
     }
 
+    /**
+     * Validates Context scopes and same-template action timing without requiring a concrete Case.
+     * This is the package-level contract for templates that are not referenced by any workbook.
+     */
+    private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
+                                                Set<String> availableActions, boolean currentOutputAvailable) {
+        for (String path : engine.parseValuePaths(text)) {
+            String root = firstPathSegment(path);
+            if ("CASE".equals(root) || "TOOL".equals(root)) continue;
+            if ("RUN".equals(root)) {
+                String field = firstChildSegment(path, "RUN");
+                if (field.isEmpty() || java.util.Arrays.asList("runId", "id", "runDirectory", "caseLog").contains(field)) continue;
+                throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                        "Unknown RUN Context variable '${" + path + "}'",
+                        "Available RUN fields: runId, id, runDirectory, caseLog", null, path,
+                        null, null, null, null, null,
+                        "Use the exact case-sensitive RUN field name.", null);
+            }
+            if ("ACTIONS".equals(root)) {
+                String id = firstChildSegment(path, "ACTIONS");
+                if (id.isEmpty() || availableActions.contains(id)) continue;
+                throw unavailableActionContext(path, id, availableActions);
+            }
+            if ("output".equals(root)) {
+                if (currentOutputAvailable) continue;
+                throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                        "Current action output is not available at '${" + path + "}'",
+                        "This field is rendered before the current action outcome is created.", null, path,
+                        null, null, null, null, null,
+                        "Use CASE data or an earlier ACTIONS.<id> result in this field.", null);
+            }
+
+            String nearest = nearestAction(root, availableActions);
+            String suffix = path.length() > root.length() ? path.substring(root.length()) : "";
+            throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                    "Unknown Context scope in '${" + path + "}'",
+                    "Root '" + root + "' is not one of CASE, RUN, ACTIONS, TOOL, or output.", null, path,
+                    null, null, null, null, null,
+                    nearest == null
+                            ? "Use an uppercase Context scope and an exact case-sensitive field/action name."
+                            : "Use '${ACTIONS." + nearest + suffix + "}' if that completed action is intended.", null);
+        }
+    }
+
+    private DiagnosticException unavailableActionContext(String path, String id, Set<String> availableActions) {
+        return new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                "Unknown or unavailable action Context '${" + path + "}'",
+                "Action '" + id + "' has not completed at the point where this value is rendered. Available actions: " + String.join(", ", availableActions),
+                null, path, null, null, null, null, null,
+                "Reference an earlier action ID, or move this reference to a field rendered after that action completes.", null);
+    }
+
+    private String firstChildSegment(String path, String root) {
+        if (path.equals(root)) return "";
+        String remainder = path.substring(root.length());
+        if (remainder.startsWith(".")) return firstPathSegment(remainder.substring(1));
+        if (remainder.startsWith("[")) {
+            int end = remainder.indexOf(']');
+            if (end < 0) return "";
+            String selector = remainder.substring(1, end).trim();
+            if (selector.length() >= 2 && ((selector.startsWith("'") && selector.endsWith("'"))
+                    || (selector.startsWith("\"") && selector.endsWith("\"")))) return selector.substring(1, selector.length() - 1);
+            return selector;
+        }
+        return "";
+    }
+
+    private String nearestAction(String requested, Set<String> candidates) {
+        String best = null; int bestDistance = Integer.MAX_VALUE;
+        for (String candidate : candidates) {
+            int distance = editDistance(requested, candidate);
+            if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+        }
+        return bestDistance <= Math.max(2, requested.length() / 3) ? best : null;
+    }
+
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage, FrameworkConfig config) {
+        validateTemplateValues(template, testCase, stage, config, null, new LinkedHashSet<String>());
+    }
+
+    private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                        FrameworkConfig config, Path caseFile) {
+        validateTemplateValues(template, testCase, stage, config, caseFile, new LinkedHashSet<String>());
+    }
+
+    private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                        FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables) {
         att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
         context.put("CASE.environment", config.environment());
+        for (String name : assignedCaseVariables) context.put("CASE.VARS." + name, null);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
+        Set<String> completedActions = new LinkedHashSet<String>();
         for (TemplateAction action : template.actions()) {
-            engine.renderValidationValues(action.description(), context);
-            if ("assert".equalsIgnoreCase(action.type())) engine.renderValidationValues(action.expected(), context);
-            if ("render".equalsIgnoreCase(action.type()) && !"file".equalsIgnoreCase(action.renderAs())) try {
-                for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
-                    String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
-                    String partial = engine.renderValidationValues(content, context);
-                    if (!partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
+            Path sourceFile = template.directory().resolve("template.yaml");
+            String sourceField = "actions." + action.id();
+            try {
+                Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
+                afterCurrentAction.add(action.id());
+
+                sourceField = "actions." + action.id() + ".description";
+                validateContextStructure(action.description(), engine, testCase, afterCurrentAction);
+                engine.renderValidationValues(action.description(), context);
+
+                if ("assign".equalsIgnoreCase(action.type())) {
+                    sourceField = "actions." + action.id() + ".name";
+                    context.requireCaseVariableAvailable(action.name());
+                    sourceField = "actions." + action.id() + ".expression";
+                    validateContextStructure(action.expression(), engine, testCase, completedActions);
+                    engine.renderValidationValues(action.expression(), context);
+                    for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
+                        validateCallArguments(call, context, engine);
+                    }
+                    context.put("CASE.VARS." + action.name(), null);
                 }
-            } catch (Exception e) { throw new IllegalArgumentException("Invalid " + action.renderAs() + " render payload for action " + action.id() + ": " + e.getMessage(), e); }
+
+                sourceField = "actions." + action.id() + ".assert";
+                validateContextStructure(action.assertion(), engine, testCase, afterCurrentAction);
+                engine.renderValidationValues(action.assertion(), context);
+
+                sourceField = "actions." + action.id() + ".actual";
+                validateContextStructure(action.actual(), engine, testCase, afterCurrentAction);
+                engine.renderValidationValues(action.actual(), context);
+
+                sourceField = "actions." + action.id() + ".expected";
+                validateContextStructure(action.expected(), engine, testCase, completedActions);
+                engine.renderValidationValues(action.expected(), context);
+
+                sourceField = "actions." + action.id() + ".message";
+                validateContextStructure(action.message(), engine, testCase, completedActions);
+                engine.renderValidationValues(action.message(), context);
+
+                sourceField = "actions." + action.id() + ".saveAs";
+                validateContextStructure(action.saveAs(), engine, testCase, completedActions);
+                engine.renderValidationValues(action.saveAs(), context);
+
+                for (Object key : action.fields().keySet()) {
+                    sourceField = "actions." + action.id() + ".fields." + key;
+                    Object value = action.fields().get(key);
+                    validateContextStructure(String.valueOf(value), engine, testCase, completedActions);
+                    engine.renderValidationValues(String.valueOf(value), context);
+                }
+                if ("tool".equalsIgnoreCase(action.type())) {
+                    sourceField = "actions." + action.id() + ".call";
+                    validateContextStructure(action.call(), engine, testCase, completedActions);
+                    engine.renderValidationValues(action.call(), context);
+                    validateCallArguments(callParser.parse(action.call()), context, engine);
+                }
+                if ("render".equalsIgnoreCase(action.type())) {
+                    for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
+                        sourceFile = payload;
+                        sourceField = "actions." + action.id() + ".payload";
+                        String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                        validateContextStructure(content, engine, testCase, completedActions);
+                        String partial = engine.renderValidationValues(content, context);
+                        for (ToolCallParser.ParsedCall call : engine.parseCalls(content)) {
+                            validateCallArguments(call, context, engine);
+                        }
+                        if (!"file".equalsIgnoreCase(action.renderAs()) && !partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
+                    }
+                }
+            } catch (Exception e) {
+                DiagnosticException typed = DiagnosticException.find(e);
+                String caseSource = caseFile == null ? null : portable(caseFile) + "!" + testCase.sheetName() + ":" + testCase.rowNumber();
+                if (typed != null) throw sourceDiagnostic(typed, sourceFile, sourceField, testCase, template, action, caseSource);
+                throw new DiagnosticException(DiagnosticCodes.TEMPLATE_INVALID,
+                        "Invalid runtime-rendered value in template action", appendCaseSource(e.getMessage(), caseSource), sourceFile.toString(),
+                        sourceField, testCase.sheetName(), testCase.rowNumber(), null, template.name(), action.id(),
+                        "Check every Context path, inline call, action field, and render payload used by this action.", e);
+            } finally {
+                completedActions.add(action.id());
+            }
+            if ("assign".equalsIgnoreCase(action.type())) assignedCaseVariables.add(action.name());
         }
+    }
+
+    private DiagnosticException sourceDiagnostic(DiagnosticException error, Path sourceFile, String sourceField,
+                                                 TestCase testCase, StageTemplate template, TemplateAction action,
+                                                 String caseSource) {
+        return new DiagnosticException(error.code(), error.summary(), appendCaseSource(error.detail(), caseSource),
+                sourceFile.toString(), sourceField, testCase.sheetName(), testCase.rowNumber(), null,
+                template.name(), action.id(), error.suggestion(), error);
+    }
+
+    private String appendCaseSource(String detail, String caseSource) {
+        if (caseSource == null || caseSource.isEmpty()) return detail;
+        String suffix = "Case source: " + caseSource;
+        return detail == null || detail.trim().isEmpty() ? suffix : detail + "; " + suffix;
+    }
+
+    private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine, TestCase testCase,
+                                          Set<String> availableActions) {
+        for (String path : engine.parseValuePaths(text)) {
+            if (path.startsWith("ACTIONS.")) {
+                String id = firstPathSegment(path.substring("ACTIONS.".length()));
+                if (!availableActions.contains(id)) throw unavailableActionContext(path, id, availableActions);
+            }
+            if (path.startsWith("CASE.STAGES.")) {
+                String key = firstPathSegment(path.substring("CASE.STAGES.".length()));
+                if (!testCase.stages().containsKey(key)) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                        "Unknown Case stage Context '${" + path + "}'",
+                        "Stage '" + key + "' is not declared by this Case. Available stage keys: " + String.join(", ", testCase.stages().keySet()),
+                        null, path, null, null, null, null, null,
+                        "Use a stage key declared by this Case sidecar selector/data mapping.", null);
+            }
+        }
+    }
+
+    private String firstPathSegment(String path) {
+        int dot = path.indexOf('.');
+        int bracket = path.indexOf('[');
+        int end = dot < 0 ? path.length() : dot;
+        if (bracket >= 0 && bracket < end) end = bracket;
+        return path.substring(0, end);
+    }
+
+    private void validateCallArguments(ToolCallParser.ParsedCall call, att.core.CaseRuntimeContext context,
+                                       att.template.UnifiedTemplateEngine engine) {
+        for (ToolCallParser.Argument argument : call.arguments()) engine.renderValidationValues(argument.expression(), context);
     }
 
     private static void require(String value, String message) { if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException(message); }
@@ -294,21 +578,93 @@ public final class PackageValidator {
     }
 
     private void validateToolCall(String call, FrameworkConfig config) {
-        ToolCallParser.ParsedCall parsed = callParser.parse(call);
+        validateCall(callParser.parse(call), config, true);
+    }
+
+    private void validateCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config, boolean configuredToolRequired) {
         String toolName = parsed.name();
-        if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Tool action requires a configured external tool, not built-in function: " + toolName);
+        if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
+            if (configuredToolRequired) throw new DiagnosticException(DiagnosticCodes.BUILTIN_INVALID,
+                    "Built-in function cannot be used as a tool action", "function=" + toolName,
+                    null, "call", null, null, null, null, null,
+                    "Call the built-in inside a render payload, or configure an external tool for a tool action.", null);
+            Map<String,Object> shape = new LinkedHashMap<String,Object>();
+            boolean staticArguments = true;
+            for (ToolCallParser.Argument argument : parsed.arguments()) {
+                Object value = argument.expression().contains("${") ? "<validation-value>" : callParser.literal(argument.expression());
+                staticArguments &= !argument.expression().contains("${");
+                if (shape.put(argument.key(), value) != null) throw builtInCallError(toolName,
+                        "Duplicate built-in argument '" + argument.key() + "'", "Supply each argument once.", null);
+            }
+            try {
+                builtIns.validateInvocation(toolName, shape);
+                if (staticArguments && ("sysdate".equalsIgnoreCase(toolName) || "systimestamp".equalsIgnoreCase(toolName))) builtIns.invoke(toolName, shape);
+            } catch (Exception e) {
+                DiagnosticException typed = DiagnosticException.find(e);
+                if (typed != null) throw typed;
+                throw builtInCallError(toolName, e.getMessage(), "Use the documented positional list or exact named arguments.", e);
+            }
+            return;
+        }
         ToolConfig tool = config.tool(toolName);
-        if (tool == null) throw new IllegalArgumentException("Unknown tool in template: " + toolName);
+        if (tool == null) {
+            String suggestion = nearestTool(toolName, config.tools().keySet());
+            throw new DiagnosticException(DiagnosticCodes.TOOL_INVALID, "Unknown configured tool '" + toolName + "'",
+                    "The template call does not match any global or qualified group.tool name. Available tools: " + String.join(", ", config.tools().keySet()),
+                    null, "call", null, null, null, null, null,
+                    suggestion == null ? "Define the tool in config/tools or correct the qualified group.tool name." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
+        }
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
             if (argument.positional() && !(tool.arguments().size() == 1 && parsed.arguments().size() == 1)) {
-                throw new IllegalArgumentException("Configured tools require named arguments unless the tool declares exactly one argument: " + argument.expression());
+                throw toolCallError(tool, "Positional arguments are not allowed for this tool",
+                        "The tool declares " + tool.arguments().size() + " arguments; positional shorthand requires exactly one declared and supplied argument.",
+                        "Use one of the declared names: " + tool.arguments().keySet());
             }
             String key = argument.positional() ? tool.arguments().keySet().iterator().next() : argument.key();
-            if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate tool argument: " + key);
-            if (!tool.arguments().containsKey(key)) throw new IllegalArgumentException("Unknown argument '" + key + "' for tool " + toolName);
+            if (!supplied.add(key)) throw toolCallError(tool, "Duplicate tool argument '" + key + "'", "The call supplies the same argument more than once.", "Supply each argument once.");
+            if (!tool.arguments().containsKey(key)) throw toolCallError(tool, "Unknown argument '" + key + "'",
+                    "Declared arguments: " + tool.arguments().keySet(), "Use an exact case-sensitive declared argument name.");
         }
-        for (ToolArgumentConfig argument : tool.arguments().values()) if (argument.required() && !supplied.contains(argument.key())) throw new IllegalArgumentException("Missing required argument '" + argument.key() + "' for tool " + toolName);
+        for (ToolArgumentConfig argument : tool.arguments().values()) if (argument.required() && !supplied.contains(argument.key())) throw toolCallError(tool,
+                "Missing required argument '" + argument.key() + "'", "required=true; supplied arguments=" + supplied,
+                "Add " + argument.key() + "=<value> to the call.");
+    }
+
+    private DiagnosticException builtInCallError(String function, String detail, String suggestion, Throwable cause) {
+        return new DiagnosticException(DiagnosticCodes.BUILTIN_INVALID, "Invalid built-in call '#{" + function + "(...)}'",
+                detail, null, "call", null, null, null, null, null, suggestion, cause);
+    }
+
+    private DiagnosticException toolCallError(ToolConfig tool, String summary, String detail, String suggestion) {
+        return new DiagnosticException(DiagnosticCodes.TOOL_INVALID, summary + " for tool '" + tool.key() + "'", detail,
+                tool.sourceFile() == null ? null : tool.sourceFile().toString(), "tools." + tool.key() + ".arguments",
+                null, null, null, null, null, suggestion, null);
+    }
+
+    private String nearestTool(String requested, Set<String> candidates) {
+        String best = null; int bestDistance = Integer.MAX_VALUE;
+        String requestedLocal = localToolName(requested);
+        for (String candidate : candidates) {
+            int distance = Math.min(editDistance(requested, candidate), editDistance(requestedLocal, localToolName(candidate)));
+            if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+        }
+        return bestDistance <= Math.max(2, requestedLocal.length() / 3) ? best : null;
+    }
+
+    private String localToolName(String value) {
+        int dot = value == null ? -1 : value.lastIndexOf('.');
+        return dot < 0 ? value : value.substring(dot + 1);
+    }
+
+    private int editDistance(String left, String right) {
+        int[] previous = new int[right.length() + 1]; for (int i = 0; i <= right.length(); i++) previous[i] = i;
+        for (int i = 1; i <= left.length(); i++) {
+            int[] current = new int[right.length() + 1]; current[0] = i;
+            for (int j = 1; j <= right.length(); j++) current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + (left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1));
+            previous = current;
+        }
+        return previous[right.length()];
     }
 
     private List<Path> suites(ExecutionOptions options) throws Exception {

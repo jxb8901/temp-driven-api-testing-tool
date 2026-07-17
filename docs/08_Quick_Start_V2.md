@@ -1,8 +1,8 @@
-# ATT V2.3.4 新手入門
+# ATT V2.3.5 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.3.4 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.4 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.3.5 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.5 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.4 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.5 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -293,11 +293,29 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 ## 7. 表達式
 
 - `${CASE.amount}`：讀取 Context。
+- `${CASE.VARS.txnSeq}`：讀取前序 `assign` action 寫入、可跨 stage/template 使用的 Case-scoped 變數。
 - `${CASE.outputDirectory}`：當前 Case 的絕對輸出目錄；可讓 action 將此路徑明確傳給 tool。
 - `${CASE.STAGES.invoke.TEMPLATE.ACTIONS.invokeApi.TOOL.invokePaymentApi.output}`：跨 stage 完整路徑。
 - `${ACTIONS.invokeApi.output.result}`：目前 template 的便捷結果路徑。
 - `${output.status}`：當前 action 在 assertion／runtime description 中的本地 outcome 路徑。
 - `#{tool(name='中文,字串', count=2, enabled=true)}`：調用工具，支援字串、數字、布爾 literal。
+
+需要組合一次並供後續 action／stage 重用的值時，可使用 `assign`：
+
+```yaml
+buildTxnSeq:
+  type: assign
+  name: txnSeq
+  expression: "ATT00#{sysdate('yyyyMMdd')}#{sample.getSeq(10)}"
+
+renderRequest:
+  type: render
+  payload: request.xml
+  renderAs: file
+  description: "Render request ${CASE.VARS.txnSeq}"
+```
+
+`name` 在同一 Case 內必須唯一，不能覆蓋前序 assign。求值成功後可從 `${CASE.VARS.txnSeq}` 讀取；當前 template 也可使用 `${ACTIONS.buildTxnSeq.output.result}`。`CASE.VARS` 與 Excel/框架 Case 欄位分離，並保留至後續 stage。可選 `assert` 在賦值後執行；FAIL/ERROR 不回滾已成功產生的變數。
 
 核心節點 `CASE`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL` 使用大寫；`caseId`、`targetFiles` 等 metadata 使用 camelCase。
 
@@ -321,7 +339,7 @@ ATT 內置函數包括：
 - `substr(value, start[, length])`、`indexOf(value, search[, fromIndex])`：以 0 為起點截取／搜尋；`substr` 的負數 start 從尾部計算；
 - `contains`、`startsWith`、`endsWith`、`replace`：進行大小寫敏感的字面文字比對／替換；
 - `padLeft(value, length[, pad])`、`padRight(...)`：補齊文字，預設使用空格；
-- `sysdate()`、`systimestamp()`：返回系統時區的 ISO 日期／帶 offset 毫秒 timestamp；
+- `sysdate([format])`、`systimestamp([format])`：返回系統時區的日期／timestamp；省略 format 時沿用 ISO 預設，亦可傳入 Java `DateTimeFormatter` pattern，例如 `sysdate('yyyyMMdd')`；
 - `formatDate(value, pattern[, zoneId])`、`dateAdd(value, amount, unit)`：格式化 ISO-8601 日期時間或進行日期加減。
 - `fileExists(path)`、`directoryExists(path)`、`fileSize(path)`：檢查一般文件、目錄或取得文件 byte 數；
 - `makeDirectories(path)`：建立完整目錄樹；
@@ -336,6 +354,8 @@ ATT 內置函數包括：
 #{getAppLogs(${CASE.caseId})}
 #{substr(${CASE.reference}, 0, 8)}
 #{formatDate('2026-07-14T04:30:00Z', 'yyyyMMdd-HHmm', 'Asia/Hong_Kong')}
+#{sysdate('yyyyMMdd')}
+#{systimestamp(format='yyyyMMdd-HHmmssXXX')}
 #{coalesce(${CASE.optionalReference}, 'NO-REFERENCE')}
 #{boolean(yes)}
 #{nvl(${CASE.optionalReference}, 'NO-REFERENCE')}
@@ -358,7 +378,7 @@ ATT 內置函數包括：
 #{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.3.4](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.3.5](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -405,7 +425,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.4",
+  "attVersion": "2.3.5",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -422,7 +442,9 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 }
 ```
 
-每條 diagnostic 都包含穩定 code、severity、檔案、字段，並在適用時提供 sheet、row、column、template、action 和修正建議。
+每條 diagnostic 都包含穩定 code、severity、檔案、字段，並在適用時提供 sheet、row、column、template、action、詳細原因和修正建議。驗證會使用與 run 相同的 Context 與 `#{...}` parser，因而會在執行前拒絕未知 Context、錯誤 stage/action ID、未知 built-in/tool、錯誤參數，以及 render payload 內的錯誤調用；validation 不會真的執行 built-in 或外部 tool。
+
+一般 human run 只輸出最終統計及 report 路徑。需要逐步排查時加入 `--verbose`，ATT 會顯示 run/suite/Case/stage/action lifecycle，並將每個完整 Case-log block（包括模板內容、tool input/argv/stdout/stderr）鏡像到 console；這可能包含敏感案例資料，只應在合適的終端使用。`--quiet` 則抑制一般輸出，且不可與 `--verbose` 同用。
 
 不帶參數或使用 `--help` 顯示完整用法。
 
@@ -462,7 +484,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 ## 10. 常見問題與安全提醒
 
 - 找不到模板：檢查目錄中的 `template.yaml`、symbolic name 或完整路徑。
-- Context 是空值：檢查大寫核心節點及 ID；stage/action ID 不可包含 `.`。
+- Context variable 報錯：按 diagnostic 的 field 與建議修正大小寫、stage/action ID 或 camelCase 欄名；不存在的變量不再靜默轉為空字串。案例中確實存在但值為 blank 的 optional 欄位仍會得到空字串。
 - Tool 驗證失敗：檢查 unknown、missing required 或 duplicate argument。
 - YAML cell 失敗：確認內容是 map 或 scalar shorthand；檢查重複 key 和未知字段。
 - 中文連結：V2.2 使用 Unicode-safe anchor，可支援中文 Case ID、模板名及路徑。

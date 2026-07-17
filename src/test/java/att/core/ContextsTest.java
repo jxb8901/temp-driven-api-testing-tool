@@ -12,6 +12,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ContextsTest {
     @TempDir Path tempDir;
@@ -58,5 +60,35 @@ class ContextsTest {
                 tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
         context.put("TOOL.input.value", 7);
         assertEquals(7, context.resolve("TOOL.input.value"));
+    }
+
+    @Test void requiredContextReportsCaseSensitiveTypoAndNearestField() {
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                        Collections.<String,Object>emptyMap(), Collections.<String,StageCaseData>emptyMap(), null),
+                tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
+                () -> context.require("CASE.csaeId"));
+        assertEquals(att.validation.DiagnosticCodes.CONTEXT_INVALID, error.code());
+        assertTrue(error.format().contains("CASE.caseId"));
+        assertTrue(error.format().contains("case-sensitive"));
+    }
+
+    @Test void caseVariablesSurviveStagesAndRejectOverwrite() {
+        Map<String,Object> input = new LinkedHashMap<String,Object>();
+        input.put("VARS", Collections.singletonMap("fromExcel", "must-not-enter-runtime-vars"));
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),input,Collections.<String,StageCaseData>emptyMap(),null),
+                tempDir,"R",tempDir,tempDir.resolve("case.log"));
+        context.assignCaseVariable("txnSeq", "ATT001");
+        context.beginStage(new StageCaseData("first","T1",Collections.<String,Object>emptyMap()),"T1",tempDir);
+        assertEquals("ATT001", context.resolve("CASE.VARS.txnSeq"));
+        context.beginStage(new StageCaseData("second","T2",Collections.<String,Object>emptyMap()),"T2",tempDir);
+        assertEquals("ATT001", context.resolve("CASE.VARS.txnSeq"));
+        assertNull(context.resolve("CASE.VARS.fromExcel"));
+        att.validation.DiagnosticException duplicate = assertThrows(att.validation.DiagnosticException.class,
+                () -> context.assignCaseVariable("txnSeq", "ATT002"));
+        assertEquals(att.validation.DiagnosticCodes.CONTEXT_INVALID, duplicate.code());
+        assertEquals("ATT001", context.resolve("CASE.VARS.txnSeq"));
     }
 }

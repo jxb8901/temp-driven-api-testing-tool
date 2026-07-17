@@ -33,6 +33,7 @@ public final class CaseRuntimeContext {
         // Framework-owned runtime metadata must not be replaceable by a
         // same-named workbook column/case-data alias.
         caseNode.put("outputDirectory", this.caseOutputDir.toString());
+        caseNode.put("VARS", new LinkedHashMap<String, Object>());
         caseNode.put("STAGES", new LinkedHashMap<String, Object>());
         root.put("CASE", caseNode);
         root.put("ACTIONS", actionsView);
@@ -77,15 +78,51 @@ public final class CaseRuntimeContext {
     }
 
     public Object resolve(String path) {
-        if (root.containsKey(path)) return root.get(path);
-        if (path.startsWith("TOOL.")) {
-            Object scoped = getPath(root.get("TOOL"), path.substring("TOOL.".length()));
-            if (scoped != null) return scoped;
-            if (path.startsWith("TOOL.input.")) return getPath(root.get("TOOL.input"), path.substring("TOOL.input.".length()));
-            if (path.startsWith("TOOL.output.")) return getPath(root.get("TOOL.output"), path.substring("TOOL.output.".length()));
+        Lookup lookup = lookup(path);
+        return lookup.found ? lookup.value : null;
+    }
+
+    public Object require(String path) {
+        Lookup lookup = lookup(path);
+        if (lookup.found) return lookup.value;
+        java.util.List<String> paths = availablePaths();
+        String nearest = nearest(path, paths);
+        String parent = parent(path);
+        java.util.List<String> siblings = new java.util.ArrayList<String>();
+        for (String candidate : paths) if (parent.isEmpty() || candidate.startsWith(parent + ".")) {
+            String remainder = parent.isEmpty() ? candidate : candidate.substring(parent.length() + 1);
+            if (!remainder.contains(".")) siblings.add(remainder);
         }
-        Object direct = getPath(root, path);
-        return direct == null ? getPath(caseNode, path) : direct;
+        java.util.Collections.sort(siblings);
+        if (siblings.size() > 12) siblings = new java.util.ArrayList<String>(siblings.subList(0, 12));
+        String detail = "No value exists at the case-sensitive path '" + path + "'"
+                + (siblings.isEmpty() ? "" : ". Available fields under '" + (parent.isEmpty() ? "<root>" : parent) + "': " + String.join(", ", siblings));
+        String suggestion = nearest == null
+                ? "Check the uppercase scope (CASE/ACTIONS/TOOL/RUN), stage/action IDs, and camelCase field name."
+                : "Use '${" + nearest + "}' if that is the intended Context variable; Context names are case-sensitive.";
+        throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                "Unknown Context variable '${" + path + "}'", detail, null, path, null, null, null,
+                null, null, suggestion, null);
+    }
+
+    public boolean contains(String path) { return lookup(path).found; }
+
+    private Lookup lookup(String path) {
+        if (root.containsKey(path)) return Lookup.found(root.get(path));
+        if (path.startsWith("TOOL.")) {
+            Lookup scoped = findPath(root.get("TOOL"), path.substring("TOOL.".length()));
+            if (scoped.found) return scoped;
+            if (path.startsWith("TOOL.input.")) {
+                Lookup input = findPath(root.get("TOOL.input"), path.substring("TOOL.input.".length()));
+                if (input.found) return input;
+            }
+            if (path.startsWith("TOOL.output.")) {
+                Lookup output = findPath(root.get("TOOL.output"), path.substring("TOOL.output.".length()));
+                if (output.found) return output;
+            }
+        }
+        Lookup direct = findPath(root, path);
+        return direct.found ? direct : findPath(caseNode, path);
     }
 
     public void put(String key, Object value) {
@@ -96,6 +133,31 @@ public final class CaseRuntimeContext {
             Map<String, Object> tool = (Map<String, Object>) root.get("TOOL");
             putPath(tool, key.substring(5), value);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    public void requireCaseVariableAvailable(String name) {
+        if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                    "Invalid CASE.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
+                    null, "name", null, null, null, null, null,
+                    "Use a simple case-sensitive identifier such as txnSeq.", null);
+        }
+        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
+        if (variables.containsKey(name)) {
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                    "Duplicate CASE.VARS assignment '${CASE.VARS." + name + "}'",
+                    "The variable was already assigned earlier in this Test Case.", null, "name",
+                    null, null, null, null, null,
+                    "Use a unique name; assign does not overwrite Case-scoped variables.", null);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public void assignCaseVariable(String name, Object value) {
+        requireCaseVariableAvailable(name);
+        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
+        variables.put(name, value);
     }
 
     public Map<String, Object> values() { return root; }
@@ -141,33 +203,102 @@ public final class CaseRuntimeContext {
 
     @SuppressWarnings("unchecked")
     public static Object getPath(Object root, String path) {
-        if (path == null || path.isEmpty()) return root;
+        Lookup lookup = findPath(root, path);
+        return lookup.found ? lookup.value : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Lookup findPath(Object root, String path) {
+        if (path == null || path.isEmpty()) return Lookup.found(root);
         Object current = root;
         int position = 0;
         while (position < path.length()) {
             if (path.charAt(position) == '.') { position++; continue; }
             if (path.charAt(position) == '[') {
                 int end = bracketEnd(path, position);
-                if (end < 0) return null;
+                if (end < 0) return Lookup.missing();
                 String selector = path.substring(position + 1, end).trim();
                 if (quoted(selector)) {
-                    if (!(current instanceof Map)) return null;
-                    current = ((Map<String, Object>) current).get(unquote(selector));
+                    if (!(current instanceof Map)) return Lookup.missing();
+                    String key = unquote(selector);
+                    if (!((Map<String, Object>) current).containsKey(key)) return Lookup.missing();
+                    current = ((Map<String, Object>) current).get(key);
                 } else if (current instanceof java.util.List && numeric(selector)) {
-                    current = listValue((java.util.List<?>) current, Integer.parseInt(selector));
-                } else return null;
+                    int index = Integer.parseInt(selector);
+                    if (index < 0 || index >= ((java.util.List<?>) current).size()) return Lookup.missing();
+                    current = ((java.util.List<?>) current).get(index);
+                } else return Lookup.missing();
                 position = end + 1;
                 continue;
             }
             int end = position;
             while (end < path.length() && path.charAt(end) != '.' && path.charAt(end) != '[') end++;
             String key = path.substring(position, end);
-            if (current instanceof Map) current = ((Map<String, Object>) current).get(key);
-            else if (current instanceof java.util.List && numeric(key)) current = listValue((java.util.List<?>) current, Integer.parseInt(key));
-            else return null;
+            if (current instanceof Map) {
+                if (!((Map<String, Object>) current).containsKey(key)) return Lookup.missing();
+                current = ((Map<String, Object>) current).get(key);
+            } else if (current instanceof java.util.List && numeric(key)) {
+                int index = Integer.parseInt(key);
+                if (index < 0 || index >= ((java.util.List<?>) current).size()) return Lookup.missing();
+                current = ((java.util.List<?>) current).get(index);
+            } else return Lookup.missing();
             position = end;
         }
-        return current;
+        return Lookup.found(current);
+    }
+
+    private java.util.List<String> availablePaths() {
+        java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<String>();
+        collectPaths(root, "", result, 0);
+        return new java.util.ArrayList<String>(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void collectPaths(Object value, String prefix, java.util.Set<String> output, int depth) {
+        if (depth > 8 || !(value instanceof Map)) return;
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            String path = prefix.isEmpty() ? key : prefix + "." + key;
+            output.add(path);
+            collectPaths(entry.getValue(), path, output, depth + 1);
+        }
+    }
+
+    private static String parent(String path) {
+        int dot = path == null ? -1 : path.lastIndexOf('.');
+        return dot < 0 ? "" : path.substring(0, dot);
+    }
+
+    private static String nearest(String requested, java.util.List<String> candidates) {
+        String best = null; int distance = Integer.MAX_VALUE;
+        for (String candidate : candidates) {
+            int current = levenshtein(requested, candidate);
+            if (current < distance) { distance = current; best = candidate; }
+        }
+        int threshold = Math.max(2, requested == null ? 2 : requested.length() / 4);
+        return distance <= threshold ? best : null;
+    }
+
+    private static int levenshtein(String left, String right) {
+        if (left == null) left = ""; if (right == null) right = "";
+        int[] previous = new int[right.length() + 1];
+        for (int j = 0; j <= right.length(); j++) previous[j] = j;
+        for (int i = 1; i <= left.length(); i++) {
+            int[] current = new int[right.length() + 1]; current[0] = i;
+            for (int j = 1; j <= right.length(); j++) {
+                int cost = left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1;
+                current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
+            }
+            previous = current;
+        }
+        return previous[right.length()];
+    }
+
+    private static final class Lookup {
+        private final boolean found; private final Object value;
+        private Lookup(boolean found, Object value) { this.found = found; this.value = value; }
+        private static Lookup found(Object value) { return new Lookup(true, value); }
+        private static Lookup missing() { return new Lookup(false, null); }
     }
 
     private static int bracketEnd(String path, int start) {

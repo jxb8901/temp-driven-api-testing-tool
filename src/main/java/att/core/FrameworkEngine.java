@@ -70,7 +70,7 @@ public class FrameworkEngine {
         Path finalRunDirectory = plan.finalRunDirectory();
         RunConcurrencyGuard concurrencyGuard = RunConcurrencyGuard.acquire(outputRoot, options.concurrencyMode(), new Runnable() {
             @Override public void run() {
-                if (!options.quiet() && "human".equals(options.format())) System.out.println("ATT run queued: waiting for the active run to complete");
+                verbose(options, "[RUN] queued: waiting for the active run to complete");
             }
         });
         try {
@@ -171,7 +171,13 @@ public class FrameworkEngine {
         Path caseOutputDir = IdentifierValidator.strictChild(runDirectory, validatedCaseId, "Case directory");
         Files.createDirectories(caseOutputDir);
         Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
-        CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors());
+        if (options.verbose() && !options.quiet() && "human".equals(options.format())) {
+            System.out.println("[CASE-LOG] case=" + testCase.caseId() + " file=" + portable(caseLogPath));
+        }
+        CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors(),
+                options.verbose() && !options.quiet() && "human".equals(options.format())
+                        ? new java.util.function.Consumer<String>() { @Override public void accept(String text) { System.out.print(text); } }
+                        : null);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, runId, runDirectory, caseLogPath);
         context.put("CASE.environment", suiteConfig.environment());
         caseLog.append("CASE", context.caseTree());
@@ -220,12 +226,14 @@ public class FrameworkEngine {
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
                     testCase.workbookId(), testCase.groupId(), testCase.tags());
         } catch (Exception e) {
-            caseLog.append("ERROR", e.getMessage());
+            att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
+            String errorMessage = typed == null ? message(e) : typed.format();
+            caseLog.append("ERROR", errorMessage);
             context.put("CASE.status", ResultStatus.ERROR.name());
-            context.put("CASE.error", e.getMessage());
+            context.put("CASE.error", errorMessage);
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             writeCaseTree(caseOutputDir, context);
-            return error(testCase, e.getMessage(), caseLogPath, Duration.between(started, Instant.now()));
+            return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()));
         }
     }
 
@@ -285,6 +293,11 @@ public class FrameworkEngine {
 
     private void verbose(ExecutionOptions options, String message) {
         if (options.verbose() && !options.quiet() && "human".equals(options.format())) System.out.println(message);
+    }
+
+    private String message(Exception error) {
+        String value = error.getMessage();
+        return value == null || value.trim().isEmpty() ? error.getClass().getSimpleName() : value;
     }
 
     private String portable(Path path) {

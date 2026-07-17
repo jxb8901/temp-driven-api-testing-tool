@@ -48,6 +48,9 @@ class V2ConfigTest {
         assertEquals("payment", resolved.workbookId());
         assertEquals("normal", stage.runWhen());
         assertEquals("stop", stage.onFailure());
+        Files.write(tempDir.resolve("reserved-vars.yaml"), ("schemaVersion: att-sidecar/v2.1\nid: reserved-vars\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\n  dataColumns: VARS=Runtime Vars\n"
+                + "stages:\n  - key: invoke\n    template: Template\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new SuiteConfigResolver(tempDir, global).resolve(tempDir.resolve("reserved-vars.xlsx")));
         Files.write(tempDir.resolve("missing-id.yaml"), ("schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: invoke\n    template: Template\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new SuiteConfigResolver(tempDir, global).resolve(tempDir.resolve("missing-id.xlsx")));
     }

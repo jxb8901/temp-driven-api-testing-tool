@@ -83,7 +83,10 @@ public class ToolInvoker {
     private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs, String saveAs, boolean overwrite) throws Exception {
         ToolConfig tool = config.tool(toolName);
         if (tool == null) {
-            throw new IllegalArgumentException("Unknown tool: " + toolName);
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
+                    "Unknown configured tool '" + toolName + "'", "Available tools: " + String.join(", ", config.tools().keySet()),
+                    null, "call", null, null, null, null, null,
+                    "Correct the case-sensitive qualified group.tool name or define it in the loaded configuration.", null);
         }
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
@@ -214,13 +217,25 @@ public class ToolInvoker {
 
     private void validateArguments(ToolConfig tool, Map<String, Object> input) {
         for (String supplied : input.keySet()) {
-            if (!tool.arguments().containsKey(supplied)) throw new IllegalArgumentException("Unknown argument '" + supplied + "' for tool " + tool.key());
+            if (!tool.arguments().containsKey(supplied)) throw toolArgumentError(tool, supplied,
+                    "Unknown argument '" + supplied + "'", "Declared arguments: " + tool.arguments().keySet(),
+                    "Use an exact case-sensitive declared argument name.");
         }
         for (ToolArgumentConfig argument : tool.arguments().values()) {
             if (argument.required() && (!input.containsKey(argument.key()) || blank(input.get(argument.key())))) {
-                throw new IllegalArgumentException("Missing required argument '" + argument.key() + "' for tool " + tool.key());
+                throw toolArgumentError(tool, argument.key(), "Missing required argument '" + argument.key() + "'",
+                        "required=true, providedValue=" + input.get(argument.key()),
+                        "Provide a non-blank value for this argument in the tool call.");
             }
         }
+    }
+
+    private att.validation.DiagnosticException toolArgumentError(ToolConfig tool, String argument, String summary,
+                                                                  String detail, String suggestion) {
+        return new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
+                summary + " for tool '" + tool.key() + "'", detail,
+                tool.sourceFile() == null ? null : tool.sourceFile().toString(),
+                "tools." + tool.key() + ".arguments." + argument, null, null, null, null, null, suggestion, null);
     }
 
     private void normalizeSinglePositionalArgument(ToolConfig tool, Map<String, Object> input) {
@@ -340,7 +355,7 @@ public class ToolInvoker {
         Matcher matcher = VALUE.matcher(template);
         StringBuffer output = new StringBuffer();
         while (matcher.find()) {
-            Object value = context.resolve(matcher.group(1));
+            Object value = context.require(matcher.group(1));
             matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
         }
         matcher.appendTail(output);

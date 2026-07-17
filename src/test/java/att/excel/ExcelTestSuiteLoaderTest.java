@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExcelTestSuiteLoaderTest {
     @TempDir Path tempDir;
@@ -55,6 +57,19 @@ class ExcelTestSuiteLoaderTest {
         assertEquals(1, cases.size());
         assertEquals("payments.payment.TC002", cases.get(0).caseId());
         assertEquals("PAYMENT_INVOKE", cases.get(0).stage("invoke").templateName());
+    }
+
+    @Test void blankCaseIdReportsWorkbookSheetRowColumnAndSuggestion() throws Exception {
+        Path workbook = tempDir.resolve("invalid.xlsx");
+        writeBlankCaseIdWorkbook(workbook);
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
+                () -> new ExcelTestSuiteLoader(config(1, false)).load(workbook));
+        assertEquals("ATT-TC-001", error.code());
+        assertEquals("支付測試案例集", error.sheet());
+        assertEquals(Integer.valueOf(2), error.row());
+        assertEquals(Integer.valueOf(1), error.column());
+        assertTrue(error.format().contains(workbook.toString()));
+        assertTrue(error.format().contains("Enter a non-blank"));
     }
 
     private FrameworkConfig config() {
@@ -108,6 +123,20 @@ class ExcelTestSuiteLoaderTest {
             row.createCell(3).setCellValue("");
             row.createCell(4).setCellValue("PAYMENT_INVOKE");
             row.createCell(5).setCellValue("timeout: 30");
+            workbook.write(output);
+        }
+    }
+
+    private void writeBlankCaseIdWorkbook(Path path) throws Exception {
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(path)) {
+            Sheet sheet = workbook.createSheet("支付測試案例集");
+            Row header = sheet.createRow(0);
+            String[] columns = {"案例編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            for (int i = 0; i < columns.length; i++) header.createCell(i).setCellValue(columns[i]);
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue(""); row.createCell(1).setCellValue("invalid");
+            row.createCell(2).setCellValue("smoke"); row.createCell(3).setCellValue("");
+            row.createCell(4).setCellValue("PAYMENT_INVOKE"); row.createCell(5).setCellValue("timeout: 30");
             workbook.write(output);
         }
     }

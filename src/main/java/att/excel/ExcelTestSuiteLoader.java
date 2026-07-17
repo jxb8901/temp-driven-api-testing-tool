@@ -46,35 +46,44 @@ public final class ExcelTestSuiteLoader {
             return result;
         } catch (IOException e) {
             throw e;
+        } catch (att.validation.DiagnosticException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("Unable to load V2 suite " + suitePath + ": " + e.getMessage(), e);
+            throw caseError("Unable to load testcase workbook", e.getMessage(), suitePath, "workbook",
+                    null, null, null, "Verify that the file is a readable .xlsx workbook and matches its sidecar configuration.", e);
         }
     }
 
     private void loadGroup(Workbook workbook, Path suitePath, SheetGroupConfig group, List<TestCase> output, Set<String> ids) {
         Sheet sheet = workbook.getSheet(group.sheetName());
-        if (sheet == null) throw new IllegalArgumentException("Missing configured sheet '" + group.sheetName() + "' for group '" + group.id() + "'");
-        if (sheet.getLastRowNum() < config.headerRows() - 1) throw new IllegalArgumentException("Missing header rows in sheet: " + group.sheetName());
+        if (sheet == null) throw caseError("Configured Sheet does not exist", "groupId=" + group.id() + ", configuredSheet='" + group.sheetName() + "'", suitePath,
+                "excel.sheet", group.sheetName(), null, null, "Correct the sidecar sheet mapping or add the configured Sheet to the workbook.", null);
+        if (sheet.getLastRowNum() < config.headerRows() - 1) throw caseError("Configured header rows do not exist", "headerRows=" + config.headerRows(), suitePath,
+                "excel.headerRows", group.sheetName(), null, null, "Reduce excel.headerRows or add the required header rows.", null);
         Map<String, Integer> columns = columns(sheet, config.headerRows());
-        requireColumn(columns, config.caseIdColumn(), "excel.caseId", group);
-        requireColumn(columns, config.tagsColumn(), "excel.tags", group);
-        for (DataColumnConfig column : config.dataColumns()) requireColumn(columns, column.columnName(), "excel.dataColumns." + column.key(), group);
+        requireColumn(columns, config.caseIdColumn(), "excel.caseId", group, suitePath);
+        requireColumn(columns, config.tagsColumn(), "excel.tags", group, suitePath);
+        for (DataColumnConfig column : config.dataColumns()) requireColumn(columns, column.columnName(), "excel.dataColumns." + column.key(), group, suitePath);
         for (StageConfig stage : config.stages()) {
-            requireColumn(columns, stage.template(), "stages." + stage.key() + ".template", group);
-            for (DataColumnConfig column : stage.dataColumns()) requireColumn(columns, column.columnName(), "stages." + stage.key() + ".dataColumns." + column.key(), group);
+            requireColumn(columns, stage.template(), "stages." + stage.key() + ".template", group, suitePath);
+            for (DataColumnConfig column : stage.dataColumns()) requireColumn(columns, column.columnName(), "stages." + stage.key() + ".dataColumns." + column.key(), group, suitePath);
         }
         for (int rowIndex = config.headerRows(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
             Row row = sheet.getRow(rowIndex);
             if (row == null || blankRow(row, columns)) continue;
             TestCase testCase = toCase(suitePath, group, row, columns);
-            if (!ids.add(testCase.caseId())) throw new IllegalArgumentException("Duplicate full Case ID " + testCase.caseId() + " at " + group.sheetName() + "!" + (rowIndex + 1));
+            if (!ids.add(testCase.caseId())) throw caseError("Duplicate full Case ID '" + testCase.caseId() + "'", "The same workbookId.groupId.rowCaseId was already loaded.", suitePath,
+                    "excel.caseId", group.sheetName(), rowIndex + 1, columns.get(config.caseIdColumn()) + 1,
+                    "Make the row Case ID unique within this workbook and group.", null);
             output.add(testCase);
         }
     }
 
     private TestCase toCase(Path suitePath, SheetGroupConfig group, Row row, Map<String, Integer> columns) {
         String rowCaseId = value(row, columns.get(config.caseIdColumn()));
-        if (rowCaseId.isEmpty()) throw new IllegalArgumentException("Blank Case ID at " + group.sheetName() + "!" + (row.getRowNum() + 1));
+        if (rowCaseId.isEmpty()) throw caseError("Case ID is blank", "The configured Case ID cell normalizes to blank.", suitePath,
+                "excel.caseId", group.sheetName(), row.getRowNum() + 1, columns.get(config.caseIdColumn()) + 1,
+                "Enter a non-blank, path-safe row Case ID in this cell.", null);
         List<String> tags = tags(value(row, columns.get(config.tagsColumn())));
         Map<String, Object> caseData = loadColumns(row, columns, config.dataColumns());
         caseData.put("workbook", suitePath.getFileName().toString());
@@ -83,23 +92,38 @@ public final class ExcelTestSuiteLoader {
         for (StageConfig stage : config.stages()) {
             String cell = value(row, columns.get(stage.template()));
             if (cell.isEmpty()) {
-                if (stage.required()) throw new IllegalArgumentException("Required stage '" + stage.key() + "' has blank template at " + group.sheetName() + "!" + (row.getRowNum() + 1));
+                if (stage.required()) throw stageError("Required stage selector is blank", "stage=" + stage.key(), suitePath,
+                        "stages." + stage.key() + ".template", group.sheetName(), row.getRowNum() + 1, columns.get(stage.template()) + 1,
+                        "Enter a template symbolic name/path or mark the stage as optional.", null);
                 continue;
             }
-            Map<String, Object> stageValues = yamlMap(cell, "stage template cell " + group.sheetName() + "!" + (row.getRowNum() + 1));
+            Map<String, Object> stageValues;
+            try { stageValues = yamlMap(cell, "stage template cell " + group.sheetName() + "!" + (row.getRowNum() + 1)); }
+            catch (Exception e) { throw stageError("Invalid stage selector YAML", e.getMessage(), suitePath,
+                    "stages." + stage.key() + ".template", group.sheetName(), row.getRowNum() + 1, columns.get(stage.template()) + 1,
+                    "Use a scalar template name/path or a YAML map containing a non-blank name.", e); }
             for (String reserved : new String[]{"key", "status", "startedAt", "durationMs", "TEMPLATE"}) {
-                if (stageValues.containsKey(reserved)) throw new IllegalArgumentException("Reserved stage key '" + reserved + "' in " + group.sheetName() + "!" + (row.getRowNum() + 1));
+                if (stageValues.containsKey(reserved)) throw stageError("Stage selector uses reserved key '" + reserved + "'", "stage=" + stage.key(), suitePath,
+                        "stages." + stage.key() + ".template", group.sheetName(), row.getRowNum() + 1, columns.get(stage.template()) + 1,
+                        "Remove the framework-owned key from the selector map.", null);
             }
             Object name = stageValues.get("name");
-            if (name == null || ValueNormalizer.normalize(String.valueOf(name)).isEmpty()) throw new IllegalArgumentException("Stage template YAML requires non-blank name: " + stage.key());
+            if (name == null || ValueNormalizer.normalize(String.valueOf(name)).isEmpty()) throw stageError("Stage selector requires a non-blank name", "stage=" + stage.key(), suitePath,
+                    "stages." + stage.key() + ".template.name", group.sheetName(), row.getRowNum() + 1, columns.get(stage.template()) + 1,
+                    "Add name: <template symbolic name or relative path>.", null);
             Map<String, Object> privateData = loadColumns(row, columns, stage.dataColumns());
             for (Map.Entry<String, Object> entry : privateData.entrySet()) {
-                if (stageValues.containsKey(entry.getKey())) throw new IllegalArgumentException("Duplicate stage data key '" + entry.getKey() + "' in stage " + stage.key());
+                if (stageValues.containsKey(entry.getKey())) throw stageError("Duplicate stage data key '" + entry.getKey() + "'", "stage=" + stage.key(), suitePath,
+                        "stages." + stage.key() + ".dataColumns." + entry.getKey(), group.sheetName(), row.getRowNum() + 1, null,
+                        "Keep the key in either the selector map or the configured stage data column, not both.", null);
                 stageValues.put(entry.getKey(), entry.getValue());
             }
             stages.put(stage.key(), new StageCaseData(stage.key(), ValueNormalizer.normalize(String.valueOf(name)), stageValues));
         }
-        IdentifierValidator.caseId(config.workbookId(), group.id(), rowCaseId);
+        try { IdentifierValidator.caseId(config.workbookId(), group.id(), rowCaseId); }
+        catch (Exception e) { throw caseError("Invalid full Case ID", "workbookId=" + config.workbookId() + ", groupId=" + group.id() + ", rowCaseId='" + rowCaseId + "': " + e.getMessage(), suitePath,
+                "excel.caseId", group.sheetName(), row.getRowNum() + 1, columns.get(config.caseIdColumn()) + 1,
+                "Use an ID without dots, path separators, control characters, trailing dots/spaces, or reserved platform names.", e); }
         return new TestCase(row.getRowNum() + 1, config.workbookId(), group.id(), group.sheetName(), rowCaseId, tags, caseData, stages, null);
     }
 
@@ -172,8 +196,25 @@ public final class ExcelTestSuiteLoader {
         return result;
     }
 
-    private void requireColumn(Map<String, Integer> columns, String name, String field, SheetGroupConfig group) {
-        if (name == null || name.trim().isEmpty() || !columns.containsKey(name)) throw new IllegalArgumentException("Missing required column for " + field + " in group " + group.id() + ": " + name);
+    private void requireColumn(Map<String, Integer> columns, String name, String field, SheetGroupConfig group, Path suitePath) {
+        if (name == null || name.trim().isEmpty() || !columns.containsKey(name)) throw caseError("Required Excel column is missing",
+                "field=" + field + ", expectedHeader='" + name + "', availableHeaders=" + columns.keySet(), suitePath,
+                field, group.sheetName(), config.headerRows(), null,
+                "Correct the sidecar header mapping or add the exact case-sensitive header to the configured header row.", null);
+    }
+
+    private static att.validation.DiagnosticException caseError(String summary, String detail, Path file, String field,
+                                                                String sheet, Integer row, Integer column,
+                                                                String suggestion, Throwable cause) {
+        return new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TESTCASE_INVALID, summary, detail,
+                file == null ? null : file.toString(), field, sheet, row, column, null, null, suggestion, cause);
+    }
+
+    private static att.validation.DiagnosticException stageError(String summary, String detail, Path file, String field,
+                                                                 String sheet, Integer row, Integer column,
+                                                                 String suggestion, Throwable cause) {
+        return new att.validation.DiagnosticException(att.validation.DiagnosticCodes.STAGE_INVALID, summary, detail,
+                file == null ? null : file.toString(), field, sheet, row, column, null, null, suggestion, cause);
     }
 
     private boolean blankRow(Row row, Map<String, Integer> columns) {

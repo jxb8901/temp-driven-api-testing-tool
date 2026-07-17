@@ -10,6 +10,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FppLandingTemplatesTest {
@@ -31,19 +32,18 @@ class FppLandingTemplatesTest {
         assertTrue(actions.get("assertDsrTxn").expected().contains("ACPT or UCPT"));
     }
 
-    @Test void ctoRtiTemplateCoversMessagesLogsAndDatabaseOutcomes() throws Exception {
+    @Test void ctoRtiTemplateActivatesPrecheckAndKeepsLaterFlowStaged() throws Exception {
         StageTemplate template = loader().load("FPP_CTO_RTI_USMF");
         Map<String, TemplateAction> actions = index(template);
 
-        for (String id : new String[]{"invokePrecheck", "searchPrecheckLog", "invokeConfirm",
-                "searchConfirmLog", "queryCtoAfterConfirm", "searchPacs002Acsc",
-                "searchPacs002Accc", "invokePacs004", "queryRtiTxn", "queryCtoRefund"}) {
-            assertNotNull(actions.get(id), "missing CTO/RTI flow action " + id);
+        for (String id : new String[]{"buildTxnSeq", "renderPrecheckRequest", "log1",
+                "invokePrecheck", "assertPrecheck"}) {
+            assertNotNull(actions.get(id), "missing active CTO/RTI precheck action " + id);
         }
-        assertPolling(actions.get("queryCtoAfterConfirm"));
-        assertPolling(actions.get("queryRtiTxn"));
-        assertPolling(actions.get("queryCtoRefund"));
-        assertTrue(actions.get("assertRtiTxn").expected().contains("${CASE.amount}"));
+        assertEquals(5, actions.size());
+        assertNull(actions.get("searchPrecheckLog"), "top-level x-staged extension must not become an action");
+        assertEquals("TxnSeq", actions.get("buildTxnSeq").name());
+        assertTrue(actions.get("invokePrecheck").call().contains("${CASE.VARS.TxnSeq}"));
     }
 
     private StageTemplateLoader loader() throws Exception {

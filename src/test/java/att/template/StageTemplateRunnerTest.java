@@ -143,6 +143,48 @@ class StageTemplateRunnerTest {
         assertEquals("Render g.TC1; status=ERROR", context.resolve("ACTIONS.render.description"));
         assertTrue(((Number)context.resolve("ACTIONS.render.output.durationMs")).longValue() >= 0);
     }
+
+    @Test void assignPublishesCaseVariableAcrossStagesAndAssertionDoesNotRollback() throws Exception {
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        Path caseDir = tempDir.resolve("assign-case");
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("prepare","PREPARE",Collections.<String,Object>emptyMap()),"PREPARE",tempDir);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("seq", new ToolConfig("seq","Sequence","test","seq","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        TemplateAction assign = new TemplateAction("build", map("type","assign","name","txnSeq",
+                "expression","ATT#{upper('x')}#{seq()}","assert","${output.result} == 'wrong'","onFailure","continue"));
+        List<ValidationResult> assigned = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new FixedRunner(0,"0007"))))
+                .execute("prepare",new StageTemplate("PREPARE",tempDir,Collections.singletonList(assign)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
+        assertEquals(ResultStatus.FAIL, assigned.get(0).status());
+        assertEquals("ATTX0007", context.resolve("CASE.VARS.txnSeq"));
+        assertEquals("ATTX0007", context.resolve("ACTIONS.build.output.result"));
+
+        context.beginStage(new StageCaseData("invoke","INVOKE",Collections.<String,Object>emptyMap()),"INVOKE",tempDir);
+        TemplateAction log = new TemplateAction("use", map("type","log","message","id=${CASE.VARS.txnSeq}"));
+        List<ValidationResult> used = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("invoke",new StageTemplate("INVOKE",tempDir,Collections.singletonList(log)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
+        assertEquals(ResultStatus.PASS, used.get(0).status());
+        assertEquals("id=ATTX0007", context.resolve("ACTIONS.use.output.result"));
+    }
+
+    @Test void failedOrDuplicateAssignDoesNotReplaceCaseVariable() throws Exception {
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        Path caseDir = tempDir.resolve("duplicate-assign");
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("prepare","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("first",map("type","assign","name","txnSeq","expression","FIRST")),
+                new TemplateAction("duplicate",map("type","assign","name","txnSeq","expression","SECOND","onFailure","continue")),
+                new TemplateAction("failed",map("type","assign","name","missingValue","expression","${CASE.missing}","onFailure","continue")));
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("prepare",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(caseDir.resolve("case.log")));
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals(ResultStatus.ERROR, results.get(1).status());
+        assertEquals(ResultStatus.ERROR, results.get(2).status());
+        assertEquals("FIRST", context.resolve("CASE.VARS.txnSeq"));
+        assertNull(context.resolve("CASE.VARS.missingValue"));
+    }
     private static final class SequencedRunner extends CommandRunner {
         int calls; final boolean timeout;
         final boolean alwaysSuccess;

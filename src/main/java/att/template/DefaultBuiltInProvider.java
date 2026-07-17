@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-/** The only built-in provider registered by ATT V2.3.4. */
+/** The only built-in provider registered by ATT V2.3.5. */
 public final class DefaultBuiltInProvider implements BuiltInProvider {
     private static final int MAX_TEXT_LENGTH = 10000;
     private static final int MAX_RANDOM_CHOICES = 1000;
@@ -70,12 +70,12 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if (!NAMES.contains(function)) throw new IllegalArgumentException("Unknown built-in: " + name);
 
         if ("sysdate".equals(function)) {
-            requireNone(input, "sysdate");
-            return DateTimeFormatter.ISO_LOCAL_DATE.format(LocalDate.now(clock));
+            return systemTime(input, "sysdate", DateTimeFormatter.ISO_LOCAL_DATE,
+                    LocalDate.now(clock));
         }
         if ("systimestamp".equals(function)) {
-            requireNone(input, "systimestamp");
-            return SYSTEM_TIMESTAMP.format(OffsetDateTime.ofInstant(clock.instant(), clock.getZone()));
+            return systemTime(input, "systimestamp", SYSTEM_TIMESTAMP,
+                    OffsetDateTime.ofInstant(clock.instant(), clock.getZone()));
         }
         if (isSingleValueFunction(function)) return invokeSingleValue(function, singleValue(input, function));
         if ("concat".equals(function)) {
@@ -132,6 +132,62 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("formatdate".equals(function)) return formatDate(input);
         if ("dateadd".equals(function)) return dateAdd(input);
         throw new IllegalArgumentException("Unknown built-in: " + name);
+    }
+
+    /** Validates call names/counts/styles without evaluating runtime argument values. */
+    public void validateInvocation(String name, Map<String, Object> input) {
+        String function = name.toLowerCase(Locale.ROOT);
+        if (!NAMES.contains(function)) throw new IllegalArgumentException("Unknown built-in: " + name);
+        if ("sysdate".equals(function) || "systimestamp".equals(function)) { require(input, function, 0, 1, "format"); return; }
+        if (isSingleValueFunction(function)) { singleValue(input, function); return; }
+        if ("concat".equals(function) || "coalesce".equals(function)) { rejectMixedArgumentStyles(input, function); return; }
+        if ("randomchoice".equals(function)) {
+            rejectMixedArgumentStyles(input, "randomChoice");
+            if (input.isEmpty() || input.size() > MAX_RANDOM_CHOICES) throw new IllegalArgumentException("randomChoice() requires 1 to " + MAX_RANDOM_CHOICES + " arguments");
+            return;
+        }
+        if ("nvl".equals(function)) { require(input, "nvl", 2, 2, "value", "defaultValue"); return; }
+        if ("iif".equals(function)) { require(input, "iif", 3, 3, "condition", "trueValue", "falseValue"); return; }
+        if ("nchar".equals(function)) { require(input, "nchar", 2, 2, "count", "value"); return; }
+        if ("fileexists".equals(function) || "directoryexists".equals(function) || "filesize".equals(function) || "makedirectories".equals(function)) { require(input, displayName(function), 1, 1, "path"); return; }
+        if ("copyfile".equals(function) || "movefile".equals(function)) { require(input, displayName(function), 2, 3, "source", "target", "overwrite"); return; }
+        if ("deletefile".equals(function)) { require(input, "deleteFile", 1, 2, "path", "missingOk"); return; }
+        if ("substr".equals(function)) { require(input, "substr", 2, 3, "value", "start", "length"); return; }
+        if ("indexof".equals(function)) { require(input, "indexOf", 2, 3, "value", "search", "fromIndex"); return; }
+        if ("contains".equals(function)) { require(input, "contains", 2, 2, "value", "search"); return; }
+        if ("startswith".equals(function)) { require(input, "startsWith", 2, 2, "value", "prefix"); return; }
+        if ("endswith".equals(function)) { require(input, "endsWith", 2, 2, "value", "suffix"); return; }
+        if ("replace".equals(function)) { require(input, "replace", 3, 3, "value", "target", "replacement"); return; }
+        if ("padleft".equals(function) || "padright".equals(function)) { require(input, displayName(function), 2, 3, "value", "length", "pad"); return; }
+        if ("formatdate".equals(function)) { require(input, "formatDate", 2, 3, "value", "pattern", "zoneId"); return; }
+        if ("dateadd".equals(function)) { require(input, "dateAdd", 3, 3, "value", "amount", "unit"); return; }
+        throw new IllegalArgumentException("Unknown built-in: " + name);
+    }
+
+    private Object systemTime(Map<String, Object> input, String function, DateTimeFormatter fallback,
+                              TemporalAccessor value) {
+        require(input, function, 0, 1, "format");
+        if (input.isEmpty()) return fallback.format(value);
+        String pattern = text(argument(input, "format", "arg0"));
+        if (pattern.trim().isEmpty()) throw builtInError(function, "format", pattern,
+                "The optional format must be a non-blank Java DateTimeFormatter pattern.", null);
+        try { return DateTimeFormatter.ofPattern(pattern, Locale.ROOT).format(value); }
+        catch (IllegalArgumentException e) {
+            throw builtInError(function, "format", pattern, "The supplied Java DateTimeFormatter pattern is invalid.", e);
+        } catch (DateTimeException e) {
+            throw builtInError(function, "format", pattern, "The pattern requests fields unavailable from this system-time value.", e);
+        } catch (RuntimeException e) {
+            throw builtInError(function, "format", pattern, "The supplied Java DateTimeFormatter pattern cannot be applied.", e);
+        }
+    }
+
+    private att.validation.DiagnosticException builtInError(String function, String argument, String value,
+                                                            String suggestion, RuntimeException cause) {
+        String detail = "function=" + function + ", argument=" + argument + ", value='" + value + "'";
+        if (cause != null && cause.getMessage() != null) detail += ", formatterCause=" + cause.getMessage();
+        return new att.validation.DiagnosticException(att.validation.DiagnosticCodes.BUILTIN_INVALID,
+                "Invalid " + function + "() " + argument + " argument", detail, null,
+                function + "." + argument, null, null, null, null, null, suggestion, cause);
     }
 
     private Object fileSize(Map<String, Object> input) {
@@ -302,10 +358,6 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             throw new IllegalArgumentException(displayName(function) + "() requires exactly one value argument");
         }
         return argument(input, "value", "arg0");
-    }
-
-    private static void requireNone(Map<String, Object> input, String function) {
-        if (!input.isEmpty()) throw new IllegalArgumentException(function + "() does not accept arguments");
     }
 
     private static Object argument(Map<String, Object> input, String named, String positional) {

@@ -28,6 +28,7 @@ import java.time.ZoneId;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Author: Jeffrey + ChatGPT. */
 class UnifiedTemplateEngineTest {
@@ -85,10 +86,15 @@ class UnifiedTemplateEngineTest {
         assertEquals("true|true|true|PAY-001|0007|7___", engine.render("#{contains('payment', 'pay')}|#{startsWith('payment', 'pay')}|#{endsWith('payment', 'ment')}|#{replace('REF-001', 'REF', 'PAY')}|#{padLeft('7', 4, '0')}|#{padRight('7', 4, '_')}", context));
         assertEquals("2026-07-14", engine.render("#{sysdate()}", context));
         assertEquals("2026-07-14T12:34:56.789+08:00", engine.render("#{systimestamp()}", context));
+        assertEquals("20260714", engine.render("#{sysdate('yyyyMMdd')}", context));
+        assertEquals("20260714-123456+08:00", engine.render("#{systimestamp(format='yyyyMMdd-HHmmssXXX')}", context));
         assertEquals("20260714-1234", engine.render("#{formatDate('2026-07-14T04:34:56Z', 'yyyyMMdd-HHmm', 'Asia/Hong_Kong')}", context));
         assertEquals("2026-02-28|2026-07-14T05:34:56Z", engine.render("#{dateAdd('2026-01-31', 1, 'month')}|#{dateAdd('2026-07-14T04:34:56Z', 1, 'hour')}", context));
 
-        assertThrows(IllegalArgumentException.class, () -> engine.render("#{sysdate('unexpected')}", context));
+        att.validation.DiagnosticException invalidFormat = assertThrows(att.validation.DiagnosticException.class,
+                () -> engine.render("#{sysdate(\"yyyy-MM-dd'\")}", context));
+        assertTrue(invalidFormat.format().contains("ATT-BUILTIN-001"));
+        assertTrue(invalidFormat.format().contains("argument=format"));
         assertThrows(IllegalArgumentException.class, () -> engine.render("#{substr('abc', 4)}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.render("#{padLeft('x', 3, '')}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.render("#{formatDate('14/07/2026', 'yyyyMMdd')}", context));

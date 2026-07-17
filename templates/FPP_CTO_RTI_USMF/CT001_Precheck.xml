@@ -1,0 +1,18 @@
+<Txn>
+    <TxHeader>
+        <TxDate>#{sysdate("yyyyMMdd")}</TxDate>
+        <TxTime>#{systimestamp("HHmmss")}</TxTime>
+    </TxHeader>
+    <TxBody>
+        <TxCode>CT001</TxCode>
+        <TxType>Precheck</TxType>
+        <TxData>
+            <PrecheckReq>
+                <RequestId>${CASE.VARS.TxnSeq}</RequestId>
+                <CustomerId>${CASE.debitAccount}</CustomerId>
+                <ProductId>${CASE.creditAccount}</ProductId>
+                <OrderDetails>${CASE.amount}</OrderDetails>
+            </PrecheckReq>
+        </TxData>
+    </TxBody>
+</Txn>

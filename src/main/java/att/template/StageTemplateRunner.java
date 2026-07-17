@@ -43,8 +43,9 @@ public class StageTemplateRunner {
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
                 else if ("tool".equals(type)) executeTool(action, context, log, output, targets, node);
-                else if ("assert".equals(type)) expected = templateEngine.renderValidationValues(action.expected(), context);
+                else if ("assert".equals(type)) expected = templateEngine.renderValues(action.expected(), context);
                 else if ("log".equals(type)) executeLog(action, context, output);
+                else if ("assign".equals(type)) executeAssign(action, context, log, output);
                 else throw new IllegalArgumentException("Unsupported action type: " + action.type());
 
                 context.addAction(action.id(), node);
@@ -53,25 +54,30 @@ public class StageTemplateRunner {
                 ResultStatus status = applyAssertion(action, output, context);
                 if ("assert".equals(type)) {
                     output.put("result", Boolean.valueOf(status == ResultStatus.PASS));
-                    actual = normalizeLines(templateEngine.renderValuesPreserving(action.actual(), context));
+                    actual = normalizeLines(templateEngine.renderValues(action.actual(), context));
                     expected = normalizeLines(expected);
                     output.put("expected", expected);
                     output.put("actual", actual);
                 }
                 output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
-                node.put("description", normalizeLines(templateEngine.renderValuesPreserving(description, context)));
+                node.put("description", normalizeLines(templateEngine.renderValues(description, context)));
                 context.updateAction(action.id(), node);
                 log.append("ACTION " + action.id(), node);
                 String reportExpected = "assert".equals(type) ? joinLines(String.valueOf(node.get("description")), expected) : "";
                 results.add(new ValidationResult(stageName, action.id(), status, reportExpected, "assert".equals(type) ? actual : "", assertionMessage(output)));
                 if (status != ResultStatus.PASS && stopOnFailure(action)) break;
             } catch (Exception e) {
-                String message = message(e);
+                att.validation.DiagnosticException typed = detailed(e, template, action);
+                String message = typed.format();
                 output.put("status", "ERROR");
                 output.put("success", false);
                 output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
                 Map<String, Object> exception = new LinkedHashMap<String, Object>();
                 exception.put("type", e.getClass().getName());
+                exception.put("code", typed.code());
+                exception.put("summary", typed.summary());
+                exception.put("detail", typed.detail());
+                exception.put("suggestion", typed.suggestion());
                 exception.put("message", message);
                 output.put("exception", exception);
                 context.setActionOutput(output);
@@ -117,10 +123,19 @@ public class StageTemplateRunner {
     }
 
     private void executeLog(TemplateAction action, CaseRuntimeContext context, Map<String, Object> output) {
-        String message = templateEngine.renderValuesPreserving(action.message(), context);
+        String message = templateEngine.renderValues(action.message(), context);
         output.put("result", message);
         output.put("level", action.level());
         output.put("fields", renderFields(action.fields(), context));
+    }
+
+    private void executeAssign(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+                               Map<String, Object> output) throws Exception {
+        context.requireCaseVariableAvailable(action.name());
+        String value = templateEngine.render(action.expression(), context, log);
+        output.put("result", value);
+        output.put("name", action.name());
+        context.assignCaseVariable(action.name(), value);
     }
 
     private void executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
@@ -167,7 +182,7 @@ public class StageTemplateRunner {
         if (action.assertion() == null || action.assertion().trim().isEmpty()) {
             output.put("status", "PASS"); output.put("success", true); return ResultStatus.PASS;
         }
-        String rendered = templateEngine.renderValuesPreserving(action.assertion(), context);
+        String rendered = templateEngine.renderValues(action.assertion(), context);
         boolean passed = evaluator.evaluate(action.assertion(), context);
         Map<String, Object> assertion = new LinkedHashMap<String, Object>();
         assertion.put("expression", action.assertion());
@@ -198,7 +213,7 @@ public class StageTemplateRunner {
 
     private Map<String, Object> renderFields(Map<String, Object> fields, CaseRuntimeContext context) {
         Map<String, Object> rendered = new LinkedHashMap<String, Object>();
-        for (Map.Entry<String, Object> entry : fields.entrySet()) rendered.put(entry.getKey(), templateEngine.renderValuesPreserving(String.valueOf(entry.getValue()), context));
+        for (Map.Entry<String, Object> entry : fields.entrySet()) rendered.put(entry.getKey(), templateEngine.renderValues(String.valueOf(entry.getValue()), context));
         return rendered;
     }
 
@@ -208,7 +223,25 @@ public class StageTemplateRunner {
     private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }
     private boolean stopOnFailure(TemplateAction action) { return !"continue".equals(action.onFailure()); }
     private String assertionMessage(Map<String, Object> output) { Object value = output.get("assertion"); return value == null ? "" : String.valueOf(value); }
-    private String message(Exception e) { return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(); }
+    private att.validation.DiagnosticException detailed(Exception error, StageTemplate template, TemplateAction action) {
+        att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
+        if (typed == null && error instanceof att.exec.ToolExecutionException) {
+            att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
+            typed = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_EXECUTION,
+                    "Tool action '" + action.id() + "' failed", "category=" + tool.category() + ", cause=" + safeMessage(error),
+                    null, "actions." + action.id() + ".call", null, null, null, template.name(), action.id(),
+                    "Inspect logical argv, executed argv, exitCode, stdout, stderr, rawOutput, and parser diagnostics in this action's evidence.", error);
+        }
+        if (typed == null) {
+            String code = "tool".equalsIgnoreCase(action.type()) ? att.validation.DiagnosticCodes.TOOL_EXECUTION : att.validation.DiagnosticCodes.TEMPLATE_INVALID;
+            typed = new att.validation.DiagnosticException(code, "Action '" + action.id() + "' failed",
+                    safeMessage(error), null, "actions." + action.id(), null, null, null, template.name(), action.id(),
+                    "Check the action fields, Context references, input files, call arguments, and detailed Case-log evidence.", error);
+        }
+        return typed.withLocation(template.directory().resolve("template.yaml").toString(),
+                "actions." + action.id(), null, null, null, template.name(), action.id());
+    }
+    private String safeMessage(Exception e) { return e.getMessage() == null || e.getMessage().trim().isEmpty() ? e.getClass().getSimpleName() : e.getMessage(); }
     private String normalizeLines(String value) { return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n'); }
     private String joinLines(String first, String second) { String a = normalizeLines(first).trim(), b = normalizeLines(second).trim(); return a.isEmpty() ? b : (b.isEmpty() ? a : a + "\n" + b); }
 }
