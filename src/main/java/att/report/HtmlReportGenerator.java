@@ -82,15 +82,19 @@ public final class HtmlReportGenerator {
         String log = result.caseLogPath() == null ? "" : result.caseLogPath().toString();
         String logContent = result.caseLogPath() != null && Files.exists(result.caseLogPath()) ? new String(Files.readAllBytes(result.caseLogPath()), StandardCharsets.UTF_8) : "";
         html.append("<details id=\"").append(anchor(result.caseId())).append("\"><summary><span class=\"badge ").append(result.status()).append("\">").append(result.status()).append("</span> ").append(escape(result.caseId())).append(" — ").append(escape(result.caseName())).append(" <span class=\"muted\">(").append(result.duration().toMillis()).append(" ms)</span></summary><div class=\"detail\"><dl><dt>Expected</dt><dd><pre>").append(escape(result.expected())).append("</pre></dd><dt>Actual</dt><dd><pre>").append(escape(result.actual())).append("</pre></dd><dt>Case log</dt><dd>").append(escape(log)).append("</dd>");
+        Path tree = result.caseLogPath() == null ? null : result.caseLogPath().getParent().resolve("case.yaml");
         if (result.caseLogPath() != null && Files.exists(result.caseLogPath())) {
             String relative = runDirectory.relativize(result.caseLogPath()).toString().replace('\\', '/');
-            html.append("<dt>Artifacts</dt><dd><a href=\"../").append(escape(relative)).append("\">Open case folder artifact</a></dd>");
+            html.append("<dt>Artifacts</dt><dd><a href=\"../").append(escape(relative)).append("\">Open execution log</a>");
+            if (tree != null && Files.exists(tree)) {
+                String treeRelative = runDirectory.relativize(tree).toString().replace('\\', '/');
+                html.append(" · <a href=\"../").append(escape(treeRelative)).append("\">Open structured case state (case.yaml)</a>");
+            }
+            html.append("</dd>");
         }
-        Path tree = result.caseLogPath() == null ? null : result.caseLogPath().getParent().resolve("case.yaml");
-        String treeContent = tree != null && Files.exists(tree) ? new String(Files.readAllBytes(tree), StandardCharsets.UTF_8) : "";
         html.append("</dl><h3>Action results</h3><table><tr><th>Stage</th><th>Action</th><th>Status</th><th>Message</th></tr>");
         for (att.core.ValidationResult action : result.validations()) html.append("<tr><td>").append(escape(action.source())).append("</td><td>").append(escape(action.name())).append("</td><td><span class=\"badge ").append(action.status()).append("\">").append(action.status()).append("</span></td><td>").append(escape(action.message())).append("</td></tr>");
-        html.append("</table><h3>Stage / Template / Action / Tool tree</h3><pre>").append(escape(treeContent)).append("</pre><h3>Detailed execution log</h3><pre>").append(escape(logContent)).append("</pre></div></details>");
+        html.append("</table><h3>Detailed execution log</h3><pre>").append(escape(logContent)).append("</pre></div></details>");
     }
 
     private String card(String name, Object value) { return "<div class=\"card\"><strong>" + escape(name) + "</strong><span>" + escape(String.valueOf(value)) + "</span></div>"; }

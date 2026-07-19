@@ -23,12 +23,21 @@ class HtmlReportGeneratorTest {
     @Test void producesAStandaloneSinglePageReport() throws Exception {
         Path log = tempDir.resolve("payments.payment.TC001/case.log");
         Files.createDirectories(log.getParent()); Files.write(log, "ACTION callApi".getBytes("UTF-8"));
+        Files.write(log.getParent().resolve("case.yaml"), "uniqueTreeState: final".getBytes("UTF-8"));
         TestResult result = new TestResult("payments.payment.TC001", "Payment <success>", ResultStatus.ERROR, Duration.ofMillis(12), "SUCCESS", "", log,
                 Collections.singletonList(new att.core.ValidationResult("verify","callApi",ResultStatus.ERROR,"tool","","Visible failure message")), "payments", "payment", Arrays.asList("smoke", "critical"));
         Path report = new HtmlReportGenerator().generate(tempDir, "RUN-1", new RunSummary(Collections.singletonList(result), tempDir), Instant.now(), Instant.now());
         String html = new String(Files.readAllBytes(report), "UTF-8");
         assertTrue(html.contains("Case details"));
         assertTrue(html.contains("Action results"));
+        assertTrue(html.contains("Detailed execution log"));
+        assertTrue(html.contains("ACTION callApi"));
+        assertTrue(html.contains("Open execution log"));
+        assertTrue(html.contains("Open structured case state (case.yaml)"));
+        assertTrue(html.contains("href=\"../payments.payment.TC001/case.log\""));
+        assertTrue(html.contains("href=\"../payments.payment.TC001/case.yaml\""));
+        assertFalse(html.contains("Stage / Template / Action / Tool tree"));
+        assertFalse(html.contains("uniqueTreeState: final"));
         assertTrue(html.contains("Visible failure message"));
         assertTrue(html.contains("Payment &lt;success&gt;"));
         assertTrue(html.contains("Minimum"));
