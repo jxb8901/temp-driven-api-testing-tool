@@ -7,6 +7,9 @@ import att.config.RunConfig;
 import att.config.StageConfig;
 import att.config.ToolArgumentConfig;
 import att.config.ToolConfig;
+import att.config.SuiteConfigResolver;
+import att.excel.ExcelTestSuiteLoader;
+import att.snapshot.TestcaseSnapshotService;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -39,6 +42,7 @@ class FrameworkEngineTest {
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
                 "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("schemas/att-ci-summary-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"inputManifestHash\"]}");
         writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
         writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
@@ -97,6 +101,7 @@ class FrameworkEngineTest {
         String manifest = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/run.yaml")), "UTF-8");
         assertTrue(manifest.contains("schemaVersion: att-run/v2.1"));
         assertTrue(manifest.contains("javaVersion:")); assertTrue(manifest.contains("timezone:")); assertTrue(manifest.contains("sha256:"));
+        assertTrue(manifest.contains("kind: testcase-snapshot"));
         assertFalse(manifest.contains(".in-progress"));
         try (java.util.stream.Stream<Path> pending = Files.list(projectRoot.resolve("output/.in-progress"))) { assertEquals(0, pending.count()); }
         String ci = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/ci/summary.json")), "UTF-8");
@@ -132,9 +137,26 @@ class FrameworkEngineTest {
     @Test void failedPlanCreatesNoOutputOrInProgressDirectory() throws Exception {
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
         Files.createDirectories(projectRoot.resolve("templates"));
         ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "PLAN-FAIL"});
         assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
+        assertFalse(Files.exists(projectRoot.resolve("output")));
+    }
+
+    @Test void staleSnapshotStopsRunBeforeOutputMutation() throws Exception {
+        Path workbook = projectRoot.resolve("testcase/payment.xlsx");
+        writeWorkbook(workbook);
+        writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        Files.createDirectories(projectRoot.resolve("templates"));
+        writeSnapshot(workbook);
+        Path snapshot = projectRoot.resolve("testcase/payment.xml");
+        String xml = new String(Files.readAllBytes(snapshot), "UTF-8");
+        writeText(snapshot, xml.replace("PAYMENT_INVOKE", "CHANGED_TEMPLATE"));
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", workbook.toString(), "--run-id", "STALE"});
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
+        assertTrue(error.getMessage().contains("snapshot is stale"), error.getMessage());
+        assertTrue(error.getMessage().contains("payment.TC001.stages.invoke.name changed"), error.getMessage());
         assertFalse(Files.exists(projectRoot.resolve("output")));
     }
 
@@ -153,6 +175,7 @@ class FrameworkEngineTest {
         for (String name : java.util.Arrays.asList("one", "two")) {
             writeWorkbook(projectRoot.resolve("testcase/" + name + ".xlsx"));
             writeText(projectRoot.resolve("testcase/" + name + ".yaml"), "schemaVersion: att-sidecar/v2.1\nid: duplicate\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+            writeSnapshot(projectRoot.resolve("testcase/" + name + ".xlsx"));
         }
         ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--all", "--run-id", "DUPLICATE-WORKBOOK"});
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
@@ -191,6 +214,10 @@ class FrameworkEngineTest {
     private void writeText(Path path, String text) throws Exception {
         Files.createDirectories(path.getParent());
         Files.write(path, text.getBytes("UTF-8"));
+    }
+    private void writeSnapshot(Path workbook) throws Exception {
+        FrameworkConfig suite = new SuiteConfigResolver(projectRoot, globalConfig()).resolve(workbook);
+        new TestcaseSnapshotService().write(workbook, suite, new ExcelTestSuiteLoader(suite).load(workbook));
     }
     private void writeTool(Path path, String body) throws Exception {
         writeText(path, "#!/usr/bin/env sh\nset -eu\n" + body);

@@ -11,11 +11,13 @@ import att.core.TestCase;
 import att.core.IdentifierValidator;
 import att.core.ValueNormalizer;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.util.CellRangeAddress;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
@@ -32,7 +34,7 @@ import java.util.Set;
 
 /** Loads all V2 testcase groups from one workbook. */
 public final class ExcelTestSuiteLoader {
-    private final DataFormatter formatter = new DataFormatter();
+    private final DataFormatter formatter = new DataFormatter(java.util.Locale.ROOT);
     private final FrameworkConfig config;
 
     public ExcelTestSuiteLoader(FrameworkConfig config) { this.config = config; }
@@ -68,9 +70,12 @@ public final class ExcelTestSuiteLoader {
             requireColumn(columns, stage.template(), "stages." + stage.key() + ".template", group, suitePath);
             for (DataColumnConfig column : stage.dataColumns()) requireColumn(columns, column.columnName(), "stages." + stage.key() + ".dataColumns." + column.key(), group, suitePath);
         }
+        Set<Integer> testcaseColumns = testcaseColumns(columns);
+        rejectMergedDataCells(sheet, testcaseColumns, suitePath, group);
         for (int rowIndex = config.headerRows(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
             Row row = sheet.getRow(rowIndex);
             if (row == null || blankRow(row, columns)) continue;
+            rejectFormulaCells(row, testcaseColumns, suitePath, group);
             TestCase testCase = toCase(suitePath, group, row, columns);
             if (!ids.add(testCase.caseId())) throw caseError("Duplicate full Case ID '" + testCase.caseId() + "'", "The same workbookId.groupId.rowCaseId was already loaded.", suitePath,
                     "excel.caseId", group.sheetName(), rowIndex + 1, columns.get(config.caseIdColumn()) + 1,
@@ -201,6 +206,44 @@ public final class ExcelTestSuiteLoader {
                 "field=" + field + ", expectedHeader='" + name + "', availableHeaders=" + columns.keySet(), suitePath,
                 field, group.sheetName(), config.headerRows(), null,
                 "Correct the sidecar header mapping or add the exact case-sensitive header to the configured header row.", null);
+    }
+
+    private Set<Integer> testcaseColumns(Map<String, Integer> columns) {
+        Set<Integer> result = new LinkedHashSet<Integer>();
+        result.add(columns.get(config.caseIdColumn()));
+        result.add(columns.get(config.tagsColumn()));
+        for (DataColumnConfig column : config.dataColumns()) result.add(columns.get(column.columnName()));
+        for (StageConfig stage : config.stages()) {
+            result.add(columns.get(stage.template()));
+            for (DataColumnConfig column : stage.dataColumns()) result.add(columns.get(column.columnName()));
+        }
+        result.remove(null);
+        return result;
+    }
+
+    private void rejectFormulaCells(Row row, Set<Integer> testcaseColumns, Path suitePath, SheetGroupConfig group) {
+        for (Integer column : testcaseColumns) {
+            Cell cell = row.getCell(column);
+            if (cell != null && cell.getCellType() == CellType.FORMULA) throw caseError(
+                    "Formula cells are not supported in testcase data",
+                    "Formula values can differ from cached Excel results and cannot produce a reproducible snapshot.", suitePath,
+                    "snapshot", group.sheetName(), row.getRowNum() + 1, column + 1,
+                    "Replace the formula with a literal value; format identifiers and leading-zero values as Excel Text.", null);
+        }
+    }
+
+    private void rejectMergedDataCells(Sheet sheet, Set<Integer> testcaseColumns, Path suitePath, SheetGroupConfig group) {
+        for (int i = 0; i < sheet.getNumMergedRegions(); i++) {
+            CellRangeAddress region = sheet.getMergedRegion(i);
+            if (region.getLastRow() < config.headerRows()) continue;
+            for (Integer column : testcaseColumns) {
+                if (column >= region.getFirstColumn() && column <= region.getLastColumn()) throw caseError(
+                        "Merged cells are not supported in testcase data",
+                        "Merged region " + region.formatAsString() + " intersects an ATT testcase column.", suitePath,
+                        "snapshot", group.sheetName(), region.getFirstRow() + 1, column + 1,
+                        "Unmerge testcase data cells; merged presentation cells are allowed only within configured header rows.", null);
+            }
+        }
     }
 
     private static att.validation.DiagnosticException caseError(String summary, String detail, Path file, String field,

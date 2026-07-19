@@ -20,6 +20,13 @@ class FrameworkRunnerTest {
         assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose", "--quiet"}));
     }
 
+    @Test void snapshotCommandRequiresWorkbookSelectionAndRejectsRunOnlyOptions() {
+        assertEquals("snapshot", att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all"}).command());
+        assertEquals(1, att.core.ExecutionOptions.parse(new String[]{"snapshot", "--suite", "testcase/payment.xlsx"}).suitePaths().size());
+        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"snapshot"}));
+        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all", "--tag", "smoke"}));
+    }
+
     @Test void typedDiagnosticKeepsRunCodeIndependentFromMessageText() {
         att.validation.DiagnosticException error = new att.validation.DiagnosticException(
                 att.validation.DiagnosticCodes.RUN_FAILED, "Run ID already exists",

@@ -1,7 +1,7 @@
-# ATT V2.3.5 User Manual and Reference
+# ATT V2.4.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.3.5
+Version: 2.4.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -51,10 +51,10 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, assert an expression, write a structured log, or assign a Case-scoped runtime variable. ATT validates the selected package before executing external tools and records the resulting evidence below one completed run directory.
 
-### What V2.3 guarantees
+### What V2.4 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
-- Every workbook has a same-basename YAML sidecar.
+- Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
 - Every template is a directory containing `template.yaml`.
 - `validate --package` checks the whole package; `validate --selected` checks only a selected dependency closure.
 - Run ID and Case ID are validated and then used directly as output directory names.
@@ -71,7 +71,8 @@ att-package/
 ├── config/config.yaml
 ├── testcase/
 │   ├── payment.xlsx
-│   └── payment.yaml
+│   ├── payment.yaml
+│   └── payment.xml
 ├── templates/
 │   └── payment/
 │       ├── template.yaml
@@ -81,9 +82,9 @@ att-package/
 └── output/
 ```
 
-You normally edit `config/config.yaml`, workbook/sidecar pairs, templates, payloads, and tool scripts. ATT owns generated content below the configured output directory and its documented build locations.
+You normally edit `config/config.yaml`, workbooks, sidecars, templates, payloads, and tool scripts. The same-basename testcase XML is generated only by `snapshot` and reviewed as source-control evidence. ATT owns generated content below the configured output directory and its documented build locations.
 
-The global `testcase.root` setting defaults to `testcase`. Discovery is recursive, and an adjacent same-basename YAML/XLSX pair defines one testcase set at any depth.
+The global `testcase.root` setting defaults to `testcase`. Discovery is recursive, and an adjacent same-basename XLSX/YAML/XML triple defines one testcase set at any depth.
 
 ## 02 Quick Start
 
@@ -248,13 +249,14 @@ This chapter explains the normal day-to-day workflow in the same order that data
 
 ### 3.1 Workbook
 
-#### Workbook and sidecar relationship
+#### Workbook, sidecar, and snapshot relationship
 
-Every `.xlsx` workbook requires a YAML file with the same basename in the same directory:
+Every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
 
 ```text
 testcase/payment_regression.xlsx
 testcase/payment_regression.yaml
+testcase/payment_regression.xml
 ```
 
 The sidecar maps Excel structure into ATT concepts. It owns the sheet mapping, headers, case data, ordered stages, optional report-column labels, and an optional workbook timeout.
@@ -278,6 +280,8 @@ stages:
 ```
 
 The root `id` is mandatory and must be unique across the package. `excel.sheet` accepts one sheet name or comma-separated `groupId=sheetName` entries. If one sheet is given without a group ID, ATT uses `default`. Full Case IDs always have the form `workbookId.groupId.rowCaseId` and must be unique across the package.
+
+After editing Excel, run `./att.sh snapshot --suite testcase/payment_regression.xlsx`. The generated `payment_regression.xml` uses schema `att-testcases/v2.4` and stores only normalized sidecar-mapped semantics. It preserves group, Case, tag, map/list, and stage order, uses explicit value types, and excludes styles and unrelated workbook content. String values containing LF or XML-special `&`, `<`, or `>` characters use CDATA; literal `]]>` content is split across adjacent CDATA sections and reconstructs exactly when parsed. Spaces/tabs immediately before LF use `&#32;`/`&#9;` between CDATA sections, preserving the value without Git trailing-whitespace warnings. Review and commit the XML with the xlsx; do not edit it manually.
 
 #### Mapping data columns
 
@@ -308,9 +312,9 @@ A required stage selector rejects a blank value. An optional stage with a blank 
 
 #### Formula, date, percentage, and scientific notation cells
 
-ATT reads the displayed text of ordinary Excel cells but does **not** calculate formulas. A formula cell is imported as its formula expression, such as `=A2+B2`; ATT does not ask Excel to recalculate or consume the cached result.
+V2.4 rejects formula cells in configured Case ID, tags, case-data, stage-selector, and stage-data columns. Formula definitions and cached/displayed results can diverge and therefore cannot produce a trustworthy semantic snapshot. Recalculate in Excel and paste the result as a literal value, or calculate it in a dedicated ATT step.
 
-Do not use a formula cell when a calculated value must be consumed by a template, assertion, or tool. Recalculate in Excel and paste the result as a value, or calculate it in a dedicated ATT step.
+Merged regions intersecting configured testcase columns below `excel.headerRows` are likewise rejected. Merged presentation cells wholly inside the configured header area remain allowed.
 
 For non-formula cells, ATT imports the displayed text. The exact representation follows the workbook's cell format and the runtime locale:
 
@@ -631,7 +635,7 @@ Selected mode checks only explicitly selected cases and their dependency closure
 | `--tag <tag>` | Include cases with any requested tag |
 | `--exclude-tag <tag>` | Exclude matching cases after inclusion filters |
 
-An empty selection is an error. `--rerun-failed` is itself a valid selection and reads FAIL/ERROR Case IDs from the latest completed persisted run. Additional `--case`, `--tag`, and `--exclude-tag` filters narrow that set. Missing history, no prior FAIL/ERROR cases, or no currently discoverable case matching the saved IDs is a command error. The current workbook, sidecar, template, and tool definitions are validated and executed; ATT does not replay the old input snapshot.
+An empty selection is an error. `--rerun-failed` is itself a valid selection and reads FAIL/ERROR Case IDs from the latest completed persisted run. Additional `--case`, `--tag`, and `--exclude-tag` filters narrow that set. Missing history, no prior FAIL/ERROR cases, or no currently discoverable case matching the saved IDs is a command error. The current workbook, sidecar, testcase XML snapshot, template, and tool definitions are validated and executed; ATT does not replay old run inputs.
 
 #### Execute
 
@@ -915,6 +919,7 @@ Each attempt is recorded directly in the case log/action record; no `attempt-001
 | `help` | Show syntax and options; default with no command | No |
 | `version` | Print ATT version | No |
 | `validate` | Validate package or selected dependency closure | No |
+| `snapshot` | Generate same-basename canonical testcase XML | No |
 | `run` | Validate and execute selected cases | Yes, except dry-run |
 | `docs` | Generate searchable package documentation | No |
 | `report` | Regenerate reports for a completed run | No |
@@ -929,6 +934,9 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 |---|---|
 | `./att.sh` or `./att.sh help` | Show help |
 | `./att.sh version` | Print version |
+| `./att.sh snapshot --suite <xlsx>` | Generate one same-basename XML snapshot |
+| `./att.sh snapshot --all` | Generate snapshots recursively below `testcase.root` |
+| `./att.sh snapshot --suite-dir <dir>` | Generate snapshots recursively below a directory |
 | `./att.sh validate --package` | Validate complete package; default scope |
 | `./att.sh validate --selected <selection>` | Validate selected dependency closure |
 | `./att.sh validate --package --format json` | Emit one validation JSON document to stdout |
@@ -1109,7 +1117,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.5",
+  "attVersion": "2.4.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1261,7 +1269,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.3.5 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.4.0 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -1377,7 +1385,7 @@ ATT normalizes `N/A`, `NA`, `NULL`, `NONE`, empty, and whitespace-only values to
 
 #### Why does an unknown Context variable now fail?
 
-V2.3.5 treats an absent path as an authoring/runtime error instead of silently rendering it as empty. Follow `ATT-CTX-001` to check the case-sensitive scope, physical header/alias, stage key, action ID, and when that action becomes available. A declared optional field with a blank value is still valid and renders as the empty string.
+V2.4.0 treats an absent path as an authoring/runtime error instead of silently rendering it as empty. Follow `ATT-CTX-001` to check the case-sensitive scope, physical header/alias, stage key, action ID, and when that action becomes available. A declared optional field with a blank value is still valid and renders as the empty string.
 
 #### Why did a FAIL become ERROR?
 

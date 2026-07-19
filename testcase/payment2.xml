@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testcases schemaVersion="att-testcases/v2.4" workbookId="payment2">
+  <group id="default" sheet="CT">
+    <case rowCaseId="CT001">
+      <tags>
+        <tag>smoke</tag>
+        <tag>regression</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">本地付款成功</field>
+        <field name="desc" type="string"><![CDATA[abc測試流程：
+1. Precheck
+2. Confirm]]></field>
+        <field name="debitAccount" type="string">1000000000</field>
+        <field name="creditAccount" type="string">2000000000</field>
+        <field name="amount" type="string">100.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="string"></field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">CTO/RTI流程模板</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="CT002">
+      <tags>
+        <tag>edge</tag>
+        <tag>amount</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">最小金額付款</field>
+        <field name="desc" type="string"><![CDATA[“test” >]]>&#32;
+<![CDATA[multiple lines]]></field>
+        <field name="debitAccount" type="string">1000000001</field>
+        <field name="creditAccount" type="string">2000000001</field>
+        <field name="amount" type="string">0.01</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="string"></field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+        </stage>
+      </stages>
+    </case>
+  </group>
+</testcases>

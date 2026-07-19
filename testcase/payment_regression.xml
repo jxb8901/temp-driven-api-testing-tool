@@ -1,0 +1,919 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testcases schemaVersion="att-testcases/v2.4" workbookId="payment">
+  <group id="payment" sheet="支付測試案例集">
+    <case rowCaseId="TC001">
+      <tags>
+        <tag>smoke</tag>
+        <tag>regression</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">本地付款成功</field>
+        <field name="debitAccount" type="string">1000000000</field>
+        <field name="creditAccount" type="string">2000000000</field>
+        <field name="amount" type="string">100.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">30</entry>
+            <entry name="retry" type="boolean">true</entry>
+            <entry name="note" type="string">case-0</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">0</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC002">
+      <tags>
+        <tag>edge</tag>
+        <tag>amount</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">最小金額付款</field>
+        <field name="debitAccount" type="string">1000000001</field>
+        <field name="creditAccount" type="string">2000000001</field>
+        <field name="amount" type="string">0.01</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">31</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-1</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">1</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC003">
+      <tags>
+        <tag>regression</tag>
+        <tag>high-value</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">大額付款</field>
+        <field name="debitAccount" type="string">1000000002</field>
+        <field name="creditAccount" type="string">2000000002</field>
+        <field name="amount" type="string">999,999.99</field>
+        <field name="currency" type="string">EUR</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">32</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-2</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">2</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC004">
+      <tags>
+        <tag>edge</tag>
+        <tag>decimal</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">小數金額付款</field>
+        <field name="debitAccount" type="string">1000000003</field>
+        <field name="creditAccount" type="string">2000000003</field>
+        <field name="amount" type="string">12.34</field>
+        <field name="currency" type="string">CNY</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">33</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-3</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">3</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC005">
+      <tags>
+        <tag>currency</tag>
+        <tag>regression</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">跨幣別付款</field>
+        <field name="debitAccount" type="string">1000000004</field>
+        <field name="creditAccount" type="string">2000000004</field>
+        <field name="amount" type="string">104.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">34</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-4</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">4</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC006">
+      <tags>
+        <tag>mobile</tag>
+        <tag>smoke</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">手機渠道付款</field>
+        <field name="debitAccount" type="string">1000000005</field>
+        <field name="creditAccount" type="string">2000000005</field>
+        <field name="amount" type="string">105.00</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">35</entry>
+            <entry name="retry" type="boolean">true</entry>
+            <entry name="note" type="string">case-5</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">5</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC007">
+      <tags>
+        <tag>web</tag>
+        <tag>regression</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">網銀渠道付款</field>
+        <field name="debitAccount" type="string">1000000006</field>
+        <field name="creditAccount" type="string">2000000006</field>
+        <field name="amount" type="string">106.00</field>
+        <field name="currency" type="string">EUR</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">36</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-6</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">6</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC008">
+      <tags>
+        <tag>corporate</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">企業付款</field>
+        <field name="debitAccount" type="string">1000000007</field>
+        <field name="creditAccount" type="string">2000000007</field>
+        <field name="amount" type="string">107.00</field>
+        <field name="currency" type="string">CNY</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">37</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-7</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">7</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC009">
+      <tags>
+        <tag>unicode</tag>
+        <tag>template-path</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">中文模板路徑付款</field>
+        <field name="debitAccount" type="string">1000000008</field>
+        <field name="creditAccount" type="string">2000000008</field>
+        <field name="amount" type="string">108.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">付款/本地付款</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">38</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-8</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">8</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC010">
+      <tags>
+        <tag>blank-marker</tag>
+        <tag>edge</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">Blank Marker 演示</field>
+        <field name="debitAccount" type="string">1000000009</field>
+        <field name="creditAccount" type="string">2000000009</field>
+        <field name="amount" type="string">109.00</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">39</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">NA</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">9</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC011">
+      <tags>
+        <tag>lifecycle</tag>
+        <tag>cleanup</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">完整生命週期</field>
+        <field name="debitAccount" type="string">1000000010</field>
+        <field name="creditAccount" type="string">2000000010</field>
+        <field name="amount" type="string">110.00</field>
+        <field name="currency" type="string">EUR</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">40</entry>
+            <entry name="retry" type="boolean">true</entry>
+            <entry name="note" type="string">case-10</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">10</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="rollback">
+          <field name="name" type="string">PAYMENT_ROLLBACK</field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+  </group>
+  <group id="batch" sheet="批量測試案例集">
+    <case rowCaseId="TC001">
+      <tags>
+        <tag>batch</tag>
+        <tag>smoke</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量付款第一筆</field>
+        <field name="debitAccount" type="string">1000000011</field>
+        <field name="creditAccount" type="string">2000000011</field>
+        <field name="amount" type="string">111.00</field>
+        <field name="currency" type="string">CNY</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">41</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-11</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">11</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC002">
+      <tags>
+        <tag>batch</tag>
+        <tag>regression</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量付款第二筆</field>
+        <field name="debitAccount" type="string">1000000012</field>
+        <field name="creditAccount" type="string">2000000012</field>
+        <field name="amount" type="string">112.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">42</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-12</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">12</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC003">
+      <tags>
+        <tag>batch</tag>
+        <tag>edge</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量邊界金額</field>
+        <field name="debitAccount" type="string">1000000013</field>
+        <field name="creditAccount" type="string">2000000013</field>
+        <field name="amount" type="string">113.00</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">43</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-13</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">13</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC004">
+      <tags>
+        <tag>batch</tag>
+        <tag>decimal</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量小數金額</field>
+        <field name="debitAccount" type="string">1000000014</field>
+        <field name="creditAccount" type="string">2000000014</field>
+        <field name="amount" type="string">114.00</field>
+        <field name="currency" type="string">EUR</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">44</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-14</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">14</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC005">
+      <tags>
+        <tag>batch</tag>
+        <tag>high-value</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量高值付款</field>
+        <field name="debitAccount" type="string">1000000015</field>
+        <field name="creditAccount" type="string">2000000015</field>
+        <field name="amount" type="string">115.00</field>
+        <field name="currency" type="string">CNY</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">45</entry>
+            <entry name="retry" type="boolean">true</entry>
+            <entry name="note" type="string">case-15</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">15</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC006">
+      <tags>
+        <tag>batch</tag>
+        <tag>hkd</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量港幣付款</field>
+        <field name="debitAccount" type="string">1000000016</field>
+        <field name="creditAccount" type="string">2000000016</field>
+        <field name="amount" type="string">116.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">46</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-16</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">16</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC007">
+      <tags>
+        <tag>batch</tag>
+        <tag>usd</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量美元付款</field>
+        <field name="debitAccount" type="string">1000000017</field>
+        <field name="creditAccount" type="string">2000000017</field>
+        <field name="amount" type="string">117.00</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">47</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-17</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">17</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC008">
+      <tags>
+        <tag>batch</tag>
+        <tag>eur</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量歐元付款</field>
+        <field name="debitAccount" type="string">1000000018</field>
+        <field name="creditAccount" type="string">2000000018</field>
+        <field name="amount" type="string">118.00</field>
+        <field name="currency" type="string">EUR</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">中文本地付款</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">48</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-18</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">18</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC009">
+      <tags>
+        <tag>batch</tag>
+        <tag>filter</tag>
+        <tag>多標籤</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量多標籤篩選</field>
+        <field name="debitAccount" type="string">1000000019</field>
+        <field name="creditAccount" type="string">2000000019</field>
+        <field name="amount" type="string">119.00</field>
+        <field name="currency" type="string">CNY</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">49</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-19</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">19</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC010">
+      <tags>
+        <tag>batch</tag>
+        <tag>optional</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量可選階段</field>
+        <field name="debitAccount" type="string">1000000020</field>
+        <field name="creditAccount" type="string">2000000020</field>
+        <field name="amount" type="string">120.00</field>
+        <field name="currency" type="string">HKD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">MOBILE</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">50</entry>
+            <entry name="retry" type="boolean">true</entry>
+            <entry name="note" type="string">case-20</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">20</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="TC011">
+      <tags>
+        <tag>batch</tag>
+        <tag>full-flow</tag>
+      </tags>
+      <data>
+        <field name="caseName" type="string">批量完整流程</field>
+        <field name="debitAccount" type="string">1000000021</field>
+        <field name="creditAccount" type="string">2000000021</field>
+        <field name="amount" type="string">121.00</field>
+        <field name="currency" type="string">USD</field>
+        <field name="預期結果" type="map">
+          <entry name="status" type="string">SUCCESS</entry>
+          <entry name="rejectCode" type="string">0000</entry>
+          <entry name="effectRows" type="integer">1</entry>
+          <entry name="txnStatus" type="string">POSTED</entry>
+          <entry name="keywords" type="string">PAYMENT,POSTED</entry>
+        </field>
+      </data>
+      <stages>
+        <stage key="prepare">
+          <field name="name" type="string">PAYMENT_PREPARE</field>
+        </stage>
+        <stage key="invoke">
+          <field name="name" type="string">PAYMENT_INVOKE</field>
+          <field name="channel" type="string">WEB</field>
+          <field name="執行參數" type="map">
+            <entry name="timeout" type="integer">51</entry>
+            <entry name="retry" type="boolean">false</entry>
+            <entry name="note" type="string">case-21</entry>
+          </field>
+        </stage>
+        <stage key="verify">
+          <field name="name" type="string">PAYMENT_VERIFY</field>
+          <field name="驗證參數" type="map">
+            <entry name="source" type="string">sample</entry>
+            <entry name="index" type="integer">21</entry>
+            <entry name="enabled" type="boolean">true</entry>
+          </field>
+        </stage>
+        <stage key="rollback">
+          <field name="name" type="string">PAYMENT_ROLLBACK</field>
+        </stage>
+        <stage key="cleanup">
+          <field name="name" type="string">PAYMENT_CLEANUP</field>
+        </stage>
+      </stages>
+    </case>
+  </group>
+</testcases>

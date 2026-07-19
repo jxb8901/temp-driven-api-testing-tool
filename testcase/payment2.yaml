@@ -5,7 +5,7 @@ excel:
   headerRows: 2
   caseId: 案例編號
   tags: 標籤
-  dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, creditAccount=入賬帳號, amount=金額, currency=幣別, 預期結果(yaml)
+  dataColumns: caseName=案例名稱, desc=案例描述, debitAccount=扣賬帳號, creditAccount=入賬帳號, amount=金額, currency=幣別, 預期結果(yaml)
 
 stages:
   - key: invoke

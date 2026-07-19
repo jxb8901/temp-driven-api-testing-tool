@@ -67,7 +67,7 @@ public final class ExecutionOptions {
         if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
         String command = args[0].startsWith("--") ? "run" : args[0];
         int start = args[0].startsWith("--") ? 0 : 1;
-        if (!("run".equals(command) || "validate".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command))) {
+        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command))) {
             throw new IllegalArgumentException("Unknown command: " + command);
         }
         Path config = Paths.get("config/config.yaml");
@@ -117,6 +117,9 @@ public final class ExecutionOptions {
         if ("run".equals(command) && !rerun && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) {
             throw new IllegalArgumentException(command + " requires --all, --suite, --case, or --tag");
         }
+        if ("snapshot".equals(command) && !all && suites.isEmpty() && suiteDir == null) {
+            throw new IllegalArgumentException("snapshot requires --all, --suite, or --suite-dir");
+        }
         if ("validate".equals(command) && "selected".equals(validationScope) && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) throw new IllegalArgumentException("validate --selected requires --all, --suite, --case, or --tag");
         if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
         if (seenOptions.contains("--queue") && seenOptions.contains("--parallel")) throw new IllegalArgumentException("--queue and --parallel are mutually exclusive");
@@ -129,6 +132,7 @@ public final class ExecutionOptions {
         Set<String> allowed = new LinkedHashSet<String>(java.util.Arrays.asList("--config", "--help"));
         if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose"));
         else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose"));
+        else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);

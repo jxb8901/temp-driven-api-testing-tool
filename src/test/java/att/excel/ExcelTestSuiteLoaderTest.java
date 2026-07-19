@@ -12,6 +12,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.util.CellRangeAddress;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -70,6 +71,53 @@ class ExcelTestSuiteLoaderTest {
         assertEquals(Integer.valueOf(1), error.column());
         assertTrue(error.format().contains(workbook.toString()));
         assertTrue(error.format().contains("Enter a non-blank"));
+    }
+
+    @Test void rejectsFormulaInConfiguredTestcaseColumn() throws Exception {
+        Path workbook = tempDir.resolve("formula.xlsx");
+        try (Workbook value = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = value.createSheet("支付測試案例集");
+            Row header = sheet.createRow(0); String[] columns = {"案例編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            for (int i = 0; i < columns.length; i++) header.createCell(i).setCellValue(columns[i]);
+            Row row = sheet.createRow(1); row.createCell(0).setCellValue("TC001"); row.createCell(1).setCellFormula("1+1");
+            row.createCell(2).setCellValue("smoke"); row.createCell(4).setCellValue("PAYMENT_INVOKE"); row.createCell(5).setCellValue("timeout: 30");
+            value.write(output);
+        }
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class, () -> new ExcelTestSuiteLoader(config(1, false)).load(workbook));
+        assertTrue(error.getMessage().contains("Formula cells are not supported"), error.getMessage());
+        assertEquals(Integer.valueOf(2), error.row()); assertEquals(Integer.valueOf(2), error.column());
+    }
+
+    @Test void rejectsMergedCellsInTestcaseDataButAllowsMergedHeaders() throws Exception {
+        Path workbook = tempDir.resolve("merged.xlsx");
+        try (Workbook value = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = value.createSheet("支付測試案例集");
+            Row header = sheet.createRow(0); String[] columns = {"案例編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            for (int i = 0; i < columns.length; i++) header.createCell(i).setCellValue(columns[i]);
+            Row row = sheet.createRow(1); row.createCell(0).setCellValue("TC001"); row.createCell(1).setCellValue("merged");
+            row.createCell(2).setCellValue("smoke"); row.createCell(4).setCellValue("PAYMENT_INVOKE"); row.createCell(5).setCellValue("timeout: 30");
+            sheet.addMergedRegion(new CellRangeAddress(1, 1, 1, 2)); value.write(output);
+        }
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class, () -> new ExcelTestSuiteLoader(config(1, false)).load(workbook));
+        assertTrue(error.getMessage().contains("Merged cells are not supported"), error.getMessage());
+    }
+
+    @Test void configuredCellFormattingIsStableAcrossDefaultLocales() throws Exception {
+        Path workbook = tempDir.resolve("locale.xlsx");
+        try (Workbook value = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = value.createSheet("支付測試案例集"); Row header = sheet.createRow(0);
+            String[] columns = {"案例編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            for (int i = 0; i < columns.length; i++) header.createCell(i).setCellValue(columns[i]);
+            org.apache.poi.ss.usermodel.CellStyle style = value.createCellStyle(); style.setDataFormat(value.createDataFormat().getFormat("#,##0.00"));
+            Row row = sheet.createRow(1); row.createCell(0).setCellValue("TC001"); row.createCell(1).setCellValue(1234.5); row.getCell(1).setCellStyle(style);
+            row.createCell(2).setCellValue("smoke"); row.createCell(4).setCellValue("PAYMENT_INVOKE"); row.createCell(5).setCellValue("timeout: 30"); value.write(output);
+        }
+        java.util.Locale previous = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.US); String us = String.valueOf(new ExcelTestSuiteLoader(config(1, false)).load(workbook).get(0).caseData().get("caseName"));
+            java.util.Locale.setDefault(java.util.Locale.GERMANY); String germany = String.valueOf(new ExcelTestSuiteLoader(config(1, false)).load(workbook).get(0).caseData().get("caseName"));
+            assertEquals(us, germany);
+        } finally { java.util.Locale.setDefault(previous); }
     }
 
     private FrameworkConfig config() {

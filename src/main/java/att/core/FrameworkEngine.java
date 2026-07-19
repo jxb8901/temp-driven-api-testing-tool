@@ -10,6 +10,7 @@ import att.config.SuiteConfigResolver;
 import att.config.YamlSupport;
 import att.excel.ExcelReportWriter;
 import att.excel.ExcelTestSuiteLoader;
+import att.snapshot.TestcaseSnapshotService;
 import att.exec.ToolInvoker;
 import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
@@ -277,7 +278,9 @@ public class FrameworkEngine {
             StageTemplateLoader loader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
             List<TestCase> selectedCases = new ArrayList<TestCase>();
             Map<String, StageTemplate> templates = new LinkedHashMap<String, StageTemplate>();
-            for (TestCase testCase : new ExcelTestSuiteLoader(suiteConfig).load(workbook)) {
+            List<TestCase> loadedCases = new ExcelTestSuiteLoader(suiteConfig).load(workbook);
+            new TestcaseSnapshotService().verify(workbook, suiteConfig, loadedCases);
+            for (TestCase testCase : loadedCases) {
                 if (!options.matches(testCase) || (options.rerunFailed() && !failed.contains(testCase.caseId()))) continue;
                 Path previousCase = fullCaseIds.put(testCase.caseId(), workbook);
                 if (previousCase != null) throw new IllegalArgumentException("Duplicate full Case ID '" + testCase.caseId() + "' in " + previousCase + " and " + workbook);
@@ -420,7 +423,13 @@ public class FrameworkEngine {
     private List<Map<String, Object>> inputHashes(ExecutionOptions options) throws Exception {
         List<Map<String, Object>> inputs = new ArrayList<Map<String, Object>>();
         addInput(inputs, "global-config", resolve(options.configPath()));
-        for (Path suite : suites(options)) { Path workbook = resolve(suite); addInput(inputs, "workbook", workbook); String name = workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml"); addInput(inputs, "sidecar", workbook.resolveSibling(name)); }
+        for (Path suite : suites(options)) {
+            Path workbook = resolve(suite);
+            addInput(inputs, "workbook", workbook);
+            String sidecar = workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml");
+            addInput(inputs, "sidecar", workbook.resolveSibling(sidecar));
+            addInput(inputs, "testcase-snapshot", new TestcaseSnapshotService().snapshotPath(workbook));
+        }
         Path templates = resolve(config.templatesRoot());
         if (Files.isDirectory(templates)) try (java.util.stream.Stream<Path> files = Files.walk(templates)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).filter(path -> !path.getFileName().toString().startsWith(".")).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "template-input", iterator.next()); }
         java.util.Set<Path> toolGroupFiles = new java.util.LinkedHashSet<Path>();

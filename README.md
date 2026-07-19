@@ -1,14 +1,15 @@
-# ATT 2.3.5 - Automated Testing Tool
+# ATT 2.4.0 - Automated Testing Tool
 
-ATT V2.3.5 loads grouped Excel testcases through mandatory strict-schema sidecar YAML, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.4.0 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
-V2.3 retains the V2 Case → Stage → Template → Action → Tool model and all V2.2 tool-group, argv-list, SSH, Windows, shorthand, and built-in capabilities. It adds multi-file render globs and typed render results, nests every action outcome under `action.output`, lets `assert` decide non-assert action PASS/FAIL, partially evaluates action descriptions during validation, and records explicit Expected/Actual report values. Templates use `att-template/v2.3`; configuration/tool-group schemas remain V2.2 and sidecar/run/CI schemas retain their existing versions.
+V2.4 retains the V2.3 Case → Stage → Template → Action → Tool and action-result contracts. It adds deterministic testcase version control: Excel remains the editable source, while `basename.xml` records only the normalized ATT testcase semantics and is verified before validation or execution.
 
-`testcase.root` defaults to `testcase`. ATT recursively discovers adjacent `basename.yaml` + `basename.xlsx` pairs below it; each pair is one testcase set.
+`testcase.root` defaults to `testcase`. ATT recursively discovers adjacent `basename.xlsx` + `basename.yaml` + `basename.xml` triples below it; each triple is one testcase set.
 
 ## Quick Start
 
 ```sh
+./att.sh snapshot --all
 ./att.sh validate --package
 ./att.sh run --all
 ```
@@ -16,6 +17,7 @@ V2.3 retains the V2 Case → Stage → Template → Action → Tool model and al
 On Windows, run the same commands through `att.bat`:
 
 ```bat
+att.bat snapshot --all
 att.bat validate --package
 att.bat run --all
 ```
@@ -31,12 +33,13 @@ Run one workbook, full Case ID, or tag:
 ./att.sh run --all --ci-output junit,json
 ```
 
-Every workbook requires a same-basename sidecar with a package-unique `id`. The included `payment` workbook contains Chinese `payment` and `batch` sheets; both may contain row Case ID `TC001`, producing `payment.payment.TC001` and `payment.batch.TC001`.
+Every workbook requires a same-basename YAML sidecar with a package-unique `id` and a generated same-basename XML snapshot. The included `payment` workbook contains Chinese `payment` and `batch` sheets; both may contain row Case ID `TC001`, producing `payment.payment.TC001` and `payment.batch.TC001`.
 
 ## Commands
 
 ```sh
 ./att.sh                 # help
+./att.sh snapshot --all
 ./att.sh validate --package
 ./att.sh run --all
 ./att.sh report --run-id <RunID>
@@ -55,7 +58,10 @@ Every workbook requires a same-basename sidecar with a package-unique `id`. The 
 
 `./att.sh docs` always produces one self-contained page at `build/docs/index.html`; Testcases are grouped by workbook and Sheet, and each table includes the validation-time Expected Result assembled from assert actions. Tool and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, or tool. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, configuration, and documentation source files.
 
-## V2.3 essentials
+## V2.4 essentials
+
+- Edit testcase values in `basename.xlsx` and never hand-edit `basename.xml`; generate it with `./att.sh snapshot --suite <xlsx>` or `snapshot --all`, review the XML diff, then commit both files (plus the YAML sidecar when its mappings changed). Snapshot XML uses `att-testcases/v2.4`, preserves group/Case/stage order and typed nested YAML values, prefers CDATA for multiline or XML-special string content, and excludes styles, widths, comments, and unconfigured sheets/columns.
+- `validate` and `run` reject a missing, malformed, non-canonical, or stale snapshot before creating run output. They never update snapshots automatically. Formula cells and merged data cells in configured testcase columns are rejected because they cannot provide stable versioned values.
 
 - Render actions require a safe template-relative `payload` glob and `renderAs: file|text|json|yaml|xml`. File mode preserves each matched relative path below the Case output directory; other modes store typed values in `ACTIONS.<id>.output.result`.
 - Action outcome fields are nested under `output`: `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Use `${output...}` for the current action and `${ACTIONS.<id>.output...}` for completed actions.
@@ -99,5 +105,5 @@ test case --1:n stage--> template --1:n action--> tool
 - Tool argument descriptors contain `name`, `description`, `required`, optional `argName`, optional `argNameMode: once|repeat`, and optional `delimit`; multiple arguments in the same tool may be delimited.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
-See [V2.3 System Design](docs/02_System_Design_V2.3.md) for the normative specification.
-See the [ATT V2.3.5 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.3.5 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See [V2.4 System Design](docs/02_System_Design_V2.4.md) for the normative specification.
+See the [ATT V2.4.0 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.4.0 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

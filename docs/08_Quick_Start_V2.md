@@ -1,8 +1,8 @@
-# ATT V2.3.5 新手入門
+# ATT V2.4.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.3.5 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.3.5 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.4.0 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.4.0 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.3.5 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.4.0 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -47,12 +47,13 @@ config/config.yaml
 config/tools/payment.yaml
 testcase/支付回歸.xlsx
 testcase/支付回歸.yaml
+testcase/支付回歸.xml
 templates/payment/local/CT001/template.yaml
 templates/payment/local/CT001/request.tmp.xml
 tools/invoke_payment_api.sh
 ```
 
-全域 `testcase.root` 預設為 `testcase`。ATT 會遞歸掃描其任意子目錄；同一目錄內的 `basename.yaml` 與 `basename.xlsx` 配對後就是一個測試案例集。
+全域 `testcase.root` 預設為 `testcase`。ATT 會遞歸掃描其任意子目錄；同一目錄內的 `basename.xlsx`、`basename.yaml` 與 `basename.xml` 三個檔案共同構成一個測試案例集。
 
 只有直接包含 `template.yaml` 的目錄才是模板；上例模板完整路徑是 `payment/local/CT001`。
 
@@ -378,11 +379,16 @@ ATT 內置函數包括：
 #{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.3.5](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.4.0](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
 ```sh
+# Excel 修改後先生成同 basename 的語義 XML，並 review Git diff
+./att.sh snapshot --suite testcase/支付回歸.xlsx
+# 或為 testcase.root 下所有 workbook 生成 snapshot
+./att.sh snapshot --all
+
 # 預設 --package：檢查整個套件，包括未被案例引用的 template/tool
 ./att.sh validate --package
 
@@ -402,6 +408,7 @@ ATT 內置函數包括：
 Windows 使用同一組命令與參數，只需將 `./att.sh` 換成 `att.bat`：
 
 ```bat
+att.bat snapshot --all
 att.bat validate --package
 att.bat run --all
 ```
@@ -420,12 +427,14 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 
 `validate --package` 是預設模式；它可不帶 testcase filter，並會找出未被引用但壞掉的 template 或 tool。`--selected` 僅驗證選定案例的依賴，速度較快，但輸出會明示未驗證其餘內容。
 
+`snapshot` 是唯一可寫入 testcase XML 的 ATT 命令。`validate` 和 `run` 只讀取並比較 snapshot；若 XML 缺失、格式不 canonical、內容過期或 schema 不是 `att-testcases/v2.4`，便以 `ATT-TC-001` 阻止後續執行。XML 只包含 sidecar 映射後的 Sheet、Case、tag、data 與 stage 值，不包含 Excel 樣式、欄寬、註解或未配置 Sheet。含換行或 `&`、`<`、`>` 的字串會優先寫成 CDATA；內容中的 `]]>` 會自動拆成相鄰 CDATA section，讀回時仍是原字串。請勿手動修改 XML。
+
 範例 validation JSON：
 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.3.5",
+  "attVersion": "2.4.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

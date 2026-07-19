@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.0 - 2026-07-19
+
+- Added mandatory same-basename semantic XML snapshots for Excel testcase version control. Excel remains the editable source; `snapshot --suite` and `snapshot --all` generate deterministic `basename.xml` documents using `att-testcases/v2.4`.
+- Added pre-validation and pre-execution snapshot verification with field-level added, removed, reordered, and modified Case diagnostics. Missing, malformed, non-canonical, or stale snapshots prevent execution before run output is created.
+- Snapshot XML records only sidecar-mapped groups, normalized Case data, tags, and ordered stage selectors/data. It uses explicit scalar/map/list types, CDATA for multiline or XML-special strings (including deterministic splitting of literal `]]>`), secure XXE-disabled parsing, UTF-8/LF canonical output, atomic replacement, XSD publication, and run-manifest hashing.
+- Rejected formula cells and merged data cells in configured testcase columns to keep execution and versioned values deterministic; merged presentation cells remain allowed within configured header rows.
+- Added sample snapshots, CLI/help/manual/design updates, and regression coverage for deterministic XML, Unicode/multiline/nested values, stale or unsafe snapshots, generation safety, formula/merge boundaries, and run enforcement.
+
 ## 2.3.5 - 2026-07-17
 
 - Reworked user-facing failures into typed, actionable diagnostics for command-line, global/tool configuration, workbook/sidecar/Case loading, template/action execution, Context lookup, built-in invocation, and external-tool execution. Diagnostics now preserve stable codes, precise locations, detailed causes, available choices, likely corrections, and repair guidance instead of inferring categories from message text.

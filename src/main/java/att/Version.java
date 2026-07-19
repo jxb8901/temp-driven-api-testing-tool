@@ -12,6 +12,7 @@ public final class Version {
     public static final String CONFIG_SCHEMA = "att-config/v2.2";
     public static final String TOOL_GROUP_SCHEMA = "att-tool-group/v2.2";
     public static final String SIDECAR_SCHEMA = "att-sidecar/v2.1";
+    public static final String TESTCASE_SNAPSHOT_SCHEMA = "att-testcases/v2.4";
     public static final String TEMPLATE_SCHEMA = "att-template/v2.3";
     public static final String RUN_SCHEMA = "att-run/v2.1";
     public static final String VALIDATION_SCHEMA = "att-validation/v2.1";

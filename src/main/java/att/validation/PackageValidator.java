@@ -9,6 +9,7 @@ import att.core.ExecutionOptions;
 import att.core.StageCaseData;
 import att.core.TestCase;
 import att.excel.ExcelTestSuiteLoader;
+import att.snapshot.TestcaseSnapshotService;
 import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
 import att.template.TemplateAction;
@@ -71,6 +72,8 @@ public final class PackageValidator {
                 if (previousWorkbook != null) diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID,
                         new IllegalArgumentException("Duplicate workbook id '" + config.workbookId() + "'; first declared by " + previousWorkbook), resolved));
                 List<TestCase> loaded = new ExcelTestSuiteLoader(config).load(resolved);
+                try { new TestcaseSnapshotService().verify(resolved, config, loaded); }
+                catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, e, resolved)); }
                 for (TestCase testCase : loaded) {
                     if ("selected".equals(options.validationScope()) && !options.matches(testCase)) continue;
                     CaseLocation previousCase = fullCaseIds.put(testCase.caseId(), new CaseLocation(resolved, testCase.sheetName(), testCase.rowNumber()));
@@ -139,7 +142,7 @@ public final class PackageValidator {
         Path catalog = projectRoot.resolve("schemas/catalog.yaml");
         if (Files.isRegularFile(catalog)) try {
             Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v2.2".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
+            if (!(loaded instanceof Map) || !"att-schema-catalog/v2.4".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
             Object schemas = ((Map<?, ?>) loaded).get("schemas"); if (!(schemas instanceof Map)) throw new IllegalArgumentException("Schema catalog requires schemas map");
             for (Object value : ((Map<?, ?>) schemas).values()) {
                 Path schema = projectRoot.resolve("schemas").resolve(String.valueOf(value)).normalize();
