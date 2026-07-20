@@ -1,6 +1,6 @@
-# ATT 2.4.0 - Automated Testing Tool
+# ATT 2.4.1 - Automated Testing Tool
 
-ATT V2.4.0 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.4.1 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
 
 V2.4 retains the V2.3 Case → Stage → Template → Action → Tool and action-result contracts. It adds deterministic testcase version control: Excel remains the editable source, while `basename.xml` records only the normalized ATT testcase semantics and is verified before validation or execution.
 
@@ -19,8 +19,11 @@ On Windows, run the same commands through `att.bat`:
 ```bat
 att.bat snapshot --all
 att.bat validate --package
+att.bat docs
 att.bat run --all
 ```
+
+`snapshot`, `validate`, and `docs` run natively through `att.bat` without invoking configured testcase tools. On Windows, validation checks `.sh` file existence and path safety but skips POSIX launch/executable compatibility and emits a warning; provide and test `.bat`, `.cmd`, or `.exe` equivalents before `run`.
 
 Run one workbook, full Case ID, or tag:
 
@@ -28,6 +31,7 @@ Run one workbook, full Case ID, or tag:
 ./att.sh validate --selected --case payment.payment.TC001
 ./att.sh validate --package --format json
 ./att.sh run --suite testcase/payment_regression.xlsx
+./att.sh run --suite testcase/payment_regression.xlsx --update-snapshot
 ./att.sh run --all --case payment.payment.TC001
 ./att.sh run --all --tag smoke --exclude-tag slow
 ./att.sh run --all --ci-output junit,json
@@ -61,7 +65,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 ## V2.4 essentials
 
 - Edit testcase values in `basename.xlsx` and never hand-edit `basename.xml`; generate it with `./att.sh snapshot --suite <xlsx>` or `snapshot --all`, review the XML diff, then commit both files (plus the YAML sidecar when its mappings changed). Snapshot XML uses `att-testcases/v2.4`, preserves group/Case/stage order and typed nested YAML values, prefers CDATA for multiline or XML-special string content, and excludes styles, widths, comments, and unconfigured sheets/columns.
-- `validate` and `run` reject a missing, malformed, non-canonical, or stale snapshot before creating run output. They never update snapshots automatically. Formula cells and merged data cells in configured testcase columns are rejected because they cannot provide stable versioned values.
+- `validate` and ordinary `run` reject a missing, malformed, non-canonical, or stale snapshot before creating run output. `run --update-snapshot` is the explicit opt-in overwrite workflow: it refreshes only changed complete-workbook snapshots before the same validation gate, including with `--dry-run`. Formula cells and merged data cells in configured testcase columns are rejected because they cannot provide stable versioned values.
 
 - Render actions require a safe template-relative `payload` glob and `renderAs: file|text|json|yaml|xml`. File mode preserves each matched relative path below the Case output directory; other modes store typed values in `ACTIONS.<id>.output.result`.
 - Action outcome fields are nested under `output`: `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Use `${output...}` for the current action and `${ACTIONS.<id>.output...}` for completed actions.
@@ -71,7 +75,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - `${CASE.outputDirectory}` exposes the normalized absolute current Case output directory. Local tools run with that directory as cwd and receive framework-owned `ATT_ROOT_DIR` and `ATT_CASE_OUTPUT_DIR` environment variables, while package-relative `./`/`../` executables are still resolved from the package root. SSH remote cwd remains the remote account default and local-path variables are not injected remotely.
 
 - Global configuration uses `att-config/v2.2`; each file in `toolGroups` uses `att-tool-group/v2.2` and a package-unique `id`. Grouped tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
-- Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
+- Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. `snapshot`, `validate`, and `docs` are safe Windows authoring commands and never invoke configured testcase tools; Windows validation warns when `.sh` launch compatibility was not checked. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
 - Tool `command` and group `script` accept a scalar or argv list. Lists preserve each YAML item as one argument; scalar commands use the existing tokenizer once. Group scripts receive `<tool key> <tool command argv>` after the script argv.
 - An argument may declare `argName`, such as `--reference`. When its exact-token placeholder has a non-blank value, ATT emits the name and value as separate atomic argv; a missing/blank optional value emits neither. For delimited values, the backward-compatible default `argNameMode: once` emits the name only before the first value, while `repeat` emits it before every value. Omitted or empty `argName` is positional, and optional positional placeholders are likewise omitted when blank.
 - Root `ssh` applies to inline global tools; a group's `ssh` applies only to that group. ATT prefers local OpenSSH and automatically warns/falls back to the bundled mwiede/jsch Java client when `ssh` is unavailable. Both use strict host-key checking, optional key files, and a safely quoted remote command; see Reference Manual Chapter 09 for Java algorithm limits.
@@ -80,7 +84,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - A built-in that accepts exactly one value may be written as `#{upper(${CASE.currency})}` instead of `value=...`. A configured tool may omit its argument name only when its configuration declares exactly one argument, for example `#{getAppLogs(${CASE.caseId})}`; multi-argument tools still require names.
 - `schemaVersion` is mandatory in global configuration, tool groups, workbook sidecars, and templates. V2.3 templates use `att-template/v2.3`; unknown non-`x-*` fields are validation errors.
 - `validate --package` is the default full-package check; `validate --selected` checks only the selected case/suite/tag dependency closure.
-- Validation parses the same Context references and inline `#{...}` calls used at runtime. Unknown Context names, stage/action references, built-ins, configured tools, arguments, and render-payload calls fail before execution with a stable code, precise location, detail, and repair hint.
+- Validation parses the same Context references and inline `#{...}` calls used at runtime. A Context path may use any case-sensitive segment suffix that uniquely identifies one currently readable logical path; ambiguity is `ATT-CTX-002`. Unknown or ambiguous references include the requested path, deepest reached node/candidates, and the complete key/type-only author-facing Context tree without exposing values.
 - `type: assign` evaluates a text `expression` and publishes it under a unique Case-scoped `name`, for example `${CASE.VARS.txnSeq}`, while retaining the same value at `${ACTIONS.<id>.output.result}`. `CASE.VARS` persists across stages/templates but is isolated per Test Case; an optional assertion does not roll back a successfully evaluated assignment.
 - A normal human run prints only the final summary and report path. `--verbose` adds lifecycle progress and mirrors every complete Case-log block, including template/tool input, argv, stdout, stderr, and payload evidence; use it only where sensitive Case data may be displayed safely. `--quiet` suppresses normal output.
 - `sysdate([format])` and `systimestamp([format])` retain their ISO defaults and accept one positional or named Java `DateTimeFormatter` pattern, for example `#{sysdate('yyyyMMdd')}`.
@@ -106,4 +110,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.4 System Design](docs/02_System_Design_V2.4.md) for the normative specification.
-See the [ATT V2.4.0 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.4.0 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.4.1 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.4.1 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

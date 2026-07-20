@@ -63,11 +63,12 @@ public class UnifiedTemplateEngine {
                     && !"CASE.outputDirectory".equals(expression);
             Object value;
             if (validationOnly) {
-                boolean runtimeDependent = expression.startsWith("CASE.STAGES.") || expression.startsWith("ACTIONS.")
+                boolean runtimeDependent = "CASE.outputDirectory".equals(expression) || expression.startsWith("CASE.STAGES.") || expression.startsWith("ACTIONS.")
                         || expression.startsWith("TOOL.") || expression.equals("output") || expression.startsWith("output.");
                 if (validationValueAvailable) value = context.require(expression);
-                else if (context.contains(expression)) value = null;
                 else if (runtimeDependent) value = null;
+                else if (context.contains(expression)) value = context.require(expression);
+                else if (!explicitContextRoot(expression)) value = null; // A dynamic unique suffix is checked structurally and completed at runtime.
                 else value = context.require(expression);
             }
             else if (preserveMissing) value = context.resolve(expression);
@@ -77,6 +78,14 @@ public class UnifiedTemplateEngine {
         }
         matcher.appendTail(output);
         return output.toString();
+    }
+
+    private boolean explicitContextRoot(String expression) {
+        return expression.equals("CASE") || expression.startsWith("CASE.") || expression.startsWith("CASE[")
+                || expression.equals("RUN") || expression.startsWith("RUN.") || expression.startsWith("RUN[")
+                || expression.equals("ACTIONS") || expression.startsWith("ACTIONS.") || expression.startsWith("ACTIONS[")
+                || expression.equals("TOOL") || expression.startsWith("TOOL.") || expression.startsWith("TOOL[")
+                || expression.equals("output") || expression.startsWith("output.") || expression.startsWith("output[");
     }
 
     public Object parseRendered(String text, String renderAs) throws Exception {

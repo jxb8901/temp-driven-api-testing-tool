@@ -10,6 +10,12 @@ import att.excel.ExcelTestSuiteLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -19,7 +25,60 @@ import att.validation.DiagnosticException;
 
 /** Generates canonical semantic snapshots for explicitly selected testcase workbooks. */
 public final class SnapshotCommand {
+    private static final Object JVM_UPDATE_LOCK = new Object();
+
     public List<Path> generate(Path projectRoot, FrameworkConfig global, ExecutionOptions options) throws Exception {
+        return withUpdateLock(projectRoot, new LockedOperation<List<Path>>() {
+            @Override public List<Path> run() throws Exception { return generateUnlocked(projectRoot, global, options); }
+        });
+    }
+
+    /** Refreshes only changed snapshots for a run after every selected workbook has been prepared successfully. */
+    public List<Path> updateForRun(Path projectRoot, FrameworkConfig global, ExecutionOptions options) throws Exception {
+        return withUpdateLock(projectRoot, new LockedOperation<List<Path>>() {
+            @Override public List<Path> run() throws Exception { return updateForRunUnlocked(projectRoot, global, options); }
+        });
+    }
+
+    private List<Path> generateUnlocked(Path projectRoot, FrameworkConfig global, ExecutionOptions options) throws Exception {
+        List<Prepared> prepared = prepare(projectRoot, global, options, false);
+        TestcaseSnapshotService snapshots = new TestcaseSnapshotService();
+        List<Path> written = new ArrayList<Path>();
+        for (Prepared item : prepared) {
+            try { written.add(snapshots.write(item.workbook, item.snapshot)); }
+            catch (Exception e) { throw DiagnosticException.wrap(DiagnosticCodes.TESTCASE_INVALID, "Unable to write testcase snapshot", e,
+                    item.workbook.toString(), "snapshot", "Check directory permissions and retry; an existing snapshot was preserved when replacement failed."); }
+        }
+        return written;
+    }
+
+    private List<Path> updateForRunUnlocked(Path projectRoot, FrameworkConfig global, ExecutionOptions options) throws Exception {
+        List<Prepared> prepared = prepare(projectRoot, global, options, true);
+        List<Prepared> changed = new ArrayList<Prepared>();
+        for (Prepared item : prepared) {
+            try {
+                if (!Files.exists(item.target) || !java.util.Arrays.equals(Files.readAllBytes(item.target), item.bytes)) changed.add(item);
+            } catch (Exception e) {
+                throw DiagnosticException.wrap(DiagnosticCodes.TESTCASE_INVALID, "Unable to inspect testcase snapshot before update", e,
+                        item.target.toString(), "snapshot", "Check that the snapshot is a readable regular file, then retry.");
+            }
+        }
+        TestcaseSnapshotService snapshots = new TestcaseSnapshotService();
+        List<Path> updated = new ArrayList<Path>();
+        for (Prepared item : changed) {
+            try { updated.add(snapshots.write(item.workbook, item.snapshot)); }
+            catch (Exception e) {
+                String completed = updated.isEmpty() ? "none" : join(updated);
+                throw new DiagnosticException(DiagnosticCodes.TESTCASE_INVALID, "Unable to update testcase snapshot",
+                        "Completed snapshot updates: " + completed + "; failed path: " + item.target + "; cause: " + message(e),
+                        item.target.toString(), "snapshot", null, null, null, null, null,
+                        "Correct the filesystem problem and rerun with --update-snapshot; completed atomic replacements remain valid.", e);
+            }
+        }
+        return updated;
+    }
+
+    private List<Prepared> prepare(Path projectRoot, FrameworkConfig global, ExecutionOptions options, boolean runUpdate) throws Exception {
         List<Path> workbooks = suites(projectRoot, global, options);
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, global);
         TestcaseSnapshotService snapshots = new TestcaseSnapshotService();
@@ -32,20 +91,19 @@ public final class SnapshotCommand {
                 FrameworkConfig config = resolver.resolve(canonical);
                 List<TestCase> cases = new ExcelTestSuiteLoader(config).load(canonical);
                 Map<String, Object> snapshot = snapshots.build(config, cases);
-                snapshots.serialize(snapshot); // Complete canonicalization before any selected file is written.
-                prepared.add(new Prepared(canonical, snapshot));
+                byte[] bytes = snapshots.serialize(snapshot).getBytes(StandardCharsets.UTF_8); // Complete canonicalization before any selected file is written.
+                Path target = snapshots.snapshotPath(canonical);
+                if (Files.isSymbolicLink(target)) throw new IllegalArgumentException("Snapshot is a symbolic link and cannot be replaced: " + target);
+                if (Files.exists(target) && !Files.isRegularFile(target)) throw new IllegalArgumentException("Snapshot target is not a regular file: " + target);
+                prepared.add(new Prepared(canonical, target, snapshot, bytes));
             } catch (Exception e) {
                 throw DiagnosticException.wrap(DiagnosticCodes.TESTCASE_INVALID, "Unable to generate testcase snapshot", e,
-                        workbook.toString(), "snapshot", "Correct the workbook/sidecar data, then rerun the snapshot command.");
+                        workbook.toString(), "snapshot", runUpdate
+                                ? "Correct the workbook/sidecar data, then rerun with --update-snapshot."
+                                : "Correct the workbook/sidecar data, then rerun the snapshot command.");
             }
         }
-        List<Path> written = new ArrayList<Path>();
-        for (Prepared item : prepared) {
-            try { written.add(snapshots.write(item.workbook, item.snapshot)); }
-            catch (Exception e) { throw DiagnosticException.wrap(DiagnosticCodes.TESTCASE_INVALID, "Unable to write testcase snapshot", e,
-                    item.workbook.toString(), "snapshot", "Check directory permissions and retry; an existing snapshot was preserved when replacement failed."); }
-        }
-        return written;
+        return prepared;
     }
 
     private List<Path> suites(Path projectRoot, FrameworkConfig global, ExecutionOptions options) throws Exception {
@@ -68,7 +126,40 @@ public final class SnapshotCommand {
 
     private static final class Prepared {
         private final Path workbook;
+        private final Path target;
         private final Map<String, Object> snapshot;
-        private Prepared(Path workbook, Map<String, Object> snapshot) { this.workbook = workbook; this.snapshot = snapshot; }
+        private final byte[] bytes;
+        private Prepared(Path workbook, Path target, Map<String, Object> snapshot, byte[] bytes) {
+            this.workbook = workbook; this.target = target; this.snapshot = snapshot; this.bytes = bytes;
+        }
     }
+
+    private <T> T withUpdateLock(Path projectRoot, LockedOperation<T> operation) throws Exception {
+        synchronized (JVM_UPDATE_LOCK) {
+            Path canonical = IdentifierValidator.canonicalPath(projectRoot, "package root");
+            Path lockPath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("att-snapshot-" + sha256(canonical.toString()) + ".lock");
+            try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 FileLock ignored = channel.lock()) {
+                return operation.run();
+            }
+        }
+    }
+
+    private String sha256(String value) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        StringBuilder out = new StringBuilder();
+        for (byte item : digest) out.append(String.format("%02x", item & 0xff));
+        return out.toString();
+    }
+
+    private String join(List<Path> paths) {
+        List<String> values = new ArrayList<String>(); for (Path path : paths) values.add(path.toString());
+        return String.join(", ", values);
+    }
+
+    private String message(Exception error) {
+        String value = error.getMessage(); return value == null || value.trim().isEmpty() ? error.getClass().getSimpleName() : value;
+    }
+
+    private interface LockedOperation<T> { T run() throws Exception; }
 }

@@ -42,6 +42,56 @@ class PackageValidatorTest {
         assertEquals(Collections.singletonList("pwsh.exe"), PackageValidator.executableCandidates("pwsh.exe", true, ".EXE;.CMD"));
         assertEquals(Collections.singletonList("pwsh"), PackageValidator.executableCandidates("pwsh", false, ".EXE;.CMD"));
     }
+
+    @Test void windowsValidationSkipsOnlyShellExecutabilityAndEmitsOneWarning() throws Exception {
+        Path toolsDir = tempDir.resolve("tools"); Files.createDirectories(toolsDir);
+        Path shell = toolsDir.resolve("sample.sh"); Files.write(shell, "#!/bin/sh\n".getBytes("UTF-8"));
+        shell.toFile().setExecutable(false);
+        ToolConfig tool = new ToolConfig("sample", "Sample", "POSIX sample", "./tools/sample.sh", "txt",
+                Collections.<String,ToolArgumentConfig>emptyMap());
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.singletonMap("sample",tool),null,null);
+        PackageValidator windowsValidator = new PackageValidator(tempDir, config, true);
+        java.lang.reflect.Method executable = PackageValidator.class.getDeclaredMethod("validateToolExecutable", ToolConfig.class);
+        executable.setAccessible(true);
+        assertDoesNotThrow(() -> { try { executable.invoke(windowsValidator, tool); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); } });
+
+        java.lang.reflect.Method warning = PackageValidator.class.getDeclaredMethod("addWindowsShellExecutableWarning", List.class);
+        warning.setAccessible(true);
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>(); warning.invoke(windowsValidator, diagnostics);
+        assertEquals(1, diagnostics.size());
+        assertEquals(Diagnostic.Severity.WARNING, diagnostics.get(0).severity());
+        assertTrue(diagnostics.get(0).message().contains("sample"));
+        assertTrue(diagnostics.get(0).message().contains("did not check whether POSIX .sh tools can be launched"));
+
+        PackageValidator unixValidator = new PackageValidator(tempDir, config, false);
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> executable.invoke(unixValidator, tool));
+    }
+
+    @Test void windowsValidationStillRejectsMissingOrUnsafeShellFiles() throws Exception {
+        ToolConfig missing = new ToolConfig("missing", "Missing", "Missing script", "./tools/missing.sh", "txt",
+                Collections.<String,ToolArgumentConfig>emptyMap());
+        PackageValidator validator = new PackageValidator(tempDir,
+                new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,Collections.<String,ToolConfig>emptyMap(),null,null), true);
+        java.lang.reflect.Method executable = PackageValidator.class.getDeclaredMethod("validateToolExecutable", ToolConfig.class);
+        executable.setAccessible(true);
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> executable.invoke(validator, missing));
+    }
+
+    @Test void windowsPackageValidationPublishesSkippedShellWarning() throws Exception {
+        Path root = java.nio.file.Paths.get("").toAbsolutePath().normalize();
+        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        PackageValidator.ValidationSummary summary = new PackageValidator(root, config, true)
+                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+        List<Diagnostic> warnings = new ArrayList<Diagnostic>();
+        for (Diagnostic diagnostic : summary.diagnostics) if (diagnostic.severity() == Diagnostic.Severity.WARNING
+                && diagnostic.message().contains("did not check whether POSIX .sh tools can be launched")) warnings.add(diagnostic);
+        assertEquals(1, warnings.size());
+        assertTrue(warnings.get(0).message().contains("invokePaymentApi"));
+        assertTrue(warnings.get(0).message().contains("sample.getSeq"));
+    }
     @Test void enforcesTypeSpecificActionContracts() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10,tempDir,Collections.<String,ToolConfig>emptyMap(),null,null);
         PackageValidator validator = new PackageValidator(tempDir,config);
@@ -137,6 +187,38 @@ class PackageValidatorTest {
             assertNotNull(error, invalid);
             assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code(), invalid);
         }
+    }
+
+    @Test void caseBoundValidationUsesTheRuntimeUniqueSuffixResolver() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "PAYMENT", Collections.<String,Object>singletonMap("name", "PAYMENT"));
+        Map<String,Object> response = new LinkedHashMap<String,Object>(); response.put("resultCode", "SUCCESS");
+        Map<String,Object> payment = new LinkedHashMap<String,Object>(); payment.put("response", response);
+        Map<String,Object> data = new LinkedHashMap<String,Object>(); data.put("payment", payment);
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                data, Collections.singletonMap("invoke", stage), null);
+        Map<String,Object> log = new LinkedHashMap<String,Object>(); log.put("type", "log"); log.put("message", "code=${resultCode}");
+        StageTemplate template = new StageTemplate("PAYMENT", tempDir, Collections.singletonList(new TemplateAction("show", log)));
+        assertDoesNotThrow(() -> { try { values.invoke(validator, template, testCase, stage, config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } });
+
+        Map<String,Object> refundResponse = new LinkedHashMap<String,Object>(); refundResponse.put("resultCode", "REFUNDED");
+        Map<String,Object> ambiguousData = new LinkedHashMap<String,Object>(data);
+        ambiguousData.put("refund", Collections.singletonMap("response", refundResponse));
+        att.core.TestCase ambiguousCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                ambiguousData, Collections.singletonMap("invoke", stage), null);
+        java.lang.reflect.InvocationTargetException thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, template, ambiguousCase, stage, config));
+        DiagnosticException error = DiagnosticException.find(thrown.getCause());
+        assertNotNull(error);
+        assertEquals(DiagnosticCodes.CONTEXT_AMBIGUOUS, error.code());
+        assertTrue(error.format().contains("CASE.payment.response.resultCode"));
+        assertTrue(error.format().contains("CASE.refund.response.resultCode"));
     }
 
     @Test void packageTemplateValidationChecksContextScopesWithoutAnyCaseReference() throws Exception {

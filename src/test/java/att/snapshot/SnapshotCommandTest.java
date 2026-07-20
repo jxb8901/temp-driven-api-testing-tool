@@ -16,12 +16,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SnapshotCommandTest {
     @TempDir Path projectRoot;
@@ -47,6 +49,47 @@ class SnapshotCommandTest {
         List<Path> one = new SnapshotCommand().generate(projectRoot, global,
                 ExecutionOptions.parse(new String[]{"snapshot", "--suite", "testcase/one.xlsx"}));
         assertEquals(projectRoot.resolve("testcase/one.xml").toRealPath(), one.get(0).toRealPath());
+    }
+
+    @Test void runUpdateCreatesOnlyChangedCanonicalSnapshotsAndRejectsSymlinks() throws Exception {
+        writeSuite("one", "ONE");
+        FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", "testcase/one.xlsx", "--update-snapshot"});
+        SnapshotCommand command = new SnapshotCommand();
+        Path snapshot = projectRoot.resolve("testcase/one.xml");
+
+        List<Path> created = command.updateForRun(projectRoot, global, options);
+        assertEquals(1, created.size()); assertEquals(snapshot.toRealPath(), created.get(0).toRealPath());
+        byte[] first = Files.readAllBytes(snapshot);
+        FileTime fixed = FileTime.fromMillis(123456000L); Files.setLastModifiedTime(snapshot, fixed);
+        assertTrue(command.updateForRun(projectRoot, global, options).isEmpty());
+        assertEquals(fixed, Files.getLastModifiedTime(snapshot));
+
+        Path workbook = projectRoot.resolve("testcase/one.xlsx");
+        try (InputStream input = Files.newInputStream(workbook); Workbook value = new XSSFWorkbook(input)) {
+            value.getSheetAt(0).getRow(1).getCell(1).setCellValue("regression");
+            try (OutputStream output = Files.newOutputStream(workbook)) { value.write(output); }
+        }
+        assertEquals(1, command.updateForRun(projectRoot, global, options).size());
+        assertTrue(!java.util.Arrays.equals(first, Files.readAllBytes(snapshot)));
+
+        Path protectedFile = projectRoot.resolve("testcase/protected.xml"); Files.write(protectedFile, "keep".getBytes(StandardCharsets.UTF_8));
+        Files.delete(snapshot); Files.createSymbolicLink(snapshot, protectedFile.getFileName());
+        assertThrows(att.validation.DiagnosticException.class, () -> command.updateForRun(projectRoot, global, options));
+        assertEquals("keep", new String(Files.readAllBytes(protectedFile), StandardCharsets.UTF_8));
+    }
+
+    @Test void runUpdatePreparesEveryWorkbookBeforeWritingAnySnapshot() throws Exception {
+        writeSuite("one", "ONE"); writeSuite("two", "TWO");
+        Files.write(projectRoot.resolve("testcase/two.yaml"), "invalid: true\n".getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--all", "--update-snapshot"});
+
+        assertThrows(att.validation.DiagnosticException.class, () -> new SnapshotCommand().updateForRun(projectRoot, global, options));
+        assertTrue(!Files.exists(projectRoot.resolve("testcase/one.xml")));
+        assertTrue(!Files.exists(projectRoot.resolve("testcase/two.xml")));
     }
 
     private void writeSuite(String relative, String id) throws Exception {

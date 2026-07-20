@@ -87,9 +87,15 @@ public class DiagnosticException extends IllegalArgumentException {
         StringBuilder output = new StringBuilder(code).append(": ").append(summary);
         String location = location();
         if (!location.isEmpty()) output.append("\n  location: ").append(location);
-        if (detail != null && !detail.equals(summary)) output.append("\n  detail: ").append(detail);
+        if (detail != null && !detail.equals(summary)) appendMultiline(output, "detail", detail);
         if (suggestion != null) output.append("\n  suggestion: ").append(suggestion);
         return output.toString();
+    }
+
+    private static void appendMultiline(StringBuilder output, String label, String value) {
+        String[] lines = value.split("\\r?\\n", -1);
+        output.append("\n  ").append(label).append(": ").append(lines[0]);
+        for (int index = 1; index < lines.length; index++) output.append("\n    ").append(lines[index]);
     }
 
     @Override public String getMessage() {

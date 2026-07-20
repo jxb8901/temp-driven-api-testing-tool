@@ -9,6 +9,7 @@ import java.util.Map;
 public final class CaseRuntimeContext {
     private final Map<String, Object> root = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> runNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> actionsView = new LinkedHashMap<String, Object>();
     private final Path caseOutputDir;
     private final Path caseLogPath;
@@ -40,10 +41,11 @@ public final class CaseRuntimeContext {
         // TOOL is a reserved transient scope. Persisted tool results live below
         // ACTIONS.<actionId>; later actions must not depend on case-wide latest state.
         root.put("TOOL", new LinkedHashMap<String, Object>());
-        root.put("RUN.runId", runId);
-        root.put("RUN.id", runId);
-        root.put("RUN.runDirectory", runDirectory.toString());
-        root.put("RUN.caseLog", caseLog.toString());
+        runNode.put("runId", runId);
+        runNode.put("id", runId);
+        runNode.put("runDirectory", runDirectory.toString());
+        runNode.put("caseLog", caseLog.toString());
+        root.put("RUN", runNode);
     }
 
     @SuppressWarnings("unchecked")
@@ -78,61 +80,92 @@ public final class CaseRuntimeContext {
     }
 
     public Object resolve(String path) {
-        Lookup lookup = lookup(path);
-        return lookup.found ? lookup.value : null;
+        Resolution resolution = resolution(path);
+        return resolution.status == ResolutionStatus.FOUND ? resolution.value : null;
     }
 
     public Object require(String path) {
-        Lookup lookup = lookup(path);
-        if (lookup.found) return lookup.value;
+        Resolution resolution = resolution(path);
+        if (resolution.status == ResolutionStatus.FOUND) return resolution.value;
         java.util.List<String> paths = availablePaths();
         String nearest = nearest(path, paths);
-        String parent = parent(path);
-        java.util.List<String> siblings = new java.util.ArrayList<String>();
-        for (String candidate : paths) if (parent.isEmpty() || candidate.startsWith(parent + ".")) {
-            String remainder = parent.isEmpty() ? candidate : candidate.substring(parent.length() + 1);
-            if (!remainder.contains(".")) siblings.add(remainder);
+        StringBuilder detail = new StringBuilder();
+        if (resolution.status == ResolutionStatus.AMBIGUOUS) {
+            detail.append("The shorthand matches more than one readable logical Context path.")
+                    .append("\nrequestedPath: ").append(path)
+                    .append("\ncurrentNode: <root>")
+                    .append("\ncandidates:");
+            for (String candidate : resolution.candidates) detail.append("\n  - ").append(candidate);
+            detail.append("\ncontextTree:\n").append(indent(contextTree("<root>"), 2));
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_AMBIGUOUS,
+                    "Ambiguous Context shorthand '${" + path + "}'", detail.toString(), null, path, null, null, null,
+                    null, null, "Use a longer unique suffix or one of the listed canonical Context paths.", null);
         }
-        java.util.Collections.sort(siblings);
-        if (siblings.size() > 12) siblings = new java.util.ArrayList<String>(siblings.subList(0, 12));
-        String detail = "No value exists at the case-sensitive path '" + path + "'"
-                + (siblings.isEmpty() ? "" : ". Available fields under '" + (parent.isEmpty() ? "<root>" : parent) + "': " + String.join(", ", siblings));
+        detail.append("No value exists at the requested case-sensitive Context path.")
+                .append("\nrequestedPath: ").append(path)
+                .append("\ncurrentNode: ").append(resolution.currentNode)
+                .append("\nmissingSegment: ").append(resolution.missingSegment)
+                .append("\ncontextTree:\n").append(indent(contextTree(resolution.currentNode), 2));
         String suggestion = nearest == null
-                ? "Check the uppercase scope (CASE/ACTIONS/TOOL/RUN), stage/action IDs, and camelCase field name."
+                ? "Check the Context tree, case-sensitive field name, and whether the stage/action output is available at this point."
                 : "Use '${" + nearest + "}' if that is the intended Context variable; Context names are case-sensitive.";
         throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                "Unknown Context variable '${" + path + "}'", detail, null, path, null, null, null,
+                "Unknown Context variable '${" + path + "}'", detail.toString(), null, path, null, null, null,
                 null, null, suggestion, null);
     }
 
-    public boolean contains(String path) { return lookup(path).found; }
+    public boolean contains(String path) { return resolution(path).status == ResolutionStatus.FOUND; }
 
-    private Lookup lookup(String path) {
-        if (root.containsKey(path)) return Lookup.found(root.get(path));
-        if (path.startsWith("TOOL.")) {
-            Lookup scoped = findPath(root.get("TOOL"), path.substring("TOOL.".length()));
-            if (scoped.found) return scoped;
-            if (path.startsWith("TOOL.input.")) {
-                Lookup input = findPath(root.get("TOOL.input"), path.substring("TOOL.input.".length()));
-                if (input.found) return input;
-            }
-            if (path.startsWith("TOOL.output.")) {
-                Lookup output = findPath(root.get("TOOL.output"), path.substring("TOOL.output.".length()));
-                if (output.found) return output;
-            }
+    private Resolution resolution(String path) {
+        java.util.List<Segment> requested;
+        try { requested = parsePath(path); }
+        catch (Exception ignored) { return Resolution.missing("<root>", path == null ? "<null>" : path); }
+        if (requested.isEmpty()) return Resolution.missing("<root>", "<empty>");
+        String first = requested.get(0).key;
+        if (first != null && explicitRoots().contains(first)) return traverse(logicalRoot(), requested);
+
+        java.util.Map<String, Object> candidates = canonicalPaths();
+        java.util.List<String> matches = new java.util.ArrayList<String>();
+        for (String candidate : candidates.keySet()) {
+            java.util.List<Segment> segments = parsePath(candidate);
+            if (endsWith(segments, requested)) matches.add(candidate);
         }
-        Lookup direct = findPath(root, path);
-        return direct.found ? direct : findPath(caseNode, path);
+        java.util.Collections.sort(matches);
+        if (matches.size() == 1) return Resolution.found(candidates.get(matches.get(0)), matches.get(0));
+        if (matches.size() > 1) return Resolution.ambiguous(matches);
+        return partialResolution(requested, candidates);
+    }
+
+    private java.util.Set<String> explicitRoots() {
+        return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("CASE", "RUN", "ACTIONS", "TOOL", "output"));
+    }
+
+    private Map<String, Object> logicalRoot() {
+        Map<String, Object> logical = new LinkedHashMap<String, Object>();
+        logical.put("CASE", caseNode);
+        logical.put("RUN", runNode);
+        logical.put("ACTIONS", actionsView);
+        if (root.containsKey("output")) logical.put("output", root.get("output"));
+        logical.put("TOOL", root.get("TOOL"));
+        return logical;
+    }
+
+    private Map<String, Object> canonicalRoot() {
+        Map<String, Object> canonical = new LinkedHashMap<String, Object>();
+        canonical.put("CASE", caseNode);
+        canonical.put("RUN", runNode);
+        canonical.put("TOOL", root.get("TOOL"));
+        return canonical;
     }
 
     public void put(String key, Object value) {
-        root.put(key, value);
         if (key.startsWith("CASE.")) putPath(caseNode, key.substring(5), value);
-        if (key.startsWith("TOOL.")) {
+        else if (key.startsWith("RUN.")) putPath(runNode, key.substring(4), value);
+        else if (key.startsWith("TOOL.")) {
             @SuppressWarnings("unchecked")
             Map<String, Object> tool = (Map<String, Object>) root.get("TOOL");
             putPath(tool, key.substring(5), value);
-        }
+        } else root.put(key, value);
     }
 
     @SuppressWarnings("unchecked")
@@ -248,25 +281,238 @@ public final class CaseRuntimeContext {
     }
 
     private java.util.List<String> availablePaths() {
-        java.util.LinkedHashSet<String> result = new java.util.LinkedHashSet<String>();
-        collectPaths(root, "", result, 0);
-        return new java.util.ArrayList<String>(result);
+        java.util.List<String> result = new java.util.ArrayList<String>(canonicalPaths().keySet());
+        java.util.Collections.sort(result);
+        return result;
+    }
+
+    private Map<String, Object> canonicalPaths() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        collectCanonical(canonicalRoot(), "", result, new java.util.IdentityHashMap<Object, Boolean>());
+        return result;
     }
 
     @SuppressWarnings("unchecked")
-    private static void collectPaths(Object value, String prefix, java.util.Set<String> output, int depth) {
-        if (depth > 8 || !(value instanceof Map)) return;
-        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-            String key = String.valueOf(entry.getKey());
-            String path = prefix.isEmpty() ? key : prefix + "." + key;
-            output.add(path);
-            collectPaths(entry.getValue(), path, output, depth + 1);
+    private static void collectCanonical(Object value, String prefix, Map<String, Object> output,
+                                         java.util.IdentityHashMap<Object, Boolean> active) {
+        if (!prefix.isEmpty()) output.put(prefix, value);
+        if (!(value instanceof Map) && !(value instanceof java.util.List)) return;
+        if (active.put(value, Boolean.TRUE) != null) return;
+        try {
+            if (value instanceof Map) {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    String path = appendPath(prefix, Segment.key(String.valueOf(entry.getKey())));
+                    collectCanonical(entry.getValue(), path, output, active);
+                }
+            } else {
+                java.util.List<?> list = (java.util.List<?>) value;
+                for (int index = 0; index < list.size(); index++) {
+                    collectCanonical(list.get(index), appendPath(prefix, Segment.index(index)), output, active);
+                }
+            }
+        } finally {
+            active.remove(value);
         }
     }
 
-    private static String parent(String path) {
-        int dot = path == null ? -1 : path.lastIndexOf('.');
-        return dot < 0 ? "" : path.substring(0, dot);
+    private Resolution traverse(Object tree, java.util.List<Segment> segments) {
+        Object current = tree;
+        String currentPath = "<root>";
+        for (Segment segment : segments) {
+            if (current instanceof Map && segment.key != null) {
+                @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) current;
+                if (!map.containsKey(segment.key)) return Resolution.missing(currentPath, segment.display());
+                current = map.get(segment.key);
+            } else if (current instanceof java.util.List && segment.index != null) {
+                java.util.List<?> list = (java.util.List<?>) current;
+                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return Resolution.missing(currentPath, segment.display());
+                current = list.get(segment.index.intValue());
+            } else return Resolution.missing(currentPath, segment.display());
+            currentPath = appendPath("<root>".equals(currentPath) ? "" : currentPath, segment);
+        }
+        return Resolution.found(current, currentPath);
+    }
+
+    private Resolution partialResolution(java.util.List<Segment> requested, Map<String, Object> candidates) {
+        int best = 0;
+        java.util.LinkedHashSet<String> currentNodes = new java.util.LinkedHashSet<String>();
+        for (String candidate : candidates.keySet()) {
+            java.util.List<Segment> full = parsePath(candidate);
+            for (int start = 0; start < full.size(); start++) {
+                int matched = 0;
+                while (matched < requested.size() && start + matched < full.size()
+                        && full.get(start + matched).equals(requested.get(matched))) matched++;
+                if (matched == 0 || matched >= requested.size()) continue;
+                String node = renderPath(full.subList(0, start + matched));
+                if (matched > best) { best = matched; currentNodes.clear(); }
+                if (matched == best) currentNodes.add(node);
+            }
+        }
+        if (best > 0 && currentNodes.size() == 1) return Resolution.missing(currentNodes.iterator().next(), requested.get(best).display());
+        return Resolution.missing("<root>", requested.get(0).display());
+    }
+
+    private static boolean endsWith(java.util.List<Segment> full, java.util.List<Segment> suffix) {
+        if (suffix.size() > full.size()) return false;
+        int offset = full.size() - suffix.size();
+        for (int index = 0; index < suffix.size(); index++) if (!full.get(offset + index).equals(suffix.get(index))) return false;
+        return true;
+    }
+
+    private String contextTree(String currentNode) {
+        StringBuilder out = new StringBuilder();
+        if ("<root>".equals(currentNode)) out.append("<root>: map  <-- currentNode\n");
+        java.util.IdentityHashMap<Object, Boolean> active = new java.util.IdentityHashMap<Object, Boolean>();
+        for (Map.Entry<String, Object> entry : canonicalRoot().entrySet()) {
+            renderTree(out, Segment.key(entry.getKey()), entry.getValue(), "", 0, currentNode, active);
+        }
+        if (currentStage != null) {
+            String target = appendPath(appendPath(appendPath(appendPath("CASE.STAGES", Segment.key(currentStage)), Segment.key("TEMPLATE")), Segment.key("ACTIONS")), null);
+            out.append("ACTIONS: alias -> ").append(target);
+            if (currentNode != null && currentNode.startsWith("ACTIONS")) out.append("  <-- currentNode");
+            out.append('\n');
+        }
+        if (root.containsKey("output")) {
+            String target = currentOutputPath();
+            out.append("output: alias");
+            if (target != null) out.append(" -> ").append(target);
+            if (currentNode != null && currentNode.startsWith("output")) out.append("  <-- currentNode");
+            out.append('\n');
+        }
+        return out.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String currentOutputPath() {
+        if (currentStage == null || currentActions == null) return null;
+        Object output = root.get("output");
+        for (Map.Entry<String, Object> entry : currentActions.entrySet()) {
+            if (entry.getValue() instanceof Map && ((Map<String, Object>) entry.getValue()).get("output") == output) {
+                String path = appendPath("CASE.STAGES", Segment.key(currentStage));
+                path = appendPath(path, Segment.key("TEMPLATE"));
+                path = appendPath(path, Segment.key("ACTIONS"));
+                path = appendPath(path, Segment.key(entry.getKey()));
+                return appendPath(path, Segment.key("output"));
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void renderTree(StringBuilder out, Segment segment, Object value, String parent, int depth,
+                                   String currentNode, java.util.IdentityHashMap<Object, Boolean> active) {
+        String path = appendPath(parent, segment);
+        for (int index = 0; index < depth; index++) out.append("  ");
+        out.append(segment.display()).append(": ").append(type(value));
+        if (path.equals(currentNode)) out.append("  <-- currentNode");
+        out.append('\n');
+        if (!(value instanceof Map) && !(value instanceof java.util.List)) return;
+        if (active.put(value, Boolean.TRUE) != null) return;
+        try {
+            if (value instanceof Map) {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    renderTree(out, Segment.key(String.valueOf(entry.getKey())), entry.getValue(), path, depth + 1, currentNode, active);
+                }
+            } else {
+                java.util.List<?> list = (java.util.List<?>) value;
+                for (int index = 0; index < list.size(); index++) renderTree(out, Segment.index(index), list.get(index), path, depth + 1, currentNode, active);
+            }
+        } finally { active.remove(value); }
+    }
+
+    private static String type(Object value) {
+        if (value == null) return "null";
+        if (value instanceof Map) return "map";
+        if (value instanceof java.util.List) return "list";
+        if (value instanceof Boolean) return "boolean";
+        if (value instanceof java.math.BigDecimal || value instanceof Float || value instanceof Double) return "decimal";
+        if (value instanceof Number) return "integer";
+        return "string";
+    }
+
+    private static String indent(String value, int spaces) {
+        String prefix = new String(new char[spaces]).replace('\0', ' ');
+        String[] lines = value.split("\\n", -1);
+        StringBuilder out = new StringBuilder();
+        for (int index = 0; index < lines.length; index++) {
+            if (index == lines.length - 1 && lines[index].isEmpty()) break;
+            if (index > 0) out.append('\n');
+            out.append(prefix).append(lines[index]);
+        }
+        return out.toString();
+    }
+
+    private static java.util.List<Segment> parsePath(String path) {
+        if (path == null) throw new IllegalArgumentException("Context path is null");
+        java.util.List<Segment> result = new java.util.ArrayList<Segment>();
+        int position = 0;
+        while (position < path.length()) {
+            if (path.charAt(position) == '.') { position++; continue; }
+            if (path.charAt(position) == '[') {
+                int end = bracketEnd(path, position);
+                if (end < 0) throw new IllegalArgumentException("Unclosed bracket");
+                String selector = path.substring(position + 1, end).trim();
+                if (quoted(selector)) result.add(Segment.key(unquote(selector)));
+                else if (numeric(selector)) result.add(Segment.index(Integer.parseInt(selector)));
+                else throw new IllegalArgumentException("Invalid selector");
+                position = end + 1;
+                continue;
+            }
+            int end = position;
+            while (end < path.length() && path.charAt(end) != '.' && path.charAt(end) != '[') end++;
+            String key = path.substring(position, end);
+            if (key.isEmpty()) throw new IllegalArgumentException("Empty path segment");
+            result.add(numeric(key) && !result.isEmpty() ? Segment.index(Integer.parseInt(key)) : Segment.key(key));
+            position = end;
+        }
+        return result;
+    }
+
+    private static String renderPath(java.util.List<Segment> segments) {
+        String path = "";
+        for (Segment segment : segments) path = appendPath(path, segment);
+        return path;
+    }
+
+    private static String appendPath(String prefix, Segment segment) {
+        if (segment == null) return prefix;
+        if (segment.index != null) return prefix + "[" + segment.index + "]";
+        if (simpleKey(segment.key)) return prefix.isEmpty() ? segment.key : prefix + "." + segment.key;
+        return prefix + "['" + segment.key.replace("\\", "\\\\").replace("'", "\\'") + "']";
+    }
+
+    private static boolean simpleKey(String key) { return key != null && key.matches("[A-Za-z_][A-Za-z0-9_-]*"); }
+
+    private enum ResolutionStatus { FOUND, MISSING, AMBIGUOUS }
+
+    private static final class Resolution {
+        private final ResolutionStatus status; private final Object value; private final String canonicalPath;
+        private final String currentNode; private final String missingSegment; private final java.util.List<String> candidates;
+        private Resolution(ResolutionStatus status, Object value, String canonicalPath, String currentNode,
+                           String missingSegment, java.util.List<String> candidates) {
+            this.status = status; this.value = value; this.canonicalPath = canonicalPath; this.currentNode = currentNode;
+            this.missingSegment = missingSegment; this.candidates = candidates;
+        }
+        private static Resolution found(Object value, String canonicalPath) { return new Resolution(ResolutionStatus.FOUND, value, canonicalPath, null, null, java.util.Collections.<String>emptyList()); }
+        private static Resolution missing(String currentNode, String missingSegment) { return new Resolution(ResolutionStatus.MISSING, null, null, currentNode, missingSegment, java.util.Collections.<String>emptyList()); }
+        private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, new java.util.ArrayList<String>(candidates)); }
+    }
+
+    private static final class Segment {
+        private final String key; private final Integer index;
+        private Segment(String key, Integer index) { this.key = key; this.index = index; }
+        private static Segment key(String value) { return new Segment(value, null); }
+        private static Segment index(int value) { return new Segment(null, Integer.valueOf(value)); }
+        private String display() {
+            if (index != null) return "[" + index + "]";
+            return simpleKey(key) ? key : "['" + key.replace("\\", "\\\\").replace("'", "\\'") + "']";
+        }
+        @Override public boolean equals(Object other) {
+            if (!(other instanceof Segment)) return false;
+            Segment value = (Segment) other;
+            return java.util.Objects.equals(key, value.key) && java.util.Objects.equals(index, value.index);
+        }
+        @Override public int hashCode() { return java.util.Objects.hash(key, index); }
     }
 
     private static String nearest(String requested, java.util.List<String> candidates) {

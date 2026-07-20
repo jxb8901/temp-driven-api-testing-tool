@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.4.1 - 2026-07-20
+
+- Added deterministic case-sensitive Context suffix lookup. A suffix resolves only when it identifies one readable logical path; ambiguous suffixes fail with new `ATT-CTX-002` candidate diagnostics instead of selecting by tree order.
+- Expanded unknown/ambiguous Context diagnostics with the requested path, deepest successfully reached node, missing segment where applicable, and a complete author-facing key/type tree. Console diagnostics never copy Context values; existing Case-log evidence remains unchanged.
+- Reformatted human validation output into indented diagnostic blocks with stable blank-line separation while leaving validation JSON unchanged.
+- Added run-only `--update-snapshot` to explicitly create or replace changed canonical snapshots before normal validation and output creation. It handles complete selected workbooks, preserves byte-identical files, rejects snapshot symlinks, uses atomic per-file replacement, serializes concurrent update phases, works with `--dry-run`, and keeps JSON stdout clean.
+- Made Windows validation skip POSIX `.sh` launch/executable compatibility checks while retaining file/path safety checks and emitting one warning that lists unchecked tools; documented native `att.bat snapshot`, `validate`, and `docs` authoring workflows.
+- Simplified expanded HTML Case details to retain the detailed execution log and explicit `.log`/`case.yaml` artifact links without duplicating the persisted Stage/Template/Action/Tool tree inline.
+
 ## 2.4.0 - 2026-07-19
 
 - Added mandatory same-basename semantic XML snapshots for Excel testcase version control. Excel remains the editable source; `snapshot --suite` and `snapshot --all` generate deterministic `basename.xml` documents using `att-testcases/v2.4`.

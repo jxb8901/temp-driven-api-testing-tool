@@ -34,10 +34,19 @@ public final class PackageValidator {
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
     private final FrameworkConfig global;
+    private final boolean windows;
+    private final Set<String> skippedWindowsShellExecutableChecks = new LinkedHashSet<String>();
 
-    public PackageValidator(Path projectRoot, FrameworkConfig global) { this.projectRoot = projectRoot; this.global = global; }
+    public PackageValidator(Path projectRoot, FrameworkConfig global) {
+        this(projectRoot, global, java.io.File.separatorChar == '\\');
+    }
+
+    PackageValidator(Path projectRoot, FrameworkConfig global, boolean windows) {
+        this.projectRoot = projectRoot; this.global = global; this.windows = windows;
+    }
 
     public ValidationSummary validate(ExecutionOptions options) throws Exception {
+        skippedWindowsShellExecutableChecks.clear();
         try {
             Path configured = options.configPath().isAbsolute() ? options.configPath() : projectRoot.resolve(options.configPath());
             if (!att.core.IdentifierValidator.canonicalPath(configured, "configuration").startsWith(att.core.IdentifierValidator.canonicalPath(projectRoot, "package root")) || Files.isSymbolicLink(configured)) throw new IllegalArgumentException("Configuration escapes package root or is a symbolic link: " + options.configPath());
@@ -97,6 +106,7 @@ public final class PackageValidator {
                 diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, e, suite));
             }
         }
+        addWindowsShellExecutableWarning(diagnostics);
         if (cases == 0) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTION_EMPTY, Diagnostic.Severity.ERROR, "Case selection is empty", null, null, null, null, null, null));
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
@@ -189,26 +199,41 @@ public final class PackageValidator {
             java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
             if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
             String first = command.get(0);
+            boolean skipShellExecutableCheck = windows && first.toLowerCase(java.util.Locale.ROOT).endsWith(".sh");
             Path executable = java.nio.file.Paths.get(first);
             boolean packageRelative = first.startsWith("./") || first.startsWith("../");
             if (!executable.isAbsolute() && packageRelative) executable = projectRoot.resolve(executable).normalize();
-            else if (!executable.isAbsolute()) executable = findOnPath(first);
+            else if (!executable.isAbsolute()) executable = findOnPath(first, !skipShellExecutableCheck);
             Path canonicalProject = projectRoot.toRealPath();
             Path canonicalExecutable = executable.toRealPath();
             if (packageRelative && !canonicalExecutable.startsWith(canonicalProject)) throw new IllegalArgumentException("Package-local tool executable escapes package root: " + first);
             if (Files.isSymbolicLink(executable) || !Files.isRegularFile(canonicalExecutable)) throw new IllegalArgumentException("Missing/unsafe tool executable: " + first);
+            if (skipShellExecutableCheck) {
+                skippedWindowsShellExecutableChecks.add(tool.key());
+                return;
+            }
             if (!Files.isExecutable(canonicalExecutable)) throw new IllegalArgumentException("Tool is not executable: " + first);
         } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing/unsafe tool executable for " + tool.key() + ": " + e.getMessage(), e); }
     }
-    private Path findOnPath(String executable) throws java.io.IOException {
+    private Path findOnPath(String executable, boolean requireExecutable) throws java.io.IOException {
         String path = System.getenv("PATH");
         if (path != null) for (String directory : path.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
-            for (String name : executableCandidates(executable, java.io.File.separatorChar == '\\', System.getenv("PATHEXT"))) {
+            for (String name : executableCandidates(executable, windows, System.getenv("PATHEXT"))) {
                 Path candidate = java.nio.file.Paths.get(directory).resolve(name);
-                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate;
+                if (Files.isRegularFile(candidate) && (!requireExecutable || Files.isExecutable(candidate))) return candidate;
             }
         }
         throw new java.io.IOException("Executable not found on PATH: " + executable);
+    }
+
+    private void addWindowsShellExecutableWarning(List<Diagnostic> diagnostics) {
+        if (skippedWindowsShellExecutableChecks.isEmpty()) return;
+        diagnostics.add(new Diagnostic(DiagnosticCodes.TOOL_INVALID, Diagnostic.Severity.WARNING,
+                "Windows validation did not check whether POSIX .sh tools can be launched: "
+                        + String.join(", ", skippedWindowsShellExecutableChecks)
+                        + ". File existence and path safety were checked; provide Windows .bat/.cmd/.exe equivalents before run.",
+                null, "tools", null, null, null, null, null,
+                "Treat validation PASS as configuration validation only for these .sh tools; test the Windows-native executables before execution."));
     }
 
     static List<String> executableCandidates(String executable, boolean windows, String pathExt) {
@@ -369,6 +394,8 @@ public final class PackageValidator {
 
             String nearest = nearestAction(root, availableActions);
             String suffix = path.length() > root.length() ? path.substring(root.length()) : "";
+            if (availableActions.contains(root)) continue; // Unique action-id suffix; its dynamic output shape is checked at runtime.
+            if (nearest == null) continue; // Potential CASE/data-column suffix requires a concrete Case binding.
             throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                     "Unknown Context scope in '${" + path + "}'",
                     "Root '" + root + "' is not one of CASE, RUN, ACTIONS, TOOL, or output.", null, path,
@@ -436,14 +463,14 @@ public final class PackageValidator {
                 afterCurrentAction.add(action.id());
 
                 sourceField = "actions." + action.id() + ".description";
-                validateContextStructure(action.description(), engine, testCase, afterCurrentAction);
+                validateContextStructure(action.description(), engine, context, testCase, afterCurrentAction);
                 engine.renderValidationValues(action.description(), context);
 
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
                     context.requireCaseVariableAvailable(action.name());
                     sourceField = "actions." + action.id() + ".expression";
-                    validateContextStructure(action.expression(), engine, testCase, completedActions);
+                    validateContextStructure(action.expression(), engine, context, testCase, completedActions);
                     engine.renderValidationValues(action.expression(), context);
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
@@ -452,34 +479,34 @@ public final class PackageValidator {
                 }
 
                 sourceField = "actions." + action.id() + ".assert";
-                validateContextStructure(action.assertion(), engine, testCase, afterCurrentAction);
+                validateContextStructure(action.assertion(), engine, context, testCase, afterCurrentAction);
                 engine.renderValidationValues(action.assertion(), context);
 
                 sourceField = "actions." + action.id() + ".actual";
-                validateContextStructure(action.actual(), engine, testCase, afterCurrentAction);
+                validateContextStructure(action.actual(), engine, context, testCase, afterCurrentAction);
                 engine.renderValidationValues(action.actual(), context);
 
                 sourceField = "actions." + action.id() + ".expected";
-                validateContextStructure(action.expected(), engine, testCase, completedActions);
+                validateContextStructure(action.expected(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.expected(), context);
 
                 sourceField = "actions." + action.id() + ".message";
-                validateContextStructure(action.message(), engine, testCase, completedActions);
+                validateContextStructure(action.message(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.message(), context);
 
                 sourceField = "actions." + action.id() + ".saveAs";
-                validateContextStructure(action.saveAs(), engine, testCase, completedActions);
+                validateContextStructure(action.saveAs(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.saveAs(), context);
 
                 for (Object key : action.fields().keySet()) {
                     sourceField = "actions." + action.id() + ".fields." + key;
                     Object value = action.fields().get(key);
-                    validateContextStructure(String.valueOf(value), engine, testCase, completedActions);
+                    validateContextStructure(String.valueOf(value), engine, context, testCase, completedActions);
                     engine.renderValidationValues(String.valueOf(value), context);
                 }
                 if ("tool".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".call";
-                    validateContextStructure(action.call(), engine, testCase, completedActions);
+                    validateContextStructure(action.call(), engine, context, testCase, completedActions);
                     engine.renderValidationValues(action.call(), context);
                     validateCallArguments(callParser.parse(action.call()), context, engine);
                 }
@@ -488,7 +515,7 @@ public final class PackageValidator {
                         sourceFile = payload;
                         sourceField = "actions." + action.id() + ".payload";
                         String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
-                        validateContextStructure(content, engine, testCase, completedActions);
+                        validateContextStructure(content, engine, context, testCase, completedActions);
                         String partial = engine.renderValidationValues(content, context);
                         for (ToolCallParser.ParsedCall call : engine.parseCalls(content)) {
                             validateCallArguments(call, context, engine);
@@ -525,7 +552,8 @@ public final class PackageValidator {
         return detail == null || detail.trim().isEmpty() ? suffix : detail + "; " + suffix;
     }
 
-    private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine, TestCase testCase,
+    private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine,
+                                          att.core.CaseRuntimeContext context, TestCase testCase,
                                           Set<String> availableActions) {
         for (String path : engine.parseValuePaths(text)) {
             if (path.startsWith("ACTIONS.")) {
@@ -539,6 +567,17 @@ public final class PackageValidator {
                         "Stage '" + key + "' is not declared by this Case. Available stage keys: " + String.join(", ", testCase.stages().keySet()),
                         null, path, null, null, null, null, null,
                         "Use a stage key declared by this Case sidecar selector/data mapping.", null);
+            }
+            String root = firstPathSegment(path);
+            if (!("CASE".equals(root) || "RUN".equals(root) || "ACTIONS".equals(root)
+                    || "TOOL".equals(root) || "output".equals(root))) {
+                try { context.require(path); }
+                catch (DiagnosticException e) {
+                    // Dynamic action/tool result shapes are unavailable during validation. A shorthand
+                    // that cannot yet be proven is preserved, then resolved strictly at runtime.
+                    if (!availableActions.isEmpty() && DiagnosticCodes.CONTEXT_INVALID.equals(e.code())) continue;
+                    throw e;
+                }
             }
         }
     }

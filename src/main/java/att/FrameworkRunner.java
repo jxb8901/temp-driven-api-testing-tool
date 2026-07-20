@@ -66,11 +66,20 @@ public final class FrameworkRunner {
                 System.out.println("Report: " + new ReportRegenerator().regenerate(output.normalize(), options.runId()));
                 return;
             }
-            if ("run".equals(options.command())) new FrameworkEngine(root, config).assertRunIdAvailable(options);
+            if ("run".equals(options.command())) {
+                new FrameworkEngine(root, config).assertRunIdAvailable(options);
+                if (options.updateSnapshot()) {
+                    java.util.List<Path> updated = new SnapshotCommand().updateForRun(root, config, options);
+                    if (!options.quiet()) for (Path snapshot : updated) {
+                        String notice = "Snapshot updated: " + root.relativize(snapshot.toAbsolutePath().normalize()).toString().replace('\\', '/');
+                        if ("json".equals(options.format())) System.err.println(notice); else System.out.println(notice);
+                    }
+                }
+            }
             PackageValidator.ValidationSummary validation = new PackageValidator(root, config).validate(options);
             if ("validate".equals(options.command())) {
                 if ("json".equals(options.format())) { String json = validation.toJson(); att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json); System.out.println(json); }
-                else { System.out.println("Validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation); printDiagnostics(validation, options); }
+                else { System.out.println("Validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation); printDiagnostics(validation, options, System.out, true); }
                 if (!validation.valid()) System.exit(2);
                 return;
             }
@@ -82,13 +91,13 @@ public final class FrameworkRunner {
                 }
                 else {
                     System.err.println("Validation FAIL: " + validation);
-                    printDiagnostics(validation, options, System.err);
+                    printDiagnostics(validation, options, System.err, true);
                 }
                 System.exit(2);
                 return;
             }
-            printDiagnostics(validation, options);
             if (options.verbose() && !options.quiet() && "human".equals(options.format())) System.out.println("[1/4] V" + Version.PRODUCT + " validation PASS: " + validation);
+            printDiagnostics(validation, options, System.out, options.verbose());
             if (options.verbose() && !options.quiet() && "human".equals(options.format())) {
                 System.out.println("[2/4] Selected: " + validation.cases + " cases from " + validation.suites + " suites");
                 System.out.println("[3/4] Executing cases (verbose Case-log mirroring enabled)");
@@ -122,22 +131,36 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  snapshot uses --suite <xlsx>, --suite-dir <dir>, or --all\n  --format human|json --ci-output junit,json [--queue|--parallel] --quiet --verbose");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot uses --suite <xlsx>, --suite-dir <dir>, or --all\n  --format human|json --ci-output junit,json [--queue|--parallel] --quiet --verbose");
     }
 
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {
-        printDiagnostics(validation, options, System.out);
+        printDiagnostics(validation, options, System.out, false);
     }
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output) {
+        printDiagnostics(validation, options, output, false);
+    }
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output, boolean leadingBlank) {
         if (options.quiet() || !"human".equals(options.format())) return;
+        java.util.List<att.validation.Diagnostic> visible = new java.util.ArrayList<att.validation.Diagnostic>();
         for (att.validation.Diagnostic diagnostic : validation.diagnostics) {
             if ("run".equals(options.command()) && !options.verbose()
                     && diagnostic.severity() == att.validation.Diagnostic.Severity.INFO) continue;
+            visible.add(diagnostic);
+        }
+        if (visible.isEmpty()) return;
+        if (leadingBlank) output.println();
+        for (int index = 0; index < visible.size(); index++) {
+            att.validation.Diagnostic diagnostic = visible.get(index);
+            if (index > 0) output.println();
             StringBuilder location = new StringBuilder();
             append(location, "file", diagnostic.file()); append(location, "field", diagnostic.field()); append(location, "sheet", diagnostic.sheet());
             append(location, "row", diagnostic.row()); append(location, "column", diagnostic.column()); append(location, "template", diagnostic.template()); append(location, "action", diagnostic.action());
-            output.println("[" + diagnostic.severity() + "] " + diagnostic.code() + ": " + diagnostic.message() + (location.length() == 0 ? "" : " [" + location + "]"));
-            if (diagnostic.suggestion() != null) output.println("  suggestion: " + diagnostic.suggestion());
+            String[] message = String.valueOf(diagnostic.message()).split("\\r?\\n", -1);
+            output.println("  [" + diagnostic.severity() + "] " + diagnostic.code() + ": " + message[0]);
+            for (int line = 1; line < message.length; line++) output.println("    " + message[line]);
+            if (location.length() > 0) output.println("    location: " + location);
+            if (diagnostic.suggestion() != null) output.println("    suggestion: " + diagnostic.suggestion());
         }
     }
     private static void append(StringBuilder out, String key, Object value) { if (value != null && !String.valueOf(value).isEmpty()) { if (out.length() > 0) out.append(", "); out.append(key).append('=').append(value); } }
