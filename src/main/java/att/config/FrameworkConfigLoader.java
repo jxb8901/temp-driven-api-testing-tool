@@ -149,8 +149,20 @@ public final class FrameworkConfigLoader {
     private static void validateCommandArguments(String tool, List<String> tokens, Map<String, ToolArgumentConfig> arguments, boolean commandOwnsExecutable) {
             if (tokens.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool);
             if (tokens.get(0).trim().isEmpty()) throw new IllegalArgumentException("Tool command first argv item must be non-blank: " + tool);
-            if (commandOwnsExecutable && tokens.get(0).contains("${")) throw new IllegalArgumentException("Tool executable must be static and non-blank: " + tool);
+            if (commandOwnsExecutable && (tokens.get(0).contains("${") || tokens.get(0).contains("#{"))) throw new IllegalArgumentException("Tool executable must be static and non-blank: " + tool);
+            att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
             for (String token : tokens) {
+                expressionEngine.validateValueSyntax(token);
+                for (att.template.ToolCallParser.ParsedCall call : expressionEngine.parseCalls(token)) expressionEngine.validateBuiltInCall(call);
+                for (att.template.ToolCallParser.ParsedCall call : expressionEngine.parseCalls(token)) {
+                    for (att.template.ToolCallParser.Argument callArgument : call.arguments()) {
+                        String expression = callArgument.expression().trim();
+                        if (expression.startsWith("input.") || expression.startsWith("TOOL.input.")) {
+                            String argument = expression.startsWith("TOOL.input.") ? expression.substring(11) : expression.substring(6);
+                            if (!arguments.containsKey(argument)) throw new IllegalArgumentException("Tool command expression must reference a declared argument: " + tool + "." + expression);
+                        }
+                    }
+                }
                 java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\$\\{([^}]+)}").matcher(token);
                 while (matcher.find()) {
                     String expression = matcher.group(1);
@@ -173,8 +185,18 @@ public final class FrameworkConfigLoader {
                         if (argument.key().equals(key)) references++;
                     }
                     boolean exact = token.equals(direct) || token.equals(input) || token.equals(legacy);
+                    for (att.template.ToolCallParser.ParsedCall call : expressionEngine.parseCalls(token)) {
+                        for (att.template.ToolCallParser.Argument callArgument : call.arguments()) {
+                            String expression = callArgument.expression().trim();
+                            if (argument.key().equals(expression) || ("input." + argument.key()).equals(expression)
+                                    || ("TOOL.input." + argument.key()).equals(expression)) references++;
+                        }
+                    }
                     if (exact) exactReferences++;
-                    if (argument.multiValue() && (token.contains(direct) || token.contains(input) || token.contains(legacy)) && !exact) {
+                    boolean transformedReference = expressionEngine.referencesBareArgument(token, argument.key())
+                            || expressionEngine.referencesBareArgument(token, "input." + argument.key())
+                            || expressionEngine.referencesBareArgument(token, "TOOL.input." + argument.key());
+                    if (argument.multiValue() && (token.contains(direct) || token.contains(input) || token.contains(legacy) || transformedReference) && !exact) {
                         throw new IllegalArgumentException("Delimited argument placeholder must occupy one complete argv token: " + tool + "." + argument.key());
                     }
                 }
@@ -216,8 +238,8 @@ public final class FrameworkConfigLoader {
             required(group, "description", "tool group " + id);
             List<String> script = group.get("script") == null ? Collections.<String>emptyList() : command(group.get("script"), "tool group " + id + ".script");
             if (!script.isEmpty()) {
-                if (script.get(0).trim().isEmpty() || script.get(0).contains("${")) throw new IllegalArgumentException("Tool group script executable must be static and non-blank: " + id);
-                for (String token : script) if (token.contains("${")) throw new IllegalArgumentException("Tool group script cannot reference tool arguments: " + id);
+                if (script.get(0).trim().isEmpty() || script.get(0).contains("${") || script.get(0).contains("#{")) throw new IllegalArgumentException("Tool group script executable must be static and non-blank: " + id);
+                for (String token : script) if (token.contains("${") || token.contains("#{")) throw new IllegalArgumentException("Tool group script cannot contain expressions: " + id);
             }
             SshConfig ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
@@ -310,7 +332,12 @@ public final class FrameworkConfigLoader {
         if (!(value instanceof Map)) return null;
         Map<?, ?> report = (Map<?, ?>) value;
         String mode = report.get("mode") == null ? "append-to-copy" : SchemaSupport.string(report.get("mode"), "report.mode", true); if (!"append-to-copy".equals(mode)) throw new IllegalArgumentException("report.mode must be append-to-copy");
-        String pattern = report.get("fileNamePattern") == null ? "${suiteName}.result.xlsx" : SchemaSupport.string(report.get("fileNamePattern"), "report.fileNamePattern", true); if (!pattern.contains("${suiteName}")) throw new IllegalArgumentException("report.fileNamePattern must contain ${suiteName}");
+        String pattern = report.get("fileNamePattern") == null ? "${suiteName}.result.xlsx" : SchemaSupport.string(report.get("fileNamePattern"), "report.fileNamePattern", true);
+        att.template.UnifiedTemplateEngine reportExpressions = new att.template.UnifiedTemplateEngine(null);
+        if (!pattern.contains("${suiteName}") && !reportExpressions.referencesBareArgument(pattern, "suiteName")) throw new IllegalArgumentException("report.fileNamePattern must reference suiteName");
+        reportExpressions.validateValueSyntax(pattern);
+        for (att.template.ToolCallParser.ParsedCall call : reportExpressions.parseCalls(pattern)) reportExpressions.validateBuiltInCall(call);
+        for (String path : reportExpressions.parseValuePaths(pattern)) if (!"suiteName".equals(path)) throw new IllegalArgumentException("report.fileNamePattern only supports ${suiteName}: ${" + path + "}");
         Object junitValue = report.get("junit");
         Map<?, ?> junit = junitValue instanceof Map ? (Map<?, ?>) junitValue : java.util.Collections.emptyMap();
         return new ReportConfig(mode, pattern, reportColumns(report.get("columns")), boundedInteger(junit.get("caseLogEmbedThresholdBytes"), 10240, 0, 1048576, "report.junit.caseLogEmbedThresholdBytes"));

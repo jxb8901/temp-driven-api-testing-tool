@@ -12,6 +12,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StageTemplateRunnerTest {
     @TempDir Path tempDir;
+    @Test void everyActionTextSurfaceSupportsInlineBuiltIns() throws Exception {
+        Map<String,Object> data = new LinkedHashMap<String,Object>(); data.put("SrcRefNo", "ABC123");
+        TestCase test=new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),data,Collections.emptyMap(),null);
+        CaseRuntimeContext context=new CaseRuntimeContext(test,tempDir,"R",tempDir,tempDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("verify","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        List<TemplateAction> actions=Arrays.asList(
+                new TemplateAction("note",map("type","log","message","#{lower(CASE.SrcRefNo)}","fields",map("size","#{length(CASE.SrcRefNo)}"),"description","Logged #{upper(output.result)}")),
+                new TemplateAction("check",map("type","assert","assert","#{length(value=CASE.SrcRefNo)} <= 35","description","#{concat('Check ', CASE.caseId)}","expected","#{upper('ok')}","actual","#{lower('OK')}")));
+
+        List<ValidationResult> results=new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("verify",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(tempDir.resolve("case.log")));
+
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS), Arrays.asList(results.get(0).status(), results.get(1).status()));
+        assertEquals("abc123", context.resolve("ACTIONS.note.output.result"));
+        assertEquals("6", context.resolve("ACTIONS.note.output.fields.size"));
+        assertEquals("Logged ABC123", context.resolve("ACTIONS.note.description"));
+        assertEquals("6 <= 35", ((Map<?,?>) context.resolve("ACTIONS.check.output.assertion")).get("rendered"));
+        assertEquals("Check g.TC1\nOK", results.get(1).expected());
+        assertEquals("ok", results.get(1).actual());
+    }
+
     @Test void recordsLogAndAssertionActions() throws Exception {
         TestCase test=new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null);
         CaseRuntimeContext context=new CaseRuntimeContext(test,tempDir,"R",tempDir,tempDir.resolve("case.log"));
@@ -42,7 +62,31 @@ class StageTemplateRunnerTest {
         TemplateAction timeoutAction = new TemplateAction("call",map("type","tool","call","#{sample()}","retry",map("maxAttempts",3,"retryOn",Arrays.asList("EXIT_CODE"))));
         List<ValidationResult> timeoutResults = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,timeout))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(timeoutAction)),timeoutContext,new CaseExecutionLog(tempDir.resolve("case2.log")));
         assertEquals(ResultStatus.ERROR, timeoutResults.get(0).status()); assertEquals(1, timeout.calls);
-        assertTrue(new String(Files.readAllBytes(tempDir.resolve("case2.log")),"UTF-8").contains("Tool timed out: sample"));
+        String timeoutLog = new String(Files.readAllBytes(tempDir.resolve("case2.log")),"UTF-8");
+        assertTrue(timeoutLog.contains("Tool timed out: sample"));
+        assertEquals(1, occurrences(timeoutLog, "Tool timed out: sample"));
+        assertEquals(1, occurrences(timeoutLog, "[ACTION call ERROR]"));
+        assertFalse(timeoutLog.contains("TOOL:"));
+    }
+
+    @Test void logActionCanEmitUtf8FileContentWithoutDuplicatingIt() throws Exception {
+        Path caseDir = tempDir.resolve("log-file-case");
+        Files.createDirectories(caseDir);
+        Path source = caseDir.resolve("response.txt");
+        Files.write(source, "第一行\r\n<Status>&OK</Status>\r\n".getBytes("UTF-8"));
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("verify","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        TemplateAction action = new TemplateAction("response", map("type","log","file","#{concat(CASE.outputDirectory, '/response.txt')}","level","DEBUG"));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("verify",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals("第一行\n<Status>&OK</Status>\n", context.resolve("ACTIONS.response.output.result"));
+        assertEquals(source.toRealPath().toString(), context.resolve("ACTIONS.response.output.sourceFile"));
+        String text = new String(Files.readAllBytes(caseDir.resolve("case.log")),"UTF-8");
+        assertEquals(1, occurrences(text, "<Status>&OK</Status>"));
     }
 
     @Test void renderAndToolSupportInlineAssertionsAndCaseLogSaveAsRules() throws Exception {
@@ -197,5 +241,6 @@ class StageTemplateRunnerTest {
         private FixedRunner(int exitCode, String stdout) { this.exitCode=exitCode; this.stdout=stdout; }
         @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { return new CommandResult(exitCode,stdout,"",false); }
     }
+    private int occurrences(String text,String value){int count=0,index=0;while((index=text.indexOf(value,index))>=0){count++;index+=value.length();}return count;}
     private Map<String,Object> map(Object... values){Map<String,Object> out=new LinkedHashMap<String,Object>();for(int i=0;i<values.length;i+=2)out.put(String.valueOf(values[i]),values[i+1]);return out;}
 }

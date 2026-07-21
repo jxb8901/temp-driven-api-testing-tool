@@ -8,6 +8,33 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FrameworkConfigLoaderTest {
     @TempDir Path tempDir;
+    @Test void validatesBuiltInsInReportAndToolCommandScopes() throws Exception {
+        Path valid = tempDir.resolve("expressions.yaml");
+        Files.write(valid, ("schemaVersion: att-config/v2.2\n" +
+                "report: {fileNamePattern: \"#{upper(suiteName)}.result.xlsx\"}\n" +
+                "tools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+                "    command: [echo, \"#{trim(input.value)}\"]\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+        FrameworkConfig config = new FrameworkConfigLoader().load(valid);
+        assertEquals("#{upper(suiteName)}.result.xlsx", config.report().fileNamePattern());
+
+        Path invalidReport = tempDir.resolve("invalid-report-expression.yaml");
+        Files.write(invalidReport, "schemaVersion: att-config/v2.2\nreport: {fileNamePattern: \"${suiteName}-#{external()}.xlsx\"}\n".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidReport));
+
+        Path invalidCommand = tempDir.resolve("invalid-command-expression.yaml");
+        Files.write(invalidCommand, ("schemaVersion: att-config/v2.2\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+                "    command: [echo, \"#{external(${value})}\"]\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidCommand));
+
+        Path invalidScopedPath = tempDir.resolve("invalid-command-scope.yaml");
+        Files.write(invalidScopedPath, ("schemaVersion: att-config/v2.2\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+                "    command: [echo, \"#{upper(input.missing)}\"]\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidScopedPath));
+    }
+
     @Test void loadsV2AndRejectsGlobalStages() throws Exception {
         Path ok=tempDir.resolve("ok.yaml"); Files.write(ok,"schemaVersion: att-config/v2.1\noutputDirectory: out\ntools: {}\n".getBytes("UTF-8"));
         assertEquals(Paths.get("out"),new FrameworkConfigLoader().load(ok).outputDirectory());

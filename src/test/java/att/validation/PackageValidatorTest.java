@@ -101,6 +101,12 @@ class PackageValidatorTest {
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("render",invalidRender))),config));
         Map<String,Object> builtInTool = new LinkedHashMap<String,Object>(); builtInTool.put("type","tool"); builtInTool.put("call","#{upper(value='x')}");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("tool",builtInTool))),config));
+        Map<String,Object> fileLog = new LinkedHashMap<String,Object>(); fileLog.put("type","log"); fileLog.put("file","${CASE.outputDirectory}/response.txt");
+        assertDoesNotThrow(() -> { try { method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("log",fileLog))),config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); } });
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,
+                new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("emptyLog",Collections.<String,Object>singletonMap("type","log")))),config));
     }
     @Test void validatesRenderGlobMatchesAndStaticStructuredPayloads() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10,tempDir,Collections.<String,ToolConfig>emptyMap(),null,null);
@@ -174,7 +180,8 @@ class PackageValidatorTest {
         att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
                 Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
 
-        for (String invalid : Arrays.asList("${RUN.runID}", "${CASE.STAGES.invkoe.status}", "${ACTIONS.later.output.result}")) {
+        for (String invalid : Arrays.asList("${RUN.runID}", "${CASE.STAGES.invkoe.status}", "${ACTIONS.later.output.result}",
+                "#{length(RUN.runID)}", "#{length(CASE.STAGES.invkoe.status)}", "#{length(ACTIONS.later.output.result)}")) {
             Map<String,Object> log = new LinkedHashMap<String,Object>();
             log.put("type", "log"); log.put("message", invalid);
             Map<String,Object> later = new LinkedHashMap<String,Object>();

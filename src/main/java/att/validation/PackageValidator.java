@@ -30,6 +30,7 @@ import java.util.stream.Stream;
 public final class PackageValidator {
     private final ToolCallParser callParser = new ToolCallParser();
     private final att.template.ExpressionEvaluator expressionEvaluator = new att.template.ExpressionEvaluator();
+    private final att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
     private final att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
@@ -123,9 +124,7 @@ public final class PackageValidator {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
             if ("tool".equalsIgnoreCase(action.type())) validateReferencedCall(callParser.parse(action.call()), config);
-            if ("assign".equalsIgnoreCase(action.type())) {
-                for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.expression())) validateReferencedCall(call, config);
-            }
+            for (String expression : actionExpressions(action)) for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
             if ("render".equalsIgnoreCase(action.type())) try {
                 for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
                     String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
@@ -135,6 +134,15 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("Unable to inspect render payload calls for action " + action.id() + ": " + e.getMessage(), e);
             }
         }
+    }
+
+    private List<String> actionExpressions(TemplateAction action) {
+        List<String> expressions = new ArrayList<String>();
+        expressions.add(action.description()); expressions.add(action.assertion()); expressions.add(action.expected());
+        expressions.add(action.actual()); expressions.add(action.message()); expressions.add(action.file()); expressions.add(action.expression());
+        expressions.add(action.saveAs()); expressions.add(action.call());
+        for (Object value : action.fields().values()) expressions.add(String.valueOf(value));
+        return expressions;
     }
 
     private void validateReferencedCall(ToolCallParser.ParsedCall call, FrameworkConfig config) {
@@ -293,14 +301,15 @@ public final class PackageValidator {
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
             if (!("render".equals(type) || "tool".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
-            syntaxEngine.validateValueSyntax(action.description());
-            syntaxEngine.validateValueSyntax(action.expected());
-            syntaxEngine.validateValueSyntax(action.actual());
+            validateInlineExpressions(action.description(), syntaxEngine, config);
+            validateInlineExpressions(action.expected(), syntaxEngine, config);
+            validateInlineExpressions(action.actual(), syntaxEngine, config);
+            if (!action.assertion().trim().isEmpty()) validateAssertionExpression(action.assertion(), syntaxEngine, config);
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
                 require(action.renderAs(), "renderAs is required for render action " + action.id());
                 if (!java.util.Arrays.asList("file", "text", "json", "yaml", "xml").contains(action.renderAs().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Invalid renderAs: " + action.renderAs());
-                forbid(action, "name", "saveAs", "overwrite", "output", "call", "expression", "expected", "actual", "message", "level", "fields", "retry", "timeoutMs");
+                forbid(action, "name", "saveAs", "overwrite", "output", "call", "expression", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
                 for (Path payload : payloads) {
                     try {
@@ -312,16 +321,17 @@ public final class PackageValidator {
                         throw e.withLocation(payload.toString(), "actions." + action.id() + ".payload", null, null, null, template.name(), action.id());
                     }
                 }
-                if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "expression", "expected", "actual", "message", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion()); }
-            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "message", "level", "fields", "retry", "timeoutMs"); expressionEvaluator.validateSyntax(action.assertion()); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "expression", "expected", "actual", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.call(), syntaxEngine, config); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); }
+            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
-                require(action.message(), "message is required for log action " + action.id());
+                if (action.message().trim().isEmpty() && action.file().trim().isEmpty()) throw new IllegalArgumentException("message or file is required for log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
                 forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "call", "expression", "expected", "actual", "retry", "timeoutMs");
                 for (Object key : action.fields().keySet()) if (!(key instanceof String)) throw new IllegalArgumentException("Log fields keys must be strings: " + action.id());
-                if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
+                validateInlineExpressions(action.message(), syntaxEngine, config);
+                validateInlineExpressions(action.file(), syntaxEngine, config);
+                for (Object value : action.fields().values()) validateInlineExpressions(String.valueOf(value), syntaxEngine, config);
             }
             if ("assign".equals(type)) {
                 require(action.name(), "name is required for assign action " + action.id());
@@ -332,11 +342,9 @@ public final class PackageValidator {
                         "The same variable name is assigned more than once in template '" + template.name() + "'.",
                         null, "name", null, null, null, template.name(), action.id(),
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
-                forbid(action, "output", "payload", "renderAs", "saveAs", "overwrite", "call", "expected", "actual", "message", "level", "fields", "retry", "timeoutMs");
-                syntaxEngine.validateValueSyntax(action.expression());
+                forbid(action, "output", "payload", "renderAs", "saveAs", "overwrite", "call", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                validateInlineExpressions(action.expression(), syntaxEngine, config);
                 validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false);
-                for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.expression())) validateCall(call, config, false);
-                if (!action.assertion().trim().isEmpty()) expressionEvaluator.validateSyntax(action.assertion());
             }
 
             Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
@@ -351,6 +359,7 @@ public final class PackageValidator {
             }
             if ("log".equals(type)) {
                 validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false);
+                validateStaticContextStructure(action.file(), syntaxEngine, completedActions, false);
                 for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false);
             }
           } catch (DiagnosticException e) { throw e.withLocation(null, "actions." + action.id(), null, null, null, template.name(), action.id()); }
@@ -366,7 +375,7 @@ public final class PackageValidator {
      */
     private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                                 Set<String> availableActions, boolean currentOutputAvailable) {
-        for (String path : engine.parseValuePaths(text)) {
+        for (String path : engine.parseContextPaths(text)) {
             String root = firstPathSegment(path);
             if ("CASE".equals(root) || "TOOL".equals(root)) continue;
             if ("RUN".equals(root)) {
@@ -465,6 +474,7 @@ public final class PackageValidator {
                 sourceField = "actions." + action.id() + ".description";
                 validateContextStructure(action.description(), engine, context, testCase, afterCurrentAction);
                 engine.renderValidationValues(action.description(), context);
+                validateCallArgumentsIn(action.description(), context, engine);
 
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
@@ -481,34 +491,45 @@ public final class PackageValidator {
                 sourceField = "actions." + action.id() + ".assert";
                 validateContextStructure(action.assertion(), engine, context, testCase, afterCurrentAction);
                 engine.renderValidationValues(action.assertion(), context);
+                validateCallArgumentsIn(action.assertion(), context, engine);
 
                 sourceField = "actions." + action.id() + ".actual";
                 validateContextStructure(action.actual(), engine, context, testCase, afterCurrentAction);
                 engine.renderValidationValues(action.actual(), context);
+                validateCallArgumentsIn(action.actual(), context, engine);
 
                 sourceField = "actions." + action.id() + ".expected";
                 validateContextStructure(action.expected(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.expected(), context);
+                validateCallArgumentsIn(action.expected(), context, engine);
 
                 sourceField = "actions." + action.id() + ".message";
                 validateContextStructure(action.message(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.message(), context);
+                validateCallArgumentsIn(action.message(), context, engine);
+
+                sourceField = "actions." + action.id() + ".file";
+                validateContextStructure(action.file(), engine, context, testCase, completedActions);
+                engine.renderValidationValues(action.file(), context);
+                validateCallArgumentsIn(action.file(), context, engine);
 
                 sourceField = "actions." + action.id() + ".saveAs";
                 validateContextStructure(action.saveAs(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.saveAs(), context);
+                validateCallArgumentsIn(action.saveAs(), context, engine);
 
                 for (Object key : action.fields().keySet()) {
                     sourceField = "actions." + action.id() + ".fields." + key;
                     Object value = action.fields().get(key);
                     validateContextStructure(String.valueOf(value), engine, context, testCase, completedActions);
                     engine.renderValidationValues(String.valueOf(value), context);
+                    validateCallArgumentsIn(String.valueOf(value), context, engine);
                 }
                 if ("tool".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".call";
                     validateContextStructure(action.call(), engine, context, testCase, completedActions);
                     engine.renderValidationValues(action.call(), context);
-                    validateCallArguments(callParser.parse(action.call()), context, engine);
+                    validateCallArgumentsIn(action.call(), context, engine);
                 }
                 if ("render".equalsIgnoreCase(action.type())) {
                     for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
@@ -517,9 +538,7 @@ public final class PackageValidator {
                         String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
                         validateContextStructure(content, engine, context, testCase, completedActions);
                         String partial = engine.renderValidationValues(content, context);
-                        for (ToolCallParser.ParsedCall call : engine.parseCalls(content)) {
-                            validateCallArguments(call, context, engine);
-                        }
+                        validateCallArgumentsIn(content, context, engine);
                         if (!"file".equalsIgnoreCase(action.renderAs()) && !partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
                     }
                 }
@@ -555,7 +574,7 @@ public final class PackageValidator {
     private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                           att.core.CaseRuntimeContext context, TestCase testCase,
                                           Set<String> availableActions) {
-        for (String path : engine.parseValuePaths(text)) {
+        for (String path : engine.parseContextPaths(text)) {
             if (path.startsWith("ACTIONS.")) {
                 String id = firstPathSegment(path.substring("ACTIONS.".length()));
                 if (!availableActions.contains(id)) throw unavailableActionContext(path, id, availableActions);
@@ -592,7 +611,16 @@ public final class PackageValidator {
 
     private void validateCallArguments(ToolCallParser.ParsedCall call, att.core.CaseRuntimeContext context,
                                        att.template.UnifiedTemplateEngine engine) {
-        for (ToolCallParser.Argument argument : call.arguments()) engine.renderValidationValues(argument.expression(), context);
+        for (ToolCallParser.Argument argument : call.arguments()) {
+            String expression = argument.expression().trim();
+            if (engine.isExplicitContextPath(expression)) engine.renderValidationValues("${" + expression + "}", context);
+            else engine.renderValidationValues(argument.expression(), context);
+        }
+    }
+
+    private void validateCallArgumentsIn(String text, att.core.CaseRuntimeContext context,
+                                         att.template.UnifiedTemplateEngine engine) {
+        for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCallArguments(call, context, engine);
     }
 
     private static void require(String value, String message) { if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException(message); }
@@ -614,6 +642,16 @@ public final class PackageValidator {
     }
     private static int integer(Object value, int fallback) { if (value == null) return fallback; if (!(value instanceof Number)) throw new IllegalArgumentException("Expected integer retry value"); return ((Number) value).intValue(); }
 
+    private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
+        engine.validateValueSyntax(text);
+        for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCall(call, config, false);
+    }
+
+    private void validateAssertionExpression(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
+        validateInlineExpressions(text, engine, config);
+        expressionEvaluator.validateSyntax(engine.maskCalls(text));
+    }
+
     private static final class LocatedValidationException extends IllegalArgumentException {
         private final String template, action, field;
         private LocatedValidationException(String message, String template, String action, String field, Throwable cause) { super(message, cause); this.template = template; this.action = action; this.field = field; }
@@ -633,8 +671,10 @@ public final class PackageValidator {
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
             for (ToolCallParser.Argument argument : parsed.arguments()) {
-                Object value = argument.expression().contains("${") ? "<validation-value>" : callParser.literal(argument.expression());
-                staticArguments &= !argument.expression().contains("${");
+                boolean dynamic = argument.expression().contains("${") || argument.expression().contains("#{")
+                        || expressionEngine.isExplicitContextPath(argument.expression().trim());
+                Object value = dynamic ? "<validation-value>" : callParser.literal(argument.expression());
+                staticArguments &= !dynamic;
                 if (shape.put(argument.key(), value) != null) throw builtInCallError(toolName,
                         "Duplicate built-in argument '" + argument.key() + "'", "Supply each argument once.", null);
             }

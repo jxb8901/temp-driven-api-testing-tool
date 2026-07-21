@@ -52,4 +52,13 @@ class StageTemplateLoaderTest {
         assertEquals("txnSeq", action.name());
         assertEquals("ATT#{sysdate('yyyyMMdd')}", action.expression());
     }
+
+    @Test void loadsFileOnlyLogAction() throws Exception {
+        Path dir=tempDir.resolve("templates/file-log"); Files.createDirectories(dir);
+        Files.write(dir.resolve("template.yaml"), ("schemaVersion: att-template/v2.3\nname: file-log\ndescription: test\nactions:\n"
+                + "  response: {type: log, file: '${ACTIONS.call.output.targetFiles[0]}'}\n").getBytes("UTF-8"));
+        TemplateAction action = new StageTemplateLoader(tempDir, Paths.get("templates")).load("file-log").actions().get(0);
+        assertEquals("${ACTIONS.call.output.targetFiles[0]}", action.file());
+        assertEquals("", action.message());
+    }
 }

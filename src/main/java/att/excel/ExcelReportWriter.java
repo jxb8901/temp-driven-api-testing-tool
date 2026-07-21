@@ -8,6 +8,7 @@ import att.config.FrameworkConfig;
 import att.config.SheetGroupConfig;
 import att.core.TestResult;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -27,6 +28,7 @@ import java.util.Map;
  */
 public class ExcelReportWriter {
     private final FrameworkConfig config;
+    private final DataFormatter formatter = new DataFormatter(java.util.Locale.ROOT);
 
     public ExcelReportWriter(FrameworkConfig config) {
         this.config = config;
@@ -37,7 +39,7 @@ public class ExcelReportWriter {
         String suiteName = suitePath.getFileName().toString().replaceFirst("\\.xlsx$", "");
         Path workbookDirectory = runDirectory.resolve("workbooks");
         Files.createDirectories(workbookDirectory);
-        Path reportPath = workbookDirectory.resolve(config.report().fileNamePattern().replace("${suiteName}", suiteName));
+        Path reportPath = workbookDirectory.resolve(reportFileName(suiteName));
         Map<String, TestResult> byCaseId = new LinkedHashMap<String, TestResult>();
         for (TestResult result : results) {
             byCaseId.put(result.caseId(), result);
@@ -47,14 +49,20 @@ public class ExcelReportWriter {
             Map<Short, org.apache.poi.ss.usermodel.CellStyle> wrappedStyles = new LinkedHashMap<Short, org.apache.poi.ss.usermodel.CellStyle>();
             for (SheetGroupConfig group : config.sheetGroups()) {
                 Sheet sheet = workbook.getSheet(group.sheetName());
+                if (sheet == null) throw new IllegalArgumentException("Configured Sheet does not exist while writing result workbook: " + group.sheetName());
                 Row header = sheet.getRow(config.headerRows() - 1);
                 if (header == null) throw new IllegalArgumentException("Missing final header row in sheet: " + group.sheetName());
-                Map<String, Integer> resultColumns = resolveResultColumns(header);
-                int caseColumn = columnIndex(header, config.caseIdColumn());
+                Map<String, Integer> sourceColumns = ExcelHeaderResolver.columns(sheet, config.headerRows(), formatter);
+                Integer caseColumn = sourceColumns.get(config.caseIdColumn());
+                if (caseColumn == null) throw new IllegalArgumentException("Configured Case ID header '" + config.caseIdColumn()
+                        + "' was not found in Sheet '" + group.sheetName() + "' across the first " + config.headerRows()
+                        + " header row(s); available headers=" + sourceColumns.keySet());
+                Map<String, Integer> resultColumns = resolveResultColumns(header, sourceColumns,
+                        ExcelHeaderResolver.maxColumns(sheet, config.headerRows()));
                 for (int rowIndex = config.headerRows(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
                     Row row = sheet.getRow(rowIndex);
                     if (row == null) continue;
-                    Cell caseCell = row.getCell(caseColumn);
+                    Cell caseCell = row.getCell(caseColumn.intValue());
                     if (caseCell == null) continue;
                     String prefix = config.workbookId().isEmpty() ? group.id() : config.workbookId() + "." + group.id();
                     TestResult result = byCaseId.get(prefix + "." + caseCell.toString().trim());
@@ -66,15 +74,27 @@ public class ExcelReportWriter {
         return reportPath;
     }
 
-    private Map<String, Integer> resolveResultColumns(Row header) {
+    private String reportFileName(String suiteName) throws IOException {
+        Map<String, Object> scope = new LinkedHashMap<String, Object>();
+        scope.put("suiteName", suiteName);
+        try {
+            return new att.template.UnifiedTemplateEngine(null).renderScoped(config.report().fileNamePattern(), scope);
+        } catch (Exception e) {
+            throw new IOException("Unable to render report.fileNamePattern: " + e.getMessage(), e);
+        }
+    }
+
+    private Map<String, Integer> resolveResultColumns(Row header, Map<String, Integer> sourceColumns, int firstUnusedColumn) {
         Map<String, Integer> columns = new LinkedHashMap<String, Integer>();
-        int nextColumn = Math.max(0, header.getLastCellNum());
+        int nextColumn = Math.max(firstUnusedColumn, Math.max(0, header.getLastCellNum()));
         for (Map.Entry<String, String> mapping : config.report().columns().entrySet()) {
-            int column = columnIndex(header, mapping.getValue());
-            if (column < 0) {
+            Integer existing = sourceColumns.get(mapping.getValue());
+            int column;
+            if (existing == null) {
                 column = nextColumn++;
                 header.createCell(column).setCellValue(mapping.getValue());
-            }
+                sourceColumns.put(mapping.getValue(), Integer.valueOf(column));
+            } else column = existing.intValue();
             columns.put(mapping.getKey(), column);
         }
         return columns;
@@ -118,14 +138,5 @@ public class ExcelReportWriter {
     }
 
     private String normalizeLines(String value) { return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n'); }
-
-    private int columnIndex(Row header, String name) {
-        for (Cell cell : header) {
-            if (name.equals(cell.toString().trim())) {
-                return cell.getColumnIndex();
-            }
-        }
-        return -1;
-    }
 
 }

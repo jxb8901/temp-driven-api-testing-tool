@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.4.2 - 2026-07-21
+
+- Unified `${...}` value references and `#{...}` built-in/configured-Tool calls behind one expression engine across every Case-runtime expression surface, including action descriptions, assertions, expected/actual values, log messages/fields, assign expressions, render payloads, Tool-call arguments, and Tool `saveAs`.
+- Added direct canonical Context paths inside call arguments, nested call evaluation, and assertion pre-evaluation, so the preferred `#{length(value=CASE.VARS.SrcRefNo)} <= 35` form validates and executes with typed comparison semantics while the older nested `${...}` form remains compatible.
+- Enabled built-ins in the dedicated `report.fileNamePattern` and Tool-definition `command` scopes while retaining their restricted values (`suiteName` or declared Tool inputs) and rejecting configured Tool calls in those non-Case/recursive boundaries.
+- Expanded configuration/package validation and regression coverage so every expression-bearing field uses the runtime call grammar without executing built-ins or external Tools during validation.
+- Reused the testcase loader's logical multi-row header projection when writing result workbooks, preventing negative Apache POI cell indexes when a configured header appears above the final header row and reporting a precise missing-header diagnostic instead.
+- Made Excel header matching ignore embedded spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace while retaining case-sensitive matching and original header text in diagnostics.
+- Added optional `file` input to log actions so UTF-8 files below the current Case output directory can be emitted with or without a rendered message; expressions are supported and symlink/path escapes are rejected.
+- Compacted human Case logs to one action block and one canonical record per Tool attempt, removing duplicated Tool/action evidence while preserving the complete final execution state in `case.yaml`.
+- Removed full Context-tree dumps from unknown and ambiguous expression diagnostics; requested path, deepest node, missing segment, nearest suggestion, and ambiguity candidates remain available.
+
 ## 2.4.1 - 2026-07-20
 
 - Added deterministic case-sensitive Context suffix lookup. A suffix resolves only when it identifies one readable logical path; ambiguous suffixes fail with new `ATT-CTX-002` candidate diagnostics instead of selecting by tree order.

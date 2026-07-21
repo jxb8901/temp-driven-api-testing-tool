@@ -48,6 +48,15 @@ class JsonSchemaVerifierTest {
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assign.replace("\"assert\":\"${output.result} != ''\"","\"call\":\"#{send()}\"")));
     }
 
+    @Test void v23TemplateSchemaAllowsLogMessageOrFile() throws Exception {
+        Path schema=Paths.get("schemas/att-template-v2.3.schema.json");
+        String fileOnly="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"response\":{\"type\":\"log\",\"file\":\"${ACTIONS.call.output.targetFiles[0]}\"}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,fileOnly));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,fileOnly.replace("\"file\":\"${ACTIONS.call.output.targetFiles[0]}\"","\"message\":\"done\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,fileOnly.replace(",\"file\":\"${ACTIONS.call.output.targetFiles[0]}\"","")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,fileOnly.replace("\"type\":\"log\"","\"type\":\"assert\",\"assert\":\"true\"")));
+    }
+
     @Test void productionV22SchemasAcceptArgvGroupsAndRejectMalformedSsh() throws Exception {
         Path config = Paths.get("schemas/att-config-v2.2.schema.json");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"toolGroups\":[\"config/tools/db.yaml\"],\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--value\"}}}}}"));

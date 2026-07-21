@@ -45,6 +45,27 @@ class CaseExecutionLogTest {
         assertTrue(text.contains("【!!!!!】[INVALID]"));
     }
 
+    @Test void compactActionKeepsEachToolAttemptOnceAndOmitsPersistedToolTree() throws Exception {
+        Map<String,Object> attempt=new LinkedHashMap<String,Object>();
+        attempt.put("attempt",1); attempt.put("status","FAIL"); attempt.put("output","PAYLOAD");
+        attempt.put("rawOutput","PAYLOAD"); attempt.put("stdout","PAYLOAD\n"); attempt.put("stderr","");
+        attempt.put("command","'sample'"); attempt.put("logicalArgv",java.util.Collections.singletonList("sample"));
+        attempt.put("argv",java.util.Collections.singletonList("sample")); attempt.put("TOOL",nestedStatus("FAIL"));
+        Map<String,Object> output=new LinkedHashMap<String,Object>(); output.put("status","FAIL"); output.put("success",false);
+        output.put("result","PAYLOAD"); output.put("stdout","PAYLOAD\n"); output.put("rawOutput","PAYLOAD");
+        output.put("attempts",java.util.Collections.singletonList(attempt));
+        Map<String,Object> action=new LinkedHashMap<String,Object>(); action.put("id","call"); action.put("type","tool");
+        action.put("output",output); action.put("TOOL",nestedStatus("FAIL"));
+        Path file=tempDir.resolve("compact.log"); new CaseExecutionLog(file).appendAction("ACTION call",action);
+
+        String text=new String(Files.readAllBytes(file),"UTF-8");
+        assertEquals(1,occurrences(text,"[ACTION call]"));
+        assertEquals(1,occurrences(text,"PAYLOAD"));
+        assertFalse(text.contains("TOOL:"));
+        assertFalse(text.contains("rawOutput:"));
+        assertFalse(text.contains("command:"));
+    }
+
     private Map<String,Object> status(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("status",value);return result;}
     private Map<String,Object> nestedStatus(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("TOOL",status(value));return result;}
 

@@ -29,6 +29,7 @@
         "expected": {"type": "string"},
         "actual": {"type": "string"},
         "message": {"type": "string", "minLength": 1},
+        "file": {"type": "string", "minLength": 1},
         "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]},
         "fields": {"type": "object"},
         "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
@@ -52,11 +53,11 @@
         {"$ref": "#/$defs/common"},
         {
           "oneOf": [
-            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
-            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "log"}}, "required": ["type", "message"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "assign"}}, "required": ["type", "name", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
+            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
+            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "log"}}, "required": ["type"], "anyOf": [{"required": ["message"]}, {"required": ["file"]}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "assign"}}, "required": ["type", "name", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["overwrite"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
           ]
         }
       ]

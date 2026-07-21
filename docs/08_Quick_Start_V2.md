@@ -1,8 +1,8 @@
-# ATT V2.4.1 新手入門
+# ATT V2.4.2 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.4.1 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.4.1 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.4.2 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.4.2 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.4.1 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.4.2 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -222,6 +222,7 @@ Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `
 - `render` 必須有 `payload` glob 及 `renderAs: file|text|json|yaml|xml`。`file` 把每個匹配文件 render 到 Case output 目錄的同名相對路徑，目標清單位於 `output.targetFiles`；其他類型把單一值或按相對路徑排序的多值 map 放在 `output.result`。render 不再使用 `saveAs`、`overwrite` 或配置 `output.mode`。
 - `tool` 必須有一個已配置的 `call`；仍可用 `saveAs` 保存 raw stdout，並設定 `timeoutMs` 與 retry。
 - `assert` action 必須有非空 `assert`，不再使用 `expression`；可加 `expected`（validate 階段求值）和 `actual`（runtime 求值）。
+- V2.4.2 中，任何可寫 `${...}` 的使用者欄位都可同時寫 `#{...}`。`${...}` 用於文字插值；在 `#{...}` 參數內可直接寫 canonical Context path，例如 `assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"`、`description: "#{upper(CASE.caseId)}"` 和 Tool action 的 `saveAs: "#{lower(CASE.caseId)}.txt"`。字面字串使用 ASCII 單／雙引號；舊的巢狀 `${...}` 寫法仍相容。完整規則見 Reference Manual 第 07 章。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
 - render、tool、log 都可用 `assert` 決定 PASS/FAIL；操作異常仍是 ERROR。tool exit code 是 `output.exitCode` 證據，不再單獨決定 action 結果。
 
@@ -289,7 +290,7 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。有效欄名重複、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.3：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.4.2：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
@@ -379,7 +380,7 @@ ATT 內置函數包括：
 #{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.4.1](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.4.2](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -437,7 +438,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.4.1",
+  "attVersion": "2.4.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -496,7 +497,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 ## 10. 常見問題與安全提醒
 
 - 找不到模板：檢查目錄中的 `template.yaml`、symbolic name 或完整路徑。
-- Context variable 報錯：查看 `requestedPath`、最深 `currentNode`、`missingSegment` 或 `ATT-CTX-002` candidates，再按完整 key/type tree 修正。`${...}` 可省略前段 path，但 suffix 必須以 case-sensitive segment 唯一識別一個當前可讀節點；tree 不顯示實際 Context 值。案例中確實存在但值為 blank 的 optional 欄位仍會得到空字串。
+- Context variable 報錯：查看 `requestedPath`、最深 `currentNode`、`missingSegment` 或 `ATT-CTX-002` candidates。`${...}` 可省略前段 path，但 suffix 必須以 case-sensitive segment 唯一識別一個當前可讀節點；為避免錯誤日誌過大，ATT 不再附帶完整 Context tree。案例中確實存在但值為 blank 的 optional 欄位仍會得到空字串。
 - Tool 驗證失敗：檢查 unknown、missing required 或 duplicate argument。
 - YAML cell 失敗：確認內容是 map 或 scalar shorthand；檢查重複 key 和未知字段。
 - 中文連結：V2.2 使用 Unicode-safe anchor，可支援中文 Case ID、模板名及路徑。
@@ -509,7 +510,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 
 ### 11.1 新增案例行
 
-1. Excel 表頭必須與 sidecar 完全一致。
+1. Excel 表頭與 sidecar 欄名匹配時忽略空格、tab、換行及其他 Unicode whitespace，但其他字符及大小寫必須一致。
 2. sidecar `id` 必須在 package 內唯一；每個 sheet 的 row Case ID 必須有效，ATT 會自動組成 `<workbookId>.<groupId>.<rowCaseId>`。
 3. 只有 sidecar 以 `(yaml)` 標識的欄位才會解析 YAML，Excel 實際表頭不包含 `(yaml)`。
 4. required stage 的模板欄可為包含 `name` 的 YAML map，或直接使用 scalar shorthand。
@@ -584,4 +585,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、報告、打包及診斷內容見 [ATT V2.4.1 Reference Manual](09_Reference_Manual_V2.md)。
+完整配置、Context、報告、打包及診斷內容見 [ATT V2.4.2 Reference Manual](09_Reference_Manual_V2.md)。

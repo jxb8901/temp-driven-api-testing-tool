@@ -59,6 +59,86 @@ public class CaseExecutionLog {
         if (mirror != null) mirror.accept(text.toString());
     }
 
+    /** Writes the human-readable action log without repeating the complete state retained in case.yaml. */
+    public void appendAction(String section, Map<String, Object> action) throws IOException {
+        append(section, compactAction(action));
+    }
+
+    /** Writes one standalone expression Tool invocation as a compact attempt record. */
+    public void appendToolInvocation(String section, Map<String, Object> invocation) throws IOException {
+        append(section, compactAttempt(invocation));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> compactAction(Map<String, Object> action) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        copyIfPresent(action, result, "id", "type");
+        Object description = action.get("description");
+        if (description != null && !String.valueOf(description).isEmpty()) result.put("description", description);
+        Object rawOutput = action.get("output");
+        if (!(rawOutput instanceof Map)) return result;
+        Map<String, Object> output = (Map<String, Object>) rawOutput;
+        Map<String, Object> compact = new LinkedHashMap<String, Object>();
+        copyIfPresent(output, compact, "status", "durationMs");
+        copyNonEmpty(output, compact, "targetFiles");
+        if ("tool".equalsIgnoreCase(String.valueOf(action.get("type")))) {
+            Object attempts = output.get("attempts");
+            if (attempts instanceof Iterable) {
+                java.util.List<Map<String, Object>> compactAttempts = new ArrayList<Map<String, Object>>();
+                for (Object attempt : (Iterable<?>) attempts) if (attempt instanceof Map) compactAttempts.add(compactAttempt((Map<String, Object>) attempt));
+                if (!compactAttempts.isEmpty()) compact.put("attempts", compactAttempts);
+            }
+            copyIfPresent(output, compact, "winningAttempt", "assertion");
+        } else {
+            copyResultUnlessTargetDuplicate(output, compact);
+            copyIfPresent(output, compact, "renderAs", "sources", "level", "sourceFile", "fields", "name", "assertion", "expected", "actual");
+        }
+        Object exception = output.get("exception");
+        if (exception instanceof Map) compact.put("exception", compactException((Map<String, Object>) exception));
+        result.put("output", compact);
+        return result;
+    }
+
+    private Map<String, Object> compactAttempt(Map<String, Object> attempt) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        copyIfPresent(attempt, result, "attempt", "id", "status", "durationMs", "input", "logicalArgv");
+        Object logical = attempt.get("logicalArgv"), executed = attempt.get("argv");
+        if (executed != null && !executed.equals(logical)) result.put("argv", executed);
+        Object parsed = attempt.get("output"), stdout = attempt.get("stdout");
+        if (!(parsed instanceof String) || stdout == null || !String.valueOf(parsed).equals(String.valueOf(stdout).trim())) {
+            if (attempt.containsKey("output")) result.put("output", parsed);
+        }
+        if (stdout != null && !String.valueOf(stdout).isEmpty()) result.put("stdout", stdout);
+        copyNonEmpty(attempt, result, "stderr");
+        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport");
+        return result;
+    }
+
+    private Map<String, Object> compactException(Map<String, Object> exception) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        copyIfPresent(exception, result, "type", "code", "summary", "detail", "location", "suggestion");
+        return result;
+    }
+
+    private void copyResultUnlessTargetDuplicate(Map<String, Object> source, Map<String, Object> target) {
+        if (!source.containsKey("result")) return;
+        Object value = source.get("result");
+        if (value != null && value.equals(source.get("targetFiles"))) return;
+        target.put("result", value);
+    }
+
+    private void copyIfPresent(Map<String, Object> source, Map<String, Object> target, String... keys) {
+        for (String key : keys) if (source.containsKey(key)) target.put(key, source.get(key));
+    }
+
+    private void copyNonEmpty(Map<String, Object> source, Map<String, Object> target, String key) {
+        Object value = source.get(key);
+        if (value == null || (value instanceof String && ((String) value).isEmpty())
+                || (value instanceof java.util.Collection && ((java.util.Collection<?>) value).isEmpty())
+                || (value instanceof Map && ((Map<?, ?>) value).isEmpty())) return;
+        target.put(key, value);
+    }
+
     private boolean abnormal(String section, Object data) {
         if (section != null && section.matches("(?i).*(^|\\s)(ERROR|FAIL|INVALID)(\\s|$).*")) return true;
         return abnormalValue(data, new IdentityHashMap<Object, Boolean>());

@@ -103,7 +103,7 @@ public final class StageTemplateLoader {
             String actionKey = String.valueOf(entry.getKey());
             if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey, "type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "level", "fields", "timeoutMs");
+            SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey, "type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs");
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
             if (actionMap.get("overwrite") != null && !(actionMap.get("overwrite") instanceof Boolean)) throw new IllegalArgumentException("actions." + actionKey + ".overwrite must be a boolean");

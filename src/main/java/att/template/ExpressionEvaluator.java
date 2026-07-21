@@ -22,6 +22,9 @@ public class ExpressionEvaluator {
     /** Parses assertion syntax without requiring runtime context values to exist. */
     public void validateSyntax(String expression) {
         if (expression == null || expression.trim().isEmpty()) throw new IllegalArgumentException("Assertion expression must not be blank");
+        UnifiedTemplateEngine expressions = new UnifiedTemplateEngine(null);
+        expressions.validateValueSyntax(expression);
+        expression = expressions.maskCalls(expression);
         StringBuilder normalized = new StringBuilder();
         for (int index = 0; index < expression.length();) {
             int start = expression.indexOf("${", index);
@@ -40,6 +43,11 @@ public class ExpressionEvaluator {
 
     /** Resolves Context values as typed expression literals before parsing. */
     public boolean evaluate(String expression, CaseRuntimeContext context) {
+        try {
+            expression = new UnifiedTemplateEngine(null).renderCalls(expression, context, null);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Unable to evaluate inline function: " + e.getMessage(), e);
+        }
         Matcher matcher = CONTEXT.matcher(expression);
         StringBuffer rendered = new StringBuffer();
         while (matcher.find()) {

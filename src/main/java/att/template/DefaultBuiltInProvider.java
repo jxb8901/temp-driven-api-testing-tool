@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-/** The only built-in provider registered by ATT V2.4.1. */
+/** The only built-in provider registered by ATT V2.4.2. */
 public final class DefaultBuiltInProvider implements BuiltInProvider {
     private static final int MAX_TEXT_LENGTH = 10000;
     private static final int MAX_RANDOM_CHOICES = 1000;

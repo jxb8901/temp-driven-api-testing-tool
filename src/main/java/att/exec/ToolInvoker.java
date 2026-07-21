@@ -90,7 +90,7 @@ public class ToolInvoker {
         }
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
-        Map<String, Object> resolvedInput = resolveMap(input, context);
+        Map<String, Object> resolvedInput = resolveMap(input);
         normalizeSinglePositionalArgument(tool, resolvedInput);
         validateArguments(tool, resolvedInput);
         expandDelimitedArguments(tool, resolvedInput);
@@ -189,8 +189,10 @@ public class ToolInvoker {
             toolNode.put(tool.groupId(), groupNode);
         } else toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
-        if (recordAction) context.addAction(id, invocation);
-        log.append("ACTION " + id, invocation);
+        if (recordAction) {
+            context.addAction(id, invocation);
+            log.appendToolInvocation("ACTION " + id, invocation);
+        }
 
         if (commandResult.timedOut()) {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
@@ -200,14 +202,13 @@ public class ToolInvoker {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> resolveMap(Map<String, Object> input, CaseRuntimeContext context) {
+    private Map<String, Object> resolveMap(Map<String, Object> input) {
         Map<String, Object> resolved = new LinkedHashMap<String, Object>();
-        Map<String, Object> renderContext = new LinkedHashMap<String, Object>(context.values());
         for (Map.Entry<String, Object> entry : input.entrySet()) {
             if (entry.getValue() instanceof Map) {
-                resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue(), context));
+                resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue()));
             } else if (entry.getValue() instanceof String) {
-                resolved.put(entry.getKey(), att.core.ValueNormalizer.normalize(renderValue((String) entry.getValue(), context)));
+                resolved.put(entry.getKey(), att.core.ValueNormalizer.normalize((String) entry.getValue()));
             } else {
                 resolved.put(entry.getKey(), entry.getValue());
             }
@@ -265,9 +266,17 @@ public class ToolInvoker {
 
     private boolean blank(Object value) { return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty(); }
 
-    private List<String> expandCommand(ToolConfig tool, Map<String, Object> input) throws java.io.IOException {
+    private List<String> expandCommand(ToolConfig tool, Map<String, Object> input) throws Exception {
         List<String> tokens = tool.commandArgv();
         List<String> argv = new ArrayList<String>();
+        Map<String, Object> declaredValues = new LinkedHashMap<String, Object>();
+        for (String key : tool.arguments().keySet()) declaredValues.put(key, input.get(key));
+        Map<String, Object> scopedValues = new LinkedHashMap<String, Object>(declaredValues);
+        scopedValues.put("input", new LinkedHashMap<String, Object>(declaredValues));
+        Map<String, Object> toolScope = new LinkedHashMap<String, Object>();
+        toolScope.put("input", new LinkedHashMap<String, Object>(declaredValues));
+        scopedValues.put("TOOL", toolScope);
+        att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
         for (String token : tokens) {
             ToolArgumentConfig exact = exactArgumentPlaceholder(tool, token);
             if (exact != null) {
@@ -288,16 +297,7 @@ public class ToolInvoker {
                 }
                 continue;
             }
-            Matcher matcher = VALUE.matcher(token);
-            StringBuffer rendered = new StringBuffer();
-            while (matcher.find()) {
-                String key = argumentKey(matcher.group(1));
-                if (!tool.arguments().containsKey(key)) throw new IllegalArgumentException("Tool command placeholder is not a declared argument: " + matcher.group(1));
-                Object value = input.get(key);
-                matcher.appendReplacement(rendered, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
-            }
-            matcher.appendTail(rendered);
-            argv.add(rendered.toString());
+            argv.add(expressionEngine.renderScoped(token, scopedValues));
         }
         if (!tool.groupScriptArgv().isEmpty()) {
             List<String> dispatched = new ArrayList<String>(tool.groupScriptArgv());
@@ -348,17 +348,6 @@ public class ToolInvoker {
             if (output.length() > 0) output.append(' ');
             output.append('\'').append(item.replace("'", "'\\''")).append('\'');
         }
-        return output.toString();
-    }
-
-    private String renderValue(String template, CaseRuntimeContext context) {
-        Matcher matcher = VALUE.matcher(template);
-        StringBuffer output = new StringBuffer();
-        while (matcher.find()) {
-            Object value = context.require(matcher.group(1));
-            matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
-        }
-        matcher.appendTail(output);
         return output.toString();
     }
 

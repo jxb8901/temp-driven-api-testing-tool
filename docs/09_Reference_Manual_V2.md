@@ -1,7 +1,7 @@
-# ATT V2.4.1 User Manual and Reference
+# ATT V2.4.2 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.4.1
+Version: 2.4.2
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -339,7 +339,7 @@ Row 2: Case ID    | Case name | Template  | Parameters
 Effective: Case ID, Case name, Template, Parameters
 ```
 
-ATT does not concatenate parent and child labels. Every configured effective header must exist exactly once. Duplicate or missing headers are validation errors. Result columns are written to the final header row.
+ATT does not concatenate parent and child labels. Header matching removes spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace from both the effective Excel header and configured sidecar/report label; matching otherwise remains case-sensitive. For example, `案例 編號`, `案例\n編號`, and `案例編號` identify the same column. Every effective header must exist exactly once after this normalization, so two physical headers that differ only by whitespace are a duplicate-header error. Testcase loading and result-workbook writing use this same projection; result columns that do not already exist are written to the final header row.
 
 #### Stages and template selection
 
@@ -403,6 +403,7 @@ actions:
     type: log
     level: INFO
     message: "Payment ${CASE.caseId} completed"
+    file: "${ACTIONS.callApi.output.targetFiles[0]}"
 ```
 
 `schemaVersion`, `description`, and a non-empty ordered `actions` map are required. `name` is optional when the template is always selected by full path; reusable templates should have a globally unique symbolic name.
@@ -414,20 +415,36 @@ actions:
 | `render` | Render one or more UTF-8 payloads | `type`, `payload`, `renderAs` | nested `output.result` and `output.targetFiles` |
 | `tool` | Invoke a configured external tool | `type`, `call` | nested typed result and process evidence |
 | `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
-| `log` | Write a rendered structured message | `type`, `message` | message and rendered fields |
+| `log` | Write a rendered message and/or UTF-8 Case-output file | `type`, at least one of `message` or `file` | combined content, source path, and rendered fields |
 | `assign` | Evaluate text and publish a Case-scoped value | `type`, `name`, `expression` | `${CASE.VARS.<name>}`, `output.name`, and `output.result` |
 
 Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
 
-Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log fields. Retry and timeout are valid only for tool actions. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
+Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log fields. Retry and timeout are valid only for tool actions. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 
-Every action supports expression-bearing `description`. Validation partially resolves static Case values and preserves unavailable runtime placeholders exactly. After execution, ATT resolves the remaining placeholders against the current action-local `${output...}` scope before persisting the final description.
+Every action supports expression-bearing `description`. Validation checks `${...}` references and `#{...}` calls without invoking them, resolves available static Case values where needed, and preserves runtime-dependent references. After successful execution, ATT evaluates both forms against the current action-local `${output...}` scope before persisting the final description.
 
 An assign action evaluates `expression` with the normal Context, built-in, and configured-tool grammar. Its `name` must match `[A-Za-z_][A-Za-z0-9_]*`, is case-sensitive, and must not already exist below `CASE.VARS` for the current Case. `CASE.VARS` is created once per Test Case, survives stage/template changes, and keeps runtime assignments separate from Excel and framework-owned Case fields. A successful assignment remains available to later actions and later stages as `${CASE.VARS.<name>}`. The same value is retained in `${ACTIONS.<assignActionId>.output.result}`. Assign supports optional `description`, `assert`, and `onFailure`, but not render, tool-action, log, report-only, retry, timeout, `saveAs`, or `overwrite` fields. Assertion FAIL/ERROR does not roll back a value whose expression already evaluated successfully; expression failure creates no variable.
 
 Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. `renderAs: file` writes the rendered result under the Case output directory using that same relative path; collisions are ERROR. Other render modes write no file and store one typed value, or an ordered relative-path-to-value map for multiple matches, in `output.result`.
+
+A log action can emit a rendered `message`, the complete content of one `file`, or both:
+
+```yaml
+logResponse:
+  type: log
+  level: DEBUG
+  message: "API response for ${CASE.caseId}:"
+  file: "${ACTIONS.callApi.output.targetFiles[0]}"
+  fields:
+    action: callApi
+```
+
+Both `message` and `file` support the unified `${...}` / `#{...}` expression engine and are evaluated before the log action publishes its own output. A relative `file` path resolves below `${CASE.outputDirectory}`; an absolute path is accepted only when its resolved real path is still below that directory. The source must be an existing regular non-symlink UTF-8 file. Path/symlink escapes, malformed UTF-8, blank resolved paths, and attempts to read the current Case log are ERROR.
+
+`output.sourceFile` records the canonical source path. `output.result` contains the file text once, with CRLF/CR normalized to LF; when both inputs are present, it contains the message, one LF, then the file content. This same result is emitted once in the human Case log rather than copying the file into multiple evidence fields.
 
 ### 3.3 Tool
 
@@ -488,21 +505,11 @@ tools:
 
 Call it as `#{database.selectPayment(caseId=${CASE.caseId})}`. With `script`, logical argv is `/opt/att/database-tools selectPayment select-payment --case <caseId>`: script argv, unqualified tool key, then tool command argv. Without `script`, the tool command starts with the executable. Persisted grouped evidence is navigable below `TOOL.database.selectPayment`.
 
-The shipped `fpp` group is a reference implementation rather than an FPP product adapter:
-
-| Call | Input | Parsed result |
-|---|---|---|
-| `fpp.invokeApi` | `requestId`, `requestType`, absolute request-file path, API-log path | XML with request metadata, `ResultCode`, and `ResultMessage` |
-| `fpp.sqlplusToXml` | SQLPlus output-file path | XML rows and columns plus `RowCount` |
-| `fpp.execCommand` | command, optional stdout path, optional stderr path, optional pipe-delimited arguments | YAML with child `exitCode`, `success`, `errorMessage`, and output paths |
-
 ```text
 #{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
 #{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
 #{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
-
-`tools/fpp_invoke_api.sh` validates and XML-escapes its inputs, records a correlation line in the requested log, and deliberately returns `ResultCode=NOT_IMPLEMENTED` until its marked integration block is replaced with an approved API client. A missing request file returns `INPUT_FILE_NOT_FOUND`. `tools/fpp_sqlplus_to_xml.sh` expects the first non-blank line to contain pipe-separated column names and converts one or more subsequent records; separator and SQLPlus footer lines are ignored. A safe ASCII XML name such as `name` is emitted directly as `<name>value</name>`; names with spaces, an invalid first character, or the reserved case-insensitive `xml` prefix use the valid fallback `<Column name="original">value</Column>`. `tools/fpp_exec_command.sh` executes an executable name from `PATH` or an executable path with atomic arguments, captures the complete child stdout/stderr, reports missing/non-executable commands as child exit codes 127/126, and exits successfully after producing valid YAML, so assertions should inspect `${output.result.exitCode}` rather than the tool process exit code. `stdoutPath` and `stderrPath` use `argName`; when either optional value is omitted, its flag is omitted too and the corresponding stream is written to the current Case log. These scripts require a POSIX shell; Windows packages may point an equivalent tool group at `.bat`, PowerShell, or native commands.
 
 #### Command processing
 
@@ -598,7 +605,7 @@ Available command placeholders are:
 | `${input.argument}` | Explicitly namespaced reference to the same declared argument |
 | `${TOOL.input.argument}` | Supported explicit alias for the same declared argument |
 
-ATT parses stdout as raw output. The tool configuration `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout in the case log directory. The relative filename may contain `${...}` Context expressions; template authors must keep it unique in that directory. `overwrite` defaults to `false`, so an existing target is an error unless overwrite is enabled. Every retry writes the same resolved target and replaces the earlier attempt's stdout, leaving the final attempt as the artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, parsed result, exit code, and retry evidence remain in the persisted case evidence.
+ATT parses stdout as raw output. The tool configuration `output` may be `txt`, `yaml`, `json`, or `xml`; default is `txt`. A tool action may set `saveAs` to persist raw stdout in the case log directory. The relative filename may contain `${...}` Context references and `#{...}` built-in/configured-Tool calls; template authors must keep it unique in that directory. `overwrite` defaults to `false`, so an existing target is an error unless overwrite is enabled. Every retry writes the same resolved target and replaces the earlier attempt's stdout, leaving the final attempt as the artifact. Without `saveAs`, ATT creates no dedicated tool-output file, while input, argv, stdout, stderr, parsed result, exit code, and retry evidence remain in the persisted case evidence.
 
 Timeout, launch/process I/O failure, or structured-output parse failure is ERROR and cannot be overridden by an assertion. Otherwise a tool action's `assert` decides PASS/FAIL. If no assertion is configured, operational completion is PASS even when the process exit code is non-zero. The exit code remains in `action.output.exitCode`, so templates that require zero must say so explicitly. Command, inputs, stdout, stderr, raw output, duration, exit code, parsed `output.result`, and assertion details are retained as evidence.
 
@@ -1072,7 +1079,7 @@ Allowed global object properties are:
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
-Case log structured entries use YAML. `caseLog.yamlAnchors: false` is the default and prints repeated Map/List content in full at every location. With `true`, SnakeYAML may emit `&id001` and `*id001`; these are standard YAML anchor/alias markers and carry no ATT identifier semantics.
+Case log structured entries use YAML. The human log records each normal action once and each Tool attempt once; duplicated final-attempt fields and the persisted `TOOL` subtree are omitted from this projection. The complete final Stage/Template/Action/Tool state remains in `case.yaml`. `caseLog.yamlAnchors: false` is the default for remaining shared Map/List objects; `true` permits SnakeYAML `&id001` / `*id001` anchor markers, which carry no ATT identifier semantics.
 
 ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `FAIL`, or `INVALID` with `【!!!!!】`. Search for that exact marker to locate abnormal blocks; PASS, SKIPPED, and informational blocks remain unmarked.
 
@@ -1093,14 +1100,90 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 |---|---|
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
-| render | requires `payload`, `renderAs`; optional `assert`; no saveAs/overwrite/output/call/expression/message/level/fields/timeout/retry |
+| render | requires `payload`, `renderAs`; optional `assert`; no saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry |
 | tool | requires `call`; optional `saveAs`, `overwrite`, `assert`, `timeoutMs`, `retry`; no render/assert-action/log-only fields |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
-| log | requires `message`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
+| log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
 | assign | requires `name`, `expression`; optional `assert`; name is unique below `CASE.VARS` for the entire Case; no render/tool/assert-action/log-only fields, timeout, retry, saveAs, or overwrite |
 | retry | `maxAttempts`, `retryOn`, `exitCodes`; retryOn required and contains only `EXIT_CODE` |
 
 `renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. `maxAttempts` is 1–10; `exitCodes` values are 1–255. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence in V2.3 and is never an action configuration field.
+
+#### Assign variable uniqueness and lifetime
+
+An `assign` action creates one immutable, Case-scoped entry below `CASE.VARS`; it is not a mutable-variable update operation. Every `name` must be unique for the entire Test Case, including across stages and templates:
+
+```yaml
+firstAssign:
+  type: assign
+  name: txnSeq
+  expression: "FIRST"
+
+secondAssign:
+  type: assign
+  name: txnSeq
+  expression: "SECOND"  # invalid: txnSeq was already declared for this Case
+```
+
+Validation reports `ATT-CTX-001` for the duplicate `${CASE.VARS.txnSeq}` assignment and blocks execution. The second action never replaces the first value. `onFailure: continue` changes only subsequent action scheduling; it does not authorize an overwrite.
+
+Use a new name for every transformation step:
+
+```yaml
+captureInitialAmount:
+  type: assign
+  name: initialAmount
+  expression: "${CASE.amount}"
+
+normalizeAmount:
+  type: assign
+  name: normalizedAmount
+  expression: "#{number(${CASE.VARS.initialAmount})}"
+```
+
+Later actions and stages read the transformed value as `${CASE.VARS.normalizedAmount}`. The same assign name may be used by different Test Cases because each Case owns an isolated `CASE.VARS`; uniqueness applies within one Case execution, not across the package globally.
+
+If an assign expression fails, ATT does not create its variable. This does not relax the authoring rule: a later assign in the same Case plan still cannot reuse that declared name. If the expression succeeds and the assign action's optional assertion subsequently returns FAIL or ERROR, the variable remains available; assertions do not roll back successful assignment. `CASE.VARS` survives stage/template transitions and is discarded only when that Test Case ends.
+
+#### Tool action `saveAs`
+
+`saveAs` is an optional property of a `type: tool` action; it is not a property of the global or grouped Tool definition. It persists that invocation's complete raw stdout as a dedicated Case artifact:
+
+```yaml
+callApi:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
+  saveAs: "responses/${CASE.rowCaseId}-response.json"
+  overwrite: false
+  assert: "${output.result.status} == 'SUCCESS'"
+```
+
+The saved bytes are stdout exactly as produced by the process, including any final line ending; they are not the trimmed `rawOutput` string or the parsed `output.result`. ATT resolves the filename below the current Case log directory, normally alongside `case.log` under `output/<RunID>/<CaseID>/`. Parent directories such as `responses/` are created. The saved path appears in the action's `output.targetFiles` and in the Tool-attempt evidence as `outputFile`. Without `saveAs`, stdout and parsed results remain in Case evidence, but ATT creates no separate Tool-output file.
+
+`saveAs` may contain `${...}` references plus `#{...}` built-in or configured-Tool calls evaluated before the primary Tool action starts. Canonical Context paths are preferred:
+
+```yaml
+saveAs: "${CASE.caseId}-response.json"
+saveAs: "responses/${CASE.VARS.txnSeq}.json"
+saveAs: "responses/${ACTIONS.prepare.output.result}.txt"
+saveAs: "responses/#{lower(${CASE.rowCaseId})}.json"
+```
+
+The current action has not produced an outcome when `saveAs` is evaluated, so `${output...}`, the current action through `${ACTIONS...}`, and future action outputs are invalid. A configured Tool call in `saveAs` is a real preceding invocation with normal Case-log evidence; built-ins are preferable for filename formatting.
+
+The rendered value must be a non-blank safe relative path using `/` separators. Absolute paths, backslashes, empty path segments, `.` segments, `..` segments, and any path that escapes the Case log directory are rejected. Examples:
+
+```yaml
+saveAs: "responses/TC001.json"    # valid
+saveAs: "/tmp/response.json"      # invalid: absolute
+saveAs: "../response.json"        # invalid: parent traversal
+saveAs: "responses\\TC001.json"  # invalid: backslash separator
+saveAs: "${output.result}.json"    # invalid: current output is unavailable
+```
+
+`overwrite` defaults to `false`. If the resolved file already exists within the same Case, the action is ERROR unless `overwrite: true` is configured. When retry is enabled, every attempt uses the same resolved `saveAs`; later attempts replace the preceding attempt's stdout so the dedicated file contains the final attempt. Separate Cases have separate artifact directories and therefore do not collide merely because they use the same relative `saveAs`.
+
+`render`, `assert`, `log`, and `assign` actions reject `saveAs` and `overwrite`. A render action writes files through `renderAs: file` and exposes them through its own `output.targetFiles` contract.
 
 ### Tool contract
 
@@ -1123,7 +1206,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.4.1",
+  "attVersion": "2.4.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1157,6 +1240,78 @@ Every diagnostic always contains `code`, `severity`, `message`, `file`, `field`,
 Generated envelopes reject additional top-level fields according to their schemas. JUnit HTML is a human-readable output and not an XML/JSON schema artifact.
 
 ## 07 Expression Reference
+
+### Unified expression engine
+
+V2.4.2 uses one parser and renderer for `${...}` value interpolation and `#{...}` expressions. Every user-facing location that accepts `${...}` also accepts `#{...}`; validation uses the same grammar without executing built-ins or external processes.
+
+The two delimiters identify different expression roles rather than two separate engines:
+
+- `${path}` inserts one Context value into surrounding text, for example `Reference=${CASE.VARS.SrcRefNo}`.
+- `#{name(arguments)}` evaluates a built-in or configured Tool call. Inside its arguments, a complete unquoted canonical Context path is resolved directly, for example `#{length(CASE.VARS.SrcRefNo)}`.
+- ASCII `'...'` or `"..."` always denotes a literal string inside a call, for example `#{length('CASE.VARS.SrcRefNo')}`.
+
+The preferred V2.4.2 form therefore avoids nested delimiters:
+
+```yaml
+assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"
+description: "Reference length: #{length(CASE.VARS.SrcRefNo)}"
+```
+
+The older nested form remains fully supported for compatibility and produces the same value:
+
+```yaml
+assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
+```
+
+#### Call-argument resolution rules
+
+ATT resolves each complete call argument in this order:
+
+1. An exact `${...}` reference is resolved as its typed Context value.
+2. An unquoted canonical Case-runtime path beginning with `CASE`, `RUN`, `ACTIONS`, `TOOL`, or action-local `output` is resolved as its typed Context value.
+3. An exact nested `#{...}` call is evaluated and its typed result is passed to the outer call.
+4. ASCII single- or double-quoted text is an explicit string literal. Numeric and boolean literals retain their normal types.
+5. Other unquoted tokens retain the legacy literal behaviour for backward compatibility. Authors should quote new literal strings so their intent remains unambiguous.
+
+Only complete arguments receive bare-path resolution. `prefix-CASE.caseId` is literal text, not interpolation; write `prefix-${CASE.caseId}` or `#{concat('prefix-', CASE.caseId)}`. Unique-suffix Context lookup also remains `${...}` syntax: use `${SrcRefNo}` when the shorthand is unambiguous, while the bare expression form should use the canonical `CASE.VARS.SrcRefNo` path.
+
+Quotation marks must be the ASCII characters `'` or `"`. Typographic quotes such as `“...”` and `‘...’` are ordinary Unicode characters and remain part of the literal token. For example:
+
+| Expression | Value passed to `length` | Result |
+|---|---|---:|
+| `#{length(value=CASE.VARS.SrcRefNo)}` | Actual value of the canonical Context path | Length of the runtime value |
+| `#{length(value=${CASE.VARS.SrcRefNo})}` | Same actual Context value; compatibility form | Length of the runtime value |
+| `#{length(value="CASE.VARS.SrcRefNo")}` | Literal `CASE.VARS.SrcRefNo` | `18` |
+| `#{length(value=“CASE.VARS.SrcRefNo”)}` | Literal including both typographic quote characters | `20` |
+
+Calls may be nested without returning to `${...}`, for example `#{upper(#{trim(CASE.name)})}`. Context paths and exact nested calls retain typed values; they are not converted to text until the receiving built-in/Tool or surrounding template requires text.
+
+The available values and callable capabilities still depend on the location's scope:
+
+| Expression-bearing location | `${...}` scope | Built-in `#{...}` | Configured Tool `#{...}` | Evaluation point |
+|---|---|---:|---:|---|
+| render payload content | Runtime Context | Yes | Yes | Before payload parsing/writing |
+| action `description` | Runtime Context including current `output` | Yes | Yes | After normal action completion |
+| action `assert` | Runtime Context including current `output` | Yes | Yes | After the action result is published locally |
+| assert-action `expected` | Runtime Context before current output | Yes | Yes | Before the assert action |
+| assert-action `actual` | Runtime Context including current `output` | Yes | Yes | After assertion evaluation |
+| log-action `message`, `file`, and `fields` values | Runtime Context before current output | Yes | Yes | Before reading/emitting the optional file |
+| assign-action `expression` | Runtime Context before current output | Yes | Yes | Before publishing `CASE.VARS.<name>` |
+| Tool-action `call` arguments | Runtime Context before current output | Yes | Yes | Before the primary Tool invocation |
+| Tool-action `saveAs` | Runtime Context before current output | Yes | Yes | Before the primary Tool invocation |
+| `config.report.fileNamePattern` | `${suiteName}` or bare `suiteName` inside a call | Yes | No | When writing the result workbook |
+| Tool-definition `command` tokens | declared Tool-input aliases, including bare arguments inside a call | Yes | No | When constructing logical argv |
+
+For a `type: tool` action, the outer `call` must still name the configured Tool being executed; a built-in cannot replace that primary Tool. Built-ins and other configured Tools may be used inside its argument expressions. Configured Tool calls are deliberately unavailable in `fileNamePattern` and Tool `command`: those dedicated scopes have no Case execution/evidence boundary, and allowing a Tool call while expanding another Tool's command would create hidden or recursive process execution.
+
+`#{...}` is not restricted to text replacement. An exact nested call argument retains its typed result, and assertion calls are evaluated before comparison parsing. Therefore this is valid:
+
+```yaml
+assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"
+```
+
+ATT first evaluates `length`, producing an expression such as `28 <= 35`, then applies the assertion operators documented below. A configured Tool called from any Case-runtime text field is a real external invocation and produces normal Tool evidence; do not use such calls merely for formatting when a built-in is sufficient.
 
 ### Runtime Context
 
@@ -1237,7 +1392,161 @@ If another readable path also ends in `InstrAmt`, the shortest form raises `ATT-
 
 `InstrAmt` is stage data, not a direct child of `CASE` or `TEMPLATE`; `${CASE.InstrAmt}`, `${TEMPLATE.InstrAmt}`, and `${CASE.STAGES.invoke.TEMPLATE.InstrAmt}` are therefore invalid unless an independently mapped value actually exists at the requested path. Quote XML lexical values such as account numbers and fixed-scale amounts in the selector YAML. This preserves the leading zero in `"012123456"` and the authored decimal representation `"100.00"`; unquoted YAML numeric values are typed numbers and do not promise to retain their original text formatting.
 
-Validation resolves available static values and preserves only values that are legitimately runtime-dependent. Runtime resolves every remaining reference at its defined execution point. Explicit `CASE`, `RUN`, `ACTIONS`, `TOOL`, and `output` roots are traversed strictly; references without one of those roots use the unique-suffix rule above. An unknown Context path is never converted silently to empty text: `ATT-CTX-001` reports the exact `requestedPath`, deepest successfully reached `currentNode`, first `missingSegment`, source location, and complete currently readable author-facing key/type tree. `ATT-CTX-002` reports the requested shorthand and all candidate paths. The tree includes applicable sidecar data, `CASE.VARS`, stage data, completed actions, action-local output, TOOL, and RUN structure, but never their actual values; values remain available in persisted Case logs. A declared optional Case field whose actual value is blank remains a valid empty string. An action may read only case data, its local `output` where supported, and action outputs that exist at that execution point; validation rejects unknown stage IDs and current/future action references used before they become available.
+Validation resolves available static values and preserves only values that are legitimately runtime-dependent. Runtime resolves every remaining reference at its defined execution point. Explicit `CASE`, `RUN`, `ACTIONS`, `TOOL`, and `output` roots are traversed strictly; references without one of those roots use the unique-suffix rule above. An unknown Context path is never converted silently to empty text: `ATT-CTX-001` reports the exact `requestedPath`, deepest successfully reached `currentNode`, first `missingSegment`, and source location. `ATT-CTX-002` reports the requested shorthand and all candidate paths. Neither diagnostic dumps the complete Context tree, preventing large failed Action/Tool structures from being copied repeatedly into logs and reports. A declared optional Case field whose actual value is blank remains a valid empty string. An action may read only case data, its local `output` where supported, and action outputs that exist at that execution point; validation rejects unknown stage IDs and current/future action references used before they become available.
+
+### `config.report.fileNamePattern`
+
+#### Context and legal forms
+
+`report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has one case-sensitive value reference:
+
+| Placeholder | Value |
+|---|---|
+| `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
+
+The configured string must reference `suiteName`, either as `${suiteName}` text interpolation or as the complete bare argument of a built-in call. Legal examples include:
+
+```yaml
+report:
+  fileNamePattern: "${suiteName}.result.xlsx"
+```
+
+```yaml
+fileNamePattern: "result-${suiteName}.xlsx"
+fileNamePattern: "ATT-${suiteName}-report.xlsx"
+fileNamePattern: "${suiteName}-${suiteName}.xlsx"
+fileNamePattern: "#{upper(suiteName)}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(suiteName)})}.xlsx"
+```
+
+For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
+
+#### Illegal or unsupported forms
+
+These values fail configuration loading because they do not reference `suiteName`:
+
+```yaml
+fileNamePattern: "result.xlsx"
+fileNamePattern: "${runId}.result.xlsx"
+fileNamePattern: "${workbookId}.result.xlsx"
+```
+
+No other value reference or Runtime Context path is supported. Configured Tool calls are also unavailable in this scope. These forms are invalid:
+
+```text
+${runId}
+${workbookId}
+${environment}
+${CASE.caseId}
+${RUN.runId}
+#{configuredTool()}
+#{upper(${runId})}
+```
+
+A pattern such as `${suiteName}-${runId}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
+
+### Tool-definition `command` expressions
+
+#### Context and legal forms
+
+A configured Tool `command` also has its own restricted Context. It may reference only keys declared by that Tool's `arguments` map. For each declared case-sensitive key, three equivalent placeholder forms are legal:
+
+| Form | Meaning |
+|---|---|
+| `${requestFile}` | Preferred direct argument reference |
+| `${input.requestFile}` | Explicit Tool-input namespace |
+| `${TOOL.input.requestFile}` | Supported full alias for the same Tool input |
+
+For example:
+
+```yaml
+tools:
+  invokePaymentApi:
+    name: Invoke Payment API
+    description: Invoke a rendered payment request
+    command:
+      - ./tools/invoke_payment_api.sh
+      - "${requestFile}"
+      - "${environment}"
+    output: json
+    arguments:
+      requestFile:
+        name: Request File
+        description: Rendered XML request path
+        required: true
+      environment:
+        name: Environment
+        description: Target environment
+        required: true
+```
+
+The action call is the boundary between the general Runtime Context and this restricted Tool-input Context:
+
+```yaml
+callApi:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=ACTIONS.renderRequest.output.targetFiles[0], environment=CASE.environment)}"
+```
+
+The call resolves the canonical Runtime Context paths first and creates Tool inputs named `requestFile` and `environment`. The older `${ACTIONS...}` / `${CASE...}` argument form remains legal. The command then substitutes `${requestFile}` and `${environment}` from those inputs; `${environment}` does not read global configuration directly. The two command arguments could equivalently use `${input.requestFile}` / `${input.environment}` or `${TOOL.input.requestFile}` / `${TOOL.input.environment}`. Mixing the three forms is legal, although one consistent style is easier to review.
+
+Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
+
+```yaml
+command:
+  - ./tools/invoke_payment_api.sh
+  - "--environment=#{upper(environment)}"
+  - "--label=#{concat('ATT-', #{lower(input.requestFile)})}"
+```
+
+Inside a command call, the three bare forms `requestFile`, `input.requestFile`, and `TOOL.input.requestFile` resolve to the same declared argument. Outside `#{...}`, command text continues to use `${requestFile}` interpolation.
+
+A normal argument placeholder may occupy a complete argv token, which is preferred, or be embedded in fixed text:
+
+```yaml
+command:
+  - ./tools/invoke_payment_api.sh
+  - "--request=${requestFile}"
+  - "--environment=${environment}"
+```
+
+Because this is a YAML argv list, each list item remains one atomic process argument even when its resolved value contains spaces or shell-like characters. ATT does not invoke a local shell.
+
+#### Illegal forms and token restrictions
+
+Tool commands cannot directly read the general Runtime Context, use unique-suffix navigation, or navigate argument fields with bracket syntax. These `${...}` forms are rejected during configuration or package validation:
+
+```text
+${CASE.environment}
+${RUN.runId}
+${ACTIONS.renderRequest.output.targetFiles[0]}
+${STAGES.invoke.InstrAmt}
+${input['requestFile']}
+${TOOL.input['requestFile']}
+${requestFile.path}
+```
+
+Configured Tool calls are not available inside `command`:
+
+```text
+#{anotherConfiguredTool(value=${requestFile})}
+```
+
+This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a standalone global Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
+
+If an argument declares a non-empty `argName`, its placeholder must appear exactly once and occupy one complete command token:
+
+```yaml
+command: [./tools/invoke_payment_api.sh, "${requestFile}"]
+arguments:
+  requestFile:
+    name: Request File
+    description: Rendered XML request path
+    required: true
+    argName: --request
+```
+
+ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${requestFile}` or a transformed form such as `#{upper(${requestFile})}` is invalid when `argName` is non-empty. Likewise, every argument declaring `delimit` must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded placeholder instead leaves its surrounding fixed token in argv.
 
 ### Operators
 
@@ -1304,7 +1613,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.4.1 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.4.2 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -1397,7 +1706,7 @@ Then use the diagnostic code and structured location. Do not automate against me
 | Category | Typical cause | Corrective action |
 |---|---|---|
 | `ATT-TC` | Missing/stale snapshot, sidecar/sheet/header error, or duplicate Case ID | Check snapshot/basenames, sheet mapping, effective headers, and full IDs |
-| `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields or candidates and the key/type tree |
+| `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields, nearest suggestion, or canonical candidates |
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
 | `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with Chapter 6 and remove unsupported fields |
@@ -1421,7 +1730,7 @@ ATT normalizes `N/A`, `NA`, `NULL`, `NONE`, empty, and whitespace-only values to
 
 #### Why does a Context variable fail?
 
-ATT treats an absent path as an authoring/runtime error instead of silently rendering it as empty. Follow `ATT-CTX-001` and its `requestedPath`, `currentNode`, `missingSegment`, and key/type tree to check the case-sensitive scope, physical header/alias, stage key, action ID, and availability point. A suffix shorthand must identify exactly one readable logical path; `ATT-CTX-002` lists every conflicting candidate so you can lengthen it. A declared optional field with a blank value is still valid and renders as the empty string.
+ATT treats an absent path as an authoring/runtime error instead of silently rendering it as empty. Follow `ATT-CTX-001` and its `requestedPath`, `currentNode`, `missingSegment`, and nearest suggestion to check the case-sensitive scope, physical header/alias, stage key, action ID, and availability point. A suffix shorthand must identify exactly one readable logical path; `ATT-CTX-002` lists every conflicting candidate so you can lengthen it. The diagnostic intentionally omits the full Context tree. A declared optional field with a blank value is still valid and renders as the empty string.
 
 #### Why did a FAIL become ERROR?
 

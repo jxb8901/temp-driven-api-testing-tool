@@ -97,7 +97,7 @@ class ContextsTest {
         assertTrue(ambiguous.format().contains("CASE.refund.response.resultCode"));
     }
 
-    @Test void missingContextReportsDeepestNodeAndKeyTypeTreeWithoutValues() {
+    @Test void missingContextReportsTraversalBoundaryWithoutDumpingTheContextTree() {
         Map<String,Object> status = new LinkedHashMap<String,Object>(); status.put("text", "SHOULD_NOT_APPEAR");
         Map<String,Object> response = new LinkedHashMap<String,Object>(); response.put("Status", status);
         CaseRuntimeContext context = new CaseRuntimeContext(
@@ -110,8 +110,8 @@ class ContextsTest {
         assertTrue(error.format().contains("requestedPath: CASE.response.Status.code"));
         assertTrue(error.format().contains("currentNode: CASE.response.Status"));
         assertTrue(error.format().contains("missingSegment: code"));
-        assertTrue(error.format().contains("Status: map  <-- currentNode"));
-        assertTrue(error.format().contains("text: string"));
+        assertTrue(!error.format().contains("contextTree:"));
+        assertTrue(!error.format().contains("text: string"));
         assertTrue(!error.format().contains("SHOULD_NOT_APPEAR"));
     }
 
@@ -131,6 +131,7 @@ class ContextsTest {
                 () -> context.require("CASE.response['Unknown Key']"));
         assertTrue(missingQuotedKey.format().contains("currentNode: CASE.response"));
         assertTrue(missingQuotedKey.format().contains("missingSegment: ['Unknown Key']"));
+        assertTrue(!missingQuotedKey.format().contains("contextTree:"));
     }
 
     @Test void resolvesUniqueSuffixFromCompletedActionCanonicalTree() {

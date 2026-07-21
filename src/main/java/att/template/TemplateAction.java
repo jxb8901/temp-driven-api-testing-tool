@@ -22,6 +22,7 @@ public class TemplateAction {
     private final String expression;
     private final String call;
     private final String message;
+    private final String file;
     private final String saveAs;
     private final String assertion;
     private final String expected;
@@ -47,6 +48,7 @@ public class TemplateAction {
         this.expression = text(data.get("expression"), "");
         this.call = text(data.get("call"), "");
         this.message = text(data.get("message"), "");
+        this.file = text(data.get("file"), "");
         this.saveAs = text(data.get("saveAs"), "");
         this.assertion = text(data.get("assert"), "");
         this.expected = text(data.get("expected"), "");
@@ -69,6 +71,7 @@ public class TemplateAction {
     public String expression() { return expression; }
     public String call() { return call; }
     public String message() { return message; }
+    public String file() { return file; }
     public String saveAs() { return saveAs; }
     public String assertion() { return assertion; }
     public String expected() { return expected; }

@@ -53,6 +53,22 @@ class UnifiedTemplateEngineTest {
         assertEquals("hello, world:true:12.5", new UnifiedTemplateEngine(null).render("#{concat('hello, world', ':', true, ':', 12.5)}", context));
     }
 
+    @Test void supportsNestedCallsAndScopedExpressionsThroughOneEngine() throws Exception {
+        LinkedHashMap<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("reference", "  abc  ");
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+
+        assertEquals("ABC", engine.render("#{upper(#{trim(CASE.reference)})}", context));
+        assertEquals("7|7", engine.render("#{length(CASE.reference)}|#{length(${CASE.reference})}", context));
+        assertEquals("18|20", engine.render("#{length('CASE.VARS.SrcRefNo')}|#{length(“CASE.VARS.SrcRefNo”)}", context));
+        assertThrows(att.validation.DiagnosticException.class, () -> engine.render("#{length(CASE.missing)}", context));
+        assertEquals("0 <= 35", engine.maskCalls("#{length(value=${CASE.reference})} <= 35"));
+        assertEquals("PAYMENT.result.xlsx", engine.renderScoped("#{upper(${suiteName})}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
+        assertEquals("PAYMENT.result.xlsx", engine.renderScoped("#{upper(suiteName)}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
+        assertThrows(IllegalArgumentException.class, () -> engine.renderScoped("#{external()}", Collections.<String,Object>emptyMap()));
+    }
+
     @Test void validationRenderingResolvesStaticCaseValuesAndPreservesRuntimeValues() {
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payments","payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
@@ -126,12 +142,26 @@ class UnifiedTemplateEngineTest {
         assertNull(context.resolve("ACTIONS.single"));
     }
 
+    @Test void toolCommandArgumentsUseUnifiedBuiltInRendering() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("message", new ToolArgumentConfig("message", "Message", "Text", true, ""));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("echoOne", new ToolConfig("echoOne", "Echo one", "Echo one value", "echo #{upper(input.message)}", "txt", arguments));
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tools,null,null), runner);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        context.beginStage(new att.core.StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+
+        assertEquals("ok", new UnifiedTemplateEngine(invoker).executeCall("#{echoOne('hello world')}", context, new CaseExecutionLog(tempDir.resolve("case.log")), "scoped"));
+        assertEquals(Arrays.asList("echo", "HELLO WORLD"), runner.calls.get(0));
+    }
+
     @Test void configuredToolReceivesContextTypesWithoutGuessing() throws Exception {
         LinkedHashMap<String,Object> data=new LinkedHashMap<String,Object>();
         data.put("account","00123"); data.put("count",7); data.put("enabled",true); data.put("items",Collections.singletonList(Collections.singletonMap("status","READY")));
         CaseRuntimeContext context=new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
         CapturingInvoker invoker=new CapturingInvoker(tempDir);
-        Object output=new UnifiedTemplateEngine(invoker).executeCall("#{capture(account=${CASE.account}, count=${CASE.count}, enabled=${CASE.enabled}, message='hello, world', first=${CASE.items[0].status})}",context,new CaseExecutionLog(tempDir.resolve("tool.log")),"call");
+        Object output=new UnifiedTemplateEngine(invoker).executeCall("#{capture(account=CASE.account, count=CASE.count, enabled=${CASE.enabled}, message='hello, world', first=CASE.items[0].status)}",context,new CaseExecutionLog(tempDir.resolve("tool.log")),"call");
         assertEquals("ok",output);
         assertEquals("00123",invoker.input.get("account"));
         assertEquals(Integer.valueOf(7),invoker.input.get("count"));

@@ -21,6 +21,7 @@ class TemplateRendererTest {
         context.put("Case ID", "TC001");
         context.put("Amount", 100);
 
-        assertEquals("case=TC001 amount=100 missing=", TemplateRenderer.render("case=${Case ID} amount=${Amount} missing=${missing}", context));
+        assertEquals("case=TC001 amount=100 missing= id=TC001",
+                TemplateRenderer.render("case=${Case ID} amount=${Amount} missing=${missing} id=#{upper(${Case ID})}", context));
     }
 }

@@ -62,7 +62,7 @@ public final class ExcelTestSuiteLoader {
                 "excel.sheet", group.sheetName(), null, null, "Correct the sidecar sheet mapping or add the configured Sheet to the workbook.", null);
         if (sheet.getLastRowNum() < config.headerRows() - 1) throw caseError("Configured header rows do not exist", "headerRows=" + config.headerRows(), suitePath,
                 "excel.headerRows", group.sheetName(), null, null, "Reduce excel.headerRows or add the required header rows.", null);
-        Map<String, Integer> columns = columns(sheet, config.headerRows());
+        Map<String, Integer> columns = ExcelHeaderResolver.columns(sheet, config.headerRows(), formatter);
         requireColumn(columns, config.caseIdColumn(), "excel.caseId", group, suitePath);
         requireColumn(columns, config.tagsColumn(), "excel.tags", group, suitePath);
         for (DataColumnConfig column : config.dataColumns()) requireColumn(columns, column.columnName(), "excel.dataColumns." + column.key(), group, suitePath);
@@ -179,33 +179,11 @@ public final class ExcelTestSuiteLoader {
         return value;
     }
 
-    private Map<String, Integer> columns(Sheet sheet, int headerRows) {
-        Map<String, Integer> result = new LinkedHashMap<String, Integer>();
-        int maxColumns = 0;
-        for (int rowIndex = 0; rowIndex < headerRows; rowIndex++) {
-            Row row = sheet.getRow(rowIndex);
-            if (row != null) maxColumns = Math.max(maxColumns, row.getLastCellNum());
-        }
-        for (int columnIndex = 0; columnIndex < maxColumns; columnIndex++) {
-            String name = "";
-            for (int rowIndex = 0; rowIndex < headerRows; rowIndex++) {
-                Row row = sheet.getRow(rowIndex);
-                Cell cell = row == null ? null : row.getCell(columnIndex);
-                String candidate = ValueNormalizer.normalize(cell == null ? "" : formatter.formatCellValue(cell));
-                if (!candidate.isEmpty()) name = candidate;
-            }
-            if (!name.isEmpty()) {
-                if (result.put(name, columnIndex) != null) throw new IllegalArgumentException("Duplicate Excel header: " + name);
-            }
-        }
-        return result;
-    }
-
     private void requireColumn(Map<String, Integer> columns, String name, String field, SheetGroupConfig group, Path suitePath) {
         if (name == null || name.trim().isEmpty() || !columns.containsKey(name)) throw caseError("Required Excel column is missing",
                 "field=" + field + ", expectedHeader='" + name + "', availableHeaders=" + columns.keySet(), suitePath,
                 field, group.sheetName(), config.headerRows(), null,
-                "Correct the sidecar header mapping or add the exact case-sensitive header to the configured header row.", null);
+                "Correct the sidecar header mapping or add the case-sensitive header; spaces, tabs, line breaks, and other Unicode whitespace are ignored during matching.", null);
     }
 
     private Set<Integer> testcaseColumns(Map<String, Integer> columns) {

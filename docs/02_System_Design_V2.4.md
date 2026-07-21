@@ -1,11 +1,11 @@
 # ATT V2.4 System Design
 
 Status: implemented
-Target release: 2.4.1
+Target release: 2.4.2
 
 ## 1. Scope and source of truth
 
-V2.4 adds testcase version control without changing the established workbook → Case → ordered stage → template → ordered action → tool model. V2.4.1 additionally makes failed Context lookup easier to diagnose, permits deterministic unambiguous Context-path suffixes, improves the layout of multiple human validation diagnostics, and adds an explicit run option for refreshing selected snapshots before validation. The `.xlsx` workbook remains the only editable source. Every workbook has two adjacent companions:
+V2.4 adds testcase version control without changing the established workbook → Case → ordered stage → template → ordered action → tool model. V2.4.1 additionally makes failed Context lookup easier to diagnose, permits deterministic unambiguous Context-path suffixes, improves the layout of multiple human validation diagnostics, and adds an explicit run option for refreshing selected snapshots before validation. V2.4.2 unifies `${...}` references and `#{...}` calls behind one expression engine across all expression-bearing surfaces. The `.xlsx` workbook remains the only editable source. Every workbook has two adjacent companions:
 
 ```text
 testcase/payment.xlsx   # editable source
@@ -59,21 +59,9 @@ Every failed `${...}` Context lookup MUST retain the existing source location (f
 - `requestedPath`: the exact case-sensitive path written by the author;
 - `currentNode`: the deepest node reached successfully while resolving that path, or `<root>` when no first segment was selected;
 - `missingSegment`: the first segment that could not be resolved, for an unknown-path failure;
-- the relevant canonical candidate paths, for an ambiguous shorthand failure;
-- `contextTree`: the complete key/type structure of the author-facing Context that is readable at that evaluation point.
+- the relevant canonical candidate paths, for an ambiguous shorthand failure.
 
-`currentNode` describes Context traversal, not the currently executing Action. The existing diagnostic source location identifies the executing template, Action, and field. The tree MUST visibly mark the node named by `currentNode` so an operator can relate the failed segment to its available children.
-
-The diagnostic tree is not a dump of `case.yaml` and MUST NOT print Context values. It contains the logical paths an author could resolve at that point, including:
-
-- framework-owned and sidecar-mapped `CASE` fields, including Excel `dataColumns`;
-- `CASE.VARS` values assigned earlier in the Case;
-- selected stage custom data that is currently available below `CASE.STAGES`;
-- completed, currently readable `ACTIONS` and their public `output` structure;
-- the current action-local `output` and invocation-local `TOOL` structure when those scopes exist;
-- supported `RUN` fields.
-
-The tree recursively prints map keys, existing list indexes, and stable scalar/container types (`map`, `list`, `string`, `integer`, `decimal`, `boolean`, or `null`). It excludes raw values and non-addressable persistence duplication. In particular, it does not copy stdout, stderr, raw output, argv, payload bodies, credentials, or other evidence values into the console; if such a field is addressable, only its key and type appear. Durable and convenience paths that expose the same logical node may be labelled as aliases but MUST NOT duplicate the whole subtree. Existing Case-log evidence remains unchanged.
+`currentNode` describes Context traversal, not the currently executing Action. The existing diagnostic source location identifies the executing template, Action, and field. Diagnostics MUST NOT append the complete Context tree: large Cases and failed Tool results otherwise multiply the same structure across console, Case log, reports, and exception evidence. Runtime values and the full structured final state remain available in `case.yaml`.
 
 Example:
 
@@ -83,17 +71,9 @@ ATT-CTX-001: Unknown Context variable '${CASE.response.Status.code}'
   requestedPath: CASE.response.Status.code
   currentNode: CASE.response.Status
   missingSegment: code
-  contextTree:
-    CASE: map
-      amount: string
-      response: map
-        Status: map  <-- currentNode
-          text: string
-      VARS: map
-        txnSeq: string
 ```
 
-Case-bound validation prints the statically readable tree for that Case and action position. Package validation of a template that has no concrete Case prints the declared structural scopes and completed action shapes known at that position; it MUST NOT invent Excel fields or runtime values. Runtime diagnostics use the actual currently readable structure. Validation and runtime MUST use the same path grammar and candidate-selection rules.
+Case-bound validation, package validation, and runtime use the same path grammar, traversal-boundary rules, nearest-path suggestion, and candidate-selection rules without printing runtime values or a whole-tree projection.
 
 ### 6.2 Unambiguous Context-path suffixes
 
@@ -170,16 +150,41 @@ It may additionally mention `run --update-snapshot`, but MUST describe that opti
 
 ### 6.5 V2.4.1 acceptance criteria
 
-- Missing first, middle, final, quoted-key, and list-index path segments report the exact `requestedPath`, deepest `currentNode`, first `missingSegment`, source location, and the complete readable key/type tree without Context values.
+- Missing first, middle, final, quoted-key, and list-index path segments report the exact `requestedPath`, deepest `currentNode`, first `missingSegment`, and source location without a complete Context-tree dump.
 - Case-bound validation, unreferenced-template validation, and runtime failures expose only the structures available at their respective evaluation points and never invent future Action results.
 - Full paths and every uniquely identifying suffix resolve to the same value in validation and runtime; segment matching remains case-sensitive.
 - Zero-candidate and multi-candidate references produce `ATT-CTX-001` and `ATT-CTX-002` respectively. Ambiguous diagnostics list all canonical candidates in deterministic order and never select one implicitly.
 - Duplicate durable/convenience views of one logical node do not create false ambiguity; genuinely distinct nodes with equal values remain ambiguous.
 - Human output uses one indented block per diagnostic and one blank line between blocks for ERROR, WARNING, and INFO; JSON bytes and schema remain unaffected by presentation-only whitespace rules.
-- Context diagnostics do not copy actual Excel values, assigned values, tool input/output, stdout/stderr, argv, raw payloads, or credentials into default console output.
+- Context diagnostics do not copy the complete Context structure, actual Excel values, assigned values, tool input/output, stdout/stderr, argv, raw payloads, or credentials into default console output.
 - Default `run` rejects missing, stale, malformed, non-canonical, unsupported-schema, and symbolic-link snapshots without modifying source files or creating run output.
 - `run --update-snapshot` creates/replaces only the selected workbook snapshots whose canonical bytes differ, then passes through the same verification and validation gates as an ordinary run.
 - Case/tag/rerun selection never produces a partial-workbook snapshot; explicit `--suite` and `--suite-dir` constrain the workbook update boundary.
 - A generation failure before replacement preserves every selected snapshot; replacement is atomic per file, byte-identical files retain their bytes/mtime, and multi-file I/O failures report partial completion precisely.
 - `--update-snapshot` rejects non-run commands and snapshot symlinks, performs no tool execution, precedes output-directory creation, remains explicit under `--dry-run`, and is serialized across concurrent ATT update phases.
 - Human, quiet, and JSON console modes report or suppress successful snapshot updates according to Section 6.4 without contaminating machine-readable stdout.
+
+## 7. V2.4.2 unified expression processing
+
+V2.4.2 removes the split between value-only renderers and call-aware renderers. `UnifiedTemplateEngine` is the single author-facing grammar implementation for `${...}` references, `#{...}` built-ins, configured Tool calls, nested call arguments, validation parsing, and scoped string rendering.
+
+Case-runtime surfaces use the complete engine and a `CaseRuntimeContext`: render payload content, action description/assert/expected/actual, log message/field values, assign expression, Tool-call arguments, and Tool-action `saveAs`. `${path}` remains text interpolation. Inside `#{...}`, a complete unquoted canonical path rooted at `CASE`, `RUN`, `ACTIONS`, `TOOL`, or `output` resolves directly, while ASCII-quoted values remain literals. Assertions execute calls first; for example, `#{length(CASE.value)} <= 35` becomes `12 <= 35` before comparison parsing. The older `#{length(${CASE.value})}` spelling remains compatible. Context paths and nested exact-call arguments retain typed results instead of being forced through text.
+
+Two non-Case scopes use the same parser/renderer with explicit capabilities:
+
+- `report.fileNamePattern` exposes `${suiteName}` interpolation or bare `suiteName` inside a built-in call;
+- Tool-definition `command` exposes each declared argument as `${argument}`, `${input.argument}`, and `${TOOL.input.argument}`, plus the corresponding bare paths inside built-in calls.
+
+Configured Tool calls are rejected in these two scopes. Report writing has no Case execution log, while Tool command expansion occurs inside an existing Tool invocation; permitting configured Tools there would create untracked or recursive process execution. The primary `type: tool` action call must still resolve to a configured Tool, although nested argument calls use the normal Case-runtime capability.
+
+Validation parses every expression-bearing field and nested call using the runtime grammar, validates call names/signatures and Context timing, and never invokes built-ins or external Tools. Tool command and report configuration are rejected at load time for unknown scope values, configured Tool calls, malformed expressions, or dynamic executable tokens.
+
+### 7.1 V2.4.2 acceptance criteria
+
+- Every public location that accepts `${...}` accepts syntactically valid `#{...}` under its documented scope.
+- Runtime and validation share call-boundary, nesting, argument, and value-reference parsing.
+- Canonical Runtime Context paths resolve directly as complete unquoted call arguments; quoted equivalents remain literals, unique-suffix shorthand remains `${...}`, and legacy nested references remain compatible.
+- Built-ins work in descriptions, assertions, expected/actual, logs, fields, assign, render payloads, Tool-call arguments, `saveAs`, report filename patterns, and Tool command tokens.
+- Configured Tool calls work on every Case-runtime text surface and emit normal evidence, but are rejected in report-filename and Tool-command scopes.
+- Assertion built-ins and configured Tools are evaluated before typed comparison parsing; the original and rendered assertion remain in action evidence.
+- Unknown calls, malformed nested calls, illegal scope references, and unsupported Tool-action primary built-ins fail validation rather than becoming literal text.

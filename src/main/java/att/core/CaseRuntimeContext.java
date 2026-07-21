@@ -96,7 +96,6 @@ public final class CaseRuntimeContext {
                     .append("\ncurrentNode: <root>")
                     .append("\ncandidates:");
             for (String candidate : resolution.candidates) detail.append("\n  - ").append(candidate);
-            detail.append("\ncontextTree:\n").append(indent(contextTree("<root>"), 2));
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_AMBIGUOUS,
                     "Ambiguous Context shorthand '${" + path + "}'", detail.toString(), null, path, null, null, null,
                     null, null, "Use a longer unique suffix or one of the listed canonical Context paths.", null);
@@ -104,10 +103,9 @@ public final class CaseRuntimeContext {
         detail.append("No value exists at the requested case-sensitive Context path.")
                 .append("\nrequestedPath: ").append(path)
                 .append("\ncurrentNode: ").append(resolution.currentNode)
-                .append("\nmissingSegment: ").append(resolution.missingSegment)
-                .append("\ncontextTree:\n").append(indent(contextTree(resolution.currentNode), 2));
+                .append("\nmissingSegment: ").append(resolution.missingSegment);
         String suggestion = nearest == null
-                ? "Check the Context tree, case-sensitive field name, and whether the stage/action output is available at this point."
+                ? "Check the case-sensitive field name and whether the stage/action output is available at this point."
                 : "Use '${" + nearest + "}' if that is the intended Context variable; Context names are case-sensitive.";
         throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
                 "Unknown Context variable '${" + path + "}'", detail.toString(), null, path, null, null, null,
@@ -357,89 +355,6 @@ public final class CaseRuntimeContext {
         int offset = full.size() - suffix.size();
         for (int index = 0; index < suffix.size(); index++) if (!full.get(offset + index).equals(suffix.get(index))) return false;
         return true;
-    }
-
-    private String contextTree(String currentNode) {
-        StringBuilder out = new StringBuilder();
-        if ("<root>".equals(currentNode)) out.append("<root>: map  <-- currentNode\n");
-        java.util.IdentityHashMap<Object, Boolean> active = new java.util.IdentityHashMap<Object, Boolean>();
-        for (Map.Entry<String, Object> entry : canonicalRoot().entrySet()) {
-            renderTree(out, Segment.key(entry.getKey()), entry.getValue(), "", 0, currentNode, active);
-        }
-        if (currentStage != null) {
-            String target = appendPath(appendPath(appendPath(appendPath("CASE.STAGES", Segment.key(currentStage)), Segment.key("TEMPLATE")), Segment.key("ACTIONS")), null);
-            out.append("ACTIONS: alias -> ").append(target);
-            if (currentNode != null && currentNode.startsWith("ACTIONS")) out.append("  <-- currentNode");
-            out.append('\n');
-        }
-        if (root.containsKey("output")) {
-            String target = currentOutputPath();
-            out.append("output: alias");
-            if (target != null) out.append(" -> ").append(target);
-            if (currentNode != null && currentNode.startsWith("output")) out.append("  <-- currentNode");
-            out.append('\n');
-        }
-        return out.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private String currentOutputPath() {
-        if (currentStage == null || currentActions == null) return null;
-        Object output = root.get("output");
-        for (Map.Entry<String, Object> entry : currentActions.entrySet()) {
-            if (entry.getValue() instanceof Map && ((Map<String, Object>) entry.getValue()).get("output") == output) {
-                String path = appendPath("CASE.STAGES", Segment.key(currentStage));
-                path = appendPath(path, Segment.key("TEMPLATE"));
-                path = appendPath(path, Segment.key("ACTIONS"));
-                path = appendPath(path, Segment.key(entry.getKey()));
-                return appendPath(path, Segment.key("output"));
-            }
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void renderTree(StringBuilder out, Segment segment, Object value, String parent, int depth,
-                                   String currentNode, java.util.IdentityHashMap<Object, Boolean> active) {
-        String path = appendPath(parent, segment);
-        for (int index = 0; index < depth; index++) out.append("  ");
-        out.append(segment.display()).append(": ").append(type(value));
-        if (path.equals(currentNode)) out.append("  <-- currentNode");
-        out.append('\n');
-        if (!(value instanceof Map) && !(value instanceof java.util.List)) return;
-        if (active.put(value, Boolean.TRUE) != null) return;
-        try {
-            if (value instanceof Map) {
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                    renderTree(out, Segment.key(String.valueOf(entry.getKey())), entry.getValue(), path, depth + 1, currentNode, active);
-                }
-            } else {
-                java.util.List<?> list = (java.util.List<?>) value;
-                for (int index = 0; index < list.size(); index++) renderTree(out, Segment.index(index), list.get(index), path, depth + 1, currentNode, active);
-            }
-        } finally { active.remove(value); }
-    }
-
-    private static String type(Object value) {
-        if (value == null) return "null";
-        if (value instanceof Map) return "map";
-        if (value instanceof java.util.List) return "list";
-        if (value instanceof Boolean) return "boolean";
-        if (value instanceof java.math.BigDecimal || value instanceof Float || value instanceof Double) return "decimal";
-        if (value instanceof Number) return "integer";
-        return "string";
-    }
-
-    private static String indent(String value, int spaces) {
-        String prefix = new String(new char[spaces]).replace('\0', ' ');
-        String[] lines = value.split("\\n", -1);
-        StringBuilder out = new StringBuilder();
-        for (int index = 0; index < lines.length; index++) {
-            if (index == lines.length - 1 && lines[index].isEmpty()) break;
-            if (index > 0) out.append('\n');
-            out.append(prefix).append(lines[index]);
-        }
-        return out.toString();
     }
 
     private static java.util.List<Segment> parsePath(String path) {

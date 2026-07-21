@@ -51,13 +51,29 @@ class ExcelTestSuiteLoaderTest {
     }
 
     @Test
-    void resolvesLastNonEmptyCellFromMultiRowHeader() throws Exception {
+    void resolvesLastNonEmptyCellAndIgnoresWhitespaceInsideHeaders() throws Exception {
         Path workbook = tempDir.resolve("multi-header.xlsx");
         writeMultiRowWorkbook(workbook);
         List<TestCase> cases = new ExcelTestSuiteLoader(config(2, false)).load(workbook);
         assertEquals(1, cases.size());
         assertEquals("payments.payment.TC002", cases.get(0).caseId());
         assertEquals("PAYMENT_INVOKE", cases.get(0).stage("invoke").templateName());
+    }
+
+    @Test void rejectsHeadersThatDifferOnlyByWhitespace() throws Exception {
+        Path workbook = tempDir.resolve("duplicate-whitespace-header.xlsx");
+        try (Workbook value = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = value.createSheet("支付測試案例集");
+            Row header = sheet.createRow(0);
+            String[] columns = {"案例 編號", "案例\n編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            for (int index = 0; index < columns.length; index++) header.createCell(index).setCellValue(columns[index]);
+            value.write(output);
+        }
+
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
+                () -> new ExcelTestSuiteLoader(config(1, false)).load(workbook));
+
+        assertTrue(error.getMessage().contains("Duplicate Excel header after ignoring whitespace"));
     }
 
     @Test void blankCaseIdReportsWorkbookSheetRowColumnAndSuggestion() throws Exception {
@@ -162,7 +178,7 @@ class ExcelTestSuiteLoaderTest {
             groupHeader.createCell(0).setCellValue("基本資料");
             groupHeader.createCell(4).setCellValue("執行資訊");
             Row header = sheet.createRow(1);
-            String[] columns = {"案例編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            String[] columns = {"案 例\n編號", "案例\t名稱", "標\u00a0籤", "備 註", "執行\n模 板", "執 行參數"};
             for (int i = 0; i < columns.length; i++) header.createCell(i).setCellValue(columns[i]);
             Row row = sheet.createRow(2);
             row.createCell(0).setCellValue("TC002");

@@ -40,6 +40,26 @@ public class UnifiedTemplateEngine {
         return renderValues(afterTools, context);
     }
 
+    /** Renders a non-Case expression scope (for example report filenames or Tool command arguments). */
+    public String renderScoped(String text, Map<String, ?> values) throws Exception {
+        return renderScoped(text, values, false);
+    }
+
+    /** Compatibility scope where unknown values render as empty strings. */
+    public String renderScopedLenient(String text, Map<String, ?> values) throws Exception {
+        return renderScoped(text, values, true);
+    }
+
+    private String renderScoped(String text, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
+        String afterCalls = renderScopedCalls(text, values, missingAsEmpty);
+        return renderScopedValues(afterCalls, values, missingAsEmpty);
+    }
+
+    /** Executes inline calls but intentionally leaves ${...} references for typed assertion evaluation. */
+    public String renderCalls(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        return renderTools(text, context, log);
+    }
+
     public String renderValues(String text, CaseRuntimeContext context) {
         return renderValues(text, context, false, false);
     }
@@ -117,6 +137,36 @@ public class UnifiedTemplateEngine {
         return paths;
     }
 
+    /** Returns interpolation paths plus unquoted canonical Runtime Context paths used as complete call arguments. */
+    public java.util.List<String> parseContextPaths(String text) {
+        java.util.List<String> paths = new java.util.ArrayList<String>(parseValuePaths(text));
+        for (ToolCallParser.ParsedCall call : parseCalls(text)) {
+            for (ToolCallParser.Argument argument : call.arguments()) {
+                String expression = argument.expression().trim();
+                if (isExplicitContextPath(expression)) paths.add(expression);
+            }
+        }
+        return paths;
+    }
+
+    /** True only for complete, unquoted canonical Case-runtime roots; suffix shorthand still requires ${...}. */
+    public boolean isExplicitContextPath(String expression) {
+        if (expression == null) return false;
+        String value = expression.trim();
+        return value.equals(expression) && explicitContextRoot(value);
+    }
+
+    /** Finds complete unquoted argument tokens equal to a dedicated-scope path. */
+    public boolean referencesBareArgument(String text, String path) {
+        if (path == null || path.isEmpty()) return false;
+        for (ToolCallParser.ParsedCall call : parseCalls(text)) {
+            for (ToolCallParser.Argument argument : call.arguments()) {
+                if (path.equals(argument.expression().trim())) return true;
+            }
+        }
+        return false;
+    }
+
     public Object executeCall(String call, CaseRuntimeContext context) throws Exception {
         return executeCall(call, context, null, null);
     }
@@ -145,8 +195,9 @@ public class UnifiedTemplateEngine {
             body = body.substring(2, body.length() - 1);
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
-        Map<String, Object> input = resolveArguments(parsed, context);
+        Map<String, Object> input = resolveArguments(parsed, context, log);
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return builtIns.invoke(parsed.name(), input);
+        if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + parsed.name());
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for tool invocation");
         }
@@ -187,42 +238,166 @@ public class UnifiedTemplateEngine {
             if (start < 0) break;
             int end = findToolEnd(text, start + 2);
             if (end < 0) throw new IllegalArgumentException("Unclosed tool/function call: " + text.substring(start));
-            calls.add(callParser.parse(text.substring(start, end + 1)));
+            ToolCallParser.ParsedCall call = callParser.parse(text.substring(start, end + 1));
+            calls.add(call);
+            for (ToolCallParser.Argument argument : call.arguments()) calls.addAll(parseCalls(argument.expression()));
             index = end + 1;
         }
         return calls;
     }
 
+    public boolean isBuiltIn(String name) {
+        return name != null && builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /** Validates a built-in call's name and argument shape without evaluating its values. */
+    public void validateBuiltInCall(ToolCallParser.ParsedCall call) {
+        if (!isBuiltIn(call.name())) throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + call.name());
+        Map<String, Object> arguments = new LinkedHashMap<String, Object>();
+        for (ToolCallParser.Argument argument : call.arguments()) putNested(arguments, argument.key(), "<expression>");
+        if (builtIns instanceof DefaultBuiltInProvider) ((DefaultBuiltInProvider) builtIns).validateInvocation(call.name(), arguments);
+    }
+
+    /** Replaces each complete inline call with a neutral operand for assertion grammar validation. */
+    public String maskCalls(String text) {
+        if (text == null || text.isEmpty()) return text == null ? "" : text;
+        StringBuilder output = new StringBuilder();
+        int index = 0;
+        while (index < text.length()) {
+            int start = text.indexOf("#{", index);
+            if (start < 0) { output.append(text.substring(index)); break; }
+            output.append(text.substring(index, start));
+            int end = findToolEnd(text, start + 2);
+            if (end < 0) throw new IllegalArgumentException("Unclosed tool/function call: " + text.substring(start));
+            callParser.parse(text.substring(start, end + 1));
+            output.append('0');
+            index = end + 1;
+        }
+        return output.toString();
+    }
+
     private int findToolEnd(String text, int bodyStart) {
-        // Tool calls may contain ${...} arguments, so a plain "next }" search would stop too early.
-        int nestedValueDepth = 0;
+        int depth = 1;
+        char quote = 0;
         for (int i = bodyStart; i < text.length(); i++) {
             char ch = text.charAt(i);
-            if (ch == '$' && i + 1 < text.length() && text.charAt(i + 1) == '{') {
-                nestedValueDepth++;
-                i++;
+            if (quote != 0) {
+                if (ch == quote && (i == 0 || text.charAt(i - 1) != '\\')) quote = 0;
                 continue;
             }
-            if (ch == '}' && nestedValueDepth > 0) {
-                nestedValueDepth--;
+            if ((ch == '\'' || ch == '"') && (i == 0 || text.charAt(i - 1) != '\\')) {
+                quote = ch;
                 continue;
             }
-            if (ch == '}' && nestedValueDepth == 0) {
-                return i;
-            }
+            if (ch == '{') depth++;
+            else if (ch == '}' && --depth == 0) return i;
         }
         return -1;
     }
 
-    private Map<String, Object> resolveArguments(ToolCallParser.ParsedCall call, CaseRuntimeContext context) {
+    private Map<String, Object> resolveArguments(ToolCallParser.ParsedCall call, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
             String expression = argument.expression().trim();
             Matcher exact = VALUE.matcher(expression);
-            Object value = exact.matches() ? context.require(exact.group(1)) : callParser.literal(renderValues(expression, context));
+            Object value;
+            if (exact.matches()) value = context.require(exact.group(1));
+            else if (isExplicitContextPath(expression)) value = context.require(expression);
+            else if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) value = executeCall(expression, context, log, null);
+            else value = callParser.literal(render(expression, context, log));
             putNested(input, argument.key(), value == null ? "" : value);
         }
         return input;
+    }
+
+    private String renderScopedCalls(String text, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
+        if (text == null || text.isEmpty()) return text == null ? "" : text;
+        StringBuilder output = new StringBuilder();
+        int index = 0;
+        while (index < text.length()) {
+            int start = text.indexOf("#{", index);
+            if (start < 0) { output.append(text.substring(index)); break; }
+            output.append(text.substring(index, start));
+            int end = findToolEnd(text, start + 2);
+            if (end < 0) throw new IllegalArgumentException("Unclosed function call: " + text.substring(start));
+            Object value = executeScopedCall(text.substring(start, end + 1), values, missingAsEmpty);
+            output.append(value == null ? "" : String.valueOf(value));
+            index = end + 1;
+        }
+        return output.toString();
+    }
+
+    private Map<String, Object> resolveScopedArguments(ToolCallParser.ParsedCall call, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        for (ToolCallParser.Argument argument : call.arguments()) {
+            String expression = argument.expression().trim();
+            Matcher exact = VALUE.matcher(expression);
+            Object value;
+            if (exact.matches()) value = requireScoped(values, exact.group(1), missingAsEmpty);
+            else if (hasScopedPath(values, expression)) value = requireScoped(values, expression, missingAsEmpty);
+            else if (explicitScopedRoot(expression)) value = requireScoped(values, expression, missingAsEmpty);
+            else if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
+                value = executeScopedCall(expression, values, missingAsEmpty);
+            } else value = callParser.literal(renderScoped(expression, values, missingAsEmpty));
+            putNested(input, argument.key(), value == null ? "" : value);
+        }
+        return input;
+    }
+
+    private Object executeScopedCall(String expression, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
+        ToolCallParser.ParsedCall call = callParser.parse(expression);
+        String normalized = call.name().toLowerCase(java.util.Locale.ROOT);
+        if (!builtIns.names().contains(normalized)) {
+            throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + call.name());
+        }
+        return builtIns.invoke(call.name(), resolveScopedArguments(call, values, missingAsEmpty));
+    }
+
+    private String renderScopedValues(String text, Map<String, ?> values, boolean missingAsEmpty) {
+        if (text == null || text.isEmpty()) return text == null ? "" : text;
+        Matcher matcher = VALUE.matcher(text);
+        StringBuffer output = new StringBuffer();
+        while (matcher.find()) {
+            Object value = requireScoped(values, matcher.group(1), missingAsEmpty);
+            matcher.appendReplacement(output, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+        }
+        matcher.appendTail(output);
+        return output.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object requireScoped(Map<String, ?> values, String path, boolean missingAsEmpty) {
+        if (values.containsKey(path)) return values.get(path);
+        Object current = values;
+        for (String part : path.split("\\.")) {
+            if (!(current instanceof Map) || !((Map<?, ?>) current).containsKey(part)) {
+                if (missingAsEmpty) return null;
+                throw new IllegalArgumentException("Unknown expression value in this scope: ${" + path + "}");
+            }
+            current = ((Map<String, ?>) current).get(part);
+        }
+        return current;
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean hasScopedPath(Map<String, ?> values, String path) {
+        if (path == null || path.isEmpty() || quoted(path)) return false;
+        if (values.containsKey(path)) return true;
+        Object current = values;
+        for (String part : path.split("\\.")) {
+            if (!(current instanceof Map) || !((Map<?, ?>) current).containsKey(part)) return false;
+            current = ((Map<String, ?>) current).get(part);
+        }
+        return true;
+    }
+
+    private boolean explicitScopedRoot(String expression) {
+        return expression != null && (expression.startsWith("input.") || expression.startsWith("TOOL.input."));
+    }
+
+    private boolean quoted(String expression) {
+        return expression.length() >= 2 && ((expression.startsWith("'") && expression.endsWith("'"))
+                || (expression.startsWith("\"") && expression.endsWith("\"")));
     }
 
     @SuppressWarnings("unchecked")
