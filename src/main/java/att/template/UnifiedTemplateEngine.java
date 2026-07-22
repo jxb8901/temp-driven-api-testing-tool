@@ -7,6 +7,8 @@ package att.template;
 import att.core.CaseRuntimeContext;
 import att.core.CaseExecutionLog;
 import att.exec.ToolInvoker;
+import att.exec.DbHelperExecutor;
+import att.exec.DbInvocationResult;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,20 +21,39 @@ import java.util.regex.Pattern;
 public class UnifiedTemplateEngine {
     private static final Pattern VALUE = Pattern.compile("\\$\\{((?:[^}'\"]|'(?:\\\\.|[^'])*'|\"(?:\\\\.|[^\"])*\")+)}");
     private final ToolInvoker toolInvoker;
+    private final DbHelperExecutor dbHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
     private final BuiltInProvider builtIns;
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker) {
-        this(toolInvoker, new DefaultBuiltInProvider());
+        this(toolInvoker, null, new DefaultBuiltInProvider());
     }
 
     UnifiedTemplateEngine(ToolInvoker toolInvoker, BuiltInProvider builtIns) {
+        this(toolInvoker, null, builtIns);
+    }
+
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor) {
+        this(toolInvoker, dbHelperExecutor, new DefaultBuiltInProvider());
+    }
+
+    UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor, BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
+        this.dbHelperExecutor = dbHelperExecutor;
         this.builtIns = builtIns;
     }
 
     public String render(String text, CaseRuntimeContext context) throws Exception {
         return render(text, context, null);
+    }
+
+    public DbHelperExecutor dbHelperExecutor() { return dbHelperExecutor; }
+
+    /** Returns builtin, db, or tool for the primary call without executing it. */
+    public String callKind(String call) {
+        ToolCallParser.ParsedCall parsed = callParser.parse(call);
+        if (parsed.name().startsWith("db.")) return "db";
+        return builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT)) ? "builtin" : "tool";
     }
 
     public String render(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
@@ -84,7 +105,8 @@ public class UnifiedTemplateEngine {
             Object value;
             if (validationOnly) {
                 boolean runtimeDependent = "CASE.outputDirectory".equals(expression) || expression.startsWith("CASE.STAGES.") || expression.startsWith("ACTIONS.")
-                        || expression.startsWith("TOOL.") || expression.equals("output") || expression.startsWith("output.");
+                        || expression.startsWith("TOOL.") || expression.startsWith("DB.")
+                        || expression.equals("output") || expression.startsWith("output.");
                 if (validationValueAvailable) value = context.require(expression);
                 else if (runtimeDependent) value = null;
                 else if (context.contains(expression)) value = context.require(expression);
@@ -105,7 +127,24 @@ public class UnifiedTemplateEngine {
                 || expression.equals("RUN") || expression.startsWith("RUN.") || expression.startsWith("RUN[")
                 || expression.equals("ACTIONS") || expression.startsWith("ACTIONS.") || expression.startsWith("ACTIONS[")
                 || expression.equals("TOOL") || expression.startsWith("TOOL.") || expression.startsWith("TOOL[")
+                || expression.equals("DB") || expression.startsWith("DB.") || expression.startsWith("DB[")
                 || expression.equals("output") || expression.startsWith("output.") || expression.startsWith("output[");
+    }
+
+    /** Preserves a complete typed Context/call expression; otherwise returns rendered text. */
+    public Object evaluate(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        String value = expression == null ? "" : expression.trim();
+        Matcher exact = VALUE.matcher(value);
+        if (exact.matches()) return context.require(exact.group(1));
+        if (value.startsWith("#{") && findToolEnd(value, 2) == value.length() - 1) {
+            return executeCall(value, context, log, null);
+        }
+        return render(expression, context, log);
+    }
+
+    /** SQL-source scope: Context values and pure built-ins only; no Tool or nested DB execution. */
+    public String renderDbSql(String sql, CaseRuntimeContext context) throws Exception {
+        return renderScoped(sql, context.values());
     }
 
     public Object parseRendered(String text, String renderAs) throws Exception {
@@ -195,6 +234,10 @@ public class UnifiedTemplateEngine {
             body = body.substring(2, body.length() - 1);
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
+        if (parsed.name().startsWith("db.")) {
+            if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
+            return executeDbCall(parsed, context, log, invocationId);
+        }
         Map<String, Object> input = resolveArguments(parsed, context, log);
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) {
             long started = System.nanoTime();
@@ -209,6 +252,86 @@ public class UnifiedTemplateEngine {
                 ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs, saveAs, overwrite)
                 : toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, null, "", false);
         return attempt ? result : result.output();
+    }
+
+    private Object executeDbCall(ToolCallParser.ParsedCall call, CaseRuntimeContext context,
+                                 CaseExecutionLog log, String requestedId) throws Exception {
+        if (dbHelperExecutor == null) throw new IllegalStateException("DB expression invocation is unavailable: " + call.name());
+        String[] parts = call.name().split("\\.", -1);
+        if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
+                || !("query".equals(parts[2]) || "scalar".equals(parts[2]))) {
+            throw new IllegalArgumentException("DB expression must be db.<instance>.query(...) or db.<instance>.scalar(...): " + call.name());
+        }
+        Map<String, Object> input = resolveDbArguments(call, context, log);
+        boolean hasSql = input.containsKey("sql");
+        boolean hasFile = input.containsKey("sqlFile");
+        if (hasSql == hasFile) throw new IllegalArgumentException(call.name() + " requires exactly one of sql or sqlFile");
+        String source = "inline";
+        String sql;
+        if (hasFile) {
+            String configured = String.valueOf(input.get("sqlFile"));
+            java.nio.file.Path file = dbHelperExecutor.resolveSqlFile(configured);
+            sql = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
+            source = configured;
+        } else sql = String.valueOf(input.get("sql"));
+        sql = renderDbSql(sql, context);
+        Object paramsValue = input.get("params");
+        if (paramsValue != null && !(paramsValue instanceof java.util.List)) {
+            throw new IllegalArgumentException(call.name() + ".params must resolve to a List");
+        }
+        java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
+        String id = requestedId == null || requestedId.trim().isEmpty()
+                ? context.nextDbInvocationId(parts[1]) : requestedId;
+        DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id);
+        context.recordDbInvocation(parts[1], id, result.evidence());
+        if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); } catch (Exception ignored) { }
+        if (!result.success()) {
+            Object error = result.result() instanceof Map ? ((Map<?, ?>) result.result()).get("error") : null;
+            throw new IllegalStateException("DB query failed for " + parts[1] + ": " + String.valueOf(error));
+        }
+        if ("query".equals(parts[2])) return result.result();
+        Map<?, ?> query = (Map<?, ?>) result.result();
+        Object rowsValue = query.get("rows");
+        if (!(rowsValue instanceof java.util.List) || ((java.util.List<?>) rowsValue).size() != 1) {
+            throw new IllegalStateException("db." + parts[1] + ".scalar requires exactly one row");
+        }
+        Object rowValue = ((java.util.List<?>) rowsValue).get(0);
+        if (!(rowValue instanceof Map) || ((Map<?, ?>) rowValue).size() != 1) {
+            throw new IllegalStateException("db." + parts[1] + ".scalar requires exactly one column");
+        }
+        return ((Map<?, ?>) rowValue).values().iterator().next();
+    }
+
+    private Map<String, Object> resolveDbArguments(ToolCallParser.ParsedCall call, CaseRuntimeContext context,
+                                                   CaseExecutionLog log) throws Exception {
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        for (ToolCallParser.Argument argument : call.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(call.name() + " requires named arguments");
+            String key = argument.key();
+            if (!("sql".equals(key) || "sqlFile".equals(key) || "params".equals(key))) {
+                throw new IllegalArgumentException("Unknown DB expression argument: " + key);
+            }
+            if (input.containsKey(key)) throw new IllegalArgumentException("Duplicate DB expression argument: " + key);
+            String expression = argument.expression().trim();
+            Object value;
+            if ("params".equals(key) && expression.startsWith("[") && expression.endsWith("]")) {
+                java.util.List<Object> items = new java.util.ArrayList<Object>();
+                for (String item : callParser.listItems(expression)) items.add(resolveDbValue(item, context, log));
+                value = items;
+            } else value = resolveDbValue(expression, context, log);
+            input.put(key, value);
+        }
+        return input;
+    }
+
+    private Object resolveDbValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        Matcher exact = VALUE.matcher(expression);
+        if (exact.matches()) return context.require(exact.group(1));
+        if (isExplicitContextPath(expression)) return context.require(expression);
+        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
+            return executeCall(expression, context, log, null);
+        }
+        return callParser.literal(expression);
     }
 
     private att.exec.ToolInvocationResult builtInAttempt(String name, String invocationId, Map<String, Object> input,
@@ -254,7 +377,12 @@ public class UnifiedTemplateEngine {
             if (end < 0) {
                 throw new IllegalArgumentException("Unclosed tool call: " + text.substring(start));
             }
-            Object value = executeCall(text.substring(start, end + 1), context, log, null);
+            String expression = text.substring(start, end + 1);
+            Object value = executeCall(expression, context, log, null);
+            ToolCallParser.ParsedCall parsed = callParser.parse(expression);
+            if (parsed.name().startsWith("db.") && parsed.name().endsWith(".query") && value instanceof Map) {
+                throw new IllegalArgumentException("A typed DB query result cannot be interpolated into text; use an exact assign expression or type: db Action");
+            }
             output.append(value == null ? "" : String.valueOf(value));
             index = end + 1;
         }

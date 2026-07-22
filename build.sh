@@ -55,7 +55,7 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 2
 fi
 if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to execute the V2.4 release gate" >&2
+  echo "mvn is required to execute the V2.5 release gate" >&2
   exit 2
 fi
 
@@ -147,6 +147,7 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 (cd "$BUILD_DIR" && tar -czf "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$PACKAGE_NAME")
 
 mkdir -p "$SOURCE_PACKAGE_DIR"
+mkdir -p "$SOURCE_PACKAGE_DIR/lib"
 cp "$ROOT_DIR/att.sh" "$SOURCE_PACKAGE_DIR/att.sh"
 cp "$ROOT_DIR/att.bat" "$SOURCE_PACKAGE_DIR/att.bat"
 cp "$ROOT_DIR/build.sh" "$SOURCE_PACKAGE_DIR/build.sh"
@@ -178,6 +179,7 @@ find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
   echo "  - tools/"
   echo "  - testcase/"
   echo "  - config/"
+  echo "  - lib/ (add JDBC drivers here)"
   echo "  - docs/"
   echo "  - schemas/"
   echo "  - README.md"

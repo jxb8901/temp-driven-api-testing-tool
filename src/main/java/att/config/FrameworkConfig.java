@@ -19,6 +19,7 @@ public final class FrameworkConfig {
     private final Path templatesRoot;
     private final Path testcasesRoot;
     private final Map<String, ToolConfig> tools;
+    private final Map<String, DbHelperConfig> dbHelpers;
     private final ReportConfig report;
     private final RunConfig run;
     private final List<SheetGroupConfig> sheetGroups;
@@ -101,6 +102,19 @@ public final class FrameworkConfig {
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId,
                            boolean caseLogYamlAnchors, ProcessOutputConfig processOutput) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, testcasesRoot,
+                tools, Collections.<String, DbHelperConfig>emptyMap(), report, run, sheetGroups, caseIdColumn,
+                tagsColumn, dataColumns, stages, headerRows, xmlNamespaceMode, workbookId, caseLogYamlAnchors,
+                processOutput);
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
+                           int timeoutMs, Path templatesRoot, Path testcasesRoot, Map<String, ToolConfig> tools,
+                           Map<String, DbHelperConfig> dbHelpers, ReportConfig report, RunConfig run,
+                           List<SheetGroupConfig> sheetGroups, String caseIdColumn, String tagsColumn,
+                           List<DataColumnConfig> dataColumns, List<StageConfig> stages, int headerRows,
+                           String xmlNamespaceMode, String workbookId, boolean caseLogYamlAnchors,
+                           ProcessOutputConfig processOutput) {
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
@@ -109,6 +123,7 @@ public final class FrameworkConfig {
         this.templatesRoot = templatesRoot == null ? Paths.get("templates") : templatesRoot;
         this.testcasesRoot = testcasesRoot == null ? Paths.get("testcase") : testcasesRoot;
         this.tools = tools == null ? Collections.<String, ToolConfig>emptyMap() : new LinkedHashMap<String, ToolConfig>(tools);
+        this.dbHelpers = dbHelpers == null ? Collections.<String, DbHelperConfig>emptyMap() : new LinkedHashMap<String, DbHelperConfig>(dbHelpers);
         this.report = report == null ? defaultReport() : report;
         this.run = run == null ? new RunConfig("timestamp", "yyyyMMdd-HHmmss") : run;
         this.sheetGroups = sheetGroups == null ? Collections.<SheetGroupConfig>emptyList() : new ArrayList<SheetGroupConfig>(sheetGroups);
@@ -134,6 +149,14 @@ public final class FrameworkConfig {
     public Path testcasesRoot() { return testcasesRoot; }
     public Map<String, ToolConfig> tools() { return Collections.unmodifiableMap(tools); }
     public ToolConfig tool(String key) { return tools.get(key); }
+    public Map<String, DbHelperConfig> dbHelpers() { return Collections.unmodifiableMap(dbHelpers); }
+    public DbHelperConfig dbHelper(String id) {
+        if (id == null) return null;
+        for (Map.Entry<String, DbHelperConfig> entry : dbHelpers.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(id)) return entry.getValue();
+        }
+        return null;
+    }
     public ReportConfig report() { return report; }
     public RunConfig run() { return run; }
     public List<SheetGroupConfig> sheetGroups() { return Collections.unmodifiableList(sheetGroups); }

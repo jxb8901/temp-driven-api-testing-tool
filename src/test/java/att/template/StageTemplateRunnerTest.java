@@ -12,6 +12,31 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StageTemplateRunnerTest {
     @TempDir Path tempDir;
+
+    @Test void v25BuiltInSaveAsUsesTypedFormatAndTextDefault() throws Exception {
+        Path caseDir = tempDir.resolve("v25-save");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("prepare","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("json", map("type","tool","call","#{upper('abc')}",
+                        "saveAs",map("path","saved/value.json","format","json")), "att-template/v2.5"),
+                new TemplateAction("text", map("type","tool","call","#{upper('def')}",
+                        "saveAs",map("path","saved/value.txt")), "att-template/v2.5"));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("prepare",new StageTemplate("T",tempDir,actions,"att-template/v2.5"),context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
+                Arrays.asList(results.get(0).status(), results.get(1).status()));
+        assertEquals("\"ABC\"\n", new String(Files.readAllBytes(caseDir.resolve("saved/value.json")), "UTF-8"));
+        assertEquals("DEF", new String(Files.readAllBytes(caseDir.resolve("saved/value.txt")), "UTF-8"));
+        assertEquals(caseDir.resolve("saved/value.json").toString(), context.resolve("ACTIONS.json.output.targetFiles[0]"));
+    }
+
     @Test void toolActionCanInvokeBuiltInAndPersistItsResult() throws Exception {
         Path caseDir = tempDir.resolve("builtin-case");
         Files.createDirectories(caseDir);

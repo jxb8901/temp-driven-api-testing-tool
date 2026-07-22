@@ -103,22 +103,25 @@ public class FrameworkEngine {
             Path suite = suitePlan.workbook();
             FrameworkConfig suiteConfig = suitePlan.config();
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
-            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker);
+            att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, suiteConfig);
+            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor);
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
             List<TestResult> suiteResults = new ArrayList<TestResult>();
-            for (TestCase testCase : cases) {
-                verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
-                TestResult result = runCase(testCase, suiteConfig, options, runId, runDirectory, suitePlan, templateRunner);
-                verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
-                results.add(result);
-                suiteResults.add(result);
-                if (options.failFast() && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR)) {
-                    stopRun = true;
-                    break;
+            try {
+                for (TestCase testCase : cases) {
+                    verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
+                    TestResult result = runCase(testCase, suiteConfig, options, runId, runDirectory, suitePlan, templateRunner, dbHelperExecutor);
+                    verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
+                    results.add(result);
+                    suiteResults.add(result);
+                    if (options.failFast() && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR)) {
+                        stopRun = true;
+                        break;
+                    }
                 }
-            }
+            } finally { dbHelperExecutor.close(); }
             suiteReportResults.put(suitePlan, new ArrayList<TestResult>(suiteResults));
             if (stopRun) break;
         }
@@ -187,7 +190,7 @@ public class FrameworkEngine {
     }
 
     private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Path runDirectory,
-                               ExecutionPlan.Suite suitePlan, StageTemplateRunner templateRunner) throws Exception {
+                               ExecutionPlan.Suite suitePlan, StageTemplateRunner templateRunner, att.exec.DbHelperExecutor dbHelperExecutor) throws Exception {
         if (!testCase.valid()) {
             return invalid(testCase, testCase.invalidReason());
         }
@@ -207,6 +210,8 @@ public class FrameworkEngine {
         context.put("CASE.environment", suiteConfig.environment());
         caseLog.append("CASE", context.caseTree());
         List<ValidationResult> validations = new ArrayList<ValidationResult>();
+        boolean dbFinalized = false;
+        dbHelperExecutor.beginCase();
         try {
             if (!options.dryRun()) {
                 boolean hasPriorFailure = false;
@@ -241,6 +246,8 @@ public class FrameworkEngine {
                     }
                 }
             }
+            validations.addAll(dbHelperExecutor.finishCase(context, caseLog));
+            dbFinalized = true;
             ResultStatus status = aggregate(validations);
             if (validations.isEmpty()) status = ResultStatus.PASS;
             ResultStatus finalStatus = options.dryRun() ? ResultStatus.SKIPPED : status;
@@ -260,6 +267,7 @@ public class FrameworkEngine {
             writeCaseTree(caseOutputDir, context);
             return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()));
         } finally {
+            if (!dbFinalized) dbHelperExecutor.abortCase();
             caseLog.close();
         }
     }
@@ -464,6 +472,12 @@ public class FrameworkEngine {
             java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
             String first = command.isEmpty() ? "" : command.get(0);
             if (tool.ssh() == null && (first.startsWith("./") || first.startsWith("../"))) addInput(inputs, "tool-executable", projectRoot.resolve(first).normalize());
+        }
+        java.util.Set<Path> dbHelperFiles = new java.util.LinkedHashSet<Path>();
+        for (att.config.DbHelperConfig helper : config.dbHelpers().values()) {
+            if (helper.sourceFile() != null && dbHelperFiles.add(helper.sourceFile())) {
+                addInput(inputs, "dbhelper", helper.sourceFile());
+            }
         }
         Path schemas = projectRoot.resolve("schemas");
         if (Files.isDirectory(schemas)) try (java.util.stream.Stream<Path> files = Files.walk(schemas)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "schema", iterator.next()); }

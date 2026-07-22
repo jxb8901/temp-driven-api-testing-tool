@@ -23,8 +23,13 @@ class PackageDocumentationGeneratorTest {
         echoArguments.put("value", new ToolArgumentConfig("value", "Value", "Optional values", false, ",", "--value", "once"));
         tools.put("echo", new ToolConfig("echo", "Echo", "Global echo", "echo ${value}", "txt", echoArguments));
         tools.put("sample.date", new ToolConfig("sample.date", "date", "sample", "Date", "Grouped date", Arrays.asList("date"), Arrays.asList("dispatch"), "txt", Collections.<String,ToolArgumentConfig>emptyMap(), null));
+        DbHelperConfig orders = new DbHelperConfig("orders", "Orders", "Order queries", "jdbc:test:orders",
+                "", "", "", Collections.<String,String>emptyMap(), true, "driverDefault", 17,
+                "case", "rollback", 50, 1024, 4096, "hash", "masked", null);
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
-                Paths.get("templates"), tools, null, new RunConfig("timestamp", "yyyyMMdd"));
+                Paths.get("templates"), Paths.get("testcase"), tools, Collections.singletonMap("orders", orders),
+                null, new RunConfig("timestamp", "yyyyMMdd"), null, "", "", null, null, 1,
+                "ignore", "", false, ProcessOutputConfig.defaults());
         Path result = new PackageDocumentationGenerator().generate(tempDir, config);
         String html = new String(Files.readAllBytes(result), "UTF-8");
         assertTrue(result.endsWith("index.html"));
@@ -34,12 +39,16 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("id=\"toolFilter\""));
         assertTrue(html.contains("position:sticky;top:0"));
         assertTrue(html.contains("href=\"#testcases\""));
+        assertTrue(html.contains("href=\"#dbhelpers\""));
         assertTrue(html.contains("data-tool="));
         assertTrue(html.contains("<strong>Index</strong>"));
         assertTrue(html.contains("Built-in functions"));
         assertTrue(html.contains("Global tools"));
         assertTrue(html.contains("Tool group: sample"));
         assertTrue(html.contains("sample.date"));
+        assertTrue(html.contains("db.orders"));
+        assertTrue(html.contains("17 seconds"));
+        assertFalse(html.contains("jdbc:test:orders"));
         assertTrue(html.contains("<th>argName</th>"));
         assertTrue(html.contains("<th>argNameMode</th>"));
         assertTrue(html.contains("<td>--value</td>"));

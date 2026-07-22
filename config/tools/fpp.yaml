@@ -1,7 +1,7 @@
 schemaVersion: att-tool-group/v2.2
 id: fpp
 name: FPP reference tools
-description: Reference command contracts for FPP API, SQLPlus, and controlled command execution integrations
+description: Reference command contracts for FPP API, SQLPlus, controlled command execution, file, and transaction-log integrations
 tools:
   invokeApi:
     name: Invoke FPP API
@@ -38,7 +38,7 @@ tools:
   execCommand:
     name: Execute command and capture streams
     description: Execute one command with optional pipe-delimited atomic arguments, optionally persist streams, and return a YAML outcome
-    command: [./tools/fpp_exec_command.sh, "${stdoutPath}", "${stderrPath}", --, "${command}", "${arguments}"]
+    command: [./tools/exehelper.sh, "${stdoutPath}", "${stderrPath}", --, "${command}", "${arguments}"]
     output: yaml
     arguments:
       command:
@@ -114,6 +114,43 @@ tools:
         name: Keyword
         description: Non-blank literal text; no regular-expression evaluation
         required: true
+  loghelper:
+    name: Search transaction logs
+    description: Search recent local transaction logs for TIDs containing every keyword, with optional SSH fallback
+    command: [./tools/loghelper.sh, "${maxTidFiles}", "${outputPrefix}", "${logFiles}", "${keywords}", "${recentLogCount}", "${sshOption}"]
+    output: yaml
+    arguments:
+      maxTidFiles:
+        name: Maximum TID Files
+        description: Positive maximum number of matching TID log files to return
+        required: true
+        argName: --max-tid-files
+      outputPrefix:
+        name: Output Prefix
+        description: Result path prefix; a bare prefix writes results under /tmp
+        required: true
+        argName: --output-prefix
+      logFiles:
+        name: Log Files
+        description: Pipe-delimited unordered local and remote log file paths
+        required: true
+        delimit: "|"
+        argName: --log-file
+      keywords:
+        name: Keywords
+        description: Pipe-delimited literal keywords which must all occur under the same TID
+        required: true
+        delimit: "|"
+        argName: --keyword
+      recentLogCount:
+        name: Recent Log Count
+        description: Optional number of newest logs to search; defaults to 2 and 0 searches all logs
+        required: false
+        argName: --recent-log-count
+      sshOption:
+        name: SSH Option
+        description: Optional literal --ssh to enable configured remote fallback after a local miss
+        required: false
   querySqlplus:
     name: Query SQLPlus and return XML
     description: Execute one SQL file through SQLPlus, save raw streams, and convert pipe-delimited stdout to XML

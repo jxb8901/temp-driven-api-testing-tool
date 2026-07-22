@@ -42,6 +42,10 @@ class ContextsTest {
         assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("CASE.outputDirectory"));
         assertEquals(tempDir.toAbsolutePath().normalize(), context.caseOutputDirectory());
         assertEquals("MOBILE", context.resolve("CASE.STAGES.invoke.channel"));
+        assertTrue(context.resolve("CASE.DB") instanceof Map);
+        assertTrue(((Map<?, ?>) context.resolve("CASE.DB")).isEmpty());
+        assertTrue(context.resolve("DB") instanceof Map);
+        assertTrue(context.resolve("CASE.DB") != context.resolve("DB"));
     }
 
     @Test void resolvesNestedMapsAndListIndexes() {

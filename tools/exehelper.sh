@@ -23,14 +23,14 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     *)
-      echo "usage: fpp_exec_command.sh [--stdout <path>] [--stderr <path>] -- <command> [argument ...]" >&2
+      echo "usage: exehelper.sh [--stdout <path>] [--stderr <path>] -- <command> [argument ...]" >&2
       exit 2
       ;;
   esac
 done
 
 [ "$#" -ge 1 ] || {
-  echo "usage: fpp_exec_command.sh [--stdout <path>] [--stderr <path>] -- <command> [argument ...]" >&2
+  echo "usage: exehelper.sh [--stdout <path>] [--stderr <path>] -- <command> [argument ...]" >&2
   exit 2
 }
 command_name=$1

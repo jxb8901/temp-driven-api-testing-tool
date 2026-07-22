@@ -45,7 +45,7 @@ public final class SuiteConfigResolver {
             String tags = required(excel, "tags");
             int headerRows = positiveInteger(excel.get("headerRows"), 1, "excel.headerRows");
             List<DataColumnConfig> dataColumns = ColumnSpecParser.dataColumns(optionalString(excel.get("dataColumns"), "excel.dataColumns"));
-            rejectReserved(dataColumns, new String[]{"caseId", "workbookId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "VARS", "STAGES"}, "excel.dataColumns");
+            rejectReserved(dataColumns, new String[]{"caseId", "workbookId", "groupId", "rowCaseId", "workbook", "sheet", "rowNumber", "tags", "status", "startedAt", "durationMs", "environment", "VARS", "DB", "STAGES"}, "excel.dataColumns");
             List<StageConfig> stages = stages(map.get("stages"));
             if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
@@ -53,7 +53,7 @@ public final class SuiteConfigResolver {
             int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
             return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
                     global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
-                    global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput());
+                    global.tools(), global.dbHelpers(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput());
         } catch (att.validation.DiagnosticException e) {
             throw e;
         } catch (Exception e) {

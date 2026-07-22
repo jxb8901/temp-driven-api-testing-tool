@@ -12,6 +12,50 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PackageValidatorTest {
     @TempDir Path tempDir;
+
+    private static Map<String,Object> map(Object... values) {
+        Map<String,Object> result = new LinkedHashMap<String,Object>();
+        for (int index = 0; index < values.length; index += 2) {
+            result.put(String.valueOf(values[index]), values[index + 1]);
+        }
+        return result;
+    }
+
+    @Test void validatesFirstClassDbActionsAndExpressionSourcesWithoutConnecting() throws Exception {
+        Files.createDirectories(tempDir.resolve("sql"));
+        Files.write(tempDir.resolve("sql/find.sql"), "select id from orders where id = ?".getBytes("UTF-8"));
+        DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB", "jdbc:never-connect",
+                "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 7,
+                "case", "rollback", 10, 1024, 4096, "full", "masked", null);
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tempDir,
+                Collections.<String,ToolConfig>emptyMap(), Collections.singletonMap("orders", helper), null, null,
+                null,"","",null,null,1,"ignore","",false,ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+
+        TemplateAction query = new TemplateAction("query", map("type","db","db","orders",
+                "query",map("sqlFile","sql/find.sql","params",Collections.singletonList("${CASE.id}")),
+                "saveAs",map("path","result.json","format","json")), "att-template/v2.5");
+        TemplateAction expression = new TemplateAction("check", map("type","assert",
+                "assert","#{db.orders.scalar(sql='select count(*) from orders where id = ?', params=[${CASE.id}, 'OPEN'])} >= 0"),
+                "att-template/v2.5");
+        assertDoesNotThrow(() -> { try { contract.invoke(validator,
+                new StageTemplate("DB",tempDir,Arrays.asList(query, expression),"att-template/v2.5"),config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); } });
+
+        TemplateAction updateAsTool = new TemplateAction("wrong", map("type","tool",
+                "call","#{db.orders.query(sql='select 1')}"), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("DB",tempDir,Collections.singletonList(updateAsTool),"att-template/v2.5"),config));
+
+        TemplateAction dynamicFile = new TemplateAction("dynamic", map("type","assign","name","x",
+                "expression","#{db.orders.query(sqlFile=${CASE.file}, params=[])}"), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("DB",tempDir,Collections.singletonList(dynamicFile),"att-template/v2.5"),config));
+    }
+
     @Test void validatorUsesSharedParserForQuotedComma() throws Exception {
         Map<String,ToolArgumentConfig> args = new LinkedHashMap<String,ToolArgumentConfig>();
         args.put("message", new ToolArgumentConfig("message", "Message", "Text", true, ""));

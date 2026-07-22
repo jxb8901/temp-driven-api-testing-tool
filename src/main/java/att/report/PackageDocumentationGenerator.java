@@ -3,6 +3,7 @@ package att.report;
 
 import att.Version;
 import att.config.FrameworkConfig;
+import att.config.DbHelperConfig;
 import att.config.SuiteConfigResolver;
 import att.config.ToolArgumentConfig;
 import att.config.ToolConfig;
@@ -36,11 +37,12 @@ public final class PackageDocumentationGenerator {
         GeneratedOutputCleaner.deleteDirectory(output);
         Files.createDirectories(output);
         Map<String, Set<String>> filters = filterValues(projectRoot, config);
-        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\"><strong>Index</strong><a href=\"#testcases\">Testcases</a><a href=\"#templates\">Templates</a><a href=\"#tools\">Tools</a><a href=\"#builtins\">Built-ins</a></div><div class=\"filters\"><input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">" + select("workbookFilter", "All workbooks", filters.get("workbook")) + select("sheetFilter", "All sheets", filters.get("sheet")) + select("caseFilter", "All Case IDs", filters.get("caseid")) + select("toolFilter", "All tools / built-ins", filters.get("tool")) + "</div></nav>";
-        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Tools · Built-ins</p></header>" + controls
+        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\"><strong>Index</strong><a href=\"#testcases\">Testcases</a><a href=\"#templates\">Templates</a><a href=\"#tools\">Tools</a><a href=\"#dbhelpers\">DB helpers</a><a href=\"#builtins\">Built-ins</a></div><div class=\"filters\"><input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">" + select("workbookFilter", "All workbooks", filters.get("workbook")) + select("sheetFilter", "All sheets", filters.get("sheet")) + select("caseFilter", "All Case IDs", filters.get("caseid")) + select("toolFilter", "All tools / DB helpers / built-ins", filters.get("tool")) + "</div></nav>";
+        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Tools · DB helpers · Built-ins</p></header>" + controls
                 + section("testcases", testcasePage(projectRoot, config, new ArrayList<String>()))
                 + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
                 + section("tools", toolPage(config, new ArrayList<String>()))
+                + section("dbhelpers", dbHelperPage(config))
                 + section("builtins", builtInPage())
                 + "<script>(()=>{const q=document.querySelector('#search'),w=document.querySelector('#workbookFilter'),s=document.querySelector('#sheetFilter'),c=document.querySelector('#caseFilter'),t=document.querySelector('#toolFilter');function apply(){const term=q.value.trim().toLowerCase();document.querySelectorAll('.doc-item').forEach(x=>{const d=x.dataset;x.hidden=!((!term||x.innerText.toLowerCase().includes(term))&&(!w.value||d.workbook===w.value)&&(!s.value||d.sheet===s.value)&&(!c.value||d.caseid===c.value)&&(!t.value||(d.tool||'').split(' ').includes(t.value)))})}[q,w,s,c,t].forEach(x=>x.addEventListener(x===q?'input':'change',apply));apply()})();</script>");
         Path index = output.resolve("index.html");
@@ -69,6 +71,7 @@ public final class PackageDocumentationGenerator {
                     Set<String> usedTools = new LinkedHashSet<String>();
                     UnifiedTemplateEngine callParser = new UnifiedTemplateEngine(null);
                     for (StageCaseData stage : test.stages().values()) for (TemplateAction action : templateLoader.load(stage.templateName()).actions()) {
+                        if ("db".equalsIgnoreCase(action.type())) usedTools.add("db." + action.db());
                         String call=action.call();
                         if(call.startsWith("#{")&&call.indexOf('(')>2) usedTools.add(call.substring(2,call.indexOf('(')));
                         if ("assign".equalsIgnoreCase(action.type())) for (att.template.ToolCallParser.ParsedCall parsed : callParser.parseCalls(action.expression())) {
@@ -131,8 +134,10 @@ public final class PackageDocumentationGenerator {
                 Map<?, ?> value = action.getValue() instanceof Map ? (Map<?, ?>) action.getValue() : Collections.emptyMap();
                 String call = String.valueOf(value.get("call") == null ? "" : value.get("call"));
                 String tool = call.startsWith("#{") && call.indexOf('(') > 2 ? call.substring(2, call.indexOf('(')) : "";
+                String db = String.valueOf(value.get("db") == null ? "" : value.get("db"));
                 body.append("<tr><td>").append(escape(String.valueOf(action.getKey()))).append("</td><td>").append(escape(String.valueOf(value.get("type")))).append("</td><td>");
                 if (!tool.isEmpty()) body.append("<a href=\"../tools/index.html#").append(anchor(tool)).append("\">").append(escape(tool)).append("</a>");
+                else if (!db.isEmpty()) body.append("<a href=\"#dbhelper-").append(anchor(db)).append("\">db.").append(escape(db)).append("</a>");
                 else body.append(escape(String.valueOf(value.get("payload") == null ? value.get("assert") : value.get("payload"))));
                 body.append("</td></tr>");
             }
@@ -152,7 +157,9 @@ public final class PackageDocumentationGenerator {
                 body.append("<h2 class=\"tool-group\">").append(group.isEmpty() ? "Global tools" : "Tool group: " + escape(group)).append("</h2>");
                 activeGroup = group;
             }
-            body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h3>").append(escape(tool.name())).append(" <code>").append(escape(tool.key())).append("</code></h3><p>").append(escape(tool.description())).append("</p><p>command argv: <code>[\"").append(escape(joinEscaped(tool.commandArgv()))).append("\"]</code>; output=").append(escape(tool.output())).append("</p>");
+            body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h3>").append(escape(tool.name())).append(" <code>").append(escape(tool.key())).append("</code></h3><p>").append(escape(tool.description())).append("</p><p>");
+            body.append("command argv: <code>[\"").append(escape(joinEscaped(tool.commandArgv()))).append("\"]</code>");
+            body.append("; output=").append(escape(tool.output())).append("</p>");
             if (!tool.groupScriptArgv().isEmpty()) body.append("<p>group script argv: <code>[\"").append(escape(joinEscaped(tool.groupScriptArgv()))).append("\"]</code></p>");
             if (tool.ssh() != null) body.append("<p>SSH: <code>").append(escape(tool.ssh().destination())).append(":").append(tool.ssh().port()).append("</code></p>");
             body.append("<table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>argName</th><th>argNameMode</th><th>Delimiter</th></tr>");
@@ -160,6 +167,29 @@ public final class PackageDocumentationGenerator {
             body.append("</table></section>"); search.add(tool.key()); search.add(tool.name()); search.add(tool.description());
         }
         return page("Tools", body.toString());
+    }
+
+    private String dbHelperPage(FrameworkConfig config) {
+        StringBuilder body = new StringBuilder("<h1>DB helpers</h1><p>Connection credentials and properties are intentionally omitted.</p><div class=\"index\"><strong>Index:</strong> ");
+        for (DbHelperConfig helper : config.dbHelpers().values()) {
+            body.append("<a href=\"#dbhelper-").append(anchor(helper.id())).append("\">db.")
+                    .append(escape(helper.id())).append("</a> ");
+        }
+        body.append("</div>");
+        for (DbHelperConfig helper : config.dbHelpers().values()) {
+            String searchable = (helper.id() + " " + helper.name() + " " + helper.description()).toLowerCase(java.util.Locale.ROOT);
+            body.append("<section class=\"doc-item\" data-search=\"").append(escape(searchable))
+                    .append("\" data-tool=\"db.").append(escape(helper.id())).append("\" id=\"dbhelper-")
+                    .append(anchor(helper.id())).append("\"><h2>").append(escape(helper.name()))
+                    .append(" <code>db.").append(escape(helper.id())).append("</code></h2><p>")
+                    .append(escape(helper.description())).append("</p><table><tr><th>Read only</th><th>Driver class</th><th>Statement timeout</th><th>Transaction</th><th>Result limits</th></tr><tr><td>")
+                    .append(helper.readOnly()).append("</td><td>").append(escape(helper.driverClass().isEmpty() ? "JDBC discovery" : helper.driverClass()))
+                    .append("</td><td>").append(helper.timeoutSeconds()).append(" seconds</td><td>")
+                    .append(escape(helper.transactionScope())).append(" / ").append(escape(helper.transactionOnEnd()))
+                    .append("</td><td>rows=").append(helper.maxRows()).append(", cellBytes=").append(helper.maxCellBytes())
+                    .append(", bytes=").append(helper.maxBytes()).append("</td></tr></table></section>");
+        }
+        return page("DB helpers", body.toString());
     }
 
     private String builtInPage() {
@@ -201,6 +231,7 @@ public final class PackageDocumentationGenerator {
             }
         }
         values.get("tool").addAll(global.tools().keySet());
+        for (String helper : global.dbHelpers().keySet()) values.get("tool").add("db." + helper);
         values.get("tool").addAll(new att.template.DefaultBuiltInProvider().names());
         return values;
     }

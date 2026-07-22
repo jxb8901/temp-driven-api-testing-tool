@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:config:v2.5",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {"const": "att-config/v2.5"},
+    "outputDirectory": {"type": "string", "minLength": 1},
+    "environment": {"type": "string", "minLength": 1},
+    "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+    "templates": {"type": "object", "properties": {"root": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "testcase": {"type": "object", "properties": {"root": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "run": {"type": "object", "properties": {"id": {"type": "object", "properties": {"default": {"const": "timestamp"}, "timestampFormat": {"type": "string", "minLength": 1}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "execution": {"type": "object", "properties": {"processOutput": {"type": "object", "properties": {"memoryLimitBytes": {"type": "integer", "minimum": 1024, "maximum": 1048576}, "artifactLimitBytes": {"type": "integer", "minimum": 1024, "maximum": 1073741824}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "report": {"type": "object", "properties": {"mode": {"enum": ["append-to-copy", "none"]}, "fileNamePattern": {"type": "string"}, "columns": {"type": "object", "additionalProperties": {"type": "string"}}, "junit": {"type": "object", "properties": {"caseLogEmbedThresholdBytes": {"type": "integer", "minimum": 0, "maximum": 1048576}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}, "html": {"type": "object", "properties": {"caseLogInlineLimitBytes": {"type": "integer", "minimum": 0, "maximum": 1048576}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "caseLog": {"type": "object", "properties": {"yamlAnchors": {"type": "boolean"}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "xml": {"type": "object", "properties": {"namespaceMode": {"enum": ["ignore", "preserve"]}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "toolGroups": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "dbhelpers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\.ya?ml$"}},
+    "ssh": {"$ref": "#/$defs/ssh"},
+    "tools": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"}, "additionalProperties": {"$ref": "#/$defs/processTool"}}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "command": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "array", "minItems": 1, "items": {"type": "string"}}]},
+    "ssh": {"type": "object", "required": ["host", "user"], "properties": {"host": {"type": "string", "minLength": 1}, "user": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "identityFile": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "argument": {"type": "object", "required": ["name", "description", "required"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "required": {"type": "boolean"}, "delimit": {"type": "string", "minLength": 1}, "argName": {"type": "string", "pattern": "^\\S*$"}, "argNameMode": {"enum": ["once", "repeat"]}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
+    "processTool": {"type": "object", "required": ["name", "description", "command"], "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "command": {"$ref": "#/$defs/command"}, "output": {"enum": ["txt", "yaml", "json", "xml"]}, "arguments": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "additionalProperties": {"$ref": "#/$defs/argument"}}}, "patternProperties": {"^x-": {}}, "additionalProperties": false}
+  }
+}

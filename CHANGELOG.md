@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.5.0 - 2026-07-22
+
+- Added first-class `type: db` Actions and independent `att-dbhelper/v2.5` instance files referenced by `att-config/v2.5`; process Tool groups remain on `att-tool-group/v2.2`.
+- Added explicit `query`/`update` blocks with inline or package-contained file SQL, rendered SQL sources, typed positional `PreparedStatement` parameters, per-instance `statement.timeoutSeconds`, and bounded stable result objects whose `rows` field is always a list.
+- Added read-only expression calls `#{db.<instance>.query(...)}` and `#{db.<instance>.scalar(...)}`, including typed multi-parameter lists and exact-expression Java-object preservation.
+- Added one JDBC connection per dbhelper instance/execution thread, pre-Case rollback/reconnect isolation, statement/case transaction scopes, rollback-only handling, and fixed Case-finalization evidence at `CASE.DB.<instance>`; DB operational errors produce Case ERROR.
+- Added the V2.5 common object `saveAs` contract (`path`, target-specific `format`, `overwrite`) for process Tools, primary built-ins, and DB Actions while preserving legacy V2.3 scalar Tool `saveAs` behavior.
+- Added JDBC driver discovery from package-root `lib/*.jar`; ATT still bundles no vendor-specific JDBC driver.
+
 ## 2.4.3 - 2026-07-22
 
 - Added `run --profile` and per-run `performance.json` phase timings, cache counters, process-output byte counts, truncation counts, and a heap snapshot.

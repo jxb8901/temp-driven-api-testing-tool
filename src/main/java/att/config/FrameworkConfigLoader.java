@@ -28,13 +28,16 @@ public final class FrameworkConfigLoader {
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> map = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(map.get("schemaVersion"));
-            boolean v22 = Version.CONFIG_SCHEMA.equals(schemaVersion);
-            if (!(v22 || "att-config/v2.1".equals(schemaVersion))) throw new IllegalArgumentException("Unsupported config schemaVersion: " + schemaVersion);
+            boolean v25 = Version.CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v22 = "att-config/v2.2".equals(schemaVersion);
+            if (!(v25 || v22 || "att-config/v2.1".equals(schemaVersion))) throw new IllegalArgumentException("Unsupported config schemaVersion: " + schemaVersion);
             projectRoot = projectRoot.toAbsolutePath().normalize();
-            String schemaName = v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json";
+            String schemaName = v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json");
             Path schema = schema(projectRoot, schemaName);
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
-            SchemaSupport.rejectUnknown(map, "config", v22
+            SchemaSupport.rejectUnknown(map, "config", v25
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "ssh", "tools"}
+                    : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
                     : new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools"});
             validateGlobalMappings(map);
@@ -42,16 +45,19 @@ public final class FrameworkConfigLoader {
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
                 addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", path);
-                if (v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
+                if (v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
                         "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
+            Map<String, DbHelperConfig> dbHelpers = v25
+                    ? new DbHelperConfigLoader().load(map.get("dbhelpers"), projectRoot)
+                    : Collections.<String, DbHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
-                    templatesRoot(map), testcasesRoot(map), tools, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
+                    templatesRoot(map), testcasesRoot(map), tools, dbHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
         } catch (att.validation.DiagnosticException e) {
             throw e;
         } catch (Exception e) {
@@ -147,7 +153,10 @@ public final class FrameworkConfigLoader {
             Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"));
             List<String> command = command(tool.get("command"), "tool " + key + ".command");
             validateCommandArguments(key, command, arguments, script.isEmpty());
-            ToolConfig previous = result.put(key, new ToolConfig(key, localKey, groupId, required(tool, "name", "tool " + key), required(tool, "description", "tool " + key), command, script, output, arguments, ssh, sourceFile));
+            ToolConfig configuredTool = new ToolConfig(key, localKey, groupId,
+                    required(tool, "name", "tool " + key), required(tool, "description", "tool " + key),
+                    command, script, output, arguments, ssh, sourceFile);
+            ToolConfig previous = result.put(key, configuredTool);
             if (previous != null) throw new IllegalArgumentException("Duplicate qualified tool name: " + key);
         }
     }
@@ -233,9 +242,10 @@ public final class FrameworkConfigLoader {
     private static void loadToolGroup(Path file, Path projectRoot, Map<String, ToolConfig> tools, Set<String> ids) {
         try {
             Map<?, ?> group = yaml(file, "Tool group");
+            String version = String.valueOf(group.get("schemaVersion"));
+            if (!Version.TOOL_GROUP_SCHEMA.equals(version)) throw new IllegalArgumentException("Unsupported tool group schemaVersion: " + version);
             Path schema = schema(projectRoot, "att-tool-group-v2.2.schema.json");
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, group); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
-            SchemaSupport.requireVersion(group, Version.TOOL_GROUP_SCHEMA, "tool group");
             SchemaSupport.rejectUnknown(group, "tool group", "schemaVersion", "id", "name", "description", "script", "ssh", "tools");
             String id = required(group, "id", "tool group");
             if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Tool group id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);

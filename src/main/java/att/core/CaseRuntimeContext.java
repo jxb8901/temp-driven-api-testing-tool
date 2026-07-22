@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Authoritative V2 CASE tree plus transient ACTIONS/TOOL views. */
+/** Authoritative V2 CASE tree plus transient ACTIONS, TOOL, and DB invocation views. */
 public final class CaseRuntimeContext {
     private final Map<String, Object> root = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
@@ -16,6 +16,7 @@ public final class CaseRuntimeContext {
     private String currentStage;
     private Map<String, Object> currentActions;
     private int toolSequence;
+    private int dbSequence;
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
@@ -35,12 +36,16 @@ public final class CaseRuntimeContext {
         // same-named workbook column/case-data alias.
         caseNode.put("outputDirectory", this.caseOutputDir.toString());
         caseNode.put("VARS", new LinkedHashMap<String, Object>());
+        caseNode.put("DB", new LinkedHashMap<String, Object>());
         caseNode.put("STAGES", new LinkedHashMap<String, Object>());
         root.put("CASE", caseNode);
         root.put("ACTIONS", actionsView);
         // TOOL is a reserved transient scope. Persisted tool results live below
         // ACTIONS.<actionId>; later actions must not depend on case-wide latest state.
         root.put("TOOL", new LinkedHashMap<String, Object>());
+        // Root DB is invocation-local evidence and is intentionally distinct
+        // from the fixed CASE.DB transaction-finalization map above.
+        root.put("DB", new LinkedHashMap<String, Object>());
         runNode.put("runId", runId);
         runNode.put("id", runId);
         runNode.put("runDirectory", runDirectory.toString());
@@ -135,7 +140,7 @@ public final class CaseRuntimeContext {
     }
 
     private java.util.Set<String> explicitRoots() {
-        return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("CASE", "RUN", "ACTIONS", "TOOL", "output"));
+        return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("CASE", "RUN", "ACTIONS", "TOOL", "DB", "output"));
     }
 
     private Map<String, Object> logicalRoot() {
@@ -145,6 +150,7 @@ public final class CaseRuntimeContext {
         logical.put("ACTIONS", actionsView);
         if (root.containsKey("output")) logical.put("output", root.get("output"));
         logical.put("TOOL", root.get("TOOL"));
+        logical.put("DB", root.get("DB"));
         return logical;
     }
 
@@ -153,6 +159,7 @@ public final class CaseRuntimeContext {
         canonical.put("CASE", caseNode);
         canonical.put("RUN", runNode);
         canonical.put("TOOL", root.get("TOOL"));
+        canonical.put("DB", root.get("DB"));
         return canonical;
     }
 
@@ -163,6 +170,10 @@ public final class CaseRuntimeContext {
             @SuppressWarnings("unchecked")
             Map<String, Object> tool = (Map<String, Object>) root.get("TOOL");
             putPath(tool, key.substring(5), value);
+        } else if (key.startsWith("DB.")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> db = (Map<String, Object>) root.get("DB");
+            putPath(db, key.substring(3), value);
         } else root.put(key, value);
     }
 
@@ -200,6 +211,25 @@ public final class CaseRuntimeContext {
 
     public int nextToolSequence(String ignored) { return ++toolSequence; }
     public String nextInvocationId(String base) { return base + "_" + String.format("%03d", nextToolSequence(base)); }
+    public String nextDbInvocationId(String instance) { return instance + "_" + String.format("%03d", ++dbSequence); }
+
+    @SuppressWarnings("unchecked")
+    public void recordDbInvocation(String instance, String invocationId, Map<String, Object> evidence) {
+        Map<String, Object> db = (Map<String, Object>) root.get("DB");
+        Object current = db.get(instance);
+        Map<String, Object> calls;
+        if (current instanceof Map) calls = (Map<String, Object>) current;
+        else { calls = new LinkedHashMap<String, Object>(); db.put(instance, calls); }
+        calls.put(invocationId, evidence);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> drainDbInvocations() {
+        Map<String, Object> db = (Map<String, Object>) root.get("DB");
+        Map<String, Object> result = new LinkedHashMap<String, Object>(db);
+        db.clear();
+        return result;
+    }
 
     public void addAction(String actionId, Map<String, Object> action) {
         if (currentActions == null) throw new IllegalStateException("No current stage for action: " + actionId);

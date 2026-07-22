@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:template:v2.5",
+  "type": "object",
+  "required": ["schemaVersion", "description", "actions"],
+  "properties": {
+    "schemaVersion": {"const": "att-template/v2.5"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "actions": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[^.]+$"}, "additionalProperties": {"$ref": "#/$defs/action"}}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "saveAs": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "format": {"enum": ["raw", "text", "json", "yaml", "xml"]},
+        "overwrite": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false
+    },
+    "dbSaveAs": {
+      "type": "object",
+      "required": ["path", "format"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "format": {"enum": ["json", "yaml", "xml"]},
+        "overwrite": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false
+    },
+    "sqlBlock": {
+      "type": "object",
+      "properties": {
+        "sql": {"type": "string", "minLength": 1},
+        "sqlFile": {"type": "string", "minLength": 1},
+        "params": {"oneOf": [{"type": "array"}, {"type": "string", "minLength": 1}]}
+      },
+      "oneOf": [
+        {"required": ["sql"], "not": {"required": ["sqlFile"]}},
+        {"required": ["sqlFile"], "not": {"required": ["sql"]}}
+      ],
+      "additionalProperties": false
+    },
+    "common": {
+      "type": "object",
+      "properties": {
+        "type": {"enum": ["render", "tool", "db", "assert", "log", "assign"]},
+        "description": {"type": "string"},
+        "onFailure": {"enum": ["stop", "continue"]},
+        "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "expression": {"type": "string", "minLength": 1},
+        "payload": {"type": "string", "minLength": 1},
+        "renderAs": {"enum": ["file", "text", "json", "yaml", "xml"]},
+        "saveAs": {"$ref": "#/$defs/saveAs"},
+        "call": {"type": "string", "minLength": 1},
+        "db": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"},
+        "query": {"$ref": "#/$defs/sqlBlock"},
+        "update": {"$ref": "#/$defs/sqlBlock"},
+        "assert": {"type": "string", "minLength": 1},
+        "expected": {"type": "string"},
+        "actual": {"type": "string"},
+        "message": {"type": "string", "minLength": 1},
+        "file": {"type": "string", "minLength": 1},
+        "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]},
+        "fields": {"type": "object"},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "retry": {"$ref": "#/$defs/retry"}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "retry": {
+      "type": "object",
+      "required": ["retryOn"],
+      "properties": {
+        "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 10},
+        "retryOn": {"type": "array", "uniqueItems": true, "items": {"const": "EXIT_CODE"}},
+        "exitCodes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 255}}
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "oneOf": [
+            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
+            {"properties": {"type": {"const": "db"}, "saveAs": {"$ref": "#/$defs/dbSaveAs"}}, "required": ["type", "db"], "oneOf": [{"required": ["query"], "not": {"required": ["update"]}}, {"required": ["update"], "not": {"required": ["query"]}}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "log"}}, "required": ["type"], "anyOf": [{"required": ["message"]}, {"required": ["file"]}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "assign"}}, "required": ["type", "name", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
+          ]
+        }
+      ]
+    }
+  }
+}

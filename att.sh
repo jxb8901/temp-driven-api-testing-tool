@@ -44,6 +44,13 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
   CP="$CP:$jar"
 done
 
+# Source-tree extensions (for example JDBC drivers) use the same lib contract
+# as a packaged ATT distribution.
+for jar in "$ROOT_DIR"/lib/*.jar; do
+  [ -f "$jar" ] || continue
+  CP="$CP:$jar"
+done
+
 NEEDS_BUILD=false
 BUILD_MARKER="$ROOT_DIR/target/classes/att-build.properties"
 if [ ! -f "$BUILD_MARKER" ]; then

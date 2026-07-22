@@ -50,6 +50,7 @@ set "CP=%CP%;%M2_REPO%\org\apache\poi\poi-ooxml-lite\5.2.5\poi-ooxml-lite-5.2.5.
 set "CP=%CP%;%M2_REPO%\com\github\virtuald\curvesapi\1.08\curvesapi-1.08.jar"
 set "CP=%CP%;%M2_REPO%\org\yaml\snakeyaml\2.2\snakeyaml-2.2.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\logging\log4j\log4j-api\2.21.1\log4j-api-2.21.1.jar"
+set "CP=%CP%;%ROOT_DIR%lib\*"
 
 java -cp "%CP%" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%

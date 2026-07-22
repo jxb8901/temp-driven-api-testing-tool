@@ -23,7 +23,10 @@ public class TemplateAction {
     private final String call;
     private final String message;
     private final String file;
-    private final String saveAs;
+    private final ActionSaveConfig saveAs;
+    private final String db;
+    private final Map<String, Object> query;
+    private final Map<String, Object> update;
     private final String assertion;
     private final String expected;
     private final String actual;
@@ -33,9 +36,12 @@ public class TemplateAction {
     private final Map<String, Object> raw;
     private final Map<String, Object> retry;
     private final Long timeoutMs;
-    private final boolean overwrite;
 
     public TemplateAction(String key, Map<String, Object> values) {
+        this(key, values, "att-template/v2.3");
+    }
+
+    public TemplateAction(String key, Map<String, Object> values, String schemaVersion) {
         this.key = key;
         Map<String, Object> data = values == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(values);
         this.raw = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(data));
@@ -49,7 +55,10 @@ public class TemplateAction {
         this.call = text(data.get("call"), "");
         this.message = text(data.get("message"), "");
         this.file = text(data.get("file"), "");
-        this.saveAs = text(data.get("saveAs"), "");
+        this.saveAs = save(data.get("saveAs"), data.get("overwrite"), schemaVersion);
+        this.db = text(data.get("db"), "");
+        this.query = map(data.get("query"));
+        this.update = map(data.get("update"));
         this.assertion = text(data.get("assert"), "");
         this.expected = text(data.get("expected"), "");
         this.actual = text(data.get("actual"), "");
@@ -58,7 +67,6 @@ public class TemplateAction {
         this.fields = map(data.get("fields"));
         this.retry = map(data.get("retry"));
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
-        this.overwrite = data.get("overwrite") != null && Boolean.parseBoolean(String.valueOf(data.get("overwrite")));
     }
 
     public String key() { return key; }
@@ -72,11 +80,15 @@ public class TemplateAction {
     public String call() { return call; }
     public String message() { return message; }
     public String file() { return file; }
-    public String saveAs() { return saveAs; }
+    public String saveAs() { return saveAs.path(); }
+    public ActionSaveConfig saveConfig() { return saveAs; }
+    public String db() { return db; }
+    public Map<String, Object> query() { return query; }
+    public Map<String, Object> update() { return update; }
     public String assertion() { return assertion; }
     public String expected() { return expected; }
     public String actual() { return actual; }
-    public boolean overwrite() { return overwrite; }
+    public boolean overwrite() { return saveAs.overwrite(); }
     public String onFailure() { return onFailure; }
     public String level() { return level; }
     public Map<String, Object> fields() { return fields; }
@@ -103,5 +115,17 @@ public class TemplateAction {
             return Collections.<String, Object>emptyMap();
         }
         return new LinkedHashMap<String, Object>((Map<String, Object>) value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ActionSaveConfig save(Object value, Object siblingOverwrite, String schemaVersion) {
+        if (value == null) return ActionSaveConfig.none();
+        if (value instanceof Map) {
+            Map<String, Object> map = new LinkedHashMap<String, Object>((Map<String, Object>) value);
+            boolean overwrite = map.get("overwrite") != null && Boolean.parseBoolean(String.valueOf(map.get("overwrite")));
+            return new ActionSaveConfig(text(map.get("path"), ""), text(map.get("format"), ""), overwrite, false);
+        }
+        boolean overwrite = siblingOverwrite != null && Boolean.parseBoolean(String.valueOf(siblingOverwrite));
+        return new ActionSaveConfig(String.valueOf(value), "raw", overwrite, "att-template/v2.3".equals(schemaVersion));
     }
 }

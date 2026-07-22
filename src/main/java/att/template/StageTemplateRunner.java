@@ -22,6 +22,7 @@ public class StageTemplateRunner {
     private final UnifiedTemplateEngine templateEngine;
     private final ExpressionEvaluator evaluator = new ExpressionEvaluator();
     private final RenderPayloadResolver payloadResolver = new RenderPayloadResolver();
+    private final ActionResultArtifactWriter artifactWriter = new ActionResultArtifactWriter();
 
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this.templateEngine = templateEngine; }
 
@@ -38,11 +39,13 @@ public class StageTemplateRunner {
             node.put("description", description);
             node.put("output", output);
             boolean recorded = false;
+            boolean invocationSucceeded = true;
             String expected = "", actual = "";
             try {
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
-                else if ("tool".equals(type)) executeTool(action, context, log, output, targets, node);
+                else if ("tool".equals(type)) invocationSucceeded = executeTool(action, context, log, output, targets, node);
+                else if ("db".equals(type)) invocationSucceeded = executeDb(action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
@@ -51,7 +54,7 @@ public class StageTemplateRunner {
                 context.addAction(action.id(), node);
                 recorded = true;
                 context.setActionOutput(output);
-                ResultStatus status = applyAssertion(action, output, context, log);
+                ResultStatus status = applyAssertion(action, output, context, log, invocationSucceeded);
                 if ("assert".equals(type)) {
                     output.put("result", Boolean.valueOf(status == ResultStatus.PASS));
                     actual = normalizeLines(templateEngine.render(action.actual(), context, log));
@@ -61,6 +64,7 @@ public class StageTemplateRunner {
                 }
                 output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
                 node.put("description", normalizeLines(templateEngine.render(description, context, log)));
+                mergeDbEvidence(node, context.drainDbInvocations());
                 context.updateAction(action.id(), node);
                 log.appendAction("ACTION " + action.id(), node);
                 String reportExpected = "assert".equals(type) ? joinLines(String.valueOf(node.get("description")), expected) : "";
@@ -84,6 +88,7 @@ public class StageTemplateRunner {
                 context.setActionOutput(output);
                 node.put("description", normalizeLines(templateEngine.renderValuesPreserving(description, context)));
                 try {
+                    mergeDbEvidence(node, context.drainDbInvocations());
                     if (recorded) context.updateAction(action.id(), node); else context.addAction(action.id(), node);
                     log.appendAction("ACTION " + action.id() + " ERROR", node);
                 } catch (Exception ignored) { }
@@ -164,13 +169,54 @@ public class StageTemplateRunner {
     private void executeAssign(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
                                Map<String, Object> output) throws Exception {
         context.requireCaseVariableAvailable(action.name());
-        String value = templateEngine.render(action.expression(), context, log);
+        Object value = templateEngine.evaluate(action.expression(), context, log);
         output.put("result", value);
         output.put("name", action.name());
         context.assignCaseVariable(action.name(), value);
     }
 
-    private void executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
+    private boolean executeDb(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+                              Map<String, Object> output, List<String> targets) throws Exception {
+        att.exec.DbHelperExecutor executor = templateEngine.dbHelperExecutor();
+        if (executor == null) throw new IllegalStateException("DB action execution is unavailable");
+        boolean query = !action.query().isEmpty();
+        Map<String, Object> operation = query ? action.query() : action.update();
+        String source = "inline";
+        String sql;
+        if (operation.containsKey("sqlFile")) {
+            String configured = String.valueOf(operation.get("sqlFile"));
+            Path file = executor.resolveSqlFile(configured);
+            sql = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            source = configured;
+        } else sql = String.valueOf(operation.get("sql"));
+        sql = templateEngine.renderDbSql(sql, context);
+        Object configuredParams = operation.get("params");
+        List<Object> params = new ArrayList<Object>();
+        if (configuredParams instanceof List) {
+            for (Object value : (List<?>) configuredParams) {
+                params.add(value instanceof String ? templateEngine.evaluate((String) value, context, log) : value);
+            }
+        } else if (configuredParams != null) {
+            Object value = templateEngine.evaluate(String.valueOf(configuredParams), context, log);
+            if (!(value instanceof List)) throw new IllegalArgumentException("DB action params must resolve to a List");
+            params.addAll((List<?>) value);
+        }
+        String invocationId = context.nextDbInvocationId(action.db());
+        att.exec.DbInvocationResult result = executor.execute(action.db(), query ? "query" : "update",
+                sql, source, params, invocationId);
+        context.recordDbInvocation(action.db(), invocationId, result.evidence());
+        try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); } catch (Exception ignored) { }
+        output.put("result", result.result());
+        if (result.success() && action.saveConfig().configured()) {
+            String path = templateEngine.render(action.saveConfig().path(), context, log);
+            String format = requiredFormat(action.saveConfig(), "DB", "");
+            Path saved = artifactWriter.write(context, path, format, result.result(), action.saveConfig().overwrite());
+            targets.add(saved.toString());
+        }
+        return result.success();
+    }
+
+    private boolean executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
                              List<String> targets, Map<String, Object> node) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
@@ -178,12 +224,27 @@ public class StageTemplateRunner {
         java.util.Set<Integer> exitCodes = integers(retry.get("exitCodes"));
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
         output.put("attempts", attempts);
-        String saveAs = templateEngine.render(action.saveAs(), context, log);
+        ActionSaveConfig save = action.saveConfig();
+        String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
+        String kind = templateEngine.callKind(action.call());
+        String format = save.configured() ? toolFormat(save, kind) : "";
+        boolean invokerWritesRaw = save.configured() && "tool".equals(kind) && "raw".equals(format);
+        boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             try {
-                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log, action.id(), action.timeoutMs(), saveAs, action.overwrite() || number > 1);
+                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
+                        action.id(), action.timeoutMs(), invokerWritesRaw ? saveAs : "",
+                        save.overwrite() || actionOwnedArtifact);
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
+                if (save.configured() && !invokerWritesRaw) {
+                    Path saved = artifactWriter.write(context, saveAs, format, result.output(),
+                            save.overwrite() || actionOwnedArtifact);
+                    actionOwnedArtifact = true;
+                    invocation.put("outputFile", saved.toString());
+                } else if (invocation.get("outputFile") != null) {
+                    actionOwnedArtifact = true;
+                }
                 attempts.add(invocation);
                 int exitCode = integer(invocation.get("exitCode"), 0);
                 boolean retryable = exitCode != 0 && retryOn.contains("EXIT_CODE") && (exitCodes.isEmpty() || exitCodes.contains(Integer.valueOf(exitCode)));
@@ -194,7 +255,7 @@ public class StageTemplateRunner {
                 Object saved = invocation.get("outputFile");
                 if (saved != null) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
-                return;
+                return result.executionSuccess();
             } catch (att.exec.ToolExecutionException e) {
                 Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
                 evidence.put("attempt", number);
@@ -210,7 +271,35 @@ public class StageTemplateRunner {
         throw new IllegalStateException("Tool action completed without a final attempt: " + action.id());
     }
 
-    private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+    private String toolFormat(ActionSaveConfig save, String kind) {
+        if (save.legacy()) return "builtin".equals(kind) ? "text" : "raw";
+        String fallback = "builtin".equals(kind) ? "text" : "raw";
+        String format = requiredFormat(save, "Tool", fallback);
+        if ("builtin".equals(kind) && "raw".equals(format)) {
+            throw new IllegalArgumentException("Built-in saveAs.format does not support raw; use text, json, yaml, or xml");
+        }
+        if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
+                || "yaml".equals(format) || "xml".equals(format))) {
+            throw new IllegalArgumentException("Tool saveAs.format must be raw, text, json, yaml, or xml: " + format);
+        }
+        return format;
+    }
+
+    private String requiredFormat(ActionSaveConfig save, String owner, String fallback) {
+        String format = save.format() == null ? "" : save.format().trim().toLowerCase(java.util.Locale.ROOT);
+        if (format.isEmpty()) format = fallback;
+        if (format.isEmpty()) throw new IllegalArgumentException(owner + " saveAs.format is required");
+        if ("DB".equals(owner) && !("json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
+            throw new IllegalArgumentException("DB saveAs.format must be json, yaml, or xml: " + format);
+        }
+        return format;
+    }
+
+    private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log,
+                                        boolean invocationSucceeded) throws Exception {
+        if (!invocationSucceeded) {
+            output.put("status", "ERROR"); output.put("success", false); return ResultStatus.ERROR;
+        }
         if (action.assertion() == null || action.assertion().trim().isEmpty()) {
             output.put("status", "PASS"); output.put("success", true); return ResultStatus.PASS;
         }
@@ -251,6 +340,20 @@ public class StageTemplateRunner {
     }
 
     private void copy(Map<String, Object> from, Map<String, Object> to, String... keys) { for (String key : keys) if (from.containsKey(key)) to.put(key, from.get(key)); }
+    @SuppressWarnings("unchecked")
+    private void mergeDbEvidence(Map<String, Object> node, Map<String, Object> additions) {
+        if (additions == null || additions.isEmpty()) return;
+        Map<String, Object> existing = node.get("DB") instanceof Map
+                ? (Map<String, Object>) node.get("DB") : new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : additions.entrySet()) {
+            if (!(entry.getValue() instanceof Map) || !(existing.get(entry.getKey()) instanceof Map)) {
+                existing.put(entry.getKey(), entry.getValue());
+            } else {
+                ((Map<String, Object>) existing.get(entry.getKey())).putAll((Map<String, Object>) entry.getValue());
+            }
+        }
+        node.put("DB", existing);
+    }
     private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
     private java.util.Set<String> strings(Object value) { java.util.Set<String> result = new java.util.LinkedHashSet<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
     private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }

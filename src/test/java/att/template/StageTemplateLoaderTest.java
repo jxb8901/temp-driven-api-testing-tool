@@ -8,6 +8,34 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StageTemplateLoaderTest {
     @TempDir Path tempDir;
+
+    @Test void loadsV25DbActionAndNormalizesLegacySaveAs() throws Exception {
+        StageTemplateLoader.clearForTests();
+        Path current = tempDir.resolve("templates/current");
+        Path legacy = tempDir.resolve("templates/legacy");
+        Files.createDirectories(current);
+        Files.createDirectories(legacy);
+        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v2.5\n" +
+                "name: current\ndescription: DB template\nactions:\n" +
+                "  query:\n    type: db\n    db: orders\n    query: {sql: 'select 1'}\n" +
+                "    saveAs: {path: result.json, format: json, overwrite: true}\n").getBytes("UTF-8"));
+        Files.write(legacy.resolve("template.yaml"), ("schemaVersion: att-template/v2.3\n" +
+                "name: legacy\ndescription: Legacy template\nactions:\n" +
+                "  call: {type: tool, call: '#{sample()}', saveAs: result.txt, overwrite: true}\n")
+                .getBytes("UTF-8"));
+
+        StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
+        TemplateAction db = loader.load("current").actions().get(0);
+        assertEquals("db", db.type());
+        assertEquals("orders", db.db());
+        assertEquals("json", db.saveConfig().format());
+        assertTrue(db.saveConfig().overwrite());
+        TemplateAction old = loader.load("legacy").actions().get(0);
+        assertTrue(old.saveConfig().legacy());
+        assertEquals("raw", old.saveConfig().format());
+        assertTrue(old.saveConfig().overwrite());
+    }
+
     @Test void resolvesChineseSymbolicNameAndFullPath() throws Exception {
         StageTemplateLoader.clearForTests();
         Path dir=tempDir.resolve("templates/付款/本地"); Files.createDirectories(dir);

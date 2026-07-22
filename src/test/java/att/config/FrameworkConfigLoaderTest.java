@@ -8,6 +8,55 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FrameworkConfigLoaderTest {
     @TempDir Path tempDir;
+
+    @Test void rejectsCaseInsensitiveDbHelperIdsAndInvalidTimeouts() throws Exception {
+        Path helpers = tempDir.resolve("config/dbhelpers");
+        Files.createDirectories(helpers);
+        String base = "name: Orders\ndescription: Orders DB\nconnection: {url: 'jdbc:test'}\n";
+        Files.write(helpers.resolve("one.yaml"), ("schemaVersion: att-dbhelper/v2.5\nid: orders\n" + base).getBytes("UTF-8"));
+        Files.write(helpers.resolve("two.yaml"), ("schemaVersion: att-dbhelper/v2.5\nid: Orders\n" + base).getBytes("UTF-8"));
+        Path duplicate = tempDir.resolve("config/duplicate.yaml");
+        Files.write(duplicate, ("schemaVersion: att-config/v2.5\ndbhelpers: [config/dbhelpers/one.yaml, config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(duplicate, tempDir));
+
+        Files.write(helpers.resolve("two.yaml"), ("schemaVersion: att-dbhelper/v2.5\nid: audit\n" + base
+                + "statement: {timeoutSeconds: 0}\n").getBytes("UTF-8"));
+        Path invalidTimeout = tempDir.resolve("config/invalid-timeout.yaml");
+        Files.write(invalidTimeout, ("schemaVersion: att-config/v2.5\ndbhelpers: [config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidTimeout, tempDir));
+    }
+
+    @Test void loadsV25DbHelperInstancesFromDedicatedFiles() throws Exception {
+        Path configDirectory = tempDir.resolve("config");
+        Files.createDirectories(configDirectory.resolve("dbhelpers"));
+        Files.write(configDirectory.resolve("dbhelpers/orders.yaml"), ("schemaVersion: att-dbhelper/v2.5\n" +
+                "id: orders\nname: Orders DB\ndescription: Order queries\n" +
+                "connection:\n  url: jdbc:test:orders\n  username: att\n  password: local\n" +
+                "statement: {timeoutSeconds: 7}\n" +
+                "transaction: {scope: case, onEnd: commit}\n" +
+                "result: {maxRows: 25, maxCellBytes: 1024, maxBytes: 4096}\n").getBytes("UTF-8"));
+        Files.write(configDirectory.resolve("dbhelpers/audit.yaml"), ("schemaVersion: att-dbhelper/v2.5\n" +
+                "id: audit\nname: Audit DB\ndescription: Audit queries\n" +
+                "connection: {url: 'jdbc:test:audit', readOnly: true}\n" +
+                "transaction: {scope: statement, onEnd: rollback}\n").getBytes("UTF-8"));
+        Path config = configDirectory.resolve("config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.5\n" +
+                "dbhelpers: [config/dbhelpers/orders.yaml, config/dbhelpers/audit.yaml]\n").getBytes("UTF-8"));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
+        assertEquals(7, loaded.dbHelper("orders").timeoutSeconds());
+        assertEquals(25, loaded.dbHelper("orders").maxRows());
+        assertEquals("case", loaded.dbHelper("orders").transactionScope());
+        assertEquals("commit", loaded.dbHelper("orders").transactionOnEnd());
+        assertTrue(loaded.dbHelper("AUDIT").readOnly());
+        assertEquals("statement", loaded.dbHelper("audit").transactionScope());
+        assertEquals("rollback", loaded.dbHelper("audit").transactionOnEnd());
+
+        Path invalid = configDirectory.resolve("invalid.yaml");
+        Files.write(invalid, ("schemaVersion: att-config/v2.5\n" +
+                "dbhelpers: [config/dbhelpers/orders.yaml, config/dbhelpers/orders.yaml]\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalid));
+    }
     @Test void validatesBuiltInsInReportAndToolCommandScopes() throws Exception {
         Path valid = tempDir.resolve("expressions.yaml");
         Files.write(valid, ("schemaVersion: att-config/v2.2\n" +

@@ -1,0 +1,29 @@
+schemaVersion: att-dbhelper/v2.5
+id: orders
+name: Orders database
+description: Example JDBC instance for order queries and updates
+
+connection:
+  url: jdbc:postgresql://localhost:5432/orders
+  # Add username/password here when the database requires them. Prefer a
+  # complete ${ENV:NAME} reference for secrets, for example:
+  # password: "${ENV:ORDERS_DB_PASSWORD}"
+  readOnly: false
+  isolation: driverDefault
+  properties: {}
+
+statement:
+  timeoutSeconds: 30
+
+transaction:
+  scope: case
+  onEnd: rollback
+
+result:
+  maxRows: 1000
+  maxCellBytes: 1048576
+  maxBytes: 10485760
+
+evidence:
+  sql: full
+  parameters: masked

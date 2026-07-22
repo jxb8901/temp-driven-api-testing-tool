@@ -71,7 +71,7 @@ class FppReferenceToolsTest {
         Path stdout = tempDir.resolve("capture/stdout.log");
         Path stderr = tempDir.resolve("capture/stderr.log");
 
-        CommandResult result = run("./tools/fpp_exec_command.sh", "--stdout", stdout.toString(), "--stderr", stderr.toString(), "--", child.toString(), "D3", "-104");
+        CommandResult result = run("./tools/exehelper.sh", "--stdout", stdout.toString(), "--stderr", stderr.toString(), "--", child.toString(), "D3", "-104");
 
         assertEquals(0, result.exitCode());
         assertTrue(result.stdout().contains("exitCode: 7"));
@@ -82,14 +82,14 @@ class FppReferenceToolsTest {
         assertEquals("standard output D3 -104\n", new String(Files.readAllBytes(stdout), StandardCharsets.UTF_8));
         assertEquals("can't continue\n", new String(Files.readAllBytes(stderr), StandardCharsets.UTF_8));
 
-        CommandResult caseLogCommand = run("./tools/fpp_exec_command.sh", "--", "sh", "-c", "printf 'case log stdout\\n'; printf 'case log stderr\\n' >&2");
+        CommandResult caseLogCommand = run("./tools/exehelper.sh", "--", "sh", "-c", "printf 'case log stdout\\n'; printf 'case log stderr\\n' >&2");
         assertEquals(0, caseLogCommand.exitCode());
         assertTrue(caseLogCommand.stdout().contains("exitCode: 0"));
         assertTrue(caseLogCommand.stdout().contains("stdoutPath: ''"));
         assertTrue(caseLogCommand.stdout().contains("stderrPath: ''"));
         assertTrue(caseLogCommand.stderr().contains("[command output]\ncase log stdout\ncase log stderr"));
 
-        CommandResult missing = run("./tools/fpp_exec_command.sh", "--stderr", stderr.toString(), "--", "att-command-that-does-not-exist");
+        CommandResult missing = run("./tools/exehelper.sh", "--stderr", stderr.toString(), "--", "att-command-that-does-not-exist");
         assertEquals(0, missing.exitCode());
         assertTrue(missing.stdout().contains("exitCode: 127"));
         assertTrue(new String(Files.readAllBytes(stderr), StandardCharsets.UTF_8).contains("Command not found"));

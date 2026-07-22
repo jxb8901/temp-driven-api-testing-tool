@@ -42,12 +42,23 @@ public final class ToolCallParser {
         try { return new BigDecimal(text); } catch (NumberFormatException ignored) { return value == null ? "" : value; }
     }
 
+    /** Splits an inline list body with the same quote/nesting rules used by call arguments. */
+    public List<String> listItems(String expression) {
+        String text = expression == null ? "" : expression.trim();
+        if (!(text.startsWith("[") && text.endsWith("]"))) {
+            throw new IllegalArgumentException("Expected an inline list: " + expression);
+        }
+        String body = text.substring(1, text.length() - 1).trim();
+        if (body.isEmpty()) return Collections.emptyList();
+        return splitArguments(body);
+    }
+
     private List<String> splitArguments(String text) {
         List<String> result = new ArrayList<String>();
         StringBuilder current = new StringBuilder();
         char quote = 0;
         boolean escaped = false;
-        int round = 0, curly = 0;
+        int round = 0, curly = 0, square = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (escaped) { current.append(ch); escaped = false; continue; }
@@ -62,17 +73,19 @@ public final class ToolCallParser {
             else if (ch == ')') round--;
             else if (ch == '{') curly++;
             else if (ch == '}') curly--;
-            if (round < 0 || curly < 0) throw new IllegalArgumentException("Unbalanced tool/function arguments: " + text);
-            if (ch == ',' && round == 0 && curly == 0) { result.add(current.toString()); current.setLength(0); }
+            else if (ch == '[') square++;
+            else if (ch == ']') square--;
+            if (round < 0 || curly < 0 || square < 0) throw new IllegalArgumentException("Unbalanced tool/function arguments: " + text);
+            if (ch == ',' && round == 0 && curly == 0 && square == 0) { result.add(current.toString()); current.setLength(0); }
             else current.append(ch);
         }
-        if (quote != 0 || round != 0 || curly != 0) throw new IllegalArgumentException("Unclosed tool/function argument: " + text);
+        if (quote != 0 || round != 0 || curly != 0 || square != 0) throw new IllegalArgumentException("Unclosed tool/function argument: " + text);
         result.add(current.toString());
         return result;
     }
 
     private int topLevelEquals(String text) {
-        char quote = 0; int round = 0, curly = 0;
+        char quote = 0; int round = 0, curly = 0, square = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (quote != 0) { if (ch == quote && (i == 0 || text.charAt(i - 1) != '\\')) quote = 0; continue; }
@@ -81,7 +94,9 @@ public final class ToolCallParser {
             else if (ch == ')') round--;
             else if (ch == '{') curly++;
             else if (ch == '}') curly--;
-            else if (ch == '=' && round == 0 && curly == 0) return i;
+            else if (ch == '[') square++;
+            else if (ch == ']') square--;
+            else if (ch == '=' && round == 0 && curly == 0 && square == 0) return i;
         }
         return -1;
     }

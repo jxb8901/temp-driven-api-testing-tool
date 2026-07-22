@@ -3,7 +3,7 @@
 # 提取特定交易應用日誌的工具：在給定的多個日誌文件中搜索包括全部 keywords 的交易日誌，
 # 每筆交易日誌保存為獨立文件，最多保存給定個數。具體要求如下：
 #    1. 配置：交易日誌目錄、交易開始 pattern、交易結束 pattern、其它模式匹配所用的正則表達式
-#    2. Usage: $0 <max_tid_files> <output_prefix> <log_file1> [log_file2 ...] -- <keyword1> [keyword2 ...]，log_file 是無序的
+#    2. Usage: $0 --max-tid-files <n> --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--recent-log-count <n>] [--ssh]，log_file 是無序的
 #    3. 應用日誌由 log4j 生成，日誌格式為：[DEBUG] [2026/07/15 13:25:32.589] [JavaClass.method] [TID123456] ...
 #       Messages…\n multiple line \n …，每條日誌的第 4 個欄位 TID 為一筆交易的唯一 ID
 #    4. 一筆交易的第一／最後一條日誌可能匹配，也可能不匹配可配置的交易開始／結束 pattern；
@@ -14,7 +14,9 @@
 #    8. 為控制內存使用兩遍掃描：第一遍倒序找到最新的符合 TID，第二遍正序提取，並使用開始／結束 pattern 限定範圍
 #    9. 結果寫入 <output_prefix>.<TID>.log，每個 TID 一個獨立文件；output_prefix 未指定目錄時使用 /tmp
 #   10. 有多個符合 TID 時，只處理按各 TID 最新日誌時間倒序排列的前 n 個
-#   11. 標準輸出只輸出 ATT output: yaml 可直接解析的結果；掃描進度及診斷寫入標準錯誤
+#   11. 默認只搜索按文件首個 timestamp 排序後最近 2 個日誌；--recent-log-count 0 表示搜索全部日誌
+#   12. 指定 --ssh 時，本地未命中才按配置順序搜索遠程服務器，並將命中結果複製到本地相同路徑
+#   13. 標準輸出只輸出 ATT output: yaml 可直接解析的結果；掃描進度及診斷寫入標準錯誤
 # ==============================================================================
 # Author: Jeffrey + ChatGPT
 set -o pipefail
@@ -26,6 +28,19 @@ export LC_ALL=C
 # the caller continue to work as-is. LOG_DIR may also be overridden by the caller.
 readonly LOG_DIR="${LOG_DIR:-.}"
 readonly DEFAULT_OUTPUT_DIR='/tmp'
+
+# Format: 'host|user|port|identity_file|remote_loghelper_path'
+# Leave identity_file empty to use the SSH agent/default identities.
+# Servers are searched in the order listed. For example:
+# SSH_SERVERS=(
+#     'server1.example.com|appuser|22||/opt/att/tools/loghelper.sh'
+#     'server2.example.com|appuser|2222|/path/to/id_ed25519|/opt/att/tools/loghelper.sh'
+# )
+SSH_SERVERS=()
+
+# Optional environment-based configuration. Each non-empty line uses the same
+# five-field format as SSH_SERVERS and replaces the list above.
+readonly SSH_SERVERS_OVERRIDE="${LOGHELPER_SSH_SERVERS:-}"
 
 # Accept normal Log4j levels such as DEBUG, INFO, WARN, ERROR and TRACE.
 readonly LOG_HEADER_REGEXP='^\[[[:upper:]]+\] \[[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}\]'
@@ -75,7 +90,7 @@ function extract_tid(line,    header_part, tags, tag_count, tid) {
 '
 
 usage() {
-    echo "Usage: $0 <max_tid_files> <output_prefix> <log_file1> [log_file2 ...] -- <keyword1> [keyword2 ...]" >&2
+    echo "Usage: $0 --max-tid-files <n> --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--recent-log-count <n>] [--ssh]" >&2
 }
 
 yaml_escape() {
@@ -155,25 +170,359 @@ reverse_file() {
     fi
 }
 
+yaml_boolean() {
+    local payload=$1
+    local field=$2
+
+    printf '%s\n' "$payload" | awk -v key="$field:" '
+        $1 == key && ($2 == "true" || $2 == "false") {
+            print $2
+            exit
+        }
+    '
+}
+
+yaml_file_paths() {
+    local payload=$1
+
+    printf '%s\n' "$payload" | awk '
+        BEGIN {
+            quote = sprintf("%c", 39)
+        }
+        /^[[:space:]]+path:[[:space:]]/ {
+            value = $0
+            sub(/^[[:space:]]+path:[[:space:]]*/, "", value)
+            if (substr(value, 1, 1) != quote || substr(value, length(value), 1) != quote) {
+                next
+            }
+            value = substr(value, 2, length(value) - 2)
+            gsub(quote quote, quote, value)
+            print value
+        }
+    '
+}
+
+remote_quote() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\"'\"'/g"
+    printf "'"
+}
+
+cleanup_copy_temps() {
+    local copy_temp
+    for copy_temp in "$@"; do
+        [ -n "$copy_temp" ] || continue
+        rm -f -- "$copy_temp"
+    done
+}
+
+copy_remote_results() {
+    local ssh_destination=$1
+    local payload=$2
+    local remote_file local_directory copy_temp copy_status copy_index
+    local -a remote_files copy_temp_files
+
+    COPY_ERROR=''
+    while IFS= read -r remote_file; do
+        [ -n "$remote_file" ] || continue
+        remote_files+=("$remote_file")
+    done < <(yaml_file_paths "$payload")
+
+    if [ "${#remote_files[@]}" -eq 0 ]; then
+        COPY_ERROR='remote loghelper.sh reported a match without any result file paths.'
+        return 1
+    fi
+
+    for remote_file in "${remote_files[@]}"; do
+        case "$remote_file" in
+            /*) ;;
+            *)
+                COPY_ERROR="remote result path must be absolute: $remote_file"
+                cleanup_copy_temps "${copy_temp_files[@]}"
+                return 1
+                ;;
+        esac
+
+        local_directory=${remote_file%/*}
+        [ -n "$local_directory" ] || local_directory=/
+        if [ ! -d "$local_directory" ] || [ ! -w "$local_directory" ]; then
+            COPY_ERROR="local result directory does not exist or is not writable: $local_directory"
+            cleanup_copy_temps "${copy_temp_files[@]}"
+            return 1
+        fi
+        if [ -L "$remote_file" ]; then
+            COPY_ERROR="local result path must not be a symbolic link: $remote_file"
+            cleanup_copy_temps "${copy_temp_files[@]}"
+            return 1
+        fi
+
+        copy_temp=$(mktemp "${remote_file}.loghelper.XXXXXX") || {
+            COPY_ERROR="could not create a local temporary file for: $remote_file"
+            cleanup_copy_temps "${copy_temp_files[@]}"
+            return 1
+        }
+        copy_temp_files+=("$copy_temp")
+
+        scp "${SCP_OPTIONS[@]}" -- "$ssh_destination:$remote_file" "$copy_temp"
+        copy_status=$?
+        if [ "$copy_status" -ne 0 ]; then
+            COPY_ERROR="could not copy remote result file: $remote_file"
+            cleanup_copy_temps "${copy_temp_files[@]}"
+            return "$copy_status"
+        fi
+    done
+
+    copy_index=0
+    while [ "$copy_index" -lt "${#remote_files[@]}" ]; do
+        mv -f -- "${copy_temp_files[$copy_index]}" "${remote_files[$copy_index]}" || {
+            COPY_ERROR="could not install local result file: ${remote_files[$copy_index]}"
+            copy_temp_files[$copy_index]=''
+            cleanup_copy_temps "${copy_temp_files[@]}"
+            return 1
+        }
+        copy_temp_files[$copy_index]=''
+        copy_index=$((copy_index + 1))
+    done
+
+    return 0
+}
+
+append_remote_error() {
+    local message=$1
+    if [ -n "$REMOTE_ERRORS" ]; then
+        REMOTE_ERRORS="$REMOTE_ERRORS; $message"
+    else
+        REMOTE_ERRORS=$message
+    fi
+}
+
+search_remote_servers() {
+    local server_record SSH_HOST SSH_USER SSH_PORT SSH_IDENTITY_FILE REMOTE_LOGHELPER EXTRA_FIELD
+    local SSH_DESTINATION REMOTE_COMMAND REMOTE_OUTPUT REMOTE_STATUS REMOTE_SUCCESS REMOTE_MATCHED
+    local LAST_NO_MATCH_OUTPUT=''
+    local REMOTE_ERRORS=''
+    local search_arg
+
+    if [ -n "$SSH_SERVERS_OVERRIDE" ]; then
+        SSH_SERVERS=()
+        while IFS= read -r server_record; do
+            [ -n "$server_record" ] || continue
+            SSH_SERVERS+=("$server_record")
+        done <<< "$SSH_SERVERS_OVERRIDE"
+    elif [ "${#SSH_SERVERS[@]}" -eq 0 ] && [ -n "${LOGHELPER_SSH_HOST:-}" ]; then
+        SSH_SERVERS+=("${LOGHELPER_SSH_HOST}|${LOGHELPER_SSH_USER:-}|${LOGHELPER_SSH_PORT:-22}|${LOGHELPER_SSH_IDENTITY_FILE:-}|${LOGHELPER_REMOTE_LOGHELPER:-}")
+    fi
+
+    [ "${#SSH_SERVERS[@]}" -gt 0 ] || fail "SSH_SERVERS must be configured at the top of loghelper.sh when --ssh is used."
+    command -v ssh >/dev/null 2>&1 || fail "required command 'ssh' was not found."
+
+    for server_record in "${SSH_SERVERS[@]}"; do
+        IFS='|' read -r SSH_HOST SSH_USER SSH_PORT SSH_IDENTITY_FILE REMOTE_LOGHELPER EXTRA_FIELD <<< "$server_record"
+        SSH_DESTINATION="$SSH_USER@$SSH_HOST"
+
+        if [ -n "$EXTRA_FIELD" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$REMOTE_LOGHELPER" ]; then
+            append_remote_error "$SSH_DESTINATION has an invalid SSH_SERVERS entry"
+            continue
+        fi
+        case "$SSH_PORT" in
+            ''|0|*[!0-9]*)
+                append_remote_error "$SSH_DESTINATION has an invalid SSH port"
+                continue
+                ;;
+        esac
+        if [ -n "$SSH_IDENTITY_FILE" ] && { [ ! -f "$SSH_IDENTITY_FILE" ] || [ -L "$SSH_IDENTITY_FILE" ]; }; then
+            append_remote_error "$SSH_DESTINATION has an invalid identity file: $SSH_IDENTITY_FILE"
+            continue
+        fi
+
+        SSH_OPTIONS=(
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -p "$SSH_PORT"
+        )
+        SCP_OPTIONS=(
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -P "$SSH_PORT"
+        )
+        if [ -n "$SSH_IDENTITY_FILE" ]; then
+            SSH_OPTIONS+=(-i "$SSH_IDENTITY_FILE")
+            SCP_OPTIONS+=(-i "$SSH_IDENTITY_FILE")
+        fi
+
+        echo "Local search found no matching transaction; retrying on $SSH_DESTINATION" >&2
+
+        REMOTE_COMMAND="$(remote_quote /bin/bash) $(remote_quote "$REMOTE_LOGHELPER")"
+        for search_arg in "${REMOTE_SEARCH_ARGS[@]}"; do
+            REMOTE_COMMAND="$REMOTE_COMMAND $(remote_quote "$search_arg")"
+        done
+
+        REMOTE_OUTPUT=$(ssh "${SSH_OPTIONS[@]}" -- "$SSH_DESTINATION" "$REMOTE_COMMAND")
+        REMOTE_STATUS=$?
+        REMOTE_SUCCESS=$(yaml_boolean "$REMOTE_OUTPUT" success)
+        REMOTE_MATCHED=$(yaml_boolean "$REMOTE_OUTPUT" matched)
+
+        if [ -z "$REMOTE_SUCCESS" ] || [ -z "$REMOTE_MATCHED" ]; then
+            append_remote_error "$SSH_DESTINATION returned invalid YAML (ssh status $REMOTE_STATUS)"
+            continue
+        fi
+        if [ "$REMOTE_STATUS" -ne 0 ] || [ "$REMOTE_SUCCESS" != true ]; then
+            append_remote_error "$SSH_DESTINATION failed (ssh status $REMOTE_STATUS)"
+            continue
+        fi
+        if [ "$REMOTE_MATCHED" = false ]; then
+            LAST_NO_MATCH_OUTPUT=$REMOTE_OUTPUT
+            continue
+        fi
+        if [ "$REMOTE_MATCHED" != true ]; then
+            append_remote_error "$SSH_DESTINATION returned an invalid matched value: $REMOTE_MATCHED"
+            continue
+        fi
+
+        command -v scp >/dev/null 2>&1 || fail "required command 'scp' was not found."
+        if copy_remote_results "$SSH_DESTINATION" "$REMOTE_OUTPUT"; then
+            printf '%s\n' "$REMOTE_OUTPUT"
+            exit 0
+        fi
+        append_remote_error "$SSH_DESTINATION: $COPY_ERROR"
+    done
+
+    if [ -n "$LAST_NO_MATCH_OUTPUT" ] && [ -z "$REMOTE_ERRORS" ]; then
+        printf '%s\n' "$LAST_NO_MATCH_OUTPUT"
+        exit 0
+    fi
+
+    [ -n "$REMOTE_ERRORS" ] || REMOTE_ERRORS='all configured SSH servers failed.'
+    fail "$REMOTE_ERRORS"
+}
+
 # ------------------------------------------------------------------------------
 # 2. ARGUMENT & ENVIRONMENT PREPARATION
 # ------------------------------------------------------------------------------
-[ "$#" -ge 5 ] || {
-    usage
-    fail "invalid arguments; expected max_tid_files, output_prefix, one or more log files, '--', and one or more keywords."
-}
+MAX_FILES=''
+OUTPUT_PREFIX=''
+RECENT_LOG_COUNT=2
+LOG_FILES=()
+KEYWORDS=()
+SEEN_MAX_FILES=false
+SEEN_OUTPUT_PREFIX=false
+SEEN_RECENT_LOG_COUNT=false
+SEEN_LOG_FILES=false
+SEEN_KEYWORDS=false
+SSH_ENABLED=false
+SEEN_SSH=false
 
-MAX_FILES=$1
-OUTPUT_PREFIX=$2
-shift 2
+while [ "$#" -gt 0 ]; do
+    option=$1
+    case "$option" in
+        --max-tid-files)
+            [ "$#" -ge 2 ] || {
+                usage
+                fail "missing value for --max-tid-files."
+            }
+            [ "$SEEN_MAX_FILES" = false ] || fail "--max-tid-files must be specified only once."
+            MAX_FILES=$2
+            SEEN_MAX_FILES=true
+            shift 2
+            ;;
+        --output-prefix)
+            [ "$#" -ge 2 ] || {
+                usage
+                fail "missing value for --output-prefix."
+            }
+            [ "$SEEN_OUTPUT_PREFIX" = false ] || fail "--output-prefix must be specified only once."
+            OUTPUT_PREFIX=$2
+            SEEN_OUTPUT_PREFIX=true
+            shift 2
+            ;;
+        --recent-log-count)
+            [ "$#" -ge 2 ] || {
+                usage
+                fail "missing value for --recent-log-count."
+            }
+            [ "$SEEN_RECENT_LOG_COUNT" = false ] || fail "--recent-log-count must be specified only once."
+            RECENT_LOG_COUNT=$2
+            SEEN_RECENT_LOG_COUNT=true
+            shift 2
+            ;;
+        --ssh)
+            [ "$SEEN_SSH" = false ] || fail "--ssh must be specified only once."
+            SSH_ENABLED=true
+            SEEN_SSH=true
+            shift
+            ;;
+        --log-file)
+            [ "$SEEN_LOG_FILES" = false ] || fail "--log-file must be specified only once."
+            SEEN_LOG_FILES=true
+            shift
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --max-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
+                esac
+                [ -n "$1" ] || fail "log file paths must not be empty."
+                LOG_FILES+=("$1")
+                shift
+            done
+            [ "${#LOG_FILES[@]}" -gt 0 ] || {
+                usage
+                fail "missing value for --log-file."
+            }
+            ;;
+        --keyword)
+            [ "$SEEN_KEYWORDS" = false ] || fail "--keyword must be specified only once."
+            SEEN_KEYWORDS=true
+            shift
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --max-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
+                esac
+                [ -n "$1" ] || fail "keywords must not be empty."
+                KEYWORDS+=("$1")
+                shift
+            done
+            [ "${#KEYWORDS[@]}" -gt 0 ] || {
+                usage
+                fail "missing value for --keyword."
+            }
+            ;;
+        *)
+            usage
+            fail "unknown argument: $option"
+            ;;
+    esac
+done
+
+[ "$SEEN_MAX_FILES" = true ] || fail "missing required argument --max-tid-files."
+[ "$SEEN_OUTPUT_PREFIX" = true ] || fail "missing required argument --output-prefix."
+[ "${#LOG_FILES[@]}" -gt 0 ] || fail "at least one --log-file is required."
+[ "${#KEYWORDS[@]}" -gt 0 ] || fail "at least one --keyword is required."
+
+# Canonical named arguments forwarded to remote loghelper.sh. --ssh is omitted
+# deliberately so a remote helper never starts another SSH fallback.
+REMOTE_SEARCH_ARGS=(
+    --max-tid-files "$MAX_FILES"
+    --output-prefix "$OUTPUT_PREFIX"
+    --recent-log-count "$RECENT_LOG_COUNT"
+    --log-file
+)
+for arg in "${LOG_FILES[@]}"; do
+    REMOTE_SEARCH_ARGS+=("$arg")
+done
+REMOTE_SEARCH_ARGS+=(--keyword)
+for arg in "${KEYWORDS[@]}"; do
+    REMOTE_SEARCH_ARGS+=("$arg")
+done
 
 case "$MAX_FILES" in
-    ''|0|*[!0-9]*) fail "max_tid_files must be a positive integer." ;;
+    ''|0|*[!0-9]*) fail "--max-tid-files must be a positive integer." ;;
+esac
+case "$RECENT_LOG_COUNT" in
+    ''|*[!0-9]*) fail "--recent-log-count must be zero or a positive integer." ;;
 esac
 
-[ -n "$OUTPUT_PREFIX" ] || fail "output_prefix must not be empty."
+[ -n "$OUTPUT_PREFIX" ] || fail "--output-prefix must not be empty."
 case "$OUTPUT_PREFIX" in
-    */) fail "output_prefix must include a filename prefix, not only a directory." ;;
+    */) fail "--output-prefix must include a filename prefix, not only a directory." ;;
 esac
 case "$OUTPUT_PREFIX" in
     */*) ;;
@@ -181,23 +530,7 @@ case "$OUTPUT_PREFIX" in
 esac
 
 FILES=()
-KEYWORDS=()
-IN_KEYWORDS=false
-SEEN_SEPARATOR=false
-
-for arg in "$@"; do
-    if [ "$arg" = "--" ] && [ "$SEEN_SEPARATOR" = false ]; then
-        IN_KEYWORDS=true
-        SEEN_SEPARATOR=true
-        continue
-    fi
-
-    if [ "$IN_KEYWORDS" = true ]; then
-        [ -n "$arg" ] || fail "keywords must not be empty."
-        KEYWORDS+=("$arg")
-        continue
-    fi
-
+for arg in "${LOG_FILES[@]}"; do
     candidate=$(canonical_path "$arg" existing-file 2>/dev/null || true)
     if [ -z "$candidate" ]; then
         candidate=$(canonical_path "$LOG_DIR/$arg" existing-file 2>/dev/null || true)
@@ -217,9 +550,7 @@ for arg in "$@"; do
     [ "$duplicate" = true ] || FILES+=("$candidate")
 done
 
-[ "$SEEN_SEPARATOR" = true ] || fail "missing '--' separator before keywords."
 [ "${#FILES[@]}" -gt 0 ] || fail "no valid log files were provided."
-[ "${#KEYWORDS[@]}" -gt 0 ] || fail "no keywords were provided after '--'."
 
 OUTPUT_PREFIX=$(canonical_path "$OUTPUT_PREFIX" output) || fail "the output directory does not exist."
 OUTPUT_DIR=${OUTPUT_PREFIX%/*}
@@ -254,6 +585,16 @@ for file in "${FILES[@]}"; do
     SORTED_KEYS[$position]=$time_key
 done
 FILES=("${SORTED_FILES[@]}")
+
+if [ "$RECENT_LOG_COUNT" -gt 0 ] && [ "${#FILES[@]}" -gt "$RECENT_LOG_COUNT" ]; then
+    RECENT_FILES=()
+    file_index=$((${#FILES[@]} - RECENT_LOG_COUNT))
+    while [ "$file_index" -lt "${#FILES[@]}" ]; do
+        RECENT_FILES+=("${FILES[$file_index]}")
+        file_index=$((file_index + 1))
+    done
+    FILES=("${RECENT_FILES[@]}")
+fi
 
 # Environment variables preserve literal keyword contents when passed to awk.
 export KW_COUNT=${#KEYWORDS[@]}
@@ -388,6 +729,9 @@ if [ "$PASS1_PRODUCER_STATUS" -ne 0 ] && [ "$PASS1_PRODUCER_STATUS" -ne 141 ]; t
 fi
 
 if [ ! -s "$MATCHED_TIDS_FILE" ]; then
+    if [ "$SSH_ENABLED" = true ]; then
+        search_remote_servers
+    fi
     emit_empty_result true false ''
     exit 0
 fi
