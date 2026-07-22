@@ -100,14 +100,15 @@ public class ToolInvoker {
         String sshTransport = tool.ssh() == null ? "" : sshCommandRunner.transportName();
         CommandResult commandResult;
         long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
+        CommandRunner.CapturePolicy capture = capturePolicy(context, id);
         try {
             if (tool.ssh() == null) {
                 Files.createDirectories(context.caseOutputDirectory());
-                commandResult = commandRunner.run(argv, Duration.ofMillis(timeoutMs), context.caseOutputDirectory(),
-                        localToolEnvironment(context));
+                commandResult = commandRunner.runWithCapture(argv, Duration.ofMillis(timeoutMs), context.caseOutputDirectory(),
+                        localToolEnvironment(context), capture);
             }
             else {
-                SshCommandRunner.Execution execution = sshCommandRunner.run(tool.ssh(), logicalArgv, Duration.ofMillis(timeoutMs), projectRoot);
+                SshCommandRunner.Execution execution = sshCommandRunner.run(tool.ssh(), logicalArgv, Duration.ofMillis(timeoutMs), projectRoot, capture);
                 commandResult = execution.result(); argv = execution.argv(); sshTransport = execution.transport();
             }
         }
@@ -124,7 +125,10 @@ public class ToolInvoker {
         String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
         Exception parseFailure = null;
-        if (!commandResult.timedOut()) try { parsed = parseOutput(rawOutput, tool.output()); } catch (Exception e) { parseFailure = e; }
+        if (!commandResult.timedOut()) try {
+            parsed = structured(tool.output()) && commandResult.stdoutArtifact() != null && !commandResult.stdoutArtifactTruncated()
+                    ? parseOutput(commandResult.stdoutArtifact(), tool.output()) : parseOutput(rawOutput, tool.output());
+        } catch (Exception e) { parseFailure = e; }
 
         Map<String, Object> toolInvocation = new LinkedHashMap<String, Object>();
         toolInvocation.put("name", toolName);
@@ -133,6 +137,7 @@ public class ToolInvoker {
         toolInvocation.put("rawOutput", rawOutput);
         toolInvocation.put("stdout", commandResult.stdout());
         toolInvocation.put("stderr", commandResult.stderr());
+        addCaptureEvidence(toolInvocation, commandResult);
         toolInvocation.put("command", command);
         toolInvocation.put("logicalArgv", logicalArgv);
         toolInvocation.put("argv", argv);
@@ -163,6 +168,7 @@ public class ToolInvoker {
         invocation.put("rawOutput", rawOutput);
         invocation.put("stdout", commandResult.stdout());
         invocation.put("stderr", commandResult.stderr());
+        addCaptureEvidence(invocation, commandResult);
         invocation.put("exitCode", commandResult.exitCode());
         invocation.put("timeoutMs", timeoutMs);
         invocation.put("command", command);
@@ -174,8 +180,14 @@ public class ToolInvoker {
             Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
             if (!outputFile.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool saveAs must stay under case log directory: " + saveAs);
             Files.createDirectories(outputFile.getParent());
-            if (Files.exists(outputFile) && !overwrite) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + saveAs);
-            if (overwrite) Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
+            boolean captureIsTarget = commandResult.stdoutArtifact() != null && commandResult.stdoutArtifact().normalize().equals(outputFile);
+            if (Files.exists(outputFile) && !overwrite && !captureIsTarget) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + saveAs);
+            if (captureIsTarget) {
+                // The streamed artifact already is the requested output.
+            } else if (commandResult.stdoutArtifact() != null && Files.isRegularFile(commandResult.stdoutArtifact())) {
+                if (overwrite) Files.copy(commandResult.stdoutArtifact(), outputFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                else Files.copy(commandResult.stdoutArtifact(), outputFile);
+            } else if (overwrite) Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8));
             else Files.write(outputFile, commandResult.stdout().getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.CREATE_NEW);
             invocation.put("outputFile", outputFile.toString());
             toolInvocation.put("outputFile", outputFile.toString());
@@ -199,6 +211,29 @@ public class ToolInvoker {
         }
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation);
+    }
+
+    private CommandRunner.CapturePolicy capturePolicy(CaseRuntimeContext context, String invocationId) throws Exception {
+        Path directory = context.caseOutputDirectory().resolve("process-output");
+        Files.createDirectories(directory);
+        String base = invocationId.replaceAll("[^A-Za-z0-9._-]", "_");
+        Path stdout = available(directory, base, ".stdout");
+        Path stderr = stdout.resolveSibling(stdout.getFileName().toString().replaceFirst("\\.stdout$", ".stderr"));
+        return new CommandRunner.CapturePolicy(config.processOutput().memoryLimitBytes(), config.processOutput().artifactLimitBytes(), stdout, stderr);
+    }
+
+    private Path available(Path directory, String base, String suffix) {
+        Path candidate = directory.resolve(base + suffix);
+        for (int sequence = 2; Files.exists(candidate) || Files.exists(candidate.resolveSibling(candidate.getFileName().toString().replaceFirst("\\.stdout$", ".stderr"))); sequence++) candidate = directory.resolve(base + "-" + sequence + suffix);
+        return candidate;
+    }
+
+    private void addCaptureEvidence(Map<String, Object> evidence, CommandResult result) {
+        evidence.put("stdoutBytes", result.stdoutBytes()); evidence.put("stderrBytes", result.stderrBytes());
+        evidence.put("stdoutTruncated", result.stdoutTruncated()); evidence.put("stderrTruncated", result.stderrTruncated());
+        evidence.put("stdoutArtifactTruncated", result.stdoutArtifactTruncated()); evidence.put("stderrArtifactTruncated", result.stderrArtifactTruncated());
+        if (result.stdoutArtifact() != null) evidence.put("stdoutArtifact", result.stdoutArtifact().toString());
+        if (result.stderrArtifact() != null) evidence.put("stderrArtifact", result.stderrArtifact().toString());
     }
 
     @SuppressWarnings("unchecked")
@@ -365,7 +400,20 @@ public class ToolInvoker {
         return text;
     }
 
+    private Object parseOutput(Path file, String outputType) throws Exception {
+        if ("json".equalsIgnoreCase(outputType)) try (java.io.InputStream input = Files.newInputStream(file)) { return att.validation.JsonSupport.mapper().readValue(input, Object.class); }
+        if ("yaml".equalsIgnoreCase(outputType)) try (java.io.Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) { synchronized (YamlSupport.parser()) { Object loaded = YamlSupport.parser().load(reader); return loaded == null ? new LinkedHashMap<String, Object>() : loaded; } }
+        if ("xml".equalsIgnoreCase(outputType)) return xmlToMap(new InputSource(file.toUri().toString()));
+        return parseOutput(new String(Files.readAllBytes(file), StandardCharsets.UTF_8), outputType);
+    }
+
+    private boolean structured(String outputType) { return "json".equalsIgnoreCase(outputType) || "yaml".equalsIgnoreCase(outputType) || "xml".equalsIgnoreCase(outputType); }
+
     private Object xmlToMap(String xml) throws Exception {
+        return xmlToMap(new InputSource(new StringReader(xml)));
+    }
+
+    private Object xmlToMap(InputSource source) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -383,7 +431,7 @@ public class ToolInvoker {
             public void error(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
             public void fatalError(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
         });
-        Document document = builder.parse(new InputSource(new StringReader(xml)));
+        Document document = builder.parse(source);
         Object value = elementValue(document.getDocumentElement());
         if (!(value instanceof Map)) return value;
         Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put("name", xmlName(document.getDocumentElement())); result.putAll((Map<String,Object>) value); return result;

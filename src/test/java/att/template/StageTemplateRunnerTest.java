@@ -12,6 +12,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StageTemplateRunnerTest {
     @TempDir Path tempDir;
+    @Test void toolActionCanInvokeBuiltInAndPersistItsResult() throws Exception {
+        Path caseDir = tempDir.resolve("builtin-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("prepare","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        TemplateAction action = new TemplateAction("normalize", map("type","tool","call","#{upper('abc')}",
+                "saveAs","normalized.txt","assert","${output.result} == 'ABC'"));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("prepare",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals("ABC", context.resolve("ACTIONS.normalize.output.result"));
+        assertEquals(0, context.resolve("ACTIONS.normalize.output.exitCode"));
+        assertEquals("builtin", context.resolve("ACTIONS.normalize.output.attempts[0].type"));
+        assertEquals("upper", context.resolve("ACTIONS.normalize.output.attempts[0].name"));
+        assertEquals("ABC", new String(Files.readAllBytes(caseDir.resolve("normalized.txt")), "UTF-8"));
+        assertNull(context.resolve("ACTIONS.normalize.TOOL"));
+    }
+
     @Test void everyActionTextSurfaceSupportsInlineBuiltIns() throws Exception {
         Map<String,Object> data = new LinkedHashMap<String,Object>(); data.put("SrcRefNo", "ABC123");
         TestCase test=new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),data,Collections.emptyMap(),null);

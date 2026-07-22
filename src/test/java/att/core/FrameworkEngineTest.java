@@ -47,7 +47,7 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
         writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
 
-        ExecutionOptions verboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose"});
+        ExecutionOptions verboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose", "--profile"});
         java.io.ByteArrayOutputStream console = new java.io.ByteArrayOutputStream();
         java.io.PrintStream previous = System.out;
         RunSummary summary;
@@ -76,6 +76,11 @@ class FrameworkEngineTest {
         }
         assertEquals("", defaultConsole.toString("UTF-8").trim());
 
+        ExecutionOptions noWorkbook = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-NO-WORKBOOK"});
+        new FrameworkEngine(projectRoot, globalConfig("none")).run(noWorkbook);
+        assertFalse(Files.exists(projectRoot.resolve("output/TEST-NO-WORKBOOK/workbooks")));
+        assertTrue(Files.exists(projectRoot.resolve("output/TEST-NO-WORKBOOK/report/index.html")));
+
         assertEquals(1, summary.passed());
         assertEquals("API status\nSUCCESS", summary.results().get(0).expected());
         assertEquals("SUCCESS", summary.results().get(0).actual());
@@ -97,6 +102,11 @@ class FrameworkEngineTest {
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/summary.json")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.xml")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/report/junit.html")));
+        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/performance.json")));
+        String performance = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/performance.json")), "UTF-8");
+        assertTrue(performance.contains("\"schemaVersion\":\"att-performance/v2.4.3\""));
+        assertTrue(performance.contains("\"caseExecutionMs\""));
+        assertTrue(Files.exists(caseDirectory.resolve("process-output/callApi.stdout")));
         assertFalse(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.html")));
         String manifest = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/run.yaml")), "UTF-8");
         assertTrue(manifest.contains("schemaVersion: att-run/v2.1"));
@@ -184,6 +194,10 @@ class FrameworkEngineTest {
     }
 
     private FrameworkConfig globalConfig() {
+        return globalConfig("append-to-copy");
+    }
+
+    private FrameworkConfig globalConfig(String reportMode) {
         Map<String, ToolArgumentConfig> args = new LinkedHashMap<String, ToolArgumentConfig>();
         args.put("caseId", new ToolArgumentConfig("caseId", "Case ID", "Full V2 Case ID", true, ""));
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
@@ -192,7 +206,7 @@ class FrameworkEngineTest {
         Map<String, String> report = new LinkedHashMap<String, String>();
         report.put("result", "Test Result");
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30000,
-                Paths.get("templates"), tools, new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", report), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
+                Paths.get("templates"), tools, new ReportConfig(reportMode, "${suiteName}.result.xlsx", report), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
     }
 
     private void writeWorkbook(Path path) throws Exception {

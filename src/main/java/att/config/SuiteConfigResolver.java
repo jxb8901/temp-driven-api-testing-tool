@@ -53,7 +53,7 @@ public final class SuiteConfigResolver {
             int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
             return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
                     global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
-                    global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors());
+                    global.tools(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput());
         } catch (att.validation.DiagnosticException e) {
             throw e;
         } catch (Exception e) {
@@ -102,7 +102,7 @@ public final class SuiteConfigResolver {
             if (!(e.getValue() instanceof String) || String.valueOf(e.getValue()).trim().isEmpty()) throw new IllegalArgumentException("Report column header must be a non-blank string: " + key);
             columns.put(key, String.valueOf(e.getValue()));
         }
-        return new ReportConfig(global.report().mode(), global.report().fileNamePattern(), columns, global.report().junitCaseLogEmbedThresholdBytes());
+        return new ReportConfig(global.report().mode(), global.report().fileNamePattern(), columns, global.report().junitCaseLogEmbedThresholdBytes(), global.report().htmlCaseLogInlineLimitBytes());
     }
 
     private Path sidecarPath(Path suitePath) {

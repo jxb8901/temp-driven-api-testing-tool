@@ -6,6 +6,7 @@ import att.config.FrameworkConfigLoader;
 import att.core.ExecutionOptions;
 import att.core.FrameworkEngine;
 import att.core.RunSummary;
+import att.core.PerformanceProfile;
 import att.report.PackageDocumentationGenerator;
 import att.report.GeneratedOutputCleaner;
 import att.report.RunArchiveBuilder;
@@ -33,6 +34,8 @@ public final class FrameworkRunner {
             if ("help".equals(options.command())) { help(); return; }
             if ("version".equals(options.command())) { System.out.println(Version.DISPLAY); return; }
             Path root = Paths.get("").toAbsolutePath();
+            PerformanceProfile profile = new PerformanceProfile(options.profile());
+            long profilePhase = profile.begin();
             FrameworkConfig config;
             try { config = new FrameworkConfigLoader().load(options.configPath(), root); }
             catch (att.validation.DiagnosticException e) { throw e; }
@@ -41,6 +44,7 @@ public final class FrameworkRunner {
                         "Unable to load ATT global configuration", e, options.configPath().toString(), "config",
                         "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
             }
+            profile.end("configLoadMs", profilePhase);
             if ("docs".equals(options.command())) {
                 System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
                 return;
@@ -76,7 +80,9 @@ public final class FrameworkRunner {
                     }
                 }
             }
+            profilePhase = profile.begin();
             PackageValidator.ValidationSummary validation = new PackageValidator(root, config).validate(options);
+            profile.end("validationMs", profilePhase);
             if ("validate".equals(options.command())) {
                 if ("json".equals(options.format())) { String json = validation.toJson(); att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json); System.out.println(json); }
                 else { System.out.println("Validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation); printDiagnostics(validation, options, System.out, true); }
@@ -102,7 +108,7 @@ public final class FrameworkRunner {
                 System.out.println("[2/4] Selected: " + validation.cases + " cases from " + validation.suites + " suites");
                 System.out.println("[3/4] Executing cases (verbose Case-log mirroring enabled)");
             }
-            RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics);
+            RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics, profile);
             if ("json".equals(options.format())) {
                 java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", summary.reportPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
             } else if (!options.quiet()) {
@@ -131,7 +137,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot uses --suite <xlsx>, --suite-dir <dir>, or --all\n  --format human|json --ci-output junit,json [--queue|--parallel] --quiet --verbose");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot uses --suite <xlsx>, --suite-dir <dir>, or --all\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {

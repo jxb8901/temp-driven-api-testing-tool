@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.BufferedWriter;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -18,10 +19,12 @@ import java.util.Map;
 /**
  * Appends ordered V2 case, stage and action diagnostics into one UTF-8 case log.
  */
-public class CaseExecutionLog {
+public class CaseExecutionLog implements AutoCloseable {
     private final Path path;
     private final boolean yamlAnchors;
     private final java.util.function.Consumer<String> mirror;
+    private final BufferedWriter writer;
+    private final Yaml yaml;
 
     public CaseExecutionLog(Path path) throws IOException {
         this(path, false);
@@ -36,7 +39,8 @@ public class CaseExecutionLog {
         this.yamlAnchors = yamlAnchors;
         this.mirror = mirror;
         Files.createDirectories(path.getParent());
-        Files.write(path, new byte[0]);
+        this.writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+        this.yaml = new Yaml();
     }
 
     public Path path() {
@@ -53,11 +57,14 @@ public class CaseExecutionLog {
             text.append(data).append("\n\n");
         } else {
             Object serializable = yamlAnchors ? data : detached(data, new IdentityHashMap<Object, Boolean>());
-            text.append(new Yaml().dump(serializable)).append("\n");
+            text.append(yaml.dump(serializable)).append("\n");
         }
-        Files.write(path, text.toString().getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.APPEND);
+        writer.write(text.toString());
+        writer.flush();
         if (mirror != null) mirror.accept(text.toString());
     }
+
+    @Override public synchronized void close() throws IOException { writer.close(); }
 
     /** Writes the human-readable action log without repeating the complete state retained in case.yaml. */
     public void appendAction(String section, Map<String, Object> action) throws IOException {
@@ -110,7 +117,7 @@ public class CaseExecutionLog {
         }
         if (stdout != null && !String.valueOf(stdout).isEmpty()) result.put("stdout", stdout);
         copyNonEmpty(attempt, result, "stderr");
-        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport");
+        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated", "stdoutArtifactTruncated", "stderrArtifactTruncated", "stdoutArtifact", "stderrArtifact", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport");
         return result;
     }
 

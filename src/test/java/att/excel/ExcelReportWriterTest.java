@@ -112,6 +112,36 @@ class ExcelReportWriterTest {
     }
 
     @Test
+    void matchesCaseIdsWithTheSameFormattedValueAsTheTestcaseLoader() throws Exception {
+        Path source = tempDir.resolve("formatted-case-id.xlsx");
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(source)) {
+            Sheet sheet = workbook.createSheet("案例");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("案例編號");
+            header.createCell(1).setCellValue("測試結果");
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue(7);
+            row.getCell(0).setCellStyle(workbook.createCellStyle());
+            row.getCell(0).getCellStyle().setDataFormat(workbook.createDataFormat().getFormat("0000"));
+            row.createCell(1).setCellValue("舊結果");
+            workbook.write(output);
+        }
+        Map<String,String> columns = new LinkedHashMap<String,String>();
+        columns.put("result", "測試結果");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", columns),
+                new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
+                "案例編號", "", Collections.emptyList(), Collections.emptyList());
+        TestResult result = new TestResult("payment.0007", "付款", ResultStatus.PASS, Duration.ZERO, "", "", null, Collections.emptyList());
+
+        Path output = new ExcelReportWriter(config).write(source, tempDir.resolve("run-formatted-id"), Collections.singletonList(result));
+
+        try (InputStream input = Files.newInputStream(output); Workbook workbook = WorkbookFactory.create(input)) {
+            assertEquals("PASS", workbook.getSheet("案例").getRow(1).getCell(1).getStringCellValue());
+        }
+    }
+
+    @Test
     void reportsAReadableErrorInsteadOfPassingNegativeCellIndexToPoi() throws Exception {
         Path source = tempDir.resolve("missing-case-header.xlsx");
         try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(source)) {

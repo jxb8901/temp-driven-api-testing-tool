@@ -26,7 +26,11 @@ class ExecutionOptionsTest {
         assertEquals("reject", ExecutionOptions.parse(new String[]{"run","--all"}).concurrencyMode());
         assertEquals("queue", ExecutionOptions.parse(new String[]{"run","--all","--queue"}).concurrencyMode());
         assertEquals("parallel", ExecutionOptions.parse(new String[]{"run","--all","--parallel"}).concurrencyMode());
+        ExecutionOptions renamed = ExecutionOptions.parse(new String[]{"run","--all","--allow-parallel-runs","--profile"});
+        assertEquals("parallel", renamed.concurrencyMode());
+        assertTrue(renamed.profile());
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run","--all","--queue","--parallel"}));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run","--all","--parallel","--allow-parallel-runs"}));
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"validate","--parallel"}));
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run","--all","--concurrency","parallel"}));
     }

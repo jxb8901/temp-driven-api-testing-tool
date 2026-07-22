@@ -1,7 +1,7 @@
-# ATT V2.4.2 User Manual and Reference
+# ATT V2.4.3 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.4.2
+Version: 2.4.3
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -965,6 +965,9 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --run-id <id>` | Set final run directory name |
 | `./att.sh run <selection> --output-dir <dir>` | Override output root |
 | `./att.sh run <selection> --ci-output junit,json` | Write CI XML/JSON plus JUnit HTML |
+| `./att.sh run <selection> --profile` | Write per-run `performance.json` timings and counters |
+| `./att.sh run <selection> --queue` | Wait for another ATT process using the same output root |
+| `./att.sh run <selection> --allow-parallel-runs` | Allow concurrent ATT processes; does not parallelize Cases in this run |
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress normal completion output |
 | `./att.sh run <selection> --verbose` | Show lifecycle progress and mirror complete Case logs |
@@ -1030,10 +1033,13 @@ caseLog: {yamlAnchors: false}
 testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
+execution:
+  processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
 report:
   mode: append-to-copy
   fileNamePattern: "${suiteName}.result.xlsx"
   columns: {}
+  html: {caseLogInlineLimitBytes: 32768}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
 toolGroups: [config/tools/database.yaml]
@@ -1051,9 +1057,12 @@ tools: {}
 | `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
-| `report.mode` | `append-to-copy` | Only `append-to-copy` is supported |
+| `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
+| `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
+| `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
 | `report.columns` | `{}` | Arbitrary string keys and string label values |
+| `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
@@ -1064,13 +1073,16 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `report`, `xml`, `toolGroups`, `ssh`, `tools`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `ssh`, `tools`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
 | `run.id` | `default`, `timestampFormat`, `x-*` |
-| `report` | `mode`, `fileNamePattern`, `columns`, `junit`, `x-*` |
+| `execution` | `processOutput`, `x-*` |
+| `execution.processOutput` | `memoryLimitBytes`, `artifactLimitBytes`, `x-*` |
+| `report` | `mode`, `fileNamePattern`, `columns`, `html`, `junit`, `x-*` |
+| `report.html` | `caseLogInlineLimitBytes`, `x-*` |
 | `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` |
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
@@ -1147,7 +1159,7 @@ If an assign expression fails, ATT does not create its variable. This does not r
 
 #### Tool action `saveAs`
 
-`saveAs` is an optional property of a `type: tool` action; it is not a property of the global or grouped Tool definition. It persists that invocation's complete raw stdout as a dedicated Case artifact:
+`saveAs` is an optional property of a `type: tool` action; it is not a property of the global or grouped Tool definition. For a configured Tool it persists that invocation's complete raw stdout as a dedicated Case artifact. For a primary built-in call it persists the built-in's text result as UTF-8:
 
 ```yaml
 callApi:
@@ -1158,7 +1170,7 @@ callApi:
   assert: "${output.result.status} == 'SUCCESS'"
 ```
 
-The saved bytes are stdout exactly as produced by the process, including any final line ending; they are not the trimmed `rawOutput` string or the parsed `output.result`. ATT resolves the filename below the current Case log directory, normally alongside `case.log` under `output/<RunID>/<CaseID>/`. Parent directories such as `responses/` are created. The saved path appears in the action's `output.targetFiles` and in the Tool-attempt evidence as `outputFile`. Without `saveAs`, stdout and parsed results remain in Case evidence, but ATT creates no separate Tool-output file.
+For a configured Tool, saved bytes are stdout exactly as produced by the process, including any final line ending; they are not the trimmed `rawOutput` string or parsed `output.result`. For a primary built-in, they are `String.valueOf(output.result)` encoded as UTF-8. ATT resolves the filename below the current Case log directory, normally alongside `case.log` under `output/<RunID>/<CaseID>/`. Parent directories such as `responses/` are created. The saved path appears in the action's `output.targetFiles` and attempt evidence as `outputFile`. Without `saveAs`, ATT creates no separate output file.
 
 `saveAs` may contain `${...}` references plus `#{...}` built-in or configured-Tool calls evaluated before the primary Tool action starts. Canonical Context paths are preferred:
 
@@ -1206,7 +1218,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.4.2",
+  "attVersion": "2.4.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1298,12 +1310,20 @@ The available values and callable capabilities still depend on the location's sc
 | assert-action `actual` | Runtime Context including current `output` | Yes | Yes | After assertion evaluation |
 | log-action `message`, `file`, and `fields` values | Runtime Context before current output | Yes | Yes | Before reading/emitting the optional file |
 | assign-action `expression` | Runtime Context before current output | Yes | Yes | Before publishing `CASE.VARS.<name>` |
-| Tool-action `call` arguments | Runtime Context before current output | Yes | Yes | Before the primary Tool invocation |
+| Tool-action `call` | Runtime Context before current output | Yes, including as the primary call | Yes | As the action's primary invocation |
 | Tool-action `saveAs` | Runtime Context before current output | Yes | Yes | Before the primary Tool invocation |
 | `config.report.fileNamePattern` | `${suiteName}` or bare `suiteName` inside a call | Yes | No | When writing the result workbook |
 | Tool-definition `command` tokens | declared Tool-input aliases, including bare arguments inside a call | Yes | No | When constructing logical argv |
 
-For a `type: tool` action, the outer `call` must still name the configured Tool being executed; a built-in cannot replace that primary Tool. Built-ins and other configured Tools may be used inside its argument expressions. Configured Tool calls are deliberately unavailable in `fileNamePattern` and Tool `command`: those dedicated scopes have no Case execution/evidence boundary, and allowing a Tool call while expanding another Tool's command would create hidden or recursive process execution.
+For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in-process and publishes its value at `${output.result}`; it has `exitCode: 0`, supports the action's assertion and optional `saveAs`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. `timeoutMs` cannot pre-empt an in-process built-in, and `EXIT_CODE` retry does not repeat its successful zero-exit result. Built-ins and other configured Tools may also be used inside argument expressions. Configured Tool calls remain unavailable in `fileNamePattern` and Tool `command`: those dedicated scopes have no Case execution/evidence boundary, and allowing a Tool call while expanding another Tool's command would create hidden or recursive process execution.
+
+```yaml
+normalizeReference:
+  type: tool
+  call: "#{upper(CASE.reference)}"
+  saveAs: "normalized-reference.txt"
+  assert: "${output.result} == 'PAY-001'"
+```
 
 `#{...}` is not restricted to text replacement. An exact nested call argument retains its typed result, and assertion calls are evaluated before comparison parsing. Therefore this is valid:
 
@@ -1646,13 +1666,13 @@ Run and Case IDs appear unchanged after validation. A final run directory repres
 
 `report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
 
-An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, the detailed execution log, and explicit `.log`/`case.yaml` artifact links. Expected is the ordered LF-joined non-blank descriptions and `expected` values from assert actions; Actual is the ordered LF-joined non-blank runtime `actual` values. The detailed log shows chronological execution evidence; `case.yaml` holds the complete structured final Stage/Template/Action/Tool state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, tool arguments and argv, stdout/stderr, raw and parsed output, retry attempts, diagnostics, and saved payload/tool-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
+An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit `.log`/`case.yaml` artifact links. `report.html.caseLogInlineLimitBytes` controls the head/tail preview; `0` keeps only the artifact link. Expected is the ordered LF-joined non-blank descriptions and `expected` values from assert actions; Actual is the ordered LF-joined non-blank runtime `actual` values. `case.yaml` holds the complete structured final Stage/Template/Action/Tool state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, tool arguments and argv, bounded stdout/stderr previews, full-or-capped process artifacts, raw and parsed output, retry attempts, diagnostics, and saved payload/tool-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
 
 `report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
 
 ### Result workbook
 
-ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Global `report.fileNamePattern` controls its filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text.
+ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Set `report.mode: none` for CI or large runs that do not need a copied workbook. Global `report.fileNamePattern` controls the copy filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text. Row matching reads the Case ID with the same Excel `DataFormatter` and whitespace normalization as testcase loading, so displayed formats such as numeric leading zeroes identify the same Case during execution and report writing.
 
 ### JUnit XML
 
@@ -1843,7 +1863,9 @@ An interrupted run stays in `.in-progress` and is not eligible for `report`, `bu
 
 ### Process safety
 
-ATT constructs argv directly and uses no implicit shell. Timeout termination must stop the managed process according to platform support and retain process evidence. Structured parsers reject malformed/ambiguous input and XML external-resource features.
+ATT constructs argv directly and uses no implicit shell. Local stdout and stderr are drained concurrently, retained in memory only as bounded head/tail previews, and streamed to `process-output/*.stdout|stderr` artifacts up to `execution.processOutput.artifactLimitBytes`. Evidence records original byte counts and truncation flags. Timeout termination stops the managed process according to platform support and retains the same bounded evidence. Structured parsers reject malformed/ambiguous input and XML external-resource features.
+
+`run --profile` writes `performance.json` beside `run.yaml`. It records configuration load, validation, plan, Case execution, result-workbook, HTML/CI report, input-hash, and publish-path-rewrite timings; selected/completed Case counts; schema/Template/payload cache loads and hits; process-output bytes/truncations; and a completion-time heap snapshot. It is diagnostic evidence, not a stable CI schema contract.
 
 Workbook import uses Apache POI `DataFormatter` for ordinary cells and deliberately does not create a `FormulaEvaluator`; formula expressions, not cached results, enter Context.
 
@@ -1856,7 +1878,7 @@ Workbook import uses Apache POI `DataFormatter` for ordinary cells and deliberat
 | `build` and `run` execute together | Build pins one completed latest-run/manifest pair and never archives `.in-progress` content. |
 | `report` and `clean` execute together | This destructive race is unsupported. Report fails rather than producing a partial result; serialize report/archive/clean jobs sharing one output root. |
 
-Use separate `--output-dir` values when parallel jobs need independent run history, cleanup, or latest-run behavior.
+Use `--allow-parallel-runs` only to permit multiple ATT processes to share one output root; it does not add Case workers inside one run. `--parallel` remains a deprecated compatibility alias. Use separate `--output-dir` values when parallel jobs need independent run history, cleanup, or latest-run behavior.
 
 ### Path and identifier safety
 

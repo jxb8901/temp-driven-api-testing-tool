@@ -60,4 +60,16 @@ class HtmlReportGeneratorTest {
         assertTrue(html.contains(HtmlSupport.id("payments.payment.TC001")));
         assertFalse(Files.exists(tempDir.resolve("report/cases")));
     }
+
+    @Test void limitsInlineCaseLogButKeepsArtifactLink() throws Exception {
+        Path log = tempDir.resolve("g.TC1/case.log"); Files.createDirectories(log.getParent());
+        byte[] content = new byte[5000]; java.util.Arrays.fill(content, (byte) 'x'); Files.write(log, content);
+        TestResult result = new TestResult("g.TC1", "large", ResultStatus.PASS, Duration.ZERO, "", "", log, Collections.<att.core.ValidationResult>emptyList());
+        Path report = new HtmlReportGenerator().generate(tempDir, "R", new RunSummary(Collections.singletonList(result), tempDir), Instant.now(), Instant.now(), 1024);
+        String html = new String(Files.readAllBytes(report), "UTF-8");
+        assertTrue(html.contains("ATT report preview truncated"));
+        assertTrue(html.contains("Inline log limited to 1024 bytes"));
+        assertTrue(html.contains("href=\"../g.TC1/case.log\""));
+        assertTrue(html.length() < 10000);
+    }
 }

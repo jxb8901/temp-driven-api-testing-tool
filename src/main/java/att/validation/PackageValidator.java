@@ -127,7 +127,7 @@ public final class PackageValidator {
             for (String expression : actionExpressions(action)) for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
             if ("render".equalsIgnoreCase(action.type())) try {
                 for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
-                    String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                    String content = att.template.PayloadCache.readUtf8(payload);
                     for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateReferencedCall(call, config);
                 }
             } catch (Exception e) {
@@ -313,9 +313,9 @@ public final class PackageValidator {
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
                 for (Path payload : payloads) {
                     try {
-                        String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                        String content = att.template.PayloadCache.readUtf8(payload);
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false);
-                        for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config, false);
+                        for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
                         if (!"file".equalsIgnoreCase(action.renderAs()) && !content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
                     } catch (DiagnosticException e) {
                         throw e.withLocation(payload.toString(), "actions." + action.id() + ".payload", null, null, null, template.name(), action.id());
@@ -535,7 +535,7 @@ public final class PackageValidator {
                     for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
                         sourceFile = payload;
                         sourceField = "actions." + action.id() + ".payload";
-                        String content = new String(Files.readAllBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+                        String content = att.template.PayloadCache.readUtf8(payload);
                         validateContextStructure(content, engine, context, testCase, completedActions);
                         String partial = engine.renderValidationValues(content, context);
                         validateCallArgumentsIn(content, context, engine);
@@ -644,7 +644,7 @@ public final class PackageValidator {
 
     private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         engine.validateValueSyntax(text);
-        for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCall(call, config, false);
+        for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCall(call, config);
     }
 
     private void validateAssertionExpression(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
@@ -658,16 +658,12 @@ public final class PackageValidator {
     }
 
     private void validateToolCall(String call, FrameworkConfig config) {
-        validateCall(callParser.parse(call), config, true);
+        validateCall(callParser.parse(call), config);
     }
 
-    private void validateCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config, boolean configuredToolRequired) {
+    private void validateCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         String toolName = parsed.name();
         if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
-            if (configuredToolRequired) throw new DiagnosticException(DiagnosticCodes.BUILTIN_INVALID,
-                    "Built-in function cannot be used as a tool action", "function=" + toolName,
-                    null, "call", null, null, null, null, null,
-                    "Call the built-in inside a render payload, or configure an external tool for a tool action.", null);
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
             for (ToolCallParser.Argument argument : parsed.arguments()) {

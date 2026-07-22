@@ -14,10 +14,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
 /** Recursively indexes V2 template directories by full path and symbolic name. */
 public final class StageTemplateLoader {
+    private static final Map<DescriptorKey, Map<String, Object>> DESCRIPTORS = new LinkedHashMap<DescriptorKey, Map<String, Object>>();
+    private static final Map<DescriptorKey, StageTemplate> TEMPLATES = new LinkedHashMap<DescriptorKey, StageTemplate>();
+    private static final AtomicLong LOADS = new AtomicLong();
+    private static final AtomicLong HITS = new AtomicLong();
     private final Path root;
     private final Path projectRoot;
     private final Map<String, Path> byPath = new LinkedHashMap<String, Path>();
@@ -89,7 +94,13 @@ public final class StageTemplateLoader {
 
     private StageTemplate loadDirectory(String reference, Path directory) throws Exception {
         if (!directory.normalize().startsWith(root)) throw new IllegalArgumentException("Template escapes root: " + reference);
-        Map<String, Object> map = yaml(directory.resolve("template.yaml"));
+        Path descriptor = directory.resolve("template.yaml");
+        DescriptorKey key = DescriptorKey.of(descriptor);
+        synchronized (TEMPLATES) {
+            StageTemplate cached = TEMPLATES.get(key);
+            if (cached != null) { HITS.incrementAndGet(); return cached; }
+        }
+        Map<String, Object> map = yaml(descriptor);
         Path schema = projectRoot.resolve("schemas/att-template-v2.3.schema.json");
         if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, Version.TEMPLATE_SCHEMA, "template");
@@ -111,18 +122,50 @@ public final class StageTemplateLoader {
             actions.add(new TemplateAction(actionKey, objectMap(actionMap)));
         }
         if (actions.isEmpty()) throw new IllegalArgumentException("Template must contain at least one action: " + directory);
-        return new StageTemplate(text(map.get("name"), reference), directory, actions);
+        StageTemplate loaded = new StageTemplate(text(map.get("name"), reference), directory, actions);
+        synchronized (TEMPLATES) {
+            removeOlder(TEMPLATES, key.path);
+            StageTemplate previous = TEMPLATES.put(key, loaded);
+            if (previous == null) LOADS.incrementAndGet(); else return previous;
+        }
+        return loaded;
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> yaml(Path file) throws Exception {
+        DescriptorKey key = DescriptorKey.of(file);
+        synchronized (DESCRIPTORS) {
+            Map<String, Object> cached = DESCRIPTORS.get(key);
+            if (cached != null) return cached;
+        }
         try (Reader reader = Files.newBufferedReader(file)) {
-            Object loaded = YamlSupport.parser().load(reader);
+            Object loaded;
+            synchronized (YamlSupport.parser()) { loaded = YamlSupport.parser().load(reader); }
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Template must be a YAML map: " + file);
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> e : ((Map<?, ?>) loaded).entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());
+            synchronized (DESCRIPTORS) { removeOlder(DESCRIPTORS, key.path); DESCRIPTORS.put(key, result); }
             return result;
         }
+    }
+
+    public static Stats stats() { return new Stats(LOADS.get(), HITS.get()); }
+    static void clearForTests() { synchronized (DESCRIPTORS) { DESCRIPTORS.clear(); } synchronized (TEMPLATES) { TEMPLATES.clear(); } LOADS.set(0); HITS.set(0); }
+    private static <T> void removeOlder(Map<DescriptorKey, T> cache, Path path) { java.util.Iterator<DescriptorKey> keys = cache.keySet().iterator(); while (keys.hasNext()) if (keys.next().path.equals(path)) keys.remove(); }
+
+    public static final class Stats {
+        private final long loads; private final long hits;
+        private Stats(long loads, long hits) { this.loads = loads; this.hits = hits; }
+        public long loads() { return loads; }
+        public long hits() { return hits; }
+    }
+
+    private static final class DescriptorKey {
+        private final Path path; private final long size; private final long modified;
+        private DescriptorKey(Path path, long size, long modified) { this.path = path; this.size = size; this.modified = modified; }
+        private static DescriptorKey of(Path file) throws Exception { Path canonical = file.toRealPath(); return new DescriptorKey(canonical, Files.size(canonical), Files.getLastModifiedTime(canonical).toMillis()); }
+        @Override public boolean equals(Object value) { if (!(value instanceof DescriptorKey)) return false; DescriptorKey other = (DescriptorKey) value; return size == other.size && modified == other.modified && path.equals(other.path); }
+        @Override public int hashCode() { int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode(); return 31 * result + Long.valueOf(modified).hashCode(); }
     }
 
     private Map<String, Object> objectMap(Map<?, ?> value) {

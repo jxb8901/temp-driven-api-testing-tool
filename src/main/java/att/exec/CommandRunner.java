@@ -4,7 +4,6 @@
 
 package att.exec;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -14,11 +13,16 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Runs shell commands with timeout handling and stdout/stderr capture.
  */
 public class CommandRunner {
+    private static final AtomicLong STDOUT_BYTES = new AtomicLong();
+    private static final AtomicLong STDERR_BYTES = new AtomicLong();
+    private static final AtomicLong TRUNCATED_STREAMS = new AtomicLong();
+    private final ThreadLocal<CapturePolicy> capture = new ThreadLocal<CapturePolicy>();
     public CommandResult run(String command, Duration timeout) throws IOException, InterruptedException {
         return run(command, timeout, null);
     }
@@ -41,8 +45,12 @@ public class CommandRunner {
         if (environment != null && !environment.isEmpty()) builder.environment().putAll(environment);
         Process process = builder.start();
         // Drain both streams concurrently so a verbose script cannot block on a full pipe.
-        StreamCollector stdout = new StreamCollector(process.getInputStream());
-        StreamCollector stderr = new StreamCollector(process.getErrorStream());
+        CapturePolicy policy = capture.get();
+        if (policy == null) policy = CapturePolicy.previewOnly(65536);
+        BoundedStreamCapture stdoutCapture = new BoundedStreamCapture(policy.memoryLimitBytes, policy.artifactLimitBytes, policy.stdoutArtifact);
+        BoundedStreamCapture stderrCapture = new BoundedStreamCapture(policy.memoryLimitBytes, policy.artifactLimitBytes, policy.stderrArtifact);
+        StreamCollector stdout = new StreamCollector(process.getInputStream(), stdoutCapture);
+        StreamCollector stderr = new StreamCollector(process.getErrorStream(), stderrCapture);
         Thread outThread = new Thread(stdout);
         Thread errThread = new Thread(stderr);
         outThread.start();
@@ -51,13 +59,49 @@ public class CommandRunner {
         boolean completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
         if (!completed) {
             process.destroyForcibly();
-            outThread.join();
-            errThread.join();
-            return new CommandResult(-1, stdout.text(), stderr.text(), true);
+            join(outThread, process.getInputStream());
+            join(errThread, process.getErrorStream());
+            stdoutCapture.close(); stderrCapture.close();
+            return result(-1, stdoutCapture, stderrCapture, true);
         }
-        outThread.join();
-        errThread.join();
-        return new CommandResult(process.exitValue(), stdout.text(), stderr.text(), false);
+        join(outThread, process.getInputStream());
+        join(errThread, process.getErrorStream());
+        stdoutCapture.close(); stderrCapture.close();
+        return result(process.exitValue(), stdoutCapture, stderrCapture, false);
+    }
+
+    public CommandResult runWithCapture(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory,
+                                        Map<String, String> environment, CapturePolicy policy) throws IOException, InterruptedException {
+        CapturePolicy previous = capture.get();
+        capture.set(policy);
+        try { return run(commandArguments, timeout, workingDirectory, environment); }
+        finally { if (previous == null) capture.remove(); else capture.set(previous); }
+    }
+
+    private CommandResult result(int exitCode, BoundedStreamCapture stdout, BoundedStreamCapture stderr, boolean timedOut) {
+        STDOUT_BYTES.addAndGet(stdout.bytes()); STDERR_BYTES.addAndGet(stderr.bytes());
+        if (stdout.memoryTruncated() || stdout.artifactTruncated()) TRUNCATED_STREAMS.incrementAndGet();
+        if (stderr.memoryTruncated() || stderr.artifactTruncated()) TRUNCATED_STREAMS.incrementAndGet();
+        return new CommandResult(exitCode, stdout.preview(), stderr.preview(), timedOut,
+                stdout.bytes(), stderr.bytes(), stdout.memoryTruncated(), stderr.memoryTruncated(), stdout.artifactTruncated(), stderr.artifactTruncated(),
+                stdout.artifact(), stderr.artifact());
+    }
+
+    public static Stats stats() { return new Stats(STDOUT_BYTES.get(), STDERR_BYTES.get(), TRUNCATED_STREAMS.get()); }
+    public static final class Stats {
+        private final long stdoutBytes; private final long stderrBytes; private final long truncatedStreams;
+        private Stats(long stdoutBytes, long stderrBytes, long truncatedStreams) { this.stdoutBytes = stdoutBytes; this.stderrBytes = stderrBytes; this.truncatedStreams = truncatedStreams; }
+        public long stdoutBytes() { return stdoutBytes; }
+        public long stderrBytes() { return stderrBytes; }
+        public long truncatedStreams() { return truncatedStreams; }
+    }
+
+    private void join(Thread thread, InputStream input) throws InterruptedException {
+        thread.join(5000L);
+        if (thread.isAlive()) {
+            try { input.close(); } catch (IOException ignored) {}
+            thread.join(1000L);
+        }
     }
 
     /** Parses the configured command without invoking a shell. */
@@ -96,10 +140,11 @@ public class CommandRunner {
 
     private static class StreamCollector implements Runnable {
         private final InputStream input;
-        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private final BoundedStreamCapture output;
 
-        StreamCollector(InputStream input) {
+        StreamCollector(InputStream input, BoundedStreamCapture output) {
             this.input = input;
+            this.output = output;
         }
 
         @Override
@@ -115,8 +160,14 @@ public class CommandRunner {
             }
         }
 
-        String text() {
-            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    public static final class CapturePolicy {
+        private final int memoryLimitBytes; private final long artifactLimitBytes; private final java.nio.file.Path stdoutArtifact; private final java.nio.file.Path stderrArtifact;
+        public CapturePolicy(int memoryLimitBytes, long artifactLimitBytes, java.nio.file.Path stdoutArtifact, java.nio.file.Path stderrArtifact) {
+            if (memoryLimitBytes < 1 || artifactLimitBytes < memoryLimitBytes) throw new IllegalArgumentException("Invalid process output capture limits");
+            this.memoryLimitBytes = memoryLimitBytes; this.artifactLimitBytes = artifactLimitBytes; this.stdoutArtifact = stdoutArtifact; this.stderrArtifact = stderrArtifact;
         }
+        static CapturePolicy previewOnly(int memoryLimitBytes) { return new CapturePolicy(memoryLimitBytes, memoryLimitBytes, null, null); }
     }
 }

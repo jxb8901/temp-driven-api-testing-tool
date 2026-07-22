@@ -31,12 +31,13 @@ public final class ExecutionOptions {
     private final Set<String> ciOutputs;
     private final String concurrencyMode;
     private final boolean updateSnapshot;
+    private final boolean profile;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
                             boolean failFast, Path outputDirectory) {
         this("run", configPath, suitePath == null ? Collections.<Path>emptyList() : Collections.singletonList(suitePath), suiteDirectory, caseIds, tags, excludeTags, runId, false,
-                rerunFailed, dryRun, failFast, outputDirectory, "human", false, false, "selected", defaultCiOutputs(), "reject", false);
+                rerunFailed, dryRun, failFast, outputDirectory, "human", false, false, "selected", defaultCiOutputs(), "reject", false, false);
     }
 
     private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
@@ -44,6 +45,15 @@ public final class ExecutionOptions {
                              boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
                              String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
                              boolean updateSnapshot) {
+        this(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId, all, rerunFailed, dryRun, failFast,
+                outputDirectory, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, false);
+    }
+
+    private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
+                             Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
+                             boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
+                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
+                             boolean updateSnapshot, boolean profile) {
         this.command = command;
         this.configPath = configPath;
         this.suitePaths = new ArrayList<Path>(suitePaths);
@@ -64,6 +74,7 @@ public final class ExecutionOptions {
         this.ciOutputs = new LinkedHashSet<String>(ciOutputs);
         this.concurrencyMode = concurrencyMode;
         this.updateSnapshot = updateSnapshot;
+        this.profile = profile;
     }
 
     public static ExecutionOptions parse(String[] args) {
@@ -80,7 +91,7 @@ public final class ExecutionOptions {
         Set<String> tags = new LinkedHashSet<String>();
         Set<String> excludeTags = new LinkedHashSet<String>();
         String runId = "";
-        boolean all = false, rerun = false, dry = false, failFast = false, updateSnapshot = false;
+        boolean all = false, rerun = false, dry = false, failFast = false, updateSnapshot = false, profile = false;
         boolean quiet = false, verbose = false, packageScope = false, selectedScope = false;
         String format = "human";
         String concurrencyMode = "reject";
@@ -102,11 +113,13 @@ public final class ExecutionOptions {
             else if ("--ci-output".equals(arg)) ciOutputs = parseCiOutputs(value(args, ++i, arg));
             else if ("--queue".equals(arg)) concurrencyMode = "queue";
             else if ("--parallel".equals(arg)) concurrencyMode = "parallel";
+            else if ("--allow-parallel-runs".equals(arg)) concurrencyMode = "parallel";
             else if ("--all".equals(arg)) all = true;
             else if ("--rerun-failed".equals(arg)) rerun = true;
             else if ("--dry-run".equals(arg)) dry = true;
             else if ("--fail-fast".equals(arg)) failFast = true;
             else if ("--update-snapshot".equals(arg)) updateSnapshot = true;
+            else if ("--profile".equals(arg)) profile = true;
             else if ("--quiet".equals(arg)) quiet = true;
             else if ("--verbose".equals(arg)) verbose = true;
             else if ("--package".equals(arg)) packageScope = true;
@@ -126,15 +139,16 @@ public final class ExecutionOptions {
         }
         if ("validate".equals(command) && "selected".equals(validationScope) && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) throw new IllegalArgumentException("validate --selected requires --all, --suite, --case, or --tag");
         if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
-        if (seenOptions.contains("--queue") && seenOptions.contains("--parallel")) throw new IllegalArgumentException("--queue and --parallel are mutually exclusive");
+        if (seenOptions.contains("--queue") && (seenOptions.contains("--parallel") || seenOptions.contains("--allow-parallel-runs"))) throw new IllegalArgumentException("--queue and --allow-parallel-runs are mutually exclusive");
+        if (seenOptions.contains("--parallel") && seenOptions.contains("--allow-parallel-runs")) throw new IllegalArgumentException("Use only one of --allow-parallel-runs or its deprecated --parallel alias");
         if (quiet && verbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         validateAllowed(command, seenOptions);
-        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot);
+        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile);
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
         Set<String> allowed = new LinkedHashSet<String>(java.util.Arrays.asList("--config", "--help"));
-        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot"));
+        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--allow-parallel-runs", "--profile", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot"));
         else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose"));
         else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
@@ -144,7 +158,7 @@ public final class ExecutionOptions {
 
     private static ExecutionOptions empty(String command) {
         return new ExecutionOptions(command, Paths.get("config/config.yaml"), Collections.<Path>emptyList(), null, new LinkedHashSet<String>(),
-                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "human", false, false, "selected", defaultCiOutputs(), "reject", false);
+                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "human", false, false, "selected", defaultCiOutputs(), "reject", false, false);
     }
 
     public String command() { return command; }
@@ -168,6 +182,7 @@ public final class ExecutionOptions {
     public Set<String> ciOutputs() { return Collections.unmodifiableSet(ciOutputs); }
     public String concurrencyMode() { return concurrencyMode; }
     public boolean updateSnapshot() { return updateSnapshot; }
+    public boolean profile() { return profile; }
 
     public boolean matches(TestCase testCase) {
         boolean caseMatches = caseIds.isEmpty() || caseIds.contains(testCase.caseId());

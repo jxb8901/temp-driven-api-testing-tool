@@ -79,6 +79,20 @@ class ToolInvokerTest {
         assertFalse(Files.exists(saved.getParent().resolve("input.yaml")));
     }
 
+    @Test void parsesLargeStructuredOutputFromStreamedArtifactInsteadOfPreview() throws Exception {
+        Path script = tempDir.resolve("large-json.sh");
+        Files.write(script, ("#!/bin/sh\nprintf '{\"value\":\"'\ni=0\nwhile [ $i -lt 3000 ]; do printf x; i=$((i+1)); done\nprintf '\"}'\n").getBytes("UTF-8"));
+        script.toFile().setExecutable(true);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("large", new ToolConfig("large", "Large", "Large JSON", "./large-json.sh", "json", Collections.<String,ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tempDir,tools,null,null,null,"","",null,null,1,"ignore","",false,new ProcessOutputConfig(1024,8192));
+        CaseRuntimeContext context = context();
+        ToolInvocationResult result = new ToolInvoker(tempDir, config).invokeAttempt("large", "large", Collections.<String,Object>emptyMap(), context, new CaseExecutionLog(tempDir.resolve("large.log")), 10000L);
+        assertEquals(3000, String.valueOf(((Map<?,?>) result.output()).get("value")).length());
+        assertEquals(Boolean.TRUE, result.invocation().get("stdoutTruncated"));
+        assertEquals(Boolean.FALSE, result.invocation().get("stdoutArtifactTruncated"));
+    }
+
     @Test void dropsBlankDelimitedValuesFromArgumentArray() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("keywords", new ToolArgumentConfig("keywords", "Keywords", "Search values", false, ","));

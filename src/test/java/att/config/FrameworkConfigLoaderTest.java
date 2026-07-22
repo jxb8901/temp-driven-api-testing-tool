@@ -163,4 +163,19 @@ class FrameworkConfigLoaderTest {
         Files.write(reserved, ("schemaVersion: att-config/v2.2\ntools:\n  nvl:\n    name: NVL\n    description: reserved\n    command: [echo]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(reserved));
     }
+
+    @Test void loadsPerformanceHardeningLimitsAndWorkbookDisableMode() throws Exception {
+        Path config = tempDir.resolve("performance.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.2\n" +
+                "execution:\n  processOutput: {memoryLimitBytes: 4096, artifactLimitBytes: 8192}\n" +
+                "report:\n  mode: none\n  html: {caseLogInlineLimitBytes: 2048}\n  junit: {caseLogEmbedThresholdBytes: 1024}\n").getBytes("UTF-8"));
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
+        assertEquals(4096, loaded.processOutput().memoryLimitBytes());
+        assertEquals(8192, loaded.processOutput().artifactLimitBytes());
+        assertEquals("none", loaded.report().mode());
+        assertEquals(2048, loaded.report().htmlCaseLogInlineLimitBytes());
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("bad-performance.yaml", "schemaVersion: att-config/v2.2\nexecution: {processOutput: {memoryLimitBytes: 4096, artifactLimitBytes: 2048}}\n")));
+    }
+
+    private Path write(String name, String content) throws Exception { Path file = tempDir.resolve(name); Files.write(file, content.getBytes("UTF-8")); return file; }
 }

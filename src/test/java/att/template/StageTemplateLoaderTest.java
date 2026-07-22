@@ -9,11 +9,25 @@ import static org.junit.jupiter.api.Assertions.*;
 class StageTemplateLoaderTest {
     @TempDir Path tempDir;
     @Test void resolvesChineseSymbolicNameAndFullPath() throws Exception {
+        StageTemplateLoader.clearForTests();
         Path dir=tempDir.resolve("templates/付款/本地"); Files.createDirectories(dir);
         Files.write(dir.resolve("template.yaml"), "schemaVersion: att-template/v2.3\nname: 中文模板\ndescription: test\nactions:\n  note: {type: log, message: ok}\n".getBytes("UTF-8"));
         StageTemplateLoader loader=new StageTemplateLoader(tempDir, Paths.get("templates"));
         assertEquals("中文模板", loader.load("中文模板").name());
         assertEquals("中文模板", loader.load("付款/本地").name());
+        assertEquals(1, StageTemplateLoader.stats().loads());
+        assertEquals(1, StageTemplateLoader.stats().hits());
+    }
+
+    @Test void payloadCacheReusesContentAndInvalidatesAfterChange() throws Exception {
+        PayloadCache.clearForTests();
+        Path payload = tempDir.resolve("payload.txt"); Files.write(payload, "one".getBytes("UTF-8"));
+        assertEquals("one", PayloadCache.readUtf8(payload));
+        assertEquals("one", PayloadCache.readUtf8(payload));
+        assertEquals(1, PayloadCache.stats().loads()); assertEquals(1, PayloadCache.stats().hits());
+        Thread.sleep(5L); Files.write(payload, "changed".getBytes("UTF-8"));
+        assertEquals("changed", PayloadCache.readUtf8(payload));
+        assertEquals(2, PayloadCache.stats().loads());
     }
 
     @Test void rejectsRemovedActionDefaultsAndInvalidActionFailureMode() throws Exception {

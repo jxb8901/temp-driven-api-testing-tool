@@ -1,8 +1,8 @@
-# ATT V2.4.2 新手入門
+# ATT V2.4.3 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.4.2 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。V2.4.2 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.4.3 的工具、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。V2.4.3 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.4.2 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.4.3 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -70,6 +70,10 @@ testcase:
   root: testcase
 templates:
   root: templates
+execution:
+  processOutput:
+    memoryLimitBytes: 65536
+    artifactLimitBytes: 104857600
 run:
   id:
     default: timestamp
@@ -77,6 +81,8 @@ run:
 report:
   mode: append-to-copy
   fileNamePattern: "${suiteName}.result.xlsx"
+  html:
+    caseLogInlineLimitBytes: 32768
   junit:
     caseLogEmbedThresholdBytes: 10240
 xml:
@@ -207,6 +213,16 @@ actions:
       retryOn: [EXIT_CODE]
 ```
 
+`type: tool` 的主要 `call` 也可直接使用 ATT built-in。結果同樣位於 `${output.result}`，可使用 `assert` 和 `saveAs`；built-in 在 JVM 內執行，因此不會產生外部進程的 `TOOL`、argv、stdout 或 stderr 證據：
+
+```yaml
+normalizeReference:
+  type: tool
+  call: "#{upper(CASE.reference)}"
+  saveAs: "normalized-reference.txt"
+  assert: "${output.result} == 'PAY-001'"
+```
+
 `requests/request.xml`：
 
 ```xml
@@ -220,7 +236,7 @@ actions:
 Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `description`：validate 先替換案例等靜態值，保留 `${output...}` 之類的 runtime 值；執行完成後再解析剩餘表達式。
 
 - `render` 必須有 `payload` glob 及 `renderAs: file|text|json|yaml|xml`。`file` 把每個匹配文件 render 到 Case output 目錄的同名相對路徑，目標清單位於 `output.targetFiles`；其他類型把單一值或按相對路徑排序的多值 map 放在 `output.result`。render 不再使用 `saveAs`、`overwrite` 或配置 `output.mode`。
-- `tool` 必須有一個已配置的 `call`；仍可用 `saveAs` 保存 raw stdout，並設定 `timeoutMs` 與 retry。
+- `tool` 必須有一個指向已配置 Tool 或 ATT built-in 的 `call`；配置 Tool 可用 `saveAs` 保存 raw stdout，built-in 則保存其 UTF-8 文本結果。`timeoutMs` 和 EXIT_CODE retry 只對外部 Tool 執行有實際控制作用。
 - `assert` action 必須有非空 `assert`，不再使用 `expression`；可加 `expected`（validate 階段求值）和 `actual`（runtime 求值）。
 - V2.4.2 中，任何可寫 `${...}` 的使用者欄位都可同時寫 `#{...}`。`${...}` 用於文字插值；在 `#{...}` 參數內可直接寫 canonical Context path，例如 `assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"`、`description: "#{upper(CASE.caseId)}"` 和 Tool action 的 `saveAs: "#{lower(CASE.caseId)}.txt"`。字面字串使用 ASCII 單／雙引號；舊的巢狀 `${...}` 寫法仍相容。完整規則見 Reference Manual 第 07 章。
 - `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
@@ -290,7 +306,7 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.4.2：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.4.3：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
@@ -380,7 +396,7 @@ ATT 內置函數包括：
 #{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.4.2](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.4.3](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -424,7 +440,8 @@ att.bat run --all
 ```bash
 ./att.sh run --all             # 默認：已有 run 時立即拒絕
 ./att.sh run --all --queue     # 顯示排隊提示，等前一個 run 完成
-./att.sh run --all --parallel  # 真正並行，各自寫入獨立 in-progress 目錄
+./att.sh run --all --allow-parallel-runs  # 允許多個 ATT 進程並行；不會並行單次 run 內的 Case
+./att.sh run --all --profile              # 完成後輸出 performance.json
 ```
 
 ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得排隊鎖後再次檢查。若已存在，會直接輸出包含重複 ID 與路徑的 `ATT-RUN-001`，不會顯示「Executing cases」或調用工具。若只在完成發布時才發生競態碰撞，ATT 會保留既有 run，並使用第一個可用的 `-2`、`-3` 等序號發布本次結果。請以完成訊息輸出的最終 Run ID 和 report 路徑為準。
@@ -438,7 +455,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.4.2",
+  "attVersion": "2.4.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -585,4 +602,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、報告、打包及診斷內容見 [ATT V2.4.2 Reference Manual](09_Reference_Manual_V2.md)。
+完整配置、Context、報告、打包及診斷內容見 [ATT V2.4.3 Reference Manual](09_Reference_Manual_V2.md)。

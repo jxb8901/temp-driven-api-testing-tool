@@ -196,7 +196,11 @@ public class UnifiedTemplateEngine {
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
         Map<String, Object> input = resolveArguments(parsed, context, log);
-        if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return builtIns.invoke(parsed.name(), input);
+        if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) {
+            long started = System.nanoTime();
+            Object output = builtIns.invoke(parsed.name(), input);
+            return attempt ? builtInAttempt(parsed.name(), invocationId, input, output, context, saveAs, overwrite, started) : output;
+        }
         if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + parsed.name());
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for tool invocation");
@@ -205,6 +209,35 @@ public class UnifiedTemplateEngine {
                 ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs, saveAs, overwrite)
                 : toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, null, "", false);
         return attempt ? result : result.output();
+    }
+
+    private att.exec.ToolInvocationResult builtInAttempt(String name, String invocationId, Map<String, Object> input,
+                                                         Object output, CaseRuntimeContext context, String saveAs,
+                                                         boolean overwrite, long started) throws Exception {
+        String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
+        String rawOutput = output == null ? "" : String.valueOf(output);
+        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation.put("id", id);
+        invocation.put("type", "builtin");
+        invocation.put("name", name);
+        invocation.put("status", "PASS");
+        invocation.put("durationMs", java.time.Duration.ofNanos(System.nanoTime() - started).toMillis());
+        invocation.put("input", input);
+        invocation.put("output", output);
+        invocation.put("rawOutput", rawOutput);
+        invocation.put("exitCode", 0);
+        if (saveAs != null && !saveAs.trim().isEmpty()) {
+            java.nio.file.Path directory = context.caseLogDirectory();
+            java.nio.file.Files.createDirectories(directory);
+            java.nio.file.Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
+            if (!outputFile.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool saveAs must stay under case log directory: " + saveAs);
+            java.nio.file.Files.createDirectories(outputFile.getParent());
+            byte[] bytes = rawOutput.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if (overwrite) java.nio.file.Files.write(outputFile, bytes);
+            else java.nio.file.Files.write(outputFile, bytes, java.nio.file.StandardOpenOption.CREATE_NEW);
+            invocation.put("outputFile", outputFile.toString());
+        }
+        return new att.exec.ToolInvocationResult(name, id, output, invocation);
     }
 
     private String renderTools(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {

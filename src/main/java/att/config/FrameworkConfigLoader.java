@@ -35,7 +35,7 @@ public final class FrameworkConfigLoader {
             Path schema = schema(projectRoot, schemaName);
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
             SchemaSupport.rejectUnknown(map, "config", v22
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
                     : new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools"});
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
@@ -51,7 +51,7 @@ public final class FrameworkConfigLoader {
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
-                    templatesRoot(map), testcasesRoot(map), tools, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map));
+                    templatesRoot(map), testcasesRoot(map), tools, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
         } catch (att.validation.DiagnosticException e) {
             throw e;
         } catch (Exception e) {
@@ -93,6 +93,11 @@ public final class FrameworkConfigLoader {
         if (map.get("templates") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("templates"), "config.templates"), "config.templates", "root");
         if (map.get("testcase") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("testcase"), "config.testcase"), "config.testcase", "root");
         if (map.get("caseLog") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("caseLog"), "config.caseLog"), "config.caseLog", "yamlAnchors");
+        if (map.get("execution") != null) {
+            Map<?, ?> execution = SchemaSupport.map(map.get("execution"), "config.execution");
+            SchemaSupport.rejectUnknown(execution, "config.execution", "processOutput");
+            if (execution.get("processOutput") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(execution.get("processOutput"), "config.execution.processOutput"), "config.execution.processOutput", "memoryLimitBytes", "artifactLimitBytes");
+        }
         if (map.get("ssh") != null) validateSshMap(SchemaSupport.map(map.get("ssh"), "config.ssh"), "config.ssh");
         if (map.get("run") != null) {
             Map<?, ?> run = SchemaSupport.map(map.get("run"), "config.run");
@@ -105,8 +110,9 @@ public final class FrameworkConfigLoader {
         }
         if (map.get("report") != null) {
             Map<?, ?> report = SchemaSupport.map(map.get("report"), "config.report");
-            SchemaSupport.rejectUnknown(report, "config.report", "mode", "fileNamePattern", "columns", "junit");
+            SchemaSupport.rejectUnknown(report, "config.report", "mode", "fileNamePattern", "columns", "junit", "html");
             if (report.get("junit") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(report.get("junit"), "config.report.junit"), "config.report.junit", "caseLogEmbedThresholdBytes");
+            if (report.get("html") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(report.get("html"), "config.report.html"), "config.report.html", "caseLogInlineLimitBytes");
         }
         if (map.get("xml") != null) { Map<?, ?> xml = SchemaSupport.map(map.get("xml"), "config.xml"); SchemaSupport.rejectUnknown(xml, "config.xml", "namespaceMode"); if (xml.get("namespaceMode") != null) { String mode = SchemaSupport.string(xml.get("namespaceMode"), "xml.namespaceMode", true); if (!("ignore".equals(mode) || "preserve".equals(mode))) throw new IllegalArgumentException("xml.namespaceMode must be ignore or preserve"); } }
     }
@@ -331,7 +337,7 @@ public final class FrameworkConfigLoader {
         Object value = map.get("report");
         if (!(value instanceof Map)) return null;
         Map<?, ?> report = (Map<?, ?>) value;
-        String mode = report.get("mode") == null ? "append-to-copy" : SchemaSupport.string(report.get("mode"), "report.mode", true); if (!"append-to-copy".equals(mode)) throw new IllegalArgumentException("report.mode must be append-to-copy");
+        String mode = report.get("mode") == null ? "append-to-copy" : SchemaSupport.string(report.get("mode"), "report.mode", true); if (!("append-to-copy".equals(mode) || "none".equals(mode))) throw new IllegalArgumentException("report.mode must be append-to-copy or none");
         String pattern = report.get("fileNamePattern") == null ? "${suiteName}.result.xlsx" : SchemaSupport.string(report.get("fileNamePattern"), "report.fileNamePattern", true);
         att.template.UnifiedTemplateEngine reportExpressions = new att.template.UnifiedTemplateEngine(null);
         if (!pattern.contains("${suiteName}") && !reportExpressions.referencesBareArgument(pattern, "suiteName")) throw new IllegalArgumentException("report.fileNamePattern must reference suiteName");
@@ -340,7 +346,19 @@ public final class FrameworkConfigLoader {
         for (String path : reportExpressions.parseValuePaths(pattern)) if (!"suiteName".equals(path)) throw new IllegalArgumentException("report.fileNamePattern only supports ${suiteName}: ${" + path + "}");
         Object junitValue = report.get("junit");
         Map<?, ?> junit = junitValue instanceof Map ? (Map<?, ?>) junitValue : java.util.Collections.emptyMap();
-        return new ReportConfig(mode, pattern, reportColumns(report.get("columns")), boundedInteger(junit.get("caseLogEmbedThresholdBytes"), 10240, 0, 1048576, "report.junit.caseLogEmbedThresholdBytes"));
+        Object htmlValue = report.get("html");
+        Map<?, ?> html = htmlValue instanceof Map ? (Map<?, ?>) htmlValue : java.util.Collections.emptyMap();
+        return new ReportConfig(mode, pattern, reportColumns(report.get("columns")), boundedInteger(junit.get("caseLogEmbedThresholdBytes"), 10240, 0, 1048576, "report.junit.caseLogEmbedThresholdBytes"), boundedInteger(html.get("caseLogInlineLimitBytes"), 32768, 0, 1048576, "report.html.caseLogInlineLimitBytes"));
+    }
+
+    private static ProcessOutputConfig processOutput(Map<?, ?> map) {
+        Object executionValue = map.get("execution");
+        Map<?, ?> execution = executionValue instanceof Map ? (Map<?, ?>) executionValue : java.util.Collections.emptyMap();
+        Object outputValue = execution.get("processOutput");
+        Map<?, ?> output = outputValue instanceof Map ? (Map<?, ?>) outputValue : java.util.Collections.emptyMap();
+        int memory = boundedInteger(output.get("memoryLimitBytes"), 65536, 1024, 1048576, "execution.processOutput.memoryLimitBytes");
+        int artifact = boundedInteger(output.get("artifactLimitBytes"), 104857600, memory, 1073741824, "execution.processOutput.artifactLimitBytes");
+        return new ProcessOutputConfig(memory, artifact);
     }
 
     private static RunConfig run(Map<?, ?> map) {

@@ -6,7 +6,9 @@ package att.excel;
 
 import att.config.FrameworkConfig;
 import att.config.SheetGroupConfig;
+import att.core.IdentifierValidator;
 import att.core.TestResult;
+import att.core.ValueNormalizer;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
@@ -64,8 +66,12 @@ public class ExcelReportWriter {
                     if (row == null) continue;
                     Cell caseCell = row.getCell(caseColumn.intValue());
                     if (caseCell == null) continue;
-                    String prefix = config.workbookId().isEmpty() ? group.id() : config.workbookId() + "." + group.id();
-                    TestResult result = byCaseId.get(prefix + "." + caseCell.toString().trim());
+                    String rowCaseId = ValueNormalizer.normalize(formatter.formatCellValue(caseCell));
+                    if (rowCaseId.isEmpty()) continue;
+                    String fullCaseId = config.workbookId().isEmpty()
+                            ? IdentifierValidator.caseId(group.id(), rowCaseId)
+                            : IdentifierValidator.caseId(config.workbookId(), group.id(), rowCaseId);
+                    TestResult result = byCaseId.get(fullCaseId);
                     if (result != null) writeResult(row, resultColumns, result, wrappedStyles);
                 }
             }

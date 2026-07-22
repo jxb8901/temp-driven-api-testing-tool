@@ -21,6 +21,10 @@ import java.util.LinkedHashSet;
 /** Generates one self-contained, offline-friendly V2 HTML run report. */
 public final class HtmlReportGenerator {
     public Path generate(Path runDirectory, String runId, RunSummary summary, Instant started, Instant ended) throws Exception {
+        return generate(runDirectory, runId, summary, started, ended, 32768);
+    }
+
+    public Path generate(Path runDirectory, String runId, RunSummary summary, Instant started, Instant ended, int caseLogInlineLimitBytes) throws Exception {
         Path report = runDirectory.resolve("report");
         Files.createDirectories(report);
         long elapsed = java.time.Duration.between(started, ended).toMillis();
@@ -71,16 +75,16 @@ public final class HtmlReportGenerator {
             html.append("<tr data-workbook=\"").append(escape(workbook)).append("\" data-sheet=\"").append(escape(sheet)).append("\" data-caseid=\"").append(escape(result.caseId())).append("\" data-name=\"").append(escape(result.caseName())).append("\" data-tags=\"").append(escape(tags)).append("\" data-expected=\"").append(escape(result.expected())).append("\" data-actual=\"").append(escape(result.actual())).append("\" data-search=\"").append(escape(search)).append("\" data-status=\"").append(result.status()).append("\" data-duration=\"").append(result.duration().toMillis()).append("\"><td>").append(escape(workbook)).append("</td><td>").append(escape(sheet)).append("</td><td><a href=\"#").append(anchor(result.caseId())).append("\">").append(escape(result.caseId())).append("</a></td><td>").append(escape(result.caseName())).append("</td><td>").append(escape(tags)).append("</td><td><pre>").append(escape(result.expected())).append("</pre></td><td><pre>").append(escape(result.actual())).append("</pre></td><td><span class=\"badge ").append(result.status()).append("\">").append(result.status()).append("</span></td><td>").append(result.duration().toMillis()).append(" ms</td></tr>");
         }
         html.append("</tbody></table><span id=\"case-details\"></span><h2>Case details</h2>");
-        for (TestResult result : summary.results()) appendCase(html, runDirectory, result);
+        for (TestResult result : summary.results()) appendCase(html, runDirectory, result, caseLogInlineLimitBytes);
         html.append("<script>(()=>{const q=document.querySelector('#caseSearch'),w=document.querySelector('#workbookFilter'),sh=document.querySelector('#sheetFilter'),st=document.querySelector('#statusFilter'),body=document.querySelector('#caseTable tbody');let sortKey='',direction=1;const rows=()=>Array.from(body.querySelectorAll('tr'));function filterCases(){const term=q.value.trim().toLowerCase();rows().forEach(r=>r.hidden=!((!term||r.dataset.search.includes(term))&&(!w.value||r.dataset.workbook===w.value)&&(!sh.value||r.dataset.sheet===sh.value)&&(!st.value||r.dataset.status===st.value)))}function sortCases(button){const key=button.dataset.sort;direction=sortKey===key?-direction:1;sortKey=key;document.querySelectorAll('[data-sort]').forEach(b=>b.removeAttribute('data-direction'));button.dataset.direction=direction===1?'asc':'desc';const numeric=button.dataset.type==='number';rows().sort((a,b)=>{const av=a.dataset[key]||'',bv=b.dataset[key]||'';return direction*(numeric?(Number(av)-Number(bv)):av.localeCompare(bv,undefined,{numeric:true,sensitivity:'base'}))}).forEach(r=>body.appendChild(r));filterCases()}q.addEventListener('input',filterCases);[w,sh,st].forEach(x=>x.addEventListener('change',filterCases));document.querySelectorAll('[data-sort]').forEach(b=>b.addEventListener('click',()=>sortCases(b)));filterCases()})();</script></main></body></html>");
         Path index = report.resolve("index.html");
         Files.write(index, html.toString().getBytes(StandardCharsets.UTF_8));
         return index;
     }
 
-    private void appendCase(StringBuilder html, Path runDirectory, TestResult result) throws Exception {
+    private void appendCase(StringBuilder html, Path runDirectory, TestResult result, int caseLogInlineLimitBytes) throws Exception {
         String log = result.caseLogPath() == null ? "" : result.caseLogPath().toString();
-        String logContent = result.caseLogPath() != null && Files.exists(result.caseLogPath()) ? new String(Files.readAllBytes(result.caseLogPath()), StandardCharsets.UTF_8) : "";
+        TextPreview.Preview logPreview = result.caseLogPath() != null && Files.exists(result.caseLogPath()) ? TextPreview.read(result.caseLogPath(), caseLogInlineLimitBytes) : new TextPreview.Preview("", false);
         html.append("<details id=\"").append(anchor(result.caseId())).append("\"><summary><span class=\"badge ").append(result.status()).append("\">").append(result.status()).append("</span> ").append(escape(result.caseId())).append(" — ").append(escape(result.caseName())).append(" <span class=\"muted\">(").append(result.duration().toMillis()).append(" ms)</span></summary><div class=\"detail\"><dl><dt>Expected</dt><dd><pre>").append(escape(result.expected())).append("</pre></dd><dt>Actual</dt><dd><pre>").append(escape(result.actual())).append("</pre></dd><dt>Case log</dt><dd>").append(escape(log)).append("</dd>");
         Path tree = result.caseLogPath() == null ? null : result.caseLogPath().getParent().resolve("case.yaml");
         if (result.caseLogPath() != null && Files.exists(result.caseLogPath())) {
@@ -94,7 +98,9 @@ public final class HtmlReportGenerator {
         }
         html.append("</dl><h3>Action results</h3><table><tr><th>Stage</th><th>Action</th><th>Status</th><th>Message</th></tr>");
         for (att.core.ValidationResult action : result.validations()) html.append("<tr><td>").append(escape(action.source())).append("</td><td>").append(escape(action.name())).append("</td><td><span class=\"badge ").append(action.status()).append("\">").append(action.status()).append("</span></td><td>").append(escape(action.message())).append("</td></tr>");
-        html.append("</table><h3>Detailed execution log</h3><pre>").append(escape(logContent)).append("</pre></div></details>");
+        html.append("</table><h3>Detailed execution log</h3><pre>").append(escape(logPreview.text)).append("</pre>");
+        if (logPreview.truncated) html.append("<p class=\"muted\">Inline log limited to ").append(caseLogInlineLimitBytes).append(" bytes; open the artifact for complete evidence.</p>");
+        html.append("</div></details>");
     }
 
     private String card(String name, Object value) { return "<div class=\"card\"><strong>" + escape(name) + "</strong><span>" + escape(String.valueOf(value)) + "</span></div>"; }

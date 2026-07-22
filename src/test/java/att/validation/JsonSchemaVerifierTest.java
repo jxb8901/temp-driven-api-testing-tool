@@ -8,10 +8,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class JsonSchemaVerifierTest {
     @TempDir Path tempDir;
     @Test void enforcesDraft202012CompositionAndConstraints() throws Exception {
+        JsonSchemaVerifier.clearForTests();
         Path schema=tempDir.resolve("schema.json");
         Files.write(schema, ("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"required\":[\"id\",\"mode\"],\"properties\":{\"id\":{\"type\":\"integer\",\"minimum\":2},\"mode\":{\"oneOf\":[{\"const\":\"A\"},{\"const\":\"B\"}]},\"tags\":{\"type\":\"array\",\"uniqueItems\":true}},\"additionalProperties\":false}").getBytes("UTF-8"));
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,"{\"id\":2,\"mode\":\"A\",\"tags\":[\"x\"]}"));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,"{\"id\":1,\"mode\":\"C\",\"tags\":[\"x\",\"x\"]}"));
+        assertEquals(1, JsonSchemaVerifier.stats().compiles());
+        assertEquals(1, JsonSchemaVerifier.stats().hits());
     }
     @Test void jsonWriterEscapesEveryControlCharacter() throws Exception {
         String json=JsonSupport.write(java.util.Collections.singletonMap("value", "a\t\b\f\u0001z"));

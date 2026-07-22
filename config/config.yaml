@@ -15,6 +15,11 @@ run:
 templates:
   root: templates
 
+execution:
+  processOutput:
+    memoryLimitBytes: 65536
+    artifactLimitBytes: 104857600
+
 toolGroups:
   - config/tools/sample.yaml
   - config/tools/fpp.yaml
@@ -22,6 +27,8 @@ toolGroups:
 report:
   mode: append-to-copy
   fileNamePattern: "${suiteName}.result.xlsx"
+  html:
+    caseLogInlineLimitBytes: 32768
   columns:
     result: Test Result
     durationMs: Duration(ms)

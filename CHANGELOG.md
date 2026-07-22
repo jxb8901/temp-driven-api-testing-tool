@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.4.3 - 2026-07-22
+
+- Added `run --profile` and per-run `performance.json` phase timings, cache counters, process-output byte counts, truncation counts, and a heap snapshot.
+- Added process-level compiled JSON Schema, Template descriptor/compiled Template, and UTF-8 render-payload caches with file-fingerprint invalidation.
+- Bounded local process stdout/stderr in memory with head/tail previews and streamed Case artifacts; added configurable memory/artifact limits and bounded the Java SSH fallback preview.
+- Reused one Case-log writer and YAML serializer for the Case lifetime, limited main HTML Case-log embedding, and changed framework input hashing to streaming SHA-256.
+- Added `report.mode: none` for CI runs that do not need copied result workbooks.
+- Renamed the concurrent-process opt-in to `--allow-parallel-runs`; the older `--parallel` spelling remains a deprecated compatibility alias and still does not parallelize Cases inside one run.
+- Fixed result-workbook row matching to use the same formatted and normalized Case ID value as testcase loading, including numeric cells with Excel formats such as leading zeroes.
+- Allowed a `type: tool` action to use an ATT built-in as its primary call, with normal action result/assertion handling and optional `saveAs` output but no external-process `TOOL` evidence.
+
 ## 2.4.2 - 2026-07-21
 
 - Unified `${...}` value references and `#{...}` built-in/configured-Tool calls behind one expression engine across every Case-runtime expression surface, including action descriptions, assertions, expected/actual values, log messages/fields, assign expressions, render payloads, Tool-call arguments, and Tool `saveAs`.

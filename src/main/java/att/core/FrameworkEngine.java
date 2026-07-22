@@ -64,8 +64,17 @@ public class FrameworkEngine {
     }
 
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics) throws Exception {
+        return run(options, validationDiagnostics, new PerformanceProfile(options.profile()));
+    }
+
+    public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics, PerformanceProfile profile) throws Exception {
         Instant runStarted = Instant.now();
+        long phaseStarted = profile.begin();
         ExecutionPlan plan = buildPlan(options);
+        profile.end("planCompileMs", phaseStarted);
+        profile.counter("suites", plan.suites().size());
+        long selectedCases = 0; for (ExecutionPlan.Suite suite : plan.suites()) selectedCases += suite.cases().size();
+        profile.counter("casesSelected", selectedCases);
         String runId = plan.runId();
         Path outputRoot = plan.outputRoot();
         Path finalRunDirectory = plan.finalRunDirectory();
@@ -89,6 +98,7 @@ public class FrameworkEngine {
         boolean stopRun = false;
         verbose(options, "[RUN] id=" + runId + " suites=" + plan.suites().size() + " output=" + portable(outputRoot));
 
+        phaseStarted = profile.begin();
         for (ExecutionPlan.Suite suitePlan : plan.suites()) {
             Path suite = suitePlan.workbook();
             FrameworkConfig suiteConfig = suitePlan.config();
@@ -112,6 +122,7 @@ public class FrameworkEngine {
             suiteReportResults.put(suitePlan, new ArrayList<TestResult>(suiteResults));
             if (stopRun) break;
         }
+        profile.end("caseExecutionMs", phaseStarted);
         if (results.isEmpty()) throw new IllegalArgumentException("Case selection is empty after rerun-failed filtering");
         try (RunIdPublicationGuard publicationGuard = RunIdPublicationGuard.acquire(outputRoot, runId)) {
         String completedRunId = uniqueCompletionRunId(outputRoot, runId);
@@ -120,17 +131,25 @@ public class FrameworkEngine {
             finalRunDirectory = IdentifierValidator.strictChild(outputRoot, completedRunId, "Run directory");
             runId = completedRunId;
         }
+        phaseStarted = profile.begin();
         for (Map.Entry<ExecutionPlan.Suite, List<TestResult>> entry : suiteReportResults.entrySet()) {
+            if ("none".equals(entry.getKey().config().report().mode())) continue;
             List<TestResult> publishedSuiteResults = new ArrayList<TestResult>();
             for (TestResult result : entry.getValue()) publishedSuiteResults.add(result.relocate(runDirectory, finalRunDirectory));
             new ExcelReportWriter(entry.getKey().config()).write(resolve(entry.getKey().workbook()), runDirectory, publishedSuiteResults);
         }
+        profile.end("resultWorkbookMs", phaseStarted);
         for (TestResult result : results) appendEvent(runDirectory, runId, result);
         Instant runEnded = Instant.now();
         RunSummary summary = new RunSummary(results, runDirectory);
-        Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded);
+        phaseStarted = profile.begin();
+        Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded, config.report().htmlCaseLogInlineLimitBytes());
+        profile.end("htmlReportMs", phaseStarted);
+        phaseStarted = profile.begin();
         List<Map<String, Object>> inputs = inputHashes(options);
         String inputManifestHash = sha256Bytes(new Yaml().dump(inputs).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        profile.end("inputHashMs", phaseStarted);
+        phaseStarted = profile.begin();
         new CiReportWriter().write(runDirectory, runId, config.environment(), summary, runStarted, runEnded, config.report().junitCaseLogEmbedThresholdBytes(), inputManifestHash, validationDiagnostics, options.ciOutputs());
         if (options.ciOutputs().contains("json")) JsonSchemaVerifier.verifyJson(projectRoot.resolve("schemas/att-ci-summary-v2.1.schema.json"), runDirectory.resolve("ci/summary.json"));
         if (options.ciOutputs().contains("junit")) {
@@ -140,8 +159,13 @@ public class FrameworkEngine {
             validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             validator.validate(new javax.xml.transform.stream.StreamSource(runDirectory.resolve("ci/junit.xml").toFile()));
         }
+        profile.end("ciReportMs", phaseStarted);
         writeManifest(runDirectory, runId, results, runStarted, runEnded, html, options, inputs, validationDiagnostics);
+        phaseStarted = profile.begin();
         rewritePublishedPaths(runDirectory, finalRunDirectory);
+        profile.end("pathRewriteMs", phaseStarted);
+        profile.counter("casesCompleted", results.size());
+        profile.write(runDirectory);
         Files.move(runDirectory, finalRunDirectory, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         writeLatest(outputRoot, finalRunDirectory, runId, summary, runEnded);
         List<TestResult> relocated = new ArrayList<TestResult>();
@@ -235,6 +259,8 @@ public class FrameworkEngine {
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             writeCaseTree(caseOutputDir, context);
             return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()));
+        } finally {
+            caseLog.close();
         }
     }
 
@@ -444,7 +470,7 @@ public class FrameworkEngine {
         return inputs;
     }
     private void addInput(List<Map<String, Object>> inputs, String kind, Path file) throws Exception { if (!Files.isRegularFile(file)) return; Map<String, Object> item = new LinkedHashMap<String, Object>(); item.put("kind", kind); item.put("path", projectRoot.toAbsolutePath().normalize().relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/')); item.put("sha256", sha256(file)); inputs.add(item); }
-    private String sha256(Path file) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(Files.readAllBytes(file)); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
+    private String sha256(Path file) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); try (java.io.InputStream input = Files.newInputStream(file)) { byte[] buffer = new byte[65536]; int count; while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count); } byte[] hash = digest.digest(); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
     private String sha256Bytes(byte[] bytes) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(bytes); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
 
     private void rewritePublishedPaths(Path workingDirectory, Path finalDirectory) throws Exception {

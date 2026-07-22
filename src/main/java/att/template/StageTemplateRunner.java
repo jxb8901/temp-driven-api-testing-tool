@@ -105,7 +105,7 @@ public class StageTemplateRunner {
         Object single = null;
         for (Path source : matches) {
             String relative = RenderPayloadResolver.portable(templateRoot.relativize(source));
-            String content = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+            String content = PayloadCache.readUtf8(source);
             String rendered = templateEngine.render(content, context, log);
             Object value;
             if ("file".equalsIgnoreCase(action.renderAs())) {

@@ -55,11 +55,19 @@ fi
 if [ "$NEEDS_BUILD" = true ]; then
   echo "Compiling ATT sources..."
   if command -v mvn >/dev/null 2>&1; then
-    (cd "$ROOT_DIR" && mvn -q -DskipTests compile)
+    # Try a parallel Maven build (1 core); if Maven doesn't support -T it will ignore it.
+    (cd "$ROOT_DIR" && mvn -q -DskipTests -T 1C compile) && touch "$BUILD_MARKER"
   elif command -v javac >/dev/null 2>&1; then
     mkdir -p "$ROOT_DIR/target/classes"
-    # shellcheck disable=SC2046
-    javac -source 8 -target 8 -cp "$CP" -d "$ROOT_DIR/target/classes" $(find "$ROOT_DIR/src/main/java" -name '*.java')
+    # Avoid ARG_MAX issues by writing sources to an argfile for javac
+    SRC_LIST="$ROOT_DIR/target/sources.list"
+    find "$ROOT_DIR/src/main/java" -name '*.java' > "$SRC_LIST"
+    if [ -s "$SRC_LIST" ]; then
+      # Use javac @argfile to pass many source files safely
+      javac -source 8 -target 8 -cp "$CP" -d "$ROOT_DIR/target/classes" @"$SRC_LIST" && touch "$BUILD_MARKER"
+    else
+      echo "No Java sources found to compile." >&2
+    fi
   else
     echo "Neither Maven nor javac is available. Build a release package first." >&2
     exit 2

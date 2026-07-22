@@ -58,10 +58,17 @@ public final class SshCommandRunner {
 
     Execution run(SshConfig ssh, List<String> logicalArgv, Duration timeout, Path projectRoot)
             throws IOException, InterruptedException {
+        return run(ssh, logicalArgv, timeout, projectRoot, null);
+    }
+
+    Execution run(SshConfig ssh, List<String> logicalArgv, Duration timeout, Path projectRoot, CommandRunner.CapturePolicy capture)
+            throws IOException, InterruptedException {
         String remoteCommand = remoteCommand(logicalArgv);
         if (localAvailable.getAsBoolean()) {
             List<String> argv = openSshArgv(ssh, remoteCommand, projectRoot);
-            return new Execution(commandRunner.run(argv, timeout, projectRoot), argv, "openssh");
+            CommandResult result = capture == null ? commandRunner.run(argv, timeout, projectRoot)
+                    : commandRunner.runWithCapture(argv, timeout, projectRoot, java.util.Collections.<String, String>emptyMap(), capture);
+            return new Execution(result, argv, "openssh");
         }
         if (warned.compareAndSet(false, true)) warningOutput.println(FALLBACK_WARNING);
         return new Execution(javaClient.run(ssh, remoteCommand, timeout, projectRoot),

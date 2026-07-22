@@ -1,11 +1,11 @@
 # ATT V2.4 System Design
 
 Status: implemented
-Target release: 2.4.2
+Target release: 2.4.3
 
 ## 1. Scope and source of truth
 
-V2.4 adds testcase version control without changing the established workbook → Case → ordered stage → template → ordered action → tool model. V2.4.1 additionally makes failed Context lookup easier to diagnose, permits deterministic unambiguous Context-path suffixes, improves the layout of multiple human validation diagnostics, and adds an explicit run option for refreshing selected snapshots before validation. V2.4.2 unifies `${...}` references and `#{...}` calls behind one expression engine across all expression-bearing surfaces. The `.xlsx` workbook remains the only editable source. Every workbook has two adjacent companions:
+V2.4 adds testcase version control without changing the established workbook → Case → ordered stage → template → ordered action → tool model. V2.4.1 additionally makes failed Context lookup easier to diagnose, permits deterministic unambiguous Context-path suffixes, improves the layout of multiple human validation diagnostics, and adds an explicit run option for refreshing selected snapshots before validation. V2.4.2 unifies `${...}` references and `#{...}` calls behind one expression engine across all expression-bearing surfaces. V2.4.3 hardens repeated parsing, process-output memory, Case-log/report I/O, result-workbook cost, and performance observability without introducing Case-level concurrency. The `.xlsx` workbook remains the only editable source. Every workbook has two adjacent companions:
 
 ```text
 testcase/payment.xlsx   # editable source
@@ -175,7 +175,7 @@ Two non-Case scopes use the same parser/renderer with explicit capabilities:
 - `report.fileNamePattern` exposes `${suiteName}` interpolation or bare `suiteName` inside a built-in call;
 - Tool-definition `command` exposes each declared argument as `${argument}`, `${input.argument}`, and `${TOOL.input.argument}`, plus the corresponding bare paths inside built-in calls.
 
-Configured Tool calls are rejected in these two scopes. Report writing has no Case execution log, while Tool command expansion occurs inside an existing Tool invocation; permitting configured Tools there would create untracked or recursive process execution. The primary `type: tool` action call must still resolve to a configured Tool, although nested argument calls use the normal Case-runtime capability.
+Configured Tool calls are rejected in these two scopes. Report writing has no Case execution log, while Tool command expansion occurs inside an existing Tool invocation; permitting configured Tools there would create untracked or recursive process execution. The primary `type: tool` action call may resolve to either a configured Tool or an ATT built-in. A primary built-in runs in-process, returns through `output.result`, and records builtin attempt evidence without a `TOOL` process node.
 
 Validation parses every expression-bearing field and nested call using the runtime grammar, validates call names/signatures and Context timing, and never invokes built-ins or external Tools. Tool command and report configuration are rejected at load time for unknown scope values, configured Tool calls, malformed expressions, or dynamic executable tokens.
 
@@ -187,4 +187,26 @@ Validation parses every expression-bearing field and nested call using the runti
 - Built-ins work in descriptions, assertions, expected/actual, logs, fields, assign, render payloads, Tool-call arguments, `saveAs`, report filename patterns, and Tool command tokens.
 - Configured Tool calls work on every Case-runtime text surface and emit normal evidence, but are rejected in report-filename and Tool-command scopes.
 - Assertion built-ins and configured Tools are evaluated before typed comparison parsing; the original and rendered assertion remain in action evidence.
-- Unknown calls, malformed nested calls, illegal scope references, and unsupported Tool-action primary built-ins fail validation rather than becoming literal text.
+- Unknown calls, malformed nested calls, illegal scope references, and invalid primary built-in signatures fail validation rather than becoming literal text.
+
+## 8. V2.4.3 performance hardening
+
+V2.4.3 removes repeated process-local parsing and bounds evidence amplification while preserving V2.4 execution order and validation semantics.
+
+- JSON Schema validators are cached by canonical schema path, size, and modification time. Template descriptors and compiled `StageTemplate` values use the same invalidation model. UTF-8 render payloads are cached by file fingerprint and reused across validation and execution.
+- A Case owns one persistent buffered log writer and one YAML serializer. The complete state remains in `case.yaml`; the human log remains the compact action/attempt projection.
+- Every local process stream is drained concurrently into a bounded head/tail memory preview and a bounded Case artifact. Byte counts and truncation flags remain in Tool evidence. The Java SSH fallback also bounds its in-memory preview.
+- `report.html.caseLogInlineLimitBytes` bounds the main HTML Case-log preview. `report.mode: none` skips the second workbook open/copy/write for CI runs that do not consume the result workbook.
+- Framework input SHA-256 uses a fixed-size streaming buffer. Archive hashing already follows the same streaming model.
+- `run --profile` emits configuration/validation/execution/report phase timings, cache/I/O counters, and a heap snapshot to `performance.json`.
+- `--allow-parallel-runs` names the existing cross-process lock bypass accurately. The old `--parallel` spelling remains an alias; neither option parallelizes Cases, Stages, or Actions within one run.
+
+### 8.1 V2.4.3 acceptance criteria
+
+- Repeated validation/execution references compile each unchanged schema and Template once per process and reuse unchanged payload text; a changed size or modification time invalidates the entry.
+- stdout/stderr memory usage is bounded independently of process output size, artifacts never exceed the configured cap, and evidence reports original bytes plus truncation state.
+- Tool `saveAs` uses the streamed stdout artifact when available rather than reconstructing the full output from the bounded preview.
+- Main HTML output never embeds more Case-log bytes than configured and always retains a relative link to the complete log artifact.
+- `report.mode: none` produces HTML/CI/run evidence normally but creates no result workbook.
+- Profiling is opt-in, does not contaminate JSON stdout, and is published atomically with the completed run.
+- Existing V2.4 validation, serial Case/Stage/Action ordering, snapshot checks, result status, and report contracts remain compatible.

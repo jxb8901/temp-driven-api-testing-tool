@@ -22,7 +22,7 @@ final class RunConcurrencyGuard implements Closeable {
         try { lock = channel.tryLock(); } catch (OverlappingFileLockException ignored) { }
         if (lock == null && "reject".equals(mode)) {
             channel.close();
-            throw new IllegalArgumentException("Another ATT run is active for output root " + outputRoot + "; use --queue to wait or --parallel to run concurrently");
+            throw new IllegalArgumentException("Another ATT run is active for output root " + outputRoot + "; use --queue to wait or --allow-parallel-runs to run concurrently");
         }
         if (lock == null) {
             queued.run();

@@ -1,6 +1,6 @@
-# ATT 2.4.2 - Automated Testing Tool
+# ATT 2.4.3 - Automated Testing Tool
 
-ATT V2.4.2 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions and local or SSH external tools, and produces atomic completed runs, result workbooks, offline HTML reports, JSON/JUnit CI output, logs, and verified run archives.
+ATT V2.4.3 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions and local or SSH external tools, and produces atomic completed runs, optional result workbooks, offline HTML reports, JSON/JUnit CI output, bounded process evidence, performance profiles, logs, and verified run archives.
 
 V2.4 retains the V2.3 Case → Stage → Template → Action → Tool and action-result contracts. It adds deterministic testcase version control: Excel remains the editable source, while `basename.xml` records only the normalized ATT testcase semantics and is verified before validation or execution.
 
@@ -57,6 +57,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - CI JSON: `output/<RunID>/ci/summary.json`
 - CI JUnit XML: `output/<RunID>/ci/junit.xml`
 - JUnit HTML report: `output/<RunID>/report/junit.html`
+- Optional performance profile: `output/<RunID>/performance.json` from `run --profile`
 - Package documentation: `build/docs/index.html`
 - Latest completed-run archive: `build/att-run-<RunID>.tar.gz`
 
@@ -87,6 +88,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - Validation parses the same Context references and inline `#{...}` calls used at runtime. A Context path may use any case-sensitive segment suffix that uniquely identifies one currently readable logical path; ambiguity is `ATT-CTX-002`. Unknown references report the requested path, deepest reached node, and missing segment; ambiguous references list their canonical candidates without dumping the full Context tree.
 - `type: assign` evaluates a text `expression` and publishes it under a unique Case-scoped `name`, for example `${CASE.VARS.txnSeq}`, while retaining the same value at `${ACTIONS.<id>.output.result}`. `CASE.VARS` persists across stages/templates but is isolated per Test Case; an optional assertion does not roll back a successfully evaluated assignment.
 - V2.4.2 routes every expression-bearing surface through one engine: every user-facing location that accepts `${...}` also accepts `#{...}`. `${...}` performs text interpolation; complete canonical Context paths may be passed directly inside calls, such as `#{length(CASE.VARS.reference)}`, while quoted paths remain literal strings and legacy nested `${...}` calls remain compatible. Case runtime fields can invoke built-ins or configured Tools; the dedicated report-filename and Tool-command scopes expose only their documented values and built-ins.
+- V2.4.3 caches compiled schemas, Templates, and render payloads; bounds process-output previews while streaming artifacts; limits HTML log embedding; supports `report.mode: none`; and exposes phase/counter evidence through `--profile`.
 - A normal human run prints only the final summary and report path. `--verbose` adds lifecycle progress and mirrors every complete Case-log block, including template/tool input, argv, stdout, stderr, and payload evidence; use it only where sensitive Case data may be displayed safely. `--quiet` suppresses normal output.
 - `sysdate([format])` and `systimestamp([format])` retain their ISO defaults and accept one positional or named Java `DateTimeFormatter` pattern, for example `#{sysdate('yyyyMMdd')}`.
 - Timeouts use milliseconds with range 1–3,600,000 and default 10,000: global `timeoutMs`, optional sidecar `timeoutMs`, then tool-action `timeoutMs` from highest to lowest precedence.
@@ -111,4 +113,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See [V2.4 System Design](docs/02_System_Design_V2.4.md) for the normative specification.
-See the [ATT V2.4.2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.4.2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [ATT V2.4.3 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.4.3 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

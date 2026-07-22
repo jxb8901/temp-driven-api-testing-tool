@@ -7,7 +7,6 @@ import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -44,8 +43,8 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
 
         Session session = null;
         ChannelExec channel = null;
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        BoundedStreamCapture stdout = new BoundedStreamCapture(65536, 65536, null);
+        BoundedStreamCapture stderr = new BoundedStreamCapture(65536, 65536, null);
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout.toMillis());
         try {
             session = jsch.getSession(ssh.user(), ssh.host(), ssh.port());
@@ -63,16 +62,17 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
             while (!channel.isClosed()) {
                 if (System.nanoTime() >= deadline) {
                     channel.disconnect();
-                    return new CommandResult(-1, text(stdout), text(stderr), true);
+                    return result(-1, stdout, stderr, true);
                 }
                 Thread.sleep(20L);
             }
-            return new CommandResult(channel.getExitStatus(), text(stdout), text(stderr), false);
+            return result(channel.getExitStatus(), stdout, stderr, false);
         } catch (JSchException e) {
             throw new IOException("Java SSH execution failed for " + ssh.destination() + ": " + e.getMessage(), e);
         } finally {
             if (channel != null && channel.isConnected()) channel.disconnect();
             if (session != null && session.isConnected()) session.disconnect();
+            stdout.close(); stderr.close();
         }
     }
 
@@ -87,7 +87,8 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
         return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, remaining));
     }
 
-    private static String text(ByteArrayOutputStream output) {
-        return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    private static CommandResult result(int exitCode, BoundedStreamCapture stdout, BoundedStreamCapture stderr, boolean timedOut) {
+        return new CommandResult(exitCode, stdout.preview(), stderr.preview(), timedOut, stdout.bytes(), stderr.bytes(),
+                stdout.memoryTruncated(), stderr.memoryTruncated(), false, false, null, null);
     }
 }
