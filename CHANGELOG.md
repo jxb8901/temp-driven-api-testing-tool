@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.6.0 - 2026-07-22
+
+- Added `att-config/v2.6` and `att-tool-group/v2.6` with exactly-one `command|call` Tool implementations while retaining V2.1/V2.2/V2.5 configuration and V2.2 Tool-group read compatibility.
+- Added typed call-backed Tool façades for `db.<instance>.query|scalar|update` and pure built-ins, including expression access for READ façades and primary-Tool-Action-only enforcement for DB updates.
+- Added definition-scoped typed `input.*`, pure built-ins, rendered inline/package SQL, positional JDBC parameters, common Tool arguments/documentation, typed `saveAs`, and nested TOOL/DB evidence without process-only argv/stdout/exit fields.
+- Added opt-in `cache.scope: case|db` with deterministic type-sensitive keys and hit evidence. Cache is deliberately unaffected by DB update, commit, rollback, transaction finalization, close, or reconnect; DB scope is an explicit stale-read contract.
+- Kept dbhelper-owned statement timeout, read-only, transaction, limit, connection, error, and Case `ERROR` semantics; process Action timeout/retry/output/SSH/argv properties are rejected for call-backed Tools.
+- Added V2.6 schemas, sample DB façade group/SQL file, generated documentation support, design/reference/Chinese documentation, and focused config/runtime/validation/cache regression coverage.
+
 ## 2.5.0 - 2026-07-22
 
 - Added first-class `type: db` Actions and independent `att-dbhelper/v2.5` instance files referenced by `att-config/v2.5`; process Tool groups remain on `att-tool-group/v2.2`.

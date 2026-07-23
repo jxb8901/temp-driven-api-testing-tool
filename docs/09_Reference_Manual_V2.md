@@ -1,7 +1,7 @@
-# ATT V2.5.0 User Manual and Reference
+# ATT V2.6.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.5.0
+Version: 2.6.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -52,7 +52,7 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, or assign a Case-scoped runtime value. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.
 
-### What V2.5 guarantees
+### What V2.6 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
@@ -71,8 +71,10 @@ att-package/
 ├── att.bat
 ├── config/
 │   ├── config.yaml
-│   └── dbhelpers/
-│       └── orders.yaml
+│   ├── dbhelpers/
+│   │   └── orders.yaml
+│   └── tools/
+│       └── orders-db.yaml
 ├── testcase/
 │   ├── payment.xlsx
 │   ├── payment.yaml
@@ -99,7 +101,7 @@ This example creates one payment test that renders JSON, invokes a tool, and ver
 Create `config/config.yaml`:
 
 ```yaml
-schemaVersion: att-config/v2.5
+schemaVersion: att-config/v2.6
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -455,7 +457,7 @@ Both `message` and `file` support the unified `${...}` / `#{...}` expression eng
 
 ### 3.3 Tool
 
-A tool is an external capability configured either globally under `config.yaml` or inside an independent tool-group file and called by template actions using named arguments.
+A Tool is a named capability configured either globally under `config.yaml` or inside an independent tool-group file. A command-backed Tool launches an external process; a V2.6 call-backed Tool invokes one typed DB operation or pure built-in. Both use the same outer call syntax and named-argument contract.
 
 ```yaml
 tools:
@@ -738,6 +740,190 @@ The similar DB spellings serve different purposes:
 ATT creates `CASE.DB` as an empty map when the Case starts, then adds one entry for each used dbhelper only after all Case Actions have finished and transaction finalization has run. Consequently, Actions in that Case cannot use `${CASE.DB.orders.state}` to make execution decisions. Read an operation's result from `${ACTIONS.<actionId>.output.result}`; use `CASE.DB` in persisted Context, Case logs, reports, or other post-Case processing.
 
 ATT bundles no JDBC driver. Put the driver and all dependencies in package-root `lib/` before starting ATT. JDBC service discovery is automatic; `connection.driverClass` supports legacy drivers. Jars load at JVM startup on a flat shared classpath.
+
+#### Call-backed Tools (V2.6)
+
+Call-backed Tools give repeated DB operations a short business name while preserving first-class dbhelper behavior. They are façades, not a replacement for `type: db` or `#{db.<instance>.*}`.
+
+Use `att-config/v2.6` and either define the Tool under global `tools`, or reference an `att-tool-group/v2.6` file:
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.6
+toolGroups:
+  - config/tools/orders-db.yaml
+dbhelpers:
+  - config/dbhelpers/orders.yaml
+```
+
+A V2.6 descriptor has exactly one of `command` or `call`. The following group shows query, scalar, SQL-file, update, and cache variants:
+
+```yaml
+# config/tools/orders-db.yaml
+schemaVersion: att-tool-group/v2.6
+id: orders
+name: Order database tools
+description: Reusable typed order operations
+
+tools:
+  find:
+    name: Find orders
+    description: Find orders by customer and status
+    call: "#{db.orders.query(sql='select order_id, status from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    cache:
+      scope: case
+    arguments:
+      customerId: {name: Customer ID, description: Customer to query, required: true}
+      status: {name: Status, description: Exact status, required: true}
+
+  count:
+    name: Count orders
+    description: Return one typed count
+    call: "#{db.orders.scalar(sql='select count(*) from orders where customer_id = ?', params=[input.customerId])}"
+    cache:
+      scope: db
+    arguments:
+      customerId: {name: Customer ID, description: Customer to count, required: true}
+
+  findByDate:
+    name: Find orders by date
+    description: Use a package-contained rendered SQL file
+    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[input.customerId, input.fromDate])}"
+    arguments:
+      customerId: {name: Customer ID, description: Customer to query, required: true}
+      fromDate: {name: From date, description: Inclusive lower bound, required: true}
+
+  updateStatus:
+    name: Update order status
+    description: Update one order
+    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[input.status, input.orderId])}"
+    arguments:
+      orderId: {name: Order ID, description: Order to update, required: true}
+      status: {name: Status, description: New status, required: true}
+```
+
+The definition uses typed `input.<argument>` values. `${input.customerId}` and `TOOL.input.*` are supported, but `CASE`, `RUN`, `ACTIONS`, `DB`, and configured Tool chaining are not. Case data must enter through the outer Tool call. Pure built-ins are allowed inside the definition, for example `params=[input.customerId, #{upper(input.status)}]`.
+
+The `call` value must be one exact `#{...}` expression targeting `db.<instance>.query`, `scalar`, `update`, or one pure built-in. A call-backed Tool cannot configure `output`, SSH, group `script`, or argument `delimit|argName|argNameMode`; those fields describe process execution and are rejected rather than ignored.
+
+For a DB façade, `sqlFile` must be a static package-relative path, for example `sqlFile='sql/orders-by-date.sql'`; an input- or expression-derived path is invalid. ATT validates the file, includes its SHA-256 in `run.yaml` as a `tool-sql` input, and renders the file contents at invocation time. This keeps package provenance complete while still allowing declared Tool inputs and pure built-ins inside the SQL text.
+
+##### Scenario: typed query in an expression
+
+READ façades work in `assign`, `assert`, payload rendering, log fields, descriptions, and ordinary call arguments:
+
+```yaml
+loadOrders:
+  type: assign
+  name: customerOrders
+  expression: >-
+    #{orders.find(
+        customerId=${CASE.customerId},
+        status='OPEN'
+    )}
+
+checkFirstOrder:
+  type: assert
+  assert: "${CASE.VARS.customerOrders.rowCount} > 0"
+  expected: At least one OPEN order
+  actual: "${CASE.VARS.customerOrders.rowCount}"
+```
+
+The exact call returns the same Java result object as `db.orders.query`; it is not converted through text. Row fields remain accessible as `${CASE.VARS.customerOrders.rows[0].STATUS}`.
+
+##### Scenario: scalar assertion
+
+```yaml
+checkOrderCount:
+  type: assert
+  assert: "#{orders.count(customerId=${CASE.customerId})} >= 1"
+  expected: Customer has an order
+  actual: Count returned by orders.count
+```
+
+`scalar` still requires exactly one row and one column. Zero, multiple, or multi-column results are `ERROR`.
+
+##### Scenario: primary Tool Action and saveAs
+
+```yaml
+queryOrders:
+  type: tool
+  call: "#{orders.find(customerId=${CASE.customerId}, status='OPEN')}"
+  saveAs:
+    path: db/open-orders.json
+    format: json
+    overwrite: false
+  assert: "${output.result.rowCount} > 0"
+```
+
+Call-backed Tool `saveAs` uses the normal `path`, `format`, and `overwrite` fields. `format` is required and may be `text|json|yaml|xml`. There is no process stdout, so `raw` is invalid. Prefer JSON/YAML/XML for query or update objects; `text` is most useful for a scalar or intentionally textual built-in result.
+
+##### Scenario: update façade
+
+WRITE façades are permitted only as the primary call of `type: tool`:
+
+```yaml
+closeOrder:
+  type: tool
+  call: "#{orders.updateStatus(orderId=${CASE.orderId}, status='CLOSED')}"
+  assert: "${output.result.affectedRows} == 1"
+```
+
+`#{orders.updateStatus(...)}` inside `assign`, `assert`, payload text, another Tool argument, or SQL is rejected during validation and again at runtime. DB errors make the Action and Case `ERROR`, not `FAIL`.
+
+##### Scenario: wrap a pure built-in
+
+Small domain-normalization helpers need no Java code:
+
+```yaml
+tools:
+  normalizeStatus:
+    name: Normalize status
+    description: Trim and uppercase a status
+    call: "#{upper(#{trim(input.value)})}"
+    cache:
+      scope: case
+    arguments:
+      value: {name: Value, description: Status text, required: true}
+```
+
+Call it as `#{normalizeStatus(value=${CASE.status})}`. A pure-built-in façade may use Case cache but cannot use DB cache.
+
+##### Cache scopes and stale-read contract
+
+```yaml
+cache:
+  scope: case   # or db
+```
+
+Only successful query, scalar, or pure-built-in results are stored. Updates cannot declare cache. The key is a SHA-256 digest of the qualified Tool name plus a deterministic, type-sensitive representation of resolved input; reordering named arguments does not change it.
+
+| Scope | Ownership and lifetime | Typical use |
+|---|---|---|
+| `case` | current `CaseRuntimeContext`; disappears with the Case | repeated lookup within one Case |
+| `db` | dbhelper instance + executor thread; normally worker/suite lifetime | stable or reference data reused across Cases |
+
+Cache is intentionally independent of JDBC lifecycle. DB update, commit, rollback, Case finalization, connection close, and automatic reconnect do **not** clear either cache. A DB-scope hit does not open or check the Connection. Consequently `db` scope can return stale data and should be enabled only when the package owner accepts that behavior. V2.6 has no TTL, size limit, persistence, or automatic coherence.
+
+Evidence records `cache.scope`, the SHA-256 `cache.key`, and `cache.hit`. A miss has nested DB evidence; a hit does not create a DB invocation because JDBC did not run.
+
+##### Timeout, retry, lifecycle, and evidence
+
+Call-backed DB Tools use the target dbhelper's `statement.timeoutSeconds`, read-only policy, transaction configuration, result limits, one-connection-per-instance/thread lifecycle, and Case pre-rollback/reconnect behavior. Action `timeoutMs` and process EXIT_CODE `retry` are invalid because they cannot safely override JDBC semantics.
+
+The Action keeps a normal `TOOL` wrapper with `implementation: call`, input, typed output, status, duration, and cache details. A DB cache miss also produces the ordinary Action `DB` evidence. Fields that only exist for a process—`command`, `logicalArgv`, `argv`, `stdout`, `stderr`, `rawOutput`, and `exitCode`—are absent.
+
+Choose the lightest authoring form:
+
+| Need | Recommended form |
+|---|---|
+| one-off query/update with visible SQL | `type: db` |
+| one-off read inside an expression | `#{db.orders.query|scalar(...)}` |
+| repeated operation with a business name and stable arguments | call-backed Tool |
+| intentional in-memory reuse | call-backed Tool with explicit cache |
+| external executable, SSH, argv, stdout parser, or exit-code retry | command-backed Tool |
+
+The complete normative contract is [V2.6 Call-backed Tool System Design](02_System_Design_V2.6.md).
 
 #### Command processing
 
@@ -1236,14 +1422,15 @@ Tool Action timeout overrides sidecar timeout, which overrides global timeout. D
 
 ### Schema catalog
 
-The V2.5 dbhelper and template entries below are the implemented release contract. Their schema files are validated before execution and are included in V2.5.0 packaging.
+V2.6 changes the main and Tool-group schemas for call-backed Tools. The V2.5 dbhelper and template schemas remain current because their contracts did not change.
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
-| Global configuration | `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
-| Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2` | [att-config-v2.2.schema.json](../schemas/att-config-v2.2.schema.json) |
+| Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../schemas/att-config-v2.6.schema.json) |
+| Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
-| Tool group | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
+| Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../schemas/att-tool-group-v2.6.schema.json) |
+| Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
 | Template descriptor | `att-template/v2.5` | [att-template-v2.5.schema.json](../schemas/att-template-v2.5.schema.json) |
 | Legacy template descriptor (read compatibility) | `att-template/v2.3` | [att-template-v2.3.schema.json](../schemas/att-template-v2.3.schema.json) |
@@ -1258,7 +1445,7 @@ All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknow
 ### Global configuration
 
 ```yaml
-schemaVersion: att-config/v2.5
+schemaVersion: att-config/v2.6
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -1282,7 +1469,7 @@ tools: {}
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | `att-config/v2.5`; unchanged V2.1/V2.2 configurations remain readable but cannot reference dbhelpers |
+| `schemaVersion` | required | `att-config/v2.6`; V2.1/V2.2/V2.5 remain readable, but only V2.6 Tool descriptors accept `call`/`cache` |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty value exposed as `${CASE.environment}`; it does not choose endpoints by itself |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -1321,7 +1508,8 @@ Allowed global object properties are:
 | `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` |
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
-| process `tools.<key>` | `name`, `description`, `command`, `output`, `arguments`, `x-*` |
+| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; process Tools may use `output`, call-backed Tools may use `cache`; `x-*` |
+| call-backed `tools.<key>.cache` | required `scope: case|db` |
 | `arguments.<key>` | `name`, `description`, `required`, `argName`, `argNameMode`, `delimit`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
@@ -1363,7 +1551,7 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
 | render | requires `payload`, `renderAs`; optional `assert`; no saveAs/output/call/expression/message/file/level/fields/timeout/retry/DB fields |
-| tool | requires `call`; optional object-shaped `saveAs`, `assert`, `timeoutMs`, `retry`; no action-level `overwrite` or render/assert-action/log-only fields |
+| tool | requires `call`; optional object-shaped `saveAs` and `assert`; `timeoutMs`/`retry` are supported only when the primary configured Tool is command-backed; no action-level `overwrite` or render/assert-action/log-only fields |
 | db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and optional typed-list `params`; optional `assert` and object-shaped `saveAs`; no action-level `overwrite`, `call`, retry, or Action timeout |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
@@ -1430,6 +1618,7 @@ callApi:
 |---|---|---|---|
 | configured process Tool | `raw`, `text`, `json`, `yaml`, `xml` | `raw` | exact stdout bytes for `raw`; parsed typed `output.result` otherwise |
 | primary built-in called by `type: tool` | `text`, `json`, `yaml`, `xml` | `text` | typed `output.result` |
+| configured call-backed Tool | `text`, `json`, `yaml`, `xml` | none; required | typed `output.result`; no stdout exists |
 | `type: db` | `json`, `yaml`, `xml` | none; required | stable typed DB result |
 
 For a configured Tool, `raw` writes stdout exactly as produced by the process, including any final line ending; it is not the trimmed `rawOutput` string or parsed `output.result`. A built-in and DB action have no process stdout, so `raw` is invalid. `text` writes `String.valueOf(output.result)` as UTF-8. `json`, `yaml`, and `xml` serialize the typed result using the selected codec and never serialize raw process stdout. Serialization does not replace the typed Context value.
@@ -1476,7 +1665,9 @@ saveAs:
 
 ### Tool contract
 
-Each tool requires `name`, `description`, and `command`. `command` is either a non-blank scalar or a non-empty string list. `output` defaults to `txt` and accepts `txt`, `yaml`, `json`, or `xml`. Each argument requires `name`, `description`, and a YAML boolean `required`. `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder for that argument. `argNameMode` accepts `once` or `repeat` and defaults to `once` for V2.3.3 compatibility. Any number of declared arguments may define a non-empty `delimit`, and every delimited placeholder must occupy one complete command token.
+Each Tool requires `name`, `description`, and exactly one of `command` or `call`. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
+
+Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`. Any number of command arguments may define `delimit`, and each delimited placeholder must occupy one complete command token. These three argv properties are invalid for call-backed arguments.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
@@ -1495,7 +1686,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.5.0",
+  "attVersion": "2.6.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1593,8 +1784,9 @@ The available values and callable capabilities still depend on the location's sc
 | DB-action `query/update.sql` or `sqlFile` content | Runtime Context before current output | Pure built-ins only | No | No | Before JDBC prepare |
 | `config.report.fileNamePattern` | `${suiteName}` or bare `suiteName` inside a call | Yes | No | No | When writing the result workbook |
 | Tool-definition `command` tokens | declared Tool-input aliases, including bare arguments inside a call | Yes | No | No | When constructing logical argv |
+| Tool-definition `call` | declared typed `input.*` only | Pure built-ins | No configured Tool chaining | One primary DB query/scalar/update | When invoking the façade |
 
-For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in-process and publishes its value at `${output.result}`; it has `exitCode: 0`, supports the action's assertion and optional `saveAs`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. `timeoutMs` cannot pre-empt an in-process built-in, and `EXIT_CODE` retry does not repeat its successful zero-exit result. Built-ins, other configured Tools, and read-only DB queries may be used inside ordinary Case-runtime expressions. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
+For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in-process and publishes its value at `${output.result}`; it has `exitCode: 0`, supports the action's assertion and optional `saveAs`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. `timeoutMs` cannot pre-empt an in-process built-in, and `EXIT_CODE` retry does not repeat its successful zero-exit result. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
 
 ```yaml
 normalizeReference:
@@ -1653,7 +1845,7 @@ Common properties include:
 | STAGE | `key`, `name`, selector-map data, sidecar stage data, status, timing, error |
 | TEMPLATE | `name`, `path`, `description`, status, timing, error |
 | ACTION | `id`, `type`, final `description`; nested `output.status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and assertion/log data |
-| TOOL | qualified configured name, optional group ID/tool key, `input`, logical/executed `argv`, optional SSH destination metadata, `stdout`, `stderr`, `rawOutput`, parsed `output`, status, exit code, duration, retry evidence, and optional `outputFile` when `saveAs` is used |
+| TOOL | qualified configured name and optional group ID/tool key; command-backed nodes contain argv/SSH/stdout/stderr/exit/retry data, while call-backed nodes contain `implementation: call`, typed output, optional cache evidence, and nested DB evidence on a miss |
 | DB | dbhelper ID, call ID, SQL source/hash according to evidence policy, masked/typed/value parameters, duration, typed result, and sanitized error |
 
 Use `${output...}` for the current action while its runtime assertion, actual value, and final description are evaluated. Use `${ACTIONS.<id>...}` as a completed current-template convenience view. Use the canonical `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}` form for persisted cross-stage references. Root `${TOOL...}` and `${DB...}` scopes are reserved for invocation internals and are not case-wide “latest invocation” APIs. Tool and inline DB evidence is persisted below the containing action and written to the Case log; Case-level DB finalization is available only after Case completion through `${CASE.DB.<instance>}`. The leading root distinguishes `${CASE.DB...}` from invocation-local `${DB...}`.
@@ -1981,7 +2173,7 @@ Text is XML-escaped. JUnit XML and HTML use `report.junit.caseLogEmbedThresholdB
 
 ### Run manifest and reproducibility
 
-`run.yaml` uses `schemaVersion: att-run/v2.1` and records ATT/build identity, Java/OS/locale/timezone, validation mode, environment, timestamps, status/summary, output paths, and SHA-256 inputs for effective configuration, tool-group files, workbook, sidecar, resolved templates/payloads, package-local tool files, and schema/catalog version.
+`run.yaml` uses `schemaVersion: att-run/v2.1` and records ATT/build identity, Java/OS/locale/timezone, validation mode, environment, timestamps, status/summary, output paths, and SHA-256 inputs for effective configuration, tool-group files, call-backed Tool SQL files (`tool-sql`), workbook, sidecar, resolved templates/payloads, package-local tool files, and schema/catalog version.
 
 ### Documentation, archive, and clean
 

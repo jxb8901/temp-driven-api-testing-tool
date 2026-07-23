@@ -17,6 +17,7 @@ public final class CaseRuntimeContext {
     private Map<String, Object> currentActions;
     private int toolSequence;
     private int dbSequence;
+    private final Map<String, Object> callToolCache = new LinkedHashMap<String, Object>();
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
@@ -212,6 +213,10 @@ public final class CaseRuntimeContext {
     public int nextToolSequence(String ignored) { return ++toolSequence; }
     public String nextInvocationId(String base) { return base + "_" + String.format("%03d", nextToolSequence(base)); }
     public String nextDbInvocationId(String instance) { return instance + "_" + String.format("%03d", ++dbSequence); }
+
+    public boolean hasCallToolCache(String key) { return callToolCache.containsKey(key); }
+    public Object callToolCache(String key) { return callToolCache.get(key); }
+    public void cacheCallTool(String key, Object value) { callToolCache.put(key, value); }
 
     @SuppressWarnings("unchecked")
     public void recordDbInvocation(String instance, String invocationId, Map<String, Object> evidence) {

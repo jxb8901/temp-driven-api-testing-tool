@@ -1,10 +1,12 @@
-schemaVersion: att-schema-catalog/v2.5
+schemaVersion: att-schema-catalog/v2.6
 schemas:
-  globalConfig: att-config-v2.5.schema.json
+  globalConfig: att-config-v2.6.schema.json
+  legacyGlobalConfigV25: att-config-v2.5.schema.json
   legacyGlobalConfig: att-config-v2.2.schema.json
   legacyGlobalConfigV21: att-config-v2.1.schema.json
   dbhelper: att-dbhelper-v2.5.schema.json
-  toolGroup: att-tool-group-v2.2.schema.json
+  toolGroup: att-tool-group-v2.6.schema.json
+  legacyToolGroup: att-tool-group-v2.2.schema.json
   sidecar: att-sidecar-v2.1.schema.json
   testcaseSnapshot: att-testcases-v2.4.xsd
   template: att-template-v2.5.schema.json

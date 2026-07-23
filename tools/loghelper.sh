@@ -3,7 +3,7 @@
 # 提取特定交易應用日誌的工具：在給定的多個日誌文件中搜索包括全部 keywords 的交易日誌，
 # 每筆交易日誌保存為獨立文件，最多保存給定個數。具體要求如下：
 #    1. 配置：交易日誌目錄、交易開始 pattern、交易結束 pattern、其它模式匹配所用的正則表達式
-#    2. Usage: $0 --max-tid-files <n> --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--recent-log-count <n>] [--ssh]，log_file 是無序的
+#    2. Usage: $0 --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]，log_file 是無序的
 #    3. 應用日誌由 log4j 生成，日誌格式為：[DEBUG] [2026/07/15 13:25:32.589] [JavaClass.method] [TID123456] ...
 #       Messages…\n multiple line \n …，每條日誌的第 4 個欄位 TID 為一筆交易的唯一 ID
 #    4. 一筆交易的第一／最後一條日誌可能匹配，也可能不匹配可配置的交易開始／結束 pattern；
@@ -12,10 +12,10 @@
 #    6. 日誌會自動 rotate，輸入可同時包含當前日誌及帶時間後綴的已 rotate 日誌
 #    7. 輸入的全部 keywords 必須出現在同一 TID 的日誌中；可出現在不同日誌條目或非 Messages 欄位
 #    8. 為控制內存使用兩遍掃描：第一遍倒序找到最新的符合 TID，第二遍正序提取，並使用開始／結束 pattern 限定範圍
-#    9. 結果寫入 <output_prefix>.<TID>.log，每個 TID 一個獨立文件；output_prefix 未指定目錄時使用 /tmp
-#   10. 有多個符合 TID 時，只處理按各 TID 最新日誌時間倒序排列的前 n 個
+#    9. 結果寫入 <output_prefix>-<TID>-<HOST>.log，每個 TID 一個獨立文件；output_prefix 未指定目錄時使用 /tmp
+#   10. 最多返回 --max-tid-files 個結果文件，默認 10；--min-tid-files 默認 1；相同 TID 在不同 HOST 的文件分別計數
 #   11. 默認只搜索按文件首個 timestamp 排序後最近 2 個日誌；--recent-log-count 0 表示搜索全部日誌
-#   12. 指定 --ssh 時，本地未命中才按配置順序搜索遠程服務器，並將命中結果複製到本地相同路徑
+#   12. 指定 --ssh 且已收集的結果文件少於 --min-tid-files 時，按配置順序繼續搜索遠程服務器，並將新結果複製到本地相同路徑
 #   13. 標準輸出只輸出 ATT output: yaml 可直接解析的結果；掃描進度及診斷寫入標準錯誤
 # ==============================================================================
 # Author: Jeffrey + ChatGPT
@@ -28,6 +28,12 @@ export LC_ALL=C
 # the caller continue to work as-is. LOG_DIR may also be overridden by the caller.
 readonly LOG_DIR="${LOG_DIR:-.}"
 readonly DEFAULT_OUTPUT_DIR='/tmp'
+
+# Result filename host identifier. Override with LOGHELPER_HOST when required;
+# otherwise use the last two characters of the current hostname.
+DEFAULT_HOSTNAME=$(hostname 2>/dev/null || true)
+readonly HOST="${LOGHELPER_HOST:-${DEFAULT_HOSTNAME: -2}}"
+unset DEFAULT_HOSTNAME
 
 # Format: 'host|user|port|identity_file|remote_loghelper_path'
 # Leave identity_file empty to use the SSH agent/default identities.
@@ -90,7 +96,7 @@ function extract_tid(line,    header_part, tags, tag_count, tid) {
 '
 
 usage() {
-    echo "Usage: $0 --max-tid-files <n> --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--recent-log-count <n>] [--ssh]" >&2
+    echo "Usage: $0 --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]" >&2
 }
 
 yaml_escape() {
@@ -115,6 +121,27 @@ fail() {
     emit_empty_result false false "$error_message"
     echo "Error: $error_message" >&2
     exit 1
+}
+
+emit_collected_result() {
+    local output_index
+
+    if [ "${#OUTPUT_FILES[@]}" -eq 0 ]; then
+        emit_empty_result true false ''
+        return 0
+    fi
+
+    printf 'success: true\n'
+    printf 'matched: true\n'
+    printf 'count: %s\n' "${#OUTPUT_FILES[@]}"
+    printf "errorMessage: ''\n"
+    printf 'files:\n'
+    output_index=0
+    while [ "$output_index" -lt "${#OUTPUT_FILES[@]}" ]; do
+        printf "  - tid: '%s'\n" "$(yaml_escape "${SELECTED_TIDS[$output_index]}")"
+        printf "    path: '%s'\n" "$(yaml_escape "${OUTPUT_FILES[$output_index]}")"
+        output_index=$((output_index + 1))
+    done
 }
 
 canonical_path() {
@@ -182,22 +209,35 @@ yaml_boolean() {
     '
 }
 
-yaml_file_paths() {
+yaml_file_records() {
     local payload=$1
 
     printf '%s\n' "$payload" | awk '
         BEGIN {
             quote = sprintf("%c", 39)
         }
-        /^[[:space:]]+path:[[:space:]]/ {
-            value = $0
-            sub(/^[[:space:]]+path:[[:space:]]*/, "", value)
+        function unquote(value) {
             if (substr(value, 1, 1) != quote || substr(value, length(value), 1) != quote) {
-                next
+                return ""
             }
             value = substr(value, 2, length(value) - 2)
             gsub(quote quote, quote, value)
-            print value
+            return value
+        }
+        /^[[:space:]]+- tid:[[:space:]]/ {
+            value = $0
+            sub(/^[[:space:]]+- tid:[[:space:]]*/, "", value)
+            current_tid = unquote(value)
+            next
+        }
+        /^[[:space:]]+path:[[:space:]]/ {
+            value = $0
+            sub(/^[[:space:]]+path:[[:space:]]*/, "", value)
+            path = unquote(value)
+            if (current_tid != "" && path != "") {
+                print current_tid "\t" path
+            }
+            current_tid = ""
         }
     '
 }
@@ -219,17 +259,25 @@ cleanup_copy_temps() {
 copy_remote_results() {
     local ssh_destination=$1
     local payload=$2
-    local remote_file local_directory copy_temp copy_status copy_index
-    local -a remote_files copy_temp_files
+    local remote_tid remote_file local_directory copy_temp copy_status copy_index parsed_record_count
+    local -a remote_tids remote_files copy_temp_files
 
     COPY_ERROR=''
-    while IFS= read -r remote_file; do
+    parsed_record_count=0
+    while IFS=$'\t' read -r remote_tid remote_file; do
+        [ -n "$remote_tid" ] || continue
         [ -n "$remote_file" ] || continue
+        parsed_record_count=$((parsed_record_count + 1))
+        [ "$(( ${#OUTPUT_FILES[@]} + ${#remote_files[@]} ))" -lt "$MAX_FILES" ] || break
+        remote_tids+=("$remote_tid")
         remote_files+=("$remote_file")
-    done < <(yaml_file_paths "$payload")
+    done < <(yaml_file_records "$payload")
 
     if [ "${#remote_files[@]}" -eq 0 ]; then
-        COPY_ERROR='remote loghelper.sh reported a match without any result file paths.'
+        if [ "$parsed_record_count" -gt 0 ]; then
+            return 0
+        fi
+        COPY_ERROR='remote loghelper.sh reported a match without valid result file records.'
         return 1
     fi
 
@@ -281,6 +329,8 @@ copy_remote_results() {
             return 1
         }
         copy_temp_files[$copy_index]=''
+        SELECTED_TIDS+=("${remote_tids[$copy_index]}")
+        OUTPUT_FILES+=("${remote_files[$copy_index]}")
         copy_index=$((copy_index + 1))
     done
 
@@ -299,8 +349,8 @@ append_remote_error() {
 search_remote_servers() {
     local server_record SSH_HOST SSH_USER SSH_PORT SSH_IDENTITY_FILE REMOTE_LOGHELPER EXTRA_FIELD
     local SSH_DESTINATION REMOTE_COMMAND REMOTE_OUTPUT REMOTE_STATUS REMOTE_SUCCESS REMOTE_MATCHED
-    local LAST_NO_MATCH_OUTPUT=''
     local REMOTE_ERRORS=''
+    local REMOTE_SUCCEEDED=false
     local search_arg
 
     if [ -n "$SSH_SERVERS_OVERRIDE" ]; then
@@ -317,6 +367,10 @@ search_remote_servers() {
     command -v ssh >/dev/null 2>&1 || fail "required command 'ssh' was not found."
 
     for server_record in "${SSH_SERVERS[@]}"; do
+        if [ "${#OUTPUT_FILES[@]}" -ge "$MIN_FILES" ] || [ "${#OUTPUT_FILES[@]}" -ge "$MAX_FILES" ]; then
+            return 0
+        fi
+
         IFS='|' read -r SSH_HOST SSH_USER SSH_PORT SSH_IDENTITY_FILE REMOTE_LOGHELPER EXTRA_FIELD <<< "$server_record"
         SSH_DESTINATION="$SSH_USER@$SSH_HOST"
 
@@ -350,7 +404,7 @@ search_remote_servers() {
             SCP_OPTIONS+=(-i "$SSH_IDENTITY_FILE")
         fi
 
-        echo "Local search found no matching transaction; retrying on $SSH_DESTINATION" >&2
+        echo "Collected ${#OUTPUT_FILES[@]} result file(s), below minimum $MIN_FILES; searching $SSH_DESTINATION" >&2
 
         REMOTE_COMMAND="$(remote_quote /bin/bash) $(remote_quote "$REMOTE_LOGHELPER")"
         for search_arg in "${REMOTE_SEARCH_ARGS[@]}"; do
@@ -370,8 +424,8 @@ search_remote_servers() {
             append_remote_error "$SSH_DESTINATION failed (ssh status $REMOTE_STATUS)"
             continue
         fi
+        REMOTE_SUCCEEDED=true
         if [ "$REMOTE_MATCHED" = false ]; then
-            LAST_NO_MATCH_OUTPUT=$REMOTE_OUTPUT
             continue
         fi
         if [ "$REMOTE_MATCHED" != true ]; then
@@ -381,30 +435,32 @@ search_remote_servers() {
 
         command -v scp >/dev/null 2>&1 || fail "required command 'scp' was not found."
         if copy_remote_results "$SSH_DESTINATION" "$REMOTE_OUTPUT"; then
-            printf '%s\n' "$REMOTE_OUTPUT"
-            exit 0
+            continue
         fi
         append_remote_error "$SSH_DESTINATION: $COPY_ERROR"
     done
 
-    if [ -n "$LAST_NO_MATCH_OUTPUT" ] && [ -z "$REMOTE_ERRORS" ]; then
-        printf '%s\n' "$LAST_NO_MATCH_OUTPUT"
-        exit 0
+    if [ "${#OUTPUT_FILES[@]}" -ge "$MIN_FILES" ]; then
+        return 0
     fi
-
-    [ -n "$REMOTE_ERRORS" ] || REMOTE_ERRORS='all configured SSH servers failed.'
-    fail "$REMOTE_ERRORS"
+    if [ -n "$REMOTE_ERRORS" ]; then
+        fail "$REMOTE_ERRORS"
+    fi
+    [ "$REMOTE_SUCCEEDED" = true ] || fail 'all configured SSH servers failed.'
+    return 0
 }
 
 # ------------------------------------------------------------------------------
 # 2. ARGUMENT & ENVIRONMENT PREPARATION
 # ------------------------------------------------------------------------------
-MAX_FILES=''
+MAX_FILES=10
+MIN_FILES=1
 OUTPUT_PREFIX=''
 RECENT_LOG_COUNT=2
 LOG_FILES=()
 KEYWORDS=()
 SEEN_MAX_FILES=false
+SEEN_MIN_FILES=false
 SEEN_OUTPUT_PREFIX=false
 SEEN_RECENT_LOG_COUNT=false
 SEEN_LOG_FILES=false
@@ -423,6 +479,16 @@ while [ "$#" -gt 0 ]; do
             [ "$SEEN_MAX_FILES" = false ] || fail "--max-tid-files must be specified only once."
             MAX_FILES=$2
             SEEN_MAX_FILES=true
+            shift 2
+            ;;
+        --min-tid-files)
+            [ "$#" -ge 2 ] || {
+                usage
+                fail "missing value for --min-tid-files."
+            }
+            [ "$SEEN_MIN_FILES" = false ] || fail "--min-tid-files must be specified only once."
+            MIN_FILES=$2
+            SEEN_MIN_FILES=true
             shift 2
             ;;
         --output-prefix)
@@ -457,7 +523,7 @@ while [ "$#" -gt 0 ]; do
             shift
             while [ "$#" -gt 0 ]; do
                 case "$1" in
-                    --max-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
+                    --max-tid-files|--min-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
                 esac
                 [ -n "$1" ] || fail "log file paths must not be empty."
                 LOG_FILES+=("$1")
@@ -474,7 +540,7 @@ while [ "$#" -gt 0 ]; do
             shift
             while [ "$#" -gt 0 ]; do
                 case "$1" in
-                    --max-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
+                    --max-tid-files|--min-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
                 esac
                 [ -n "$1" ] || fail "keywords must not be empty."
                 KEYWORDS+=("$1")
@@ -492,7 +558,6 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-[ "$SEEN_MAX_FILES" = true ] || fail "missing required argument --max-tid-files."
 [ "$SEEN_OUTPUT_PREFIX" = true ] || fail "missing required argument --output-prefix."
 [ "${#LOG_FILES[@]}" -gt 0 ] || fail "at least one --log-file is required."
 [ "${#KEYWORDS[@]}" -gt 0 ] || fail "at least one --keyword is required."
@@ -501,6 +566,7 @@ done
 # deliberately so a remote helper never starts another SSH fallback.
 REMOTE_SEARCH_ARGS=(
     --max-tid-files "$MAX_FILES"
+    --min-tid-files "$MIN_FILES"
     --output-prefix "$OUTPUT_PREFIX"
     --recent-log-count "$RECENT_LOG_COUNT"
     --log-file
@@ -515,6 +581,13 @@ done
 
 case "$MAX_FILES" in
     ''|0|*[!0-9]*) fail "--max-tid-files must be a positive integer." ;;
+esac
+case "$MIN_FILES" in
+    ''|0|*[!0-9]*) fail "--min-tid-files must be a positive integer." ;;
+esac
+[ "$MIN_FILES" -le "$MAX_FILES" ] || fail "--min-tid-files must not exceed --max-tid-files."
+case "$HOST" in
+    ''|*[![:alnum:]_.-]*) fail "configured HOST must contain only letters, digits, dot, underscore, or hyphen." ;;
 esac
 case "$RECENT_LOG_COUNT" in
     ''|*[!0-9]*) fail "--recent-log-count must be zero or a positive integer." ;;
@@ -622,7 +695,7 @@ echo "Pass 1: scanning logs newest-to-oldest with '$REVERSE_COMMAND'" >&2
         file_index=$((file_index - 1))
     done
 } | awk \
-    -v max_tids="$MAX_FILES" "$AWK_COMMON"'
+    -v max_files="$MAX_FILES" "$AWK_COMMON"'
 function advance_resolved_prefix(    next_rank) {
     next_rank = resolved_prefix + 1
     while (next_rank <= seen_tid_count &&
@@ -633,7 +706,7 @@ function advance_resolved_prefix(    next_rank) {
         }
         next_rank++
     }
-    return matched_in_resolved_prefix >= max_tids
+    return matched_in_resolved_prefix >= max_files
 }
 function update_match_state(tid,    rank, keyword_index, matches_all) {
     if (tid_matched[tid] == 1) {
@@ -709,7 +782,7 @@ BEGIN {
 }
 END {
     selected = 0
-    for (rank = 1; rank <= seen_tid_count && selected < max_tids; rank++) {
+    for (rank = 1; rank <= seen_tid_count && selected < max_files; rank++) {
         tid = tid_by_rank[rank]
         if (tid_matched[tid] == 1) {
             print tid "\t" (tid_has_start[tid] == 1 ? 1 : 0) "\t" (tid_has_end[tid] == 1 ? 1 : 0) > tids_file
@@ -728,20 +801,20 @@ if [ "$PASS1_PRODUCER_STATUS" -ne 0 ] && [ "$PASS1_PRODUCER_STATUS" -ne 141 ]; t
     fail "reverse log reader failed with status $PASS1_PRODUCER_STATUS."
 fi
 
+SELECTED_TIDS=()
+OUTPUT_FILES=()
 if [ ! -s "$MATCHED_TIDS_FILE" ]; then
-    if [ "$SSH_ENABLED" = true ]; then
+    if [ "$SSH_ENABLED" = true ] && [ "${#OUTPUT_FILES[@]}" -lt "$MIN_FILES" ]; then
         search_remote_servers
     fi
-    emit_empty_result true false ''
+    emit_collected_result
     exit 0
 fi
 
-SELECTED_TIDS=()
-OUTPUT_FILES=()
 while IFS=$'\t' read -r tid has_start has_end; do
     [ -n "$tid" ] || continue
     SELECTED_TIDS+=("$tid")
-    output_file="${OUTPUT_PREFIX}.${tid}.log"
+    output_file="${OUTPUT_PREFIX}-${tid}-${HOST}.log"
     output_file=$(canonical_path "$output_file" output) || fail "could not resolve output path for TID '$tid'."
 
     [ ! -L "$output_file" ] || fail "output file '$output_file' must not be a symbolic link."
@@ -766,10 +839,11 @@ done
 echo "Pass 2: extracting selected transactions oldest-to-newest" >&2
 
 export LOGHELPER_OUTPUT_PREFIX="$OUTPUT_PREFIX"
+export LOGHELPER_OUTPUT_HOST="$HOST"
 
 awk "$AWK_COMMON"'
 function emit(tid, line,    path) {
-    path = output_prefix "." tid ".log"
+    path = output_prefix "-" tid "-" output_host ".log"
     print line >> path
     close(path)
 }
@@ -786,6 +860,7 @@ function finish_previous_entry() {
 BEGIN {
     initialize_common()
     output_prefix = ENVIRON["LOGHELPER_OUTPUT_PREFIX"]
+    output_host = ENVIRON["LOGHELPER_OUTPUT_HOST"]
     while ((getline metadata < tids_file) > 0) {
         field_count = split(metadata, fields, "\t")
         if (field_count >= 3) {
@@ -832,14 +907,7 @@ for output_file in "${OUTPUT_FILES[@]}"; do
     [ -s "$output_file" ] || fail "selected transaction produced no output in '$output_file'."
 done
 
-printf 'success: true\n'
-printf 'matched: true\n'
-printf 'count: %s\n' "${#OUTPUT_FILES[@]}"
-printf "errorMessage: ''\n"
-printf 'files:\n'
-output_index=0
-while [ "$output_index" -lt "${#OUTPUT_FILES[@]}" ]; do
-    printf "  - tid: '%s'\n" "$(yaml_escape "${SELECTED_TIDS[$output_index]}")"
-    printf "    path: '%s'\n" "$(yaml_escape "${OUTPUT_FILES[$output_index]}")"
-    output_index=$((output_index + 1))
-done
+if [ "$SSH_ENABLED" = true ] && [ "${#OUTPUT_FILES[@]}" -lt "$MIN_FILES" ]; then
+    search_remote_servers
+fi
+emit_collected_result

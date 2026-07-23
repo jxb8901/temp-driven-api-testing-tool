@@ -60,6 +60,19 @@ public class ToolInvoker {
         this.sshCommandRunner = sshCommandRunner;
     }
 
+    public ToolConfig tool(String name) { return config.tool(name); }
+
+    /** Applies the common Tool argument contract without performing a process invocation. */
+    public Map<String, Object> prepareInput(String toolName, Map<String, Object> input) {
+        ToolConfig tool = config.tool(toolName);
+        if (tool == null) throw new IllegalArgumentException("Unknown configured tool: " + toolName);
+        Map<String, Object> resolved = resolveMap(input == null ? java.util.Collections.<String, Object>emptyMap() : input);
+        normalizeSinglePositionalArgument(tool, resolved);
+        validateArguments(tool, resolved);
+        if (tool.commandBacked()) expandDelimitedArguments(tool, resolved);
+        return resolved;
+    }
+
     public ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         return invoke(invocationId, toolName, input, context, log, true);
     }
@@ -88,12 +101,10 @@ public class ToolInvoker {
                     null, "call", null, null, null, null, null,
                     "Correct the case-sensitive qualified group.tool name or define it in the loaded configuration.", null);
         }
+        if (tool.callBacked()) throw new IllegalStateException("call-backed Tool must be executed by the unified expression engine: " + toolName);
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
-        Map<String, Object> resolvedInput = resolveMap(input);
-        normalizeSinglePositionalArgument(tool, resolvedInput);
-        validateArguments(tool, resolvedInput);
-        expandDelimitedArguments(tool, resolvedInput);
+        Map<String, Object> resolvedInput = prepareInput(toolName, input);
 
         List<String> logicalArgv = expandCommand(tool, resolvedInput);
         List<String> argv = tool.ssh() == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;

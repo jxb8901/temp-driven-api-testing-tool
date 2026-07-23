@@ -55,7 +55,7 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 2
 fi
 if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to execute the V2.5 release gate" >&2
+  echo "mvn is required to execute the V2.6 release gate" >&2
   exit 2
 fi
 
@@ -115,6 +115,7 @@ cp -R "$ROOT_DIR/config" "$PACKAGE_DIR/config"
 cp -R "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
 cp -R "$ROOT_DIR/tools" "$PACKAGE_DIR/tools"
 cp -R "$ROOT_DIR/testcase" "$PACKAGE_DIR/testcase"
+[ ! -d "$ROOT_DIR/sql" ] || cp -R "$ROOT_DIR/sql" "$PACKAGE_DIR/sql"
 [ ! -d "$ROOT_DIR/docs" ] || cp -R "$ROOT_DIR/docs" "$PACKAGE_DIR/docs"
 [ ! -d "$ROOT_DIR/schemas" ] || cp -R "$ROOT_DIR/schemas" "$PACKAGE_DIR/schemas"
 mkdir -p "$PACKAGE_DIR/output"
@@ -137,6 +138,7 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
   echo "  - templates/"
   echo "  - tools/"
   echo "  - testcase/"
+  echo "  - sql/ (when present)"
   echo "  - docs/"
   echo "  - schemas/"
 } > "$PACKAGE_DIR/RELEASE_MANIFEST.txt"
@@ -144,7 +146,7 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 (cd "$PACKAGE_DIR" && ./att.sh version | grep -Fx "ATT V$VERSION" >/dev/null)
 (cd "$PACKAGE_DIR" && ./att.sh validate --package)
 
-(cd "$BUILD_DIR" && tar -czf "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$PACKAGE_NAME")
+(cd "$BUILD_DIR" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$PACKAGE_NAME")
 
 mkdir -p "$SOURCE_PACKAGE_DIR"
 mkdir -p "$SOURCE_PACKAGE_DIR/lib"
@@ -158,6 +160,7 @@ cp -R "$ROOT_DIR/config" "$SOURCE_PACKAGE_DIR/config"
 cp -R "$ROOT_DIR/templates" "$SOURCE_PACKAGE_DIR/templates"
 cp -R "$ROOT_DIR/tools" "$SOURCE_PACKAGE_DIR/tools"
 cp -R "$ROOT_DIR/testcase" "$SOURCE_PACKAGE_DIR/testcase"
+[ ! -d "$ROOT_DIR/sql" ] || cp -R "$ROOT_DIR/sql" "$SOURCE_PACKAGE_DIR/sql"
 [ ! -d "$ROOT_DIR/docs" ] || cp -R "$ROOT_DIR/docs" "$SOURCE_PACKAGE_DIR/docs"
 [ ! -d "$ROOT_DIR/schemas" ] || cp -R "$ROOT_DIR/schemas" "$SOURCE_PACKAGE_DIR/schemas"
 cp -R "$ROOT_DIR/src" "$SOURCE_PACKAGE_DIR/src"
@@ -178,6 +181,7 @@ find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
   echo "  - templates/"
   echo "  - tools/"
   echo "  - testcase/"
+  echo "  - sql/ (when present)"
   echo "  - config/"
   echo "  - lib/ (add JDBC drivers here)"
   echo "  - docs/"
@@ -190,6 +194,6 @@ find "$SOURCE_PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
   echo "  - build.sh"
 } > "$SOURCE_PACKAGE_DIR/RELEASE_MANIFEST.txt"
 
-(cd "$BUILD_DIR" && tar -czf "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz" "$SOURCE_PACKAGE_NAME")
+(cd "$BUILD_DIR" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz" "$SOURCE_PACKAGE_NAME")
 echo "$DIST_DIR/$PACKAGE_NAME.tar.gz"
 echo "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz"

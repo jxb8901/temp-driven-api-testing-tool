@@ -2,6 +2,7 @@
 package att.core;
 
 import att.config.FrameworkConfig;
+import att.config.DbHelperConfig;
 import att.config.ReportConfig;
 import att.config.RunConfig;
 import att.config.StageConfig;
@@ -142,6 +143,32 @@ class FrameworkEngineTest {
                 new ValidationResult("s","assert",ResultStatus.FAIL,"","",""),
                 new ValidationResult("s","tool",ResultStatus.ERROR,"","","boom"));
         assertEquals(ResultStatus.ERROR, method.invoke(engine, mixed));
+    }
+
+    @Test void inputManifestIncludesStaticSqlFilesUsedByCallBackedTools() throws Exception {
+        Path sql = projectRoot.resolve("sql/reference.sql");
+        writeText(sql, "select 1");
+        Path workbook = projectRoot.resolve("testcase/dummy.xlsx");
+        writeText(workbook, "not parsed by input manifest collection");
+        ToolConfig lookup = new ToolConfig("reference.lookup", "lookup", "reference", "Lookup", "Lookup",
+                Collections.<String>emptyList(), "#{db.reference.query(sqlFile='sql/reference.sql', params=[])}", "db",
+                Collections.<String>emptyList(), "", Collections.<String,ToolArgumentConfig>emptyMap(), null, null);
+        DbHelperConfig helper = new DbHelperConfig("reference", "Reference", "Reference DB", "jdbc:never-connect",
+                "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 5,
+                "case", "rollback", 10, 1024, 4096, "hash", "masked", null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 1000, Paths.get("templates"), Paths.get("testcase"),
+                Collections.singletonMap(lookup.key(), lookup), Collections.singletonMap(helper.id(), helper),
+                null, null, null, "", "", null, null, 1, "ignore", "", false,
+                att.config.ProcessOutputConfig.defaults());
+        FrameworkEngine engine = new FrameworkEngine(projectRoot, config);
+        java.lang.reflect.Method method = FrameworkEngine.class.getDeclaredMethod("inputHashes", ExecutionOptions.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.List<Map<String,Object>> inputs = (java.util.List<Map<String,Object>>) method.invoke(engine,
+                ExecutionOptions.parse(new String[]{"run", "--suite", workbook.toString(), "--run-id", "MANIFEST"}));
+        assertTrue(inputs.stream().anyMatch(item -> "tool-sql".equals(item.get("kind"))
+                && "sql/reference.sql".equals(item.get("path"))), inputs.toString());
     }
 
     @Test void failedPlanCreatesNoOutputOrInProgressDirectory() throws Exception {

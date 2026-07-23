@@ -158,8 +158,14 @@ public final class PackageDocumentationGenerator {
                 activeGroup = group;
             }
             body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h3>").append(escape(tool.name())).append(" <code>").append(escape(tool.key())).append("</code></h3><p>").append(escape(tool.description())).append("</p><p>");
-            body.append("command argv: <code>[\"").append(escape(joinEscaped(tool.commandArgv()))).append("\"]</code>");
-            body.append("; output=").append(escape(tool.output())).append("</p>");
+            if (tool.callBacked()) {
+                body.append("call: <code>").append(escape(tool.call())).append("</code>");
+                if (!tool.cache().isEmpty()) body.append("; cache.scope=").append(escape(tool.cache()));
+            } else {
+                body.append("command argv: <code>[\"").append(escape(joinEscaped(tool.commandArgv()))).append("\"]</code>");
+                body.append("; output=").append(escape(tool.output()));
+            }
+            body.append("</p>");
             if (!tool.groupScriptArgv().isEmpty()) body.append("<p>group script argv: <code>[\"").append(escape(joinEscaped(tool.groupScriptArgv()))).append("\"]</code></p>");
             if (tool.ssh() != null) body.append("<p>SSH: <code>").append(escape(tool.ssh().destination())).append(":").append(tool.ssh().port()).append("</code></p>");
             body.append("<table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>argName</th><th>argNameMode</th><th>Delimiter</th></tr>");

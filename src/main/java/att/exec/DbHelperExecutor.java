@@ -57,6 +57,30 @@ public final class DbHelperExecutor implements AutoCloseable {
         return null;
     }
 
+    public boolean hasCached(String instance, String key) {
+        ManagedConnection managed = scope().connections.get(canonicalId(instance));
+        return managed != null && managed.hasCached(key);
+    }
+
+    public Object cached(String instance, String key) {
+        ManagedConnection managed = scope().connections.get(canonicalId(instance));
+        return managed == null ? null : managed.cache.get(key);
+    }
+
+    public void cache(String instance, String key, Object value) {
+        DbHelperConfig config = helper(instance);
+        if (config == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + instance);
+        Scope scope = scope();
+        ManagedConnection managed = scope.connections.get(config.id());
+        if (managed == null) { managed = new ManagedConnection(config); scope.connections.put(config.id(), managed); }
+        managed.cache.put(key, value);
+    }
+
+    private String canonicalId(String instance) {
+        DbHelperConfig config = helper(instance);
+        return config == null ? instance : config.id();
+    }
+
     public Path resolveSqlFile(String configured) throws Exception {
         Path relative = att.core.IdentifierValidator.relativePath(configured, "DB sqlFile");
         Path logical = projectRoot.resolve(relative).normalize();
@@ -379,6 +403,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         Connection connection;
         boolean rollbackOnly;
         boolean usedInCase;
+        final Map<String, Object> cache = new LinkedHashMap<String, Object>();
 
         ManagedConnection(DbHelperConfig config) { this.config = config; }
 
@@ -480,6 +505,10 @@ public final class DbHelperExecutor implements AutoCloseable {
         void close() {
             if (connection != null) try { connection.close(); } catch (Exception ignored) { }
             connection = null;
+        }
+
+        boolean hasCached(String key) {
+            return cache.containsKey(key);
         }
     }
 

@@ -1,0 +1,61 @@
+schemaVersion: att-tool-group/v2.6
+id: orders
+name: Order database tools
+description: Typed, reusable dbhelper facades for common order operations
+
+tools:
+  find:
+    name: Find orders
+    description: Find orders for one customer and status
+    call: "#{db.orders.query(sql='select order_id as ORDER_ID, status as STATUS from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    cache:
+      scope: case
+    arguments:
+      customerId:
+        name: Customer ID
+        description: Customer whose orders are returned
+        required: true
+      status:
+        name: Status
+        description: Exact order status
+        required: true
+
+  count:
+    name: Count orders
+    description: Return one typed scalar order count
+    call: "#{db.orders.scalar(sql='select count(*) as ORDER_COUNT from orders where customer_id = ?', params=[input.customerId])}"
+    cache:
+      scope: db
+    arguments:
+      customerId:
+        name: Customer ID
+        description: Customer whose orders are counted
+        required: true
+
+  findByDate:
+    name: Find orders by date
+    description: Query through a package-contained rendered SQL file
+    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[input.customerId, input.fromDate])}"
+    arguments:
+      customerId:
+        name: Customer ID
+        description: Customer whose orders are returned
+        required: true
+      fromDate:
+        name: From date
+        description: Inclusive order date lower bound
+        required: true
+
+  updateStatus:
+    name: Update order status
+    description: Update one order; callable only as the primary call of a tool Action
+    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[input.status, input.orderId])}"
+    arguments:
+      orderId:
+        name: Order ID
+        description: Order to update
+        required: true
+      status:
+        name: Status
+        description: New order status
+        required: true

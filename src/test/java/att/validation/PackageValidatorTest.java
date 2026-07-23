@@ -56,6 +56,72 @@ class PackageValidatorTest {
                 new StageTemplate("DB",tempDir,Collections.singletonList(dynamicFile),"att-template/v2.5"),config));
     }
 
+    @Test void validatesCallBackedReadAndWriteToolBoundaries() throws Exception {
+        DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB", "jdbc:never-connect",
+                "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 7,
+                "case", "rollback", 10, 1024, 4096, "full", "masked", null);
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("id",
+                new ToolArgumentConfig("id", "ID", "Order ID", true, ""));
+        ToolConfig query = new ToolConfig("orders.find", "find", "orders", "Find", "Find",
+                Collections.<String>emptyList(), "#{db.orders.query(sql='select * from orders where id = ?', params=[input.id])}",
+                "case", Collections.<String>emptyList(), "", arguments, null, null);
+        ToolConfig update = new ToolConfig("orders.close", "close", "orders", "Close", "Close",
+                Collections.<String>emptyList(), "#{db.orders.update(sql='update orders set status = 1 where id = ?', params=[input.id])}",
+                "", Collections.<String>emptyList(), "", arguments, null, null);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put(query.key(), query); tools.put(update.key(), update);
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tempDir,
+                tools, Collections.singletonMap("orders", helper), null,null,null,"","",null,null,1,
+                "ignore","",false,ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+
+        TemplateAction readExpression = new TemplateAction("read", map("type","assign","name","orders",
+                "expression","#{orders.find(id=${CASE.id})}"), "att-template/v2.5");
+        TemplateAction writeAction = new TemplateAction("write", map("type","tool",
+                "call","#{orders.close(id=${CASE.id})}"), "att-template/v2.5");
+        assertDoesNotThrow(() -> { try { contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Arrays.asList(readExpression, writeAction), "att-template/v2.5"), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); } });
+
+        TemplateAction writeExpression = new TemplateAction("bad", map("type","assign","name","x",
+                "expression","#{orders.close(id=${CASE.id})}"), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(writeExpression), "att-template/v2.5"), config));
+
+        TemplateAction processOptions = new TemplateAction("bad", map("type","tool",
+                "call","#{orders.find(id=${CASE.id})}", "timeoutMs", 1000), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(processOptions), "att-template/v2.5"), config));
+
+        TemplateAction rawSave = new TemplateAction("bad", map("type","tool",
+                "call","#{orders.find(id=${CASE.id})}", "saveAs", map("path","out.json","format","raw")), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(rawSave), "att-template/v2.5"), config));
+        TemplateAction legacySave = new TemplateAction("bad", map("type","tool",
+                "call","#{orders.find(id=${CASE.id})}", "saveAs", "out.txt"), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(legacySave), "att-template/v2.5"), config));
+
+        ToolConfig invalid = new ToolConfig("orders.invalid", "invalid", "orders", "Invalid", "Invalid",
+                Collections.<String>emptyList(), "#{db.missing.query(sql='select 1')}", "",
+                Collections.<String>emptyList(), "", Collections.<String,ToolArgumentConfig>emptyMap(), null, null);
+        Map<String,ToolConfig> invalidTools = new LinkedHashMap<String,ToolConfig>(tools);
+        invalidTools.put(invalid.key(), invalid);
+        FrameworkConfig selectedConfig = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tempDir,
+                invalidTools, Collections.singletonMap("orders", helper), null,null,null,"","",null,null,1,
+                "ignore","",false,ProcessOutputConfig.defaults());
+        PackageValidator selectedValidator = new PackageValidator(tempDir, selectedConfig);
+        TemplateAction invalidReference = new TemplateAction("bad", map("type","tool",
+                "call","#{orders.invalid()}"), "att-template/v2.5");
+        java.lang.reflect.Method referenced = PackageValidator.class.getDeclaredMethod("validateReferencedTools", StageTemplate.class, FrameworkConfig.class);
+        referenced.setAccessible(true);
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> referenced.invoke(selectedValidator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(invalidReference), "att-template/v2.5"), selectedConfig));
+    }
+
     @Test void validatorUsesSharedParserForQuotedComma() throws Exception {
         Map<String,ToolArgumentConfig> args = new LinkedHashMap<String,ToolArgumentConfig>();
         args.put("message", new ToolArgumentConfig("message", "Message", "Text", true, ""));

@@ -1,8 +1,8 @@
-# ATT V2.5.0 新手入門
+# ATT V2.6.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.5.0 的工具、Java JDBC dbhelper、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。V2.5.0 的關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.6.0 的 command/call-backed 工具、Java JDBC dbhelper、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.5.0 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.6.0 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -60,7 +60,7 @@ tools/invoke_payment_api.sh
 ## 4. 建立嚴格的全域配置
 
 ```yaml
-schemaVersion: att-config/v2.5
+schemaVersion: att-config/v2.6
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -89,6 +89,7 @@ xml:
   namespaceMode: ignore
 toolGroups:
   - config/tools/payment.yaml
+  - config/tools/orders-db.yaml
 dbhelpers:
   - config/dbhelpers/orders.yaml
 tools:
@@ -107,7 +108,7 @@ tools:
       traceId: {name: Trace ID, description: 可選追蹤 ID, required: false, argName: --trace-id}
 ```
 
-`schemaVersion` 必填。V2.5 對 config、dbhelper、tool group、sidecar、template 和 action 採嚴格 schema：未定義字段會在 validate 報錯；若要保存工具自訂但 ATT 不解讀的資料，字段必須以 `x-` 開頭。既有 V2.1/V2.2 process Tool 配置仍可讀；`tools` 仍是全局工具，可繼續使用未加前綴的調用名稱。
+`schemaVersion` 必填。V2.6 對 config、dbhelper、tool group、sidecar、template 和 action 採嚴格 schema。既有 V2.1/V2.2/V2.5 config 與 V2.2 command-backed Tool group 仍可讀；只有 V2.6 Tool descriptor 可使用 `call`／`cache`。
 
 `caseLog.yamlAnchors` 預設為 `false`，相同 Map/List 會在 Case log 每處完整輸出。設為 `true` 時，YAML 可使用 `&id001`／`*id001` 形式的 anchor/alias 以減少重複內容；它們只是 YAML 引用，不是 ATT ID。
 
@@ -165,6 +166,35 @@ checkCount:
 ```
 
 `params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
+
+若同一操作會重複出現，可新增 `config/tools/orders-db.yaml` 將它包裝成 typed Tool：
+
+```yaml
+schemaVersion: att-tool-group/v2.6
+id: orders
+name: Order DB tools
+description: 常用訂單操作
+tools:
+  find:
+    name: Find orders
+    description: 按客戶與狀態查詢
+    call: "#{db.orders.query(sql='select id, status from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    cache: {scope: case}
+    arguments:
+      customerId: {name: Customer ID, description: 客戶, required: true}
+      status: {name: Status, description: 狀態, required: true}
+```
+
+之後可在 expression 直接取得 Java object：
+
+```yaml
+loadOrders:
+  type: assign
+  name: orders
+  expression: "#{orders.find(customerId=${CASE.customerId}, status='OPEN')}"
+```
+
+`cache.scope` 可為 `case` 或 `db`。`db` 可跨 Case 重用，但 DB update、commit、rollback 或 reconnect 都不會清除 cache，因此可能返回 stale data，只應用於穩定/reference 資料。DB update façade 不可 cache，且只能作為 `type: tool` 的主要 call。Call-backed Tool 使用 dbhelper 的 SQL timeout，不支持 process `timeoutMs`／retry／stdout `raw`。
 
 例如下列 `note` 可包含空格並保持為一個 argv：
 
@@ -360,7 +390,7 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.5.0：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.6.0：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
@@ -509,7 +539,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.5.0",
+  "attVersion": "2.6.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -656,4 +686,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、報告、打包及診斷內容見 [ATT V2.5.0 Reference Manual](09_Reference_Manual_V2.md)。
+完整配置、Context、報告、打包及診斷內容見 [ATT V2.6.0 Reference Manual](09_Reference_Manual_V2.md)。

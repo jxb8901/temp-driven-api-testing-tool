@@ -227,6 +227,9 @@ public class StageTemplateRunner {
         ActionSaveConfig save = action.saveConfig();
         String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
         String kind = templateEngine.callKind(action.call());
+        if ("call-tool".equals(kind) && (action.timeoutMs() != null || !retry.isEmpty())) {
+            throw new IllegalArgumentException("call-backed Tool uses dbhelper/built-in limits and does not support process timeoutMs or retry: " + action.id());
+        }
         String format = save.configured() ? toolFormat(save, kind) : "";
         boolean invokerWritesRaw = save.configured() && "tool".equals(kind) && "raw".equals(format);
         boolean actionOwnedArtifact = false;
@@ -255,6 +258,7 @@ public class StageTemplateRunner {
                 Object saved = invocation.get("outputFile");
                 if (saved != null) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
+                if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
                 return result.executionSuccess();
             } catch (att.exec.ToolExecutionException e) {
                 Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
@@ -265,6 +269,7 @@ public class StageTemplateRunner {
                 if (evidence.containsKey("output")) output.put("result", evidence.get("output"));
                 if (evidence.get("outputFile") != null) targets.add(String.valueOf(evidence.get("outputFile")));
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
+                if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
                 throw e;
             }
         }
@@ -272,11 +277,14 @@ public class StageTemplateRunner {
     }
 
     private String toolFormat(ActionSaveConfig save, String kind) {
-        if (save.legacy()) return "builtin".equals(kind) ? "text" : "raw";
-        String fallback = "builtin".equals(kind) ? "text" : "raw";
+        if (save.legacy()) {
+            if ("call-tool".equals(kind)) throw new IllegalArgumentException("call-backed Tool saveAs must use {path, format, overwrite}");
+            return "builtin".equals(kind) ? "text" : "raw";
+        }
+        String fallback = "builtin".equals(kind) ? "text" : ("call-tool".equals(kind) ? "" : "raw");
         String format = requiredFormat(save, "Tool", fallback);
-        if ("builtin".equals(kind) && "raw".equals(format)) {
-            throw new IllegalArgumentException("Built-in saveAs.format does not support raw; use text, json, yaml, or xml");
+        if (("builtin".equals(kind) || "call-tool".equals(kind)) && "raw".equals(format)) {
+            throw new IllegalArgumentException("Built-in and call-backed Tool saveAs.format do not support raw; use text, json, yaml, or xml");
         }
         if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
                 || "yaml".equals(format) || "xml".equals(format))) {

@@ -26,6 +26,61 @@ class FrameworkConfigLoaderTest {
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidTimeout, tempDir));
     }
 
+    @Test void loadsV26CallBackedToolsAndKeepsV25CommandOnly() throws Exception {
+        Path configDirectory = tempDir.resolve("config");
+        Files.createDirectories(configDirectory.resolve("dbhelpers"));
+        Files.createDirectories(configDirectory.resolve("tools"));
+        Files.write(configDirectory.resolve("dbhelpers/orders.yaml"), ("schemaVersion: att-dbhelper/v2.5\n" +
+                "id: orders\nname: Orders\ndescription: Orders DB\nconnection: {url: 'jdbc:test'}\n").getBytes("UTF-8"));
+        Files.write(configDirectory.resolve("tools/orders.yaml"), ("schemaVersion: att-tool-group/v2.6\n" +
+                "id: orderTools\nname: Order tools\ndescription: Typed order queries\n" +
+                "tools:\n  find:\n    name: Find order\n    description: Find by two parameters\n" +
+                "    cache: {scope: case}\n" +
+                "    call: \"#{db.orders.query(sql='select * from orders where id = ? and status = ?', params=[input.id, #{upper(input.status)}])}\"\n" +
+                "    arguments:\n      id: {name: ID, description: Order ID, required: true}\n" +
+                "      status: {name: Status, description: Order status, required: true}\n").getBytes("UTF-8"));
+        Path config = configDirectory.resolve("config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\n" +
+                "dbhelpers: [config/dbhelpers/orders.yaml]\n" +
+                "toolGroups: [config/tools/orders.yaml]\n" +
+                "tools:\n  today:\n    name: Today\n    description: Normalized date\n" +
+                "    call: \"#{upper(input.value)}\"\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
+        assertTrue(loaded.tool("orderTools.find").callBacked());
+        assertTrue(loaded.tool("orderTools.find").caseCached());
+        assertEquals("db.orders.query", new att.template.ToolCallParser().parse(loaded.tool("orderTools.find").call()).name());
+        assertTrue(loaded.tool("today").callBacked());
+        assertTrue(loaded.tool("today").commandArgv().isEmpty());
+
+        Path legacy = tempDir.resolve("legacy-v25-call.yaml");
+        Files.write(legacy, ("schemaVersion: att-config/v2.5\ntools:\n  bad:\n" +
+                "    name: Bad\n    description: Bad\n    call: '#{upper(input.value)}'\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(legacy));
+    }
+
+    @Test void rejectsAmbiguousAndProcessOnlyCallBackedToolFields() throws Exception {
+        String prefix = "schemaVersion: att-config/v2.6\ntools:\n  bad:\n    name: Bad\n    description: Bad\n";
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("both.yaml",
+                prefix + "    command: [echo]\n    call: '#{upper(input.value)}'\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("output.yaml",
+                prefix + "    call: '#{upper(input.value)}'\n    output: json\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("context.yaml",
+                prefix + "    call: '#{upper(CASE.value)}'\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("nested-context.yaml",
+                prefix + "    call: \"#{db.orders.query(sql='select ?', params=[#{upper(CASE.value)}])}\"\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("dynamic-sql-file.yaml",
+                prefix + "    call: '#{db.orders.query(sqlFile=input.file, params=[])}'\n" +
+                        "    arguments:\n      file: {name: File, description: SQL file, required: true}\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("argv.yaml",
+                prefix + "    call: '#{upper(input.value)}'\n    arguments:\n" +
+                        "      value: {name: Value, description: Value, required: true, argName: --value}\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("cached-update.yaml",
+                prefix + "    call: \"#{db.orders.update(sql='update t set v=1')}\"\n    cache: {scope: db}\n")));
+    }
+
     @Test void loadsV25DbHelperInstancesFromDedicatedFiles() throws Exception {
         Path configDirectory = tempDir.resolve("config");
         Files.createDirectories(configDirectory.resolve("dbhelpers"));

@@ -28,14 +28,15 @@ public final class FrameworkConfigLoader {
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> map = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(map.get("schemaVersion"));
-            boolean v25 = Version.CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v26 = Version.CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v25 = Version.LEGACY_CONFIG_SCHEMA.equals(schemaVersion);
             boolean v22 = "att-config/v2.2".equals(schemaVersion);
-            if (!(v25 || v22 || "att-config/v2.1".equals(schemaVersion))) throw new IllegalArgumentException("Unsupported config schemaVersion: " + schemaVersion);
+            if (!(v26 || v25 || v22 || "att-config/v2.1".equals(schemaVersion))) throw new IllegalArgumentException("Unsupported config schemaVersion: " + schemaVersion);
             projectRoot = projectRoot.toAbsolutePath().normalize();
-            String schemaName = v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json");
+            String schemaName = v26 ? "att-config-v2.6.schema.json" : (v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json"));
             Path schema = schema(projectRoot, schemaName);
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
-            SchemaSupport.rejectUnknown(map, "config", v25
+            SchemaSupport.rejectUnknown(map, "config", (v26 || v25)
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "ssh", "tools"}
                     : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
@@ -44,14 +45,14 @@ public final class FrameworkConfigLoader {
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
-                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", path);
-                if (v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
+                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", path, v26);
+                if (v26 || v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
                         "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
-            Map<String, DbHelperConfig> dbHelpers = v25
+            Map<String, DbHelperConfig> dbHelpers = (v26 || v25)
                     ? new DbHelperConfigLoader().load(map.get("dbhelpers"), projectRoot)
                     : Collections.<String, DbHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
@@ -133,7 +134,8 @@ public final class FrameworkConfigLoader {
     }
 
     private static void addTools(Object configured, Map<String, ToolConfig> result, String groupId,
-                                 List<String> script, SshConfig ssh, String owner, Path sourceFile) {
+                                 List<String> script, SshConfig ssh, String owner, Path sourceFile,
+                                 boolean allowCall) {
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Tool keys must be strings");
@@ -145,19 +147,139 @@ public final class FrameworkConfigLoader {
             }
             String key = groupId.isEmpty() ? localKey : groupId + "." + localKey;
             Map<?, ?> tool = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(tool, owner + "." + localKey, "name", "description", "command", "output", "arguments");
-            String output = tool.get("output") == null ? "txt" : SchemaSupport.string(tool.get("output"), owner + "." + localKey + ".output", true);
-            if (!("txt".equals(output) || "yaml".equals(output) || "json".equals(output) || "xml".equals(output))) {
+            SchemaSupport.rejectUnknown(tool, owner + "." + localKey, "name", "description", "command", "call", "cache", "output", "arguments");
+            boolean hasCommand = tool.get("command") != null;
+            boolean hasCall = tool.get("call") != null;
+            if (hasCommand == hasCall) throw new IllegalArgumentException("Tool requires exactly one of command or call: " + key);
+            if (hasCall && !allowCall) throw new IllegalArgumentException("Tool call requires att-config/v2.6 or att-tool-group/v2.6: " + key);
+            String cache = "";
+            if (tool.get("cache") != null) {
+                if (!hasCall) throw new IllegalArgumentException("Tool cache is supported only on call-backed Tools: " + key);
+                Map<?, ?> cacheMap = SchemaSupport.map(tool.get("cache"), owner + "." + localKey + ".cache");
+                SchemaSupport.rejectUnknown(cacheMap, owner + "." + localKey + ".cache", "scope");
+                cache = required(cacheMap, "scope", owner + "." + localKey + ".cache");
+                if (!("case".equals(cache) || "db".equals(cache))) {
+                    throw new IllegalArgumentException("Tool cache.scope must be case or db: " + key);
+                }
+            }
+            String output = tool.get("output") == null ? (hasCommand ? "txt" : "") : SchemaSupport.string(tool.get("output"), owner + "." + localKey + ".output", true);
+            if (hasCall && !output.isEmpty()) throw new IllegalArgumentException("call-backed Tool does not support process-only output: " + key);
+            if (hasCommand && !("txt".equals(output) || "yaml".equals(output) || "json".equals(output) || "xml".equals(output))) {
                 throw new IllegalArgumentException("Tool output must be txt, yaml, json, or xml: " + key);
             }
             Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"));
-            List<String> command = command(tool.get("command"), "tool " + key + ".command");
-            validateCommandArguments(key, command, arguments, script.isEmpty());
+            List<String> command = hasCommand ? command(tool.get("command"), "tool " + key + ".command") : Collections.<String>emptyList();
+            String call = hasCall ? SchemaSupport.string(tool.get("call"), "tool " + key + ".call", true) : "";
+            if (hasCommand) validateCommandArguments(key, command, arguments, script.isEmpty());
+            else validateCallDefinition(key, call, cache, arguments, script, ssh);
             ToolConfig configuredTool = new ToolConfig(key, localKey, groupId,
                     required(tool, "name", "tool " + key), required(tool, "description", "tool " + key),
-                    command, script, output, arguments, ssh, sourceFile);
+                    command, call, cache, hasCommand ? script : Collections.<String>emptyList(), output, arguments,
+                    hasCommand ? ssh : null, sourceFile);
             ToolConfig previous = result.put(key, configuredTool);
             if (previous != null) throw new IllegalArgumentException("Duplicate qualified tool name: " + key);
+        }
+    }
+
+    private static void validateCallDefinition(String tool, String expression, String cache,
+                                               Map<String, ToolArgumentConfig> arguments,
+                                               List<String> script, SshConfig ssh) {
+        if (!script.isEmpty() || ssh != null) {
+            throw new IllegalArgumentException("call-backed Tool cannot use process-only script or ssh: " + tool);
+        }
+        String value = expression == null ? "" : expression.trim();
+        att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(null);
+        java.util.List<att.template.ToolCallParser.ParsedCall> calls = engine.parseCalls(value);
+        if (calls.isEmpty() || !(value.startsWith("#{") && value.endsWith("}")) || calls.size() < 1) {
+            throw new IllegalArgumentException("Tool call must be one exact #{...} expression: " + tool);
+        }
+        att.template.ToolCallParser.ParsedCall primary = new att.template.ToolCallParser().parse(value);
+        String name = primary.name();
+        boolean database = name.matches("db\\.[A-Za-z_][A-Za-z0-9_-]*\\.(query|scalar|update)");
+        if (!database && !engine.isBuiltIn(name)) {
+            throw new IllegalArgumentException("call-backed Tool may target db.<instance>.query|scalar|update or a built-in only: " + tool);
+        }
+        if (!database) engine.validateBuiltInCall(primary);
+        else validateDbCallShape(tool, primary);
+        if (!cache.isEmpty() && name.endsWith(".update")) {
+            throw new IllegalArgumentException("DB update call-backed Tool cannot be cached: " + tool);
+        }
+        if ("db".equals(cache) && !database) {
+            throw new IllegalArgumentException("cache.scope db requires a DB query/scalar call-backed Tool: " + tool);
+        }
+        for (int index = 1; index < calls.size(); index++) {
+            att.template.ToolCallParser.ParsedCall call = calls.get(index);
+            if (!engine.isBuiltIn(call.name())) {
+                throw new IllegalArgumentException("Nested call-backed Tool expressions may use built-ins only: " + tool + " -> " + call.name());
+            }
+        }
+        java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\$\\{([^}]+)}");
+        for (att.template.ToolCallParser.ParsedCall parsedCall : calls) for (att.template.ToolCallParser.Argument callArgument : parsedCall.arguments()) {
+            java.util.List<String> fragments = new java.util.ArrayList<String>();
+            fragments.add(callArgument.expression());
+            if (callArgument.expression().trim().startsWith("[") && callArgument.expression().trim().endsWith("]")) {
+                fragments.addAll(new att.template.ToolCallParser().listItems(callArgument.expression().trim()));
+            }
+            for (String fragment : fragments) {
+                engine.validateValueSyntax(fragment);
+                java.util.regex.Matcher matcher = placeholder.matcher(fragment);
+                while (matcher.find()) validateCallInputReference(tool, matcher.group(1), arguments);
+                String trimmed = fragment.trim();
+                if (trimmed.startsWith("input.") || trimmed.startsWith("TOOL.input.")) {
+                    validateCallInputReference(tool, trimmed, arguments);
+                }
+                if (trimmed.equals("CASE") || trimmed.startsWith("CASE.") || trimmed.startsWith("ACTIONS.")
+                        || trimmed.startsWith("RUN.") || trimmed.startsWith("DB.")) {
+                    throw new IllegalArgumentException("Tool definition call is limited to input.* and pure built-ins: " + tool + "." + trimmed);
+                }
+            }
+        }
+        for (ToolArgumentConfig argument : arguments.values()) {
+            if (argument.multiValue() || argument.namedArgv() || !"once".equals(argument.argNameMode())) {
+                throw new IllegalArgumentException("call-backed Tool arguments do not support process-only delimit/argName/argNameMode: " + tool + "." + argument.key());
+            }
+        }
+    }
+
+    private static void validateDbCallShape(String tool, att.template.ToolCallParser.ParsedCall call) {
+        java.util.Set<String> supplied = new java.util.LinkedHashSet<String>();
+        for (att.template.ToolCallParser.Argument argument : call.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(call.name() + " requires named arguments: " + tool);
+            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key()) || "params".equals(argument.key()))) {
+                throw new IllegalArgumentException("Unknown DB call argument in Tool " + tool + ": " + argument.key());
+            }
+            if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate DB call argument in Tool " + tool + ": " + argument.key());
+            if ("params".equals(argument.key())) {
+                String value = argument.expression().trim();
+                boolean list = value.startsWith("[") && value.endsWith("]");
+                boolean input = value.startsWith("input.") || value.startsWith("TOOL.input.")
+                        || value.startsWith("${input.") || value.startsWith("${TOOL.input.");
+                if (!(list || input)) throw new IllegalArgumentException(call.name() + ".params must be an inline list or typed input List: " + tool);
+            }
+        }
+        if (supplied.contains("sql") == supplied.contains("sqlFile")) {
+            throw new IllegalArgumentException(call.name() + " requires exactly one of sql or sqlFile: " + tool);
+        }
+        for (att.template.ToolCallParser.Argument argument : call.arguments()) {
+            if (!"sqlFile".equals(argument.key())) continue;
+            String expression = argument.expression().trim();
+            if (expression.contains("${") || expression.contains("#{")
+                    || expression.startsWith("input.") || expression.startsWith("TOOL.input.")) {
+                throw new IllegalArgumentException(call.name() + ".sqlFile must be a static package-relative path: " + tool);
+            }
+        }
+    }
+
+    private static void validateCallInputReference(String tool, String path,
+                                                   Map<String, ToolArgumentConfig> arguments) {
+        String value = path.startsWith("TOOL.input.") ? path.substring(11)
+                : path.startsWith("input.") ? path.substring(6) : null;
+        if (value == null || value.isEmpty()) {
+            throw new IllegalArgumentException("Tool definition call placeholders must reference input.<argument>: " + tool + "." + path);
+        }
+        String root = value.split("\\.", 2)[0];
+        if (!arguments.containsKey(root)) {
+            throw new IllegalArgumentException("Tool definition call references undeclared argument: " + tool + "." + path);
         }
     }
 
@@ -243,8 +365,9 @@ public final class FrameworkConfigLoader {
         try {
             Map<?, ?> group = yaml(file, "Tool group");
             String version = String.valueOf(group.get("schemaVersion"));
-            if (!Version.TOOL_GROUP_SCHEMA.equals(version)) throw new IllegalArgumentException("Unsupported tool group schemaVersion: " + version);
-            Path schema = schema(projectRoot, "att-tool-group-v2.2.schema.json");
+            boolean v26 = Version.TOOL_GROUP_SCHEMA.equals(version);
+            if (!(v26 || Version.LEGACY_TOOL_GROUP_SCHEMA.equals(version))) throw new IllegalArgumentException("Unsupported tool group schemaVersion: " + version);
+            Path schema = schema(projectRoot, v26 ? "att-tool-group-v2.6.schema.json" : "att-tool-group-v2.2.schema.json");
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, group); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
             SchemaSupport.rejectUnknown(group, "tool group", "schemaVersion", "id", "name", "description", "script", "ssh", "tools");
             String id = required(group, "id", "tool group");
@@ -259,7 +382,7 @@ public final class FrameworkConfigLoader {
             }
             SshConfig ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
-            addTools(group.get("tools"), tools, id, script, ssh, "tool group " + id + ".tools", file);
+            addTools(group.get("tools"), tools, id, script, ssh, "tool group " + id + ".tools", file, v26);
         } catch (att.validation.DiagnosticException e) {
             throw e;
         } catch (Exception e) {

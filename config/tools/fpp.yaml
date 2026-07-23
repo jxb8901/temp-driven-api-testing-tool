@@ -117,17 +117,22 @@ tools:
   loghelper:
     name: Search transaction logs
     description: Search recent local transaction logs for TIDs containing every keyword, with optional SSH fallback
-    command: [./tools/loghelper.sh, "${maxTidFiles}", "${outputPrefix}", "${logFiles}", "${keywords}", "${recentLogCount}", "${sshOption}"]
+    command: [./tools/loghelper.sh, "${maxTidFiles}", "${minTidFiles}", "${outputPrefix}", "${logFiles}", "${keywords}", "${recentLogCount}", "${sshOption}"]
     output: yaml
     arguments:
       maxTidFiles:
         name: Maximum TID Files
-        description: Positive maximum number of matching TID log files to return
-        required: true
+        description: Optional maximum number of result files to return; defaults to 10
+        required: false
         argName: --max-tid-files
+      minTidFiles:
+        name: Minimum TID Files
+        description: Optional result-file threshold which triggers SSH fallback while unmet; defaults to 1
+        required: false
+        argName: --min-tid-files
       outputPrefix:
         name: Output Prefix
-        description: Result path prefix; a bare prefix writes results under /tmp
+        description: Result path prefix for <prefix>-<TID>-<HOST>.log; a bare prefix writes results under /tmp
         required: true
         argName: --output-prefix
       logFiles:
@@ -149,7 +154,7 @@ tools:
         argName: --recent-log-count
       sshOption:
         name: SSH Option
-        description: Optional literal --ssh to enable configured remote fallback after a local miss
+        description: Optional literal --ssh to search configured remote servers while the minimum TID threshold is unmet
         required: false
   querySqlplus:
     name: Query SQLPlus and return XML

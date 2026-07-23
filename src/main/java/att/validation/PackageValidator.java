@@ -155,7 +155,8 @@ public final class PackageValidator {
     private void validateReferencedCall(ToolCallParser.ParsedCall call, FrameworkConfig config) {
         if (BUILT_INS.contains(call.name().toLowerCase(java.util.Locale.ROOT))) return;
         ToolConfig tool = config.tool(call.name());
-        if (tool != null) validateToolExecutable(tool);
+        if (tool != null && tool.commandBacked()) validateToolExecutable(tool);
+        else if (tool != null && tool.callBacked()) validateCallBackedDefinition(tool, config);
     }
 
     @SuppressWarnings("unchecked")
@@ -167,7 +168,7 @@ public final class PackageValidator {
         Path catalog = projectRoot.resolve("schemas/catalog.yaml");
         if (Files.isRegularFile(catalog)) try {
             Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v2.5".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
+            if (!(loaded instanceof Map) || !"att-schema-catalog/v2.6".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
             Object schemas = ((Map<?, ?>) loaded).get("schemas"); if (!(schemas instanceof Map)) throw new IllegalArgumentException("Schema catalog requires schemas map");
             for (Object value : ((Map<?, ?>) schemas).values()) {
                 Path schema = projectRoot.resolve("schemas").resolve(String.valueOf(value)).normalize();
@@ -192,13 +193,17 @@ public final class PackageValidator {
                     att.exec.SshCommandRunner.FALLBACK_WARNING, null, null, null, null, null, null, null, null));
         }
         for (ToolConfig tool : global.tools().values()) {
-            try { validateToolExecutable(tool); }
+            try {
+                if (tool.commandBacked()) validateToolExecutable(tool);
+                else validateCallBackedDefinition(tool, global);
+            }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TOOL_INVALID, e, null)); }
         }
     }
 
     private void validateToolExecutable(ToolConfig tool) {
         try {
+            if (tool.callBacked()) return;
             if (tool.ssh() != null) {
                 String configured = tool.ssh().identityFile();
                 if (!configured.isEmpty()) {
@@ -329,7 +334,7 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.call(), syntaxEngine, config); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolSaveAs(action); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateCallBackedActionOptions(action, config); validateToolSaveAs(action, config); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
@@ -432,18 +437,35 @@ public final class PackageValidator {
         }
     }
 
-    private void validateToolSaveAs(TemplateAction action) {
-        if (!action.saveConfig().configured() || action.saveConfig().legacy()) return;
+    private void validateToolSaveAs(TemplateAction action, FrameworkConfig config) {
+        if (!action.saveConfig().configured()) return;
         ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
-        String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
         boolean builtIn = BUILT_INS.contains(parsed.name().toLowerCase(java.util.Locale.ROOT));
-        if (format.isEmpty()) return; // Runtime default is text for built-ins and raw for configured process Tools.
+        ToolConfig configured = config.tool(parsed.name());
+        boolean callBacked = configured != null && configured.callBacked();
+        if (action.saveConfig().legacy()) {
+            if (callBacked) throw new IllegalArgumentException("call-backed Tool saveAs must use {path, format, overwrite}: " + action.id());
+            return;
+        }
+        String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+        if (format.isEmpty()) {
+            if (callBacked) throw new IllegalArgumentException("call-backed Tool saveAs.format is required: " + action.id());
+            return; // Runtime default is text for built-ins and raw for configured process Tools.
+        }
         if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
                 || "yaml".equals(format) || "xml".equals(format))) {
             throw new IllegalArgumentException("Tool saveAs.format must be raw, text, json, yaml, or xml: " + action.id());
         }
-        if (builtIn && "raw".equals(format)) {
-            throw new IllegalArgumentException("Built-in saveAs.format does not support raw: " + action.id());
+        if ((builtIn || callBacked) && "raw".equals(format)) {
+            throw new IllegalArgumentException("Built-in and call-backed Tool saveAs.format do not support raw: " + action.id());
+        }
+    }
+
+    private void validateCallBackedActionOptions(TemplateAction action, FrameworkConfig config) {
+        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        ToolConfig tool = config.tool(parsed.name());
+        if (tool != null && tool.callBacked() && (action.timeoutMs() != null || !action.retry().isEmpty())) {
+            throw new IllegalArgumentException("call-backed Tool uses dbhelper/built-in limits and does not support process timeoutMs or retry: " + action.id());
         }
     }
 
@@ -774,14 +796,21 @@ public final class PackageValidator {
     }
 
     private void validateToolCall(String call, FrameworkConfig config) {
+        java.util.List<ToolCallParser.ParsedCall> calls = expressionEngine.parseCalls(call);
+        if (calls.isEmpty()) throw new IllegalArgumentException("Tool call must be one exact #{...} expression");
         ToolCallParser.ParsedCall parsed = callParser.parse(call);
         if (parsed.name().startsWith("db.")) {
             throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
         }
-        validateCall(parsed, config);
+        validateCall(parsed, config, true);
+        for (int index = 1; index < calls.size(); index++) validateCall(calls.get(index), config, false);
     }
 
     private void validateCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateCall(parsed, config, false);
+    }
+
+    private void validateCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config, boolean allowWriteFacade) {
         String toolName = parsed.name();
         if (toolName.startsWith("db.")) {
             validateDbExpressionCall(parsed, config);
@@ -816,6 +845,9 @@ public final class PackageValidator {
                     null, "call", null, null, null, null, null,
                     suggestion == null ? "Define the tool in config/tools or correct the qualified group.tool name." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
         }
+        if (tool.callBacked() && isWriteFacade(tool) && !allowWriteFacade) {
+            throw new IllegalArgumentException("DB update Tool may only be the primary call of a type: tool Action: " + tool.key());
+        }
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
             if (argument.positional() && !(tool.arguments().size() == 1 && parsed.arguments().size() == 1)) {
@@ -831,6 +863,49 @@ public final class PackageValidator {
         for (ToolArgumentConfig argument : tool.arguments().values()) if (argument.required() && !supplied.contains(argument.key())) throw toolCallError(tool,
                 "Missing required argument '" + argument.key() + "'", "required=true; supplied arguments=" + supplied,
                 "Add " + argument.key() + "=<value> to the call.");
+    }
+
+    private boolean isWriteFacade(ToolConfig tool) {
+        return tool != null && tool.callBacked()
+                && callParser.parse(tool.call()).name().matches("db\\.[^.]+\\.update");
+    }
+
+    private void validateCallBackedDefinition(ToolConfig tool, FrameworkConfig config) {
+        ToolCallParser.ParsedCall target = callParser.parse(tool.call());
+        if (!target.name().startsWith("db.")) return;
+        String[] parts = target.name().split("\\.", -1);
+        if (parts.length != 3 || config.dbHelper(parts[1]) == null
+                || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
+            throw new IllegalArgumentException("Invalid DB target for call-backed Tool " + tool.key() + ": " + target.name());
+        }
+        if ("update".equals(parts[2]) && config.dbHelper(parts[1]).readOnly()) {
+            throw new IllegalArgumentException("Dbhelper '" + parts[1] + "' is readOnly and cannot back update Tool " + tool.key());
+        }
+        Set<String> supplied = new LinkedHashSet<String>();
+        Map<String, ToolCallParser.Argument> byName = new LinkedHashMap<String, ToolCallParser.Argument>();
+        for (ToolCallParser.Argument argument : target.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(target.name() + " requires named arguments");
+            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key()) || "params".equals(argument.key()))) {
+                throw new IllegalArgumentException("Unknown DB call argument in Tool " + tool.key() + ": " + argument.key());
+            }
+            if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate DB call argument in Tool " + tool.key() + ": " + argument.key());
+            byName.put(argument.key(), argument);
+        }
+        if (supplied.contains("sql") == supplied.contains("sqlFile")) {
+            throw new IllegalArgumentException(target.name() + " requires exactly one of sql or sqlFile");
+        }
+        if (byName.containsKey("sqlFile")) {
+            String expression = byName.get("sqlFile").expression().trim();
+            boolean dynamic = expression.contains("${") || expression.contains("#{")
+                    || expression.startsWith("input.") || expression.startsWith("TOOL.input.");
+            if (dynamic) throw new IllegalArgumentException(target.name() + ".sqlFile must be a static package-relative path");
+            try {
+                String configured = String.valueOf(callParser.literal(expression));
+                Path file = new att.exec.DbHelperExecutor(projectRoot, config).resolveSqlFile(configured);
+                validateDbSql(new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8), expressionEngine, config);
+            } catch (RuntimeException error) { throw error; }
+            catch (Exception error) { throw new IllegalArgumentException(error.getMessage(), error); }
+        }
     }
 
     private void validateDbExpressionCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {

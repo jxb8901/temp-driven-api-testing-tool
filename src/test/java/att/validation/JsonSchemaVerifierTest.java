@@ -71,4 +71,17 @@ class JsonSchemaVerifierTest {
         Path group = Paths.get("schemas/att-tool-group-v2.2.schema.json");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group, "{\"schemaVersion\":\"att-tool-group/v2.2\",\"id\":\"db\",\"name\":\"DB\",\"description\":\"DB tools\",\"script\":[\"dispatch\"],\"tools\":{\"select\":{\"name\":\"Select\",\"description\":\"Select\",\"command\":[\"query\",\"${id}\"],\"arguments\":{\"id\":{\"name\":\"ID\",\"description\":\"ID\",\"required\":true,\"argName\":\"--id\"}}}}}"));
     }
+
+    @Test void v26SchemasSeparateCommandAndCallBackedTools() throws Exception {
+        Path config = Paths.get("schemas/att-config-v2.6.schema.json");
+        String call = "{\"schemaVersion\":\"att-config/v2.6\",\"tools\":{\"find\":{\"name\":\"Find\",\"description\":\"Find\",\"call\":\"#{db.orders.query(sql='select 1')}\",\"cache\":{\"scope\":\"case\"},\"arguments\":{}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, call));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config,
+                call.replace("\"cache\":{\"scope\":\"case\"},", "\"command\":[\"echo\"],")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config,
+                call.replace("\"cache\":{\"scope\":\"case\"},", "\"output\":\"json\",")));
+        Path group = Paths.get("schemas/att-tool-group-v2.6.schema.json");
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group,
+                "{\"schemaVersion\":\"att-tool-group/v2.6\",\"id\":\"orders\",\"name\":\"Orders\",\"description\":\"Orders\",\"tools\":{\"find\":{\"name\":\"Find\",\"description\":\"Find\",\"call\":\"#{db.orders.scalar(sql='select 1')}\"}}}"));
+    }
 }

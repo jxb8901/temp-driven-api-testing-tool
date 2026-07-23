@@ -1,8 +1,8 @@
-# ATT 2.5.0 - Automated Testing Tool
+# ATT 2.6.0 - Automated Testing Tool
 
-ATT V2.5.0 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions, process Tools, and configured Java JDBC DB helpers, and produces atomic completed runs, optional result workbooks, offline HTML reports, JSON/JUnit CI output, bounded evidence, performance profiles, logs, and verified run archives.
+ATT V2.6.0 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions, process Tools, typed call-backed Tool façades, and configured Java JDBC DB helpers, and produces atomic completed runs, optional result workbooks, offline HTML reports, JSON/JUnit CI output, bounded evidence, performance profiles, logs, and verified run archives.
 
-V2.5 retains the V2.4 Case → Stage → Template → Action and action-result contracts. V2.4 added deterministic testcase version control: Excel remains the editable source, while `basename.xml` records only the normalized ATT testcase semantics and is verified before validation or execution. V2.5 adds first-class DB helpers without treating them as process Tools.
+V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternative to Tool `command`. A call-backed Tool can wrap a DB query/scalar/update or pure built-in while direct DB Actions and expressions remain available.
 
 `testcase.root` defaults to `testcase`. ATT recursively discovers adjacent `basename.xlsx` + `basename.yaml` + `basename.xml` triples below it; each triple is one testcase set.
 
@@ -63,9 +63,11 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 
 `./att.sh docs` always produces one self-contained page at `build/docs/index.html`; Testcases are grouped by workbook and Sheet, and each table includes the validation-time Expected Result assembled from assert actions. Tool, DB helper, and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, Tool, or DB helper. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, dbhelper, configuration, and documentation source files.
 
-## V2.5 essentials
+## V2.6 essentials
 
-- Global configuration may use `att-config/v2.5`; process Tool groups remain `att-tool-group/v2.2`. Existing V2.1/V2.2 process Tool configurations remain readable.
+- Current configuration uses `att-config/v2.6`; call-backed groups use `att-tool-group/v2.6`. Existing V2.1/V2.2/V2.5 configuration and V2.2 command-backed groups remain readable.
+- A Tool declares exactly one of `command` or `call`. `call` may target one DB query/scalar/update or pure built-in and keeps typed results. DB update façades work only as the primary call of a Tool Action; READ façades also work in expressions.
+- Call-backed Tools may opt into `{cache: {scope: case|db}}`. DB update, commit, rollback, and reconnect never invalidate cache; `db` scope can intentionally return stale data and is for stable/reference lookups only.
 - Configure each DB helper in its own `att-dbhelper/v2.5` YAML file and reference those files with the global `dbhelpers` list. DB helpers are first-class runtime services, not Tool implementations.
 - Use `type: db` with exactly one `query` or `update` block. Read queries are also available inside Case-runtime expressions as `#{db.<instance>.query(...)}` and `#{db.<instance>.scalar(...)}`. Results remain typed at `ACTIONS.<id>.output.result` or in an exact assign expression.
 - DB helpers use JDBC `?` parameters, per-instance `statement.timeoutSeconds`, bounded stable results, and one connection per instance/execution thread. Case boundaries roll back open non-auto-commit connections for isolation; Case completion publishes transaction outcomes at the fixed `${CASE.DB.<instance>}` path. DB operational errors make the Case ERROR.
@@ -82,7 +84,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - Render, tool, and log actions may use `assert` to decide PASS/FAIL. Operational exceptions stay ERROR; a tool's exit code is evidence at `output.exitCode`, not an automatic status decision.
 - `${CASE.outputDirectory}` exposes the normalized absolute current Case output directory. Local tools run with that directory as cwd and receive framework-owned `ATT_ROOT_DIR` and `ATT_CASE_OUTPUT_DIR` environment variables, while package-relative `./`/`../` executables are still resolved from the package root. SSH remote cwd remains the remote account default and local-path variables are not injected remotely.
 
-- Current global configuration uses `att-config/v2.5`; tool groups use `att-tool-group/v2.2`, and DB helpers use independent `att-dbhelper/v2.5` files. V2.1/V2.2 process configuration remains compatible. Grouped tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
+- Current global configuration uses `att-config/v2.6`; Tool groups may use `att-tool-group/v2.6` or legacy `v2.2`, and DB helpers remain independent `att-dbhelper/v2.5` files. Grouped Tools are called as `#{group.tool(...)}` while inline `tools` remain global and unqualified.
 - Linux/macOS use `./att.sh`; Windows uses `att.bat`. Both launch the same Java runner and accept the same commands and exit codes. `snapshot`, `validate`, and `docs` are safe Windows authoring commands and never invoke configured testcase tools; Windows validation warns when `.sh` launch compatibility was not checked. Release packages need only Java 8+; source-tree mode compiles with Maven when it is available.
 - Tool `command` and group `script` accept a scalar or argv list. Lists preserve each YAML item as one argument; scalar commands use the existing tokenizer once. Group scripts receive `<tool key> <tool command argv>` after the script argv.
 - An argument may declare `argName`, such as `--reference`. When its exact-token placeholder has a non-blank value, ATT emits the name and value as separate atomic argv; a missing/blank optional value emits neither. For delimited values, the backward-compatible default `argNameMode: once` emits the name only before the first value, while `repeat` emits it before every value. Omitted or empty `argName` is positional, and optional positional placeholders are likewise omitted when blank.
@@ -119,5 +121,5 @@ test case --1:n stage--> template --1:n action--> tool
 - Tool argument descriptors contain `name`, `description`, `required`, optional `argName`, optional `argNameMode: once|repeat`, and optional `delimit`; multiple arguments in the same tool may be delimited.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
-See [V2.5 System Design](docs/02_System_Design_V2.5.md) for the normative specification.
-See the [ATT V2.5.0 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.5.0 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [V2.6 Call-backed Tool System Design](docs/02_System_Design_V2.6.md) and [V2.5 Database Helper System Design](docs/02_System_Design_V2.5.md) for normative specifications.
+See the [ATT V2.6.0 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.6.0 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.

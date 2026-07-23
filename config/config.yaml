@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.5
+schemaVersion: att-config/v2.6
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -23,6 +23,7 @@ execution:
 toolGroups:
   - config/tools/sample.yaml
   - config/tools/fpp.yaml
+  - config/tools/orders-db.yaml
 
 # Each referenced file declares one independent att-dbhelper/v2.5 instance.
 dbhelpers:

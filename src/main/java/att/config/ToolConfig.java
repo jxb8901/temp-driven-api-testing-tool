@@ -14,6 +14,8 @@ public final class ToolConfig {
     private final String name;
     private final String description;
     private final List<String> commandArgv;
+    private final String call;
+    private final String cache;
     private final List<String> groupScriptArgv;
     private final String groupId;
     private final String localKey;
@@ -24,24 +26,39 @@ public final class ToolConfig {
 
     public ToolConfig(String key, String name, String description, String command, String output,
                       Map<String, ToolArgumentConfig> arguments) {
-        this(key, key, "", name, description, parse(command), Collections.<String>emptyList(), output, arguments, null);
+        this(key, key, "", name, description, parse(command), "", Collections.<String>emptyList(), output, arguments, null, null);
     }
 
     public ToolConfig(String key, String localKey, String groupId, String name, String description,
                       List<String> commandArgv, List<String> groupScriptArgv, String output,
                       Map<String, ToolArgumentConfig> arguments, SshConfig ssh) {
-        this(key, localKey, groupId, name, description, commandArgv, groupScriptArgv, output, arguments, ssh, null);
+        this(key, localKey, groupId, name, description, commandArgv, "", groupScriptArgv, output, arguments, ssh, null);
     }
 
     public ToolConfig(String key, String localKey, String groupId, String name, String description,
                       List<String> commandArgv, List<String> groupScriptArgv, String output,
                       Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile) {
+        this(key, localKey, groupId, name, description, commandArgv, "", groupScriptArgv, output, arguments, ssh, sourceFile);
+    }
+
+    public ToolConfig(String key, String localKey, String groupId, String name, String description,
+                      List<String> commandArgv, String call, List<String> groupScriptArgv, String output,
+                      Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile) {
+        this(key, localKey, groupId, name, description, commandArgv, call, "", groupScriptArgv,
+                output, arguments, ssh, sourceFile);
+    }
+
+    public ToolConfig(String key, String localKey, String groupId, String name, String description,
+                      List<String> commandArgv, String call, String cache, List<String> groupScriptArgv,
+                      String output, Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile) {
         this.key = key;
         this.localKey = localKey;
         this.groupId = groupId == null ? "" : groupId;
         this.name = name;
         this.description = description;
         this.commandArgv = immutable(commandArgv);
+        this.call = call == null ? "" : call.trim();
+        this.cache = cache == null ? "" : cache.trim();
         this.groupScriptArgv = immutable(groupScriptArgv);
         this.output = output;
         this.arguments = arguments == null ? Collections.<String, ToolArgumentConfig>emptyMap()
@@ -55,6 +72,12 @@ public final class ToolConfig {
     public String description() { return description; }
     public String command() { return printable(commandArgv); }
     public List<String> commandArgv() { return commandArgv; }
+    public String call() { return call; }
+    public boolean commandBacked() { return call.isEmpty(); }
+    public boolean callBacked() { return !call.isEmpty(); }
+    public String cache() { return cache; }
+    public boolean caseCached() { return "case".equals(cache); }
+    public boolean dbCached() { return "db".equals(cache); }
     public List<String> groupScriptArgv() { return groupScriptArgv; }
     public String groupId() { return groupId; }
     public String localKey() { return localKey; }

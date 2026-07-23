@@ -23,6 +23,9 @@ class PackageDocumentationGeneratorTest {
         echoArguments.put("value", new ToolArgumentConfig("value", "Value", "Optional values", false, ",", "--value", "once"));
         tools.put("echo", new ToolConfig("echo", "Echo", "Global echo", "echo ${value}", "txt", echoArguments));
         tools.put("sample.date", new ToolConfig("sample.date", "date", "sample", "Date", "Grouped date", Arrays.asList("date"), Arrays.asList("dispatch"), "txt", Collections.<String,ToolArgumentConfig>emptyMap(), null));
+        tools.put("orders.count", new ToolConfig("orders.count", "count", "orders", "Count orders", "Typed count",
+                Collections.<String>emptyList(), "#{db.orders.scalar(sql='select count(*)')}", "db",
+                Collections.<String>emptyList(), "", Collections.<String,ToolArgumentConfig>emptyMap(), null, null));
         DbHelperConfig orders = new DbHelperConfig("orders", "Orders", "Order queries", "jdbc:test:orders",
                 "", "", "", Collections.<String,String>emptyMap(), true, "driverDefault", 17,
                 "case", "rollback", 50, 1024, 4096, "hash", "masked", null);
@@ -46,6 +49,9 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("Global tools"));
         assertTrue(html.contains("Tool group: sample"));
         assertTrue(html.contains("sample.date"));
+        assertTrue(html.contains("orders.count"));
+        assertTrue(html.contains("call: <code>#{db.orders.scalar"));
+        assertTrue(html.contains("cache.scope=db"));
         assertTrue(html.contains("db.orders"));
         assertTrue(html.contains("17 seconds"));
         assertFalse(html.contains("jdbc:test:orders"));
