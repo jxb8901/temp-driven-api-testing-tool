@@ -115,7 +115,7 @@ class FrameworkEngineTest {
         assertTrue(manifest.contains("javaVersion:")); assertTrue(manifest.contains("timezone:")); assertTrue(manifest.contains("sha256:"));
         assertTrue(manifest.contains("kind: testcase-snapshot"));
         assertFalse(manifest.contains(".in-progress"));
-        try (java.util.stream.Stream<Path> pending = Files.list(projectRoot.resolve("output/.in-progress"))) { assertEquals(0, pending.count()); }
+        assertFalse(Files.exists(projectRoot.resolve("output/.in-progress")));
         String ci = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/ci/summary.json")), "UTF-8");
         assertTrue(ci.contains("\"inputManifestHash\":\""));
         IllegalArgumentException duplicate = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(verboseOptions));
@@ -172,7 +172,7 @@ class FrameworkEngineTest {
                 && "sql/reference.sql".equals(item.get("path"))), inputs.toString());
     }
 
-    @Test void failedPlanCreatesNoOutputOrInProgressDirectory() throws Exception {
+    @Test void failedPlanCreatesNoOutputDirectory() throws Exception {
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
         writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
@@ -196,15 +196,6 @@ class FrameworkEngineTest {
         assertTrue(error.getMessage().contains("snapshot is stale"), error.getMessage());
         assertTrue(error.getMessage().contains("payment.TC001.stages.invoke.name changed"), error.getMessage());
         assertFalse(Files.exists(projectRoot.resolve("output")));
-    }
-
-    @Test void allocatesSequentialRunIdWhenCompletionNameHasCollided() throws Exception {
-        Files.createDirectories(projectRoot.resolve("output/RUN-1"));
-        Files.createDirectories(projectRoot.resolve("output/RUN-1-2"));
-        FrameworkEngine engine = new FrameworkEngine(projectRoot, globalConfig());
-        java.lang.reflect.Method method = FrameworkEngine.class.getDeclaredMethod("uniqueCompletionRunId", Path.class, String.class);
-        method.setAccessible(true);
-        assertEquals("RUN-1-3", method.invoke(engine, projectRoot.resolve("output"), "RUN-1"));
     }
 
     @Test void rejectsDuplicateWorkbookIdsAcrossExcelFilesDuringPlanning() throws Exception {

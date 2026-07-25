@@ -36,6 +36,9 @@ public class TemplateAction {
     private final Map<String, Object> raw;
     private final Map<String, Object> retry;
     private final Long timeoutMs;
+    private final String use;
+    private final Map<String, Object> with;
+    private final String runWhen;
 
     public TemplateAction(String key, Map<String, Object> values) {
         this(key, values, "att-template/v2.3");
@@ -67,6 +70,9 @@ public class TemplateAction {
         this.fields = map(data.get("fields"));
         this.retry = map(data.get("retry"));
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
+        this.use = text(data.get("use"), "");
+        this.with = map(data.get("with"));
+        this.runWhen = text(data.get("runWhen"), "");
     }
 
     public String key() { return key; }
@@ -95,6 +101,9 @@ public class TemplateAction {
     public Map<String, Object> raw() { return raw; }
     public Map<String, Object> retry() { return retry; }
     public Long timeoutMs() { return timeoutMs; }
+    public String use() { return use; }
+    public Map<String, Object> with() { return with; }
+    public String runWhen() { return runWhen; }
 
     private static String text(Object value, String defaultValue) {
         return value == null ? defaultValue : String.valueOf(value);

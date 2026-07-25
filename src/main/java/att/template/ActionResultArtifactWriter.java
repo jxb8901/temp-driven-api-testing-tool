@@ -15,19 +15,19 @@ final class ActionResultArtifactWriter {
     private final ObjectOutputCodec codec = new ObjectOutputCodec();
     private final DbTextResultFormatter dbText = new DbTextResultFormatter();
 
-    Path write(CaseRuntimeContext context, String configuredPath, String format, Object value,
+    Path write(CaseRuntimeContext context, String actionId, String configuredPath, String format, Object value,
                boolean overwrite) throws Exception {
-        return write(context, configuredPath, format, value, overwrite, false);
+        return write(context, actionId, configuredPath, format, value, overwrite, false);
     }
 
-    Path writeDb(CaseRuntimeContext context, String configuredPath, String format, Object value,
+    Path writeDb(CaseRuntimeContext context, String actionId, String configuredPath, String format, Object value,
                  boolean overwrite) throws Exception {
-        return write(context, configuredPath, format, value, overwrite, true);
+        return write(context, actionId, configuredPath, format, value, overwrite, true);
     }
 
-    private Path write(CaseRuntimeContext context, String configuredPath, String format, Object value,
+    private Path write(CaseRuntimeContext context, String actionId, String configuredPath, String format, Object value,
                        boolean overwrite, boolean dbResult) throws Exception {
-        Path root = context.caseOutputDirectory().toAbsolutePath().normalize();
+        Path root = (context.inFlow() ? context.actionOutputDir(actionId) : context.caseOutputDirectory()).toAbsolutePath().normalize();
         Files.createDirectories(root);
         Path target = root.resolve(IdentifierValidator.relativePath(configuredPath, "action saveAs.path")).normalize();
         if (!target.startsWith(root) || target.equals(root)) {

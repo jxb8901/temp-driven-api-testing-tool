@@ -18,6 +18,13 @@ class PackageDocumentationGeneratorTest {
     @TempDir Path tempDir;
     @Test void generatesModernSinglePageAndUniqueUnicodeIds() throws Exception {
         Files.createDirectories(tempDir.resolve("testcase")); Files.createDirectories(tempDir.resolve("templates"));
+        Files.createDirectories(tempDir.resolve("templates/flows/sample"));
+        Files.write(tempDir.resolve("templates/flows/sample/flow.yaml"), (
+                "schemaVersion: att-flow/v3.0\n" +
+                "id: sample.echo.v1\nname: Sample Echo\ndescription: Documented Flow\n" +
+                "inputs:\n  value: {type: string, required: true}\n" +
+                "actions:\n  copy: {type: assign, name: value, expression: '${input.value}'}\n" +
+                "outputs:\n  value: {type: string, from: '${runtime.value}'}\n").getBytes("UTF-8"));
         LinkedHashMap<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
         LinkedHashMap<String,ToolArgumentConfig> echoArguments = new LinkedHashMap<String,ToolArgumentConfig>();
         echoArguments.put("value", new ToolArgumentConfig("value", "Value", "Optional values", false, ",", "--value", "once"));
@@ -42,6 +49,9 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("id=\"toolFilter\""));
         assertTrue(html.contains("position:sticky;top:0"));
         assertTrue(html.contains("href=\"#testcases\""));
+        assertTrue(html.contains("href=\"#flows\""));
+        assertTrue(html.contains("sample.echo.v1"));
+        assertTrue(html.contains("Documented Flow"));
         assertTrue(html.contains("href=\"#dbhelpers\""));
         assertTrue(html.contains("data-tool="));
         assertTrue(html.contains("<strong>Index</strong>"));

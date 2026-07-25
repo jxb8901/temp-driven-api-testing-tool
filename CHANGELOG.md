@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.0.1 - 2026-07-26
+
+- Fixed static validation of Flow bindings sourced from an ordered `assign`: `${CASE.VARS.<name>}` is treated as runtime-typed during validation, while the resolved value remains strictly checked immediately before Flow entry.
+- Moved malformed V3 Flow invocation fields such as dynamic/non-canonical `use` and non-object `with` to the Template/Flow load boundary so `validate` reports them before execution; strict Tool configuration loading remains part of the same validation command boundary.
+- Removed `.in-progress` Run staging. ATT now atomically reserves `output/<RunID>` before execution and writes live Case evidence there; only runs with a `COMPLETE` manifest and latest pointer are eligible for completed-run consumers.
+
+## 3.0.0 - 2026-07-25
+
+- Added strict `att-flow/v3.0` and `att-template/v3.0` authoring contracts for static reusable Flow composition while retaining V2 Template read compatibility.
+- Added package Flow indexing, duplicate/unresolved/cycle/depth validation, typed input/output contracts, selected dependency-closure loading, and compilation before run output mutation.
+- Added isolated nested Flow runtime scopes (`input`, `actions`, `runtime`, `flow`), local assign variables, declared-only outputs, Action `runWhen`, existing `onFailure` aggregation, qualified invocation IDs, and collision-free nested artifacts.
+- Added hierarchical Flow evidence while preserving top-level Excel, HTML, JUnit and CI result consumption until the later reporting phase.
+- Added three complete Flow examples, one V3 composition Template, package documentation coverage, compatibility/runtime/graph/performance tests, and synchronized V3 design and authoring documentation.
+
 ## 2.6.2 - 2026-07-25
 
 - Unified command-backed, call-backed DB/built-in, and primary built-in Tool Actions behind one per-attempt timeout contract with precedence Action → Tool descriptor → global → 10,000 ms.

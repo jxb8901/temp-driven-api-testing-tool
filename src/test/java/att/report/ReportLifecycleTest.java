@@ -24,6 +24,13 @@ class ReportLifecycleTest {
         assertTrue(Files.exists(run.resolve("report/junit.html")));
         assertTrue(Files.exists(new RunArchiveBuilder().build(tempDir,output)));
         assertFalse(Files.exists(run.resolve("package-config")));
+        assertFalse(Files.exists(output.resolve(".in-progress")));
+    }
+    @Test void reportRejectsDirectRunDirectoryWithoutCompleteManifest() throws Exception {
+        Path output = tempDir.resolve("output"), run = output.resolve("DEBUG-RUN");
+        Files.createDirectories(run);
+        Files.write(run.resolve("case.log"), "partial evidence".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new ReportRegenerator().regenerate(output, "DEBUG-RUN"));
     }
     @Test void reportAndBuildRejectSymlinkRunDirectory() throws Exception {
         Path output=tempDir.resolve("out"), outside=tempDir.resolve("outside"); Files.createDirectories(output); Files.createDirectories(outside);

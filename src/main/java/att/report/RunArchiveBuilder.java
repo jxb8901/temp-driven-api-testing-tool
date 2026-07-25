@@ -39,8 +39,7 @@ public final class RunArchiveBuilder {
         if (expectedManifestHash.length() != 64 || !expectedManifestHash.equals(sha256(runDir.resolve("run.yaml")))) throw new IllegalArgumentException("Latest run manifest hash does not match: " + runId);
         Path dist = projectRoot.resolve("build");
         Files.createDirectories(dist);
-        Path stagingRoot = outputRoot.resolve(".in-progress"); Files.createDirectories(stagingRoot);
-        Path stagedRun = stagingRoot.resolve("archive-" + runId + "-" + java.util.UUID.randomUUID().toString());
+        Path stagedRun = Files.createTempDirectory(dist, ".att-archive-" + runId + "-");
         copyTree(runDir, stagedRun);
         snapshotPackage(projectRoot, stagedRun, (Map<?, ?>) manifestObject);
         Path archive = dist.resolve("att-run-" + runId + ".tar.gz");

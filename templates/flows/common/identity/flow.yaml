@@ -1,0 +1,16 @@
+schemaVersion: att-flow/v3.0
+id: common.identity.v1
+name: Identity
+description: Publish one string through an isolated Flow contract.
+inputs:
+  value:
+    type: string
+    required: true
+actions:
+  copy:
+    type: tool
+    call: "#{misc.string(value=${input.value})}"
+outputs:
+  value:
+    type: string
+    from: "${actions.copy.output.result}"

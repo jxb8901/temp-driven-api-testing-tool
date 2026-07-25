@@ -103,4 +103,22 @@ class StageTemplateLoaderTest {
         assertEquals("${ACTIONS.call.output.targetFiles[0]}", action.file());
         assertEquals("", action.message());
     }
+
+    @Test void rejectsMalformedV3FlowUseAndBindingsAtLoadBoundary() throws Exception {
+        StageTemplateLoader.clearForTests();
+        Path dynamic = tempDir.resolve("templates/dynamic");
+        Path array = tempDir.resolve("templates/array");
+        Files.createDirectories(dynamic);
+        Files.createDirectories(array);
+        Files.write(dynamic.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\nname: dynamic\ndescription: test\nactions:\n"
+                + "  call: {type: flow, use: '${CASE.flow}'}\n").getBytes("UTF-8"));
+        Files.write(array.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\nname: array\ndescription: test\nactions:\n"
+                + "  call: {type: flow, use: common.copy.v1, with: [one]}\n").getBytes("UTF-8"));
+        StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
+
+        IllegalArgumentException invalidUse = assertThrows(IllegalArgumentException.class, () -> loader.load("dynamic"));
+        assertTrue(invalidUse.getMessage().contains("static canonical Flow ID"), invalidUse.getMessage());
+        IllegalArgumentException invalidWith = assertThrows(IllegalArgumentException.class, () -> loader.load("array"));
+        assertTrue(invalidWith.getMessage().contains("with must be a map"), invalidWith.getMessage());
+    }
 }

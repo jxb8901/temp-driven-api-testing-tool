@@ -84,14 +84,15 @@ public class FrameworkEngine {
             }
         });
         try {
-        if (Files.exists(finalRunDirectory)) {
-            throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + finalRunDirectory + "). Choose a different --run-id.");
-        }
         Files.createDirectories(outputRoot);
-        Path progressRoot = outputRoot.resolve(".in-progress");
-        Files.createDirectories(progressRoot);
-        Path runDirectory = progressRoot.resolve(runId + "-" + java.util.UUID.randomUUID().toString());
-        Files.createDirectories(runDirectory);
+        Path runDirectory = finalRunDirectory;
+        try {
+            // Reserve the final Run ID atomically. Evidence is intentionally
+            // visible at its permanent path while the Case is executing.
+            Files.createDirectory(runDirectory);
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + finalRunDirectory + "). Choose a different --run-id.", e);
+        }
 
         List<TestResult> results = new ArrayList<>();
         Map<ExecutionPlan.Suite, List<TestResult>> suiteReportResults = new LinkedHashMap<ExecutionPlan.Suite, List<TestResult>>();
@@ -105,7 +106,7 @@ public class FrameworkEngine {
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, suiteConfig);
             UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor);
-            StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine);
+            StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
             List<TestResult> suiteResults = new ArrayList<TestResult>();
@@ -127,19 +128,10 @@ public class FrameworkEngine {
         }
         profile.end("caseExecutionMs", phaseStarted);
         if (results.isEmpty()) throw new IllegalArgumentException("Case selection is empty after rerun-failed filtering");
-        try (RunIdPublicationGuard publicationGuard = RunIdPublicationGuard.acquire(outputRoot, runId)) {
-        String completedRunId = uniqueCompletionRunId(outputRoot, runId);
-        if (!completedRunId.equals(runId)) {
-            if (!options.quiet() && "human".equals(options.format())) System.out.println("Run ID collision detected at completion; publishing as " + completedRunId);
-            finalRunDirectory = IdentifierValidator.strictChild(outputRoot, completedRunId, "Run directory");
-            runId = completedRunId;
-        }
         phaseStarted = profile.begin();
         for (Map.Entry<ExecutionPlan.Suite, List<TestResult>> entry : suiteReportResults.entrySet()) {
             if ("none".equals(entry.getKey().config().report().mode())) continue;
-            List<TestResult> publishedSuiteResults = new ArrayList<TestResult>();
-            for (TestResult result : entry.getValue()) publishedSuiteResults.add(result.relocate(runDirectory, finalRunDirectory));
-            new ExcelReportWriter(entry.getKey().config()).write(resolve(entry.getKey().workbook()), runDirectory, publishedSuiteResults);
+            new ExcelReportWriter(entry.getKey().config()).write(resolve(entry.getKey().workbook()), runDirectory, entry.getValue());
         }
         profile.end("resultWorkbookMs", phaseStarted);
         for (TestResult result : results) appendEvent(runDirectory, runId, result);
@@ -163,30 +155,17 @@ public class FrameworkEngine {
             validator.validate(new javax.xml.transform.stream.StreamSource(runDirectory.resolve("ci/junit.xml").toFile()));
         }
         profile.end("ciReportMs", phaseStarted);
-        writeManifest(runDirectory, runId, results, runStarted, runEnded, html, options, inputs, validationDiagnostics);
-        phaseStarted = profile.begin();
-        rewritePublishedPaths(runDirectory, finalRunDirectory);
-        profile.end("pathRewriteMs", phaseStarted);
         profile.counter("casesCompleted", results.size());
         profile.write(runDirectory);
-        Files.move(runDirectory, finalRunDirectory, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-        writeLatest(outputRoot, finalRunDirectory, runId, summary, runEnded);
-        List<TestResult> relocated = new ArrayList<TestResult>();
-        for (TestResult result : results) relocated.add(result.relocate(runDirectory, finalRunDirectory));
-        return new RunSummary(relocated, finalRunDirectory.resolve("report/index.html"));
-        }
+        // COMPLETE is the final run artifact. If any earlier evidence write
+        // fails, the directly visible directory remains intentionally
+        // incomplete and cannot be consumed as a finished run.
+        writeManifest(runDirectory, runId, results, runStarted, runEnded, html, options, inputs, validationDiagnostics);
+        writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
+        return new RunSummary(results, runDirectory.resolve("report/index.html"));
         } finally {
             concurrencyGuard.close();
         }
-    }
-
-    private String uniqueCompletionRunId(Path outputRoot, String requested) {
-        if (!Files.exists(IdentifierValidator.strictChild(outputRoot, requested, "Run directory"))) return requested;
-        for (int sequence = 2; sequence < Integer.MAX_VALUE; sequence++) {
-            String candidate = IdentifierValidator.runId(requested + "-" + sequence);
-            if (!Files.exists(IdentifierValidator.strictChild(outputRoot, candidate, "Run directory"))) return candidate;
-        }
-        throw new IllegalArgumentException("Unable to allocate a unique Run ID for " + requested);
     }
 
     private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Path runDirectory,
@@ -310,6 +289,7 @@ public class FrameworkEngine {
             Path previousWorkbook = workbookIds.put(suiteConfig.workbookId(), workbook);
             if (previousWorkbook != null) throw new IllegalArgumentException("Duplicate workbook id '" + suiteConfig.workbookId() + "' in " + previousWorkbook + " and " + workbook);
             StageTemplateLoader loader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
+            att.flow.FlowRegistry flows = new att.flow.FlowRegistry(projectRoot, suiteConfig.templatesRoot(), false);
             List<TestCase> selectedCases = new ArrayList<TestCase>();
             Map<String, StageTemplate> templates = new LinkedHashMap<String, StageTemplate>();
             List<TestCase> loadedCases = new ExcelTestSuiteLoader(suiteConfig).load(workbook);
@@ -319,9 +299,13 @@ public class FrameworkEngine {
                 Path previousCase = fullCaseIds.put(testCase.caseId(), workbook);
                 if (previousCase != null) throw new IllegalArgumentException("Duplicate full Case ID '" + testCase.caseId() + "' in " + previousCase + " and " + workbook);
                 selectedCases.add(testCase);
-                for (StageCaseData stage : testCase.stages().values()) if (!templates.containsKey(stage.templateName())) templates.put(stage.templateName(), loader.load(stage.templateName()));
+                for (StageCaseData stage : testCase.stages().values()) if (!templates.containsKey(stage.templateName())) {
+                    StageTemplate template = loader.load(stage.templateName());
+                    for (att.template.TemplateAction action : template.actions()) if ("flow".equalsIgnoreCase(action.type())) flows.validateInvocation(action);
+                    templates.put(stage.templateName(), template);
+                }
             }
-            if (!selectedCases.isEmpty()) suitePlans.add(new ExecutionPlan.Suite(workbook, suiteConfig, selectedCases, templates));
+            if (!selectedCases.isEmpty()) suitePlans.add(new ExecutionPlan.Suite(workbook, suiteConfig, selectedCases, templates, flows));
         }
         ExecutionPlan plan = new ExecutionPlan(runId, outputRoot, finalRunDirectory, suitePlans);
         if (plan.caseCount() == 0) throw new IllegalArgumentException("Case selection is empty after rerun-failed filtering");
@@ -496,35 +480,6 @@ public class FrameworkEngine {
     private void addInput(List<Map<String, Object>> inputs, String kind, Path file) throws Exception { if (!Files.isRegularFile(file)) return; Path canonicalRoot = projectRoot.toRealPath(); Path canonicalFile = file.toRealPath(); if (!canonicalFile.startsWith(canonicalRoot)) throw new IllegalArgumentException("Run input escapes package root: " + file); Map<String, Object> item = new LinkedHashMap<String, Object>(); item.put("kind", kind); item.put("path", canonicalRoot.relativize(canonicalFile).toString().replace('\\', '/')); item.put("sha256", sha256(canonicalFile)); inputs.add(item); }
     private String sha256(Path file) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); try (java.io.InputStream input = Files.newInputStream(file)) { byte[] buffer = new byte[65536]; int count; while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count); } byte[] hash = digest.digest(); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
     private String sha256Bytes(byte[] bytes) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(bytes); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
-
-    private void rewritePublishedPaths(Path workingDirectory, Path finalDirectory) throws Exception {
-        String from = workingDirectory.toAbsolutePath().normalize().toString();
-        String to = finalDirectory.toAbsolutePath().normalize().toString();
-        // A child process may report a physical path while ATT uses a lexical
-        // path through a platform symlink (for example macOS /var ->
-        // /private/var). Rewrite the longer physical form first so the
-        // lexical replacement cannot duplicate the symlink prefix.
-        String physicalFrom = workingDirectory.toRealPath().toString();
-        Path finalParent = finalDirectory.toAbsolutePath().normalize().getParent();
-        String physicalTo = finalParent == null
-                ? to
-                : finalParent.toRealPath().resolve(finalDirectory.getFileName()).normalize().toString();
-        try (java.util.stream.Stream<Path> files = Files.walk(workingDirectory)) {
-            java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(this::isTextEvidence).iterator();
-            while (iterator.hasNext()) {
-                Path file = iterator.next();
-                String content = new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
-                String rewritten = content;
-                if (!physicalFrom.equals(from) && rewritten.contains(physicalFrom)) rewritten = rewritten.replace(physicalFrom, physicalTo);
-                if (rewritten.contains(from)) rewritten = rewritten.replace(from, to);
-                if (!rewritten.equals(content)) Files.write(file, rewritten.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            }
-        }
-    }
-    private boolean isTextEvidence(Path file) {
-        String name = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-        return name.endsWith(".yaml") || name.endsWith(".json") || name.endsWith(".jsonl") || name.endsWith(".xml") || name.endsWith(".html") || name.endsWith(".log") || name.endsWith(".txt");
-    }
 
     private void writeCaseTree(Path caseDirectory, CaseRuntimeContext context) throws Exception {
         Files.write(caseDirectory.resolve("case.yaml"), new Yaml().dump(context.caseTree()).getBytes(java.nio.charset.StandardCharsets.UTF_8));

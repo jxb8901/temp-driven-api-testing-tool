@@ -18,6 +18,7 @@ public final class CaseRuntimeContext {
     private int toolSequence;
     private int dbSequence;
     private final Map<String, Object> callToolCache = new LinkedHashMap<String, Object>();
+    private final java.util.Deque<FlowFrame> flowScopes = new java.util.ArrayDeque<FlowFrame>();
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
@@ -141,10 +142,18 @@ public final class CaseRuntimeContext {
     }
 
     private java.util.Set<String> explicitRoots() {
+        if (!flowScopes.isEmpty()) return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("input", "actions", "runtime", "flow", "output"));
         return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("CASE", "RUN", "ACTIONS", "TOOL", "DB", "output"));
     }
 
     private Map<String, Object> logicalRoot() {
+        if (!flowScopes.isEmpty()) {
+            FlowFrame frame = flowScopes.peek();
+            Map<String, Object> local = new LinkedHashMap<String, Object>();
+            local.put("input", frame.input); local.put("actions", frame.actionViews); local.put("runtime", frame.runtime); local.put("flow", frame.flow);
+            if (root.containsKey("output")) local.put("output", root.get("output"));
+            return local;
+        }
         Map<String, Object> logical = new LinkedHashMap<String, Object>();
         logical.put("CASE", caseNode);
         logical.put("RUN", runNode);
@@ -156,6 +165,7 @@ public final class CaseRuntimeContext {
     }
 
     private Map<String, Object> canonicalRoot() {
+        if (!flowScopes.isEmpty()) return logicalRoot();
         Map<String, Object> canonical = new LinkedHashMap<String, Object>();
         canonical.put("CASE", caseNode);
         canonical.put("RUN", runNode);
@@ -186,24 +196,24 @@ public final class CaseRuntimeContext {
                     null, "name", null, null, null, null, null,
                     "Use a simple case-sensitive identifier such as txnSeq.", null);
         }
-        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
+        Map<String, Object> variables = flowScopes.isEmpty() ? (Map<String, Object>) caseNode.get("VARS") : flowScopes.peek().runtime;
         if (variables.containsKey(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    "Duplicate CASE.VARS assignment '${CASE.VARS." + name + "}'",
-                    "The variable was already assigned earlier in this Test Case.", null, "name",
+                    flowScopes.isEmpty() ? "Duplicate CASE.VARS assignment '${CASE.VARS." + name + "}'" : "Duplicate Flow runtime assignment '${runtime." + name + "}'",
+                    flowScopes.isEmpty() ? "The variable was already assigned earlier in this Test Case." : "The variable was already assigned in this Flow invocation.", null, "name",
                     null, null, null, null, null,
-                    "Use a unique name; assign does not overwrite Case-scoped variables.", null);
+                    "Use a unique name; assign does not overwrite scoped variables.", null);
         }
     }
 
     @SuppressWarnings("unchecked")
     public void assignCaseVariable(String name, Object value) {
         requireCaseVariableAvailable(name);
-        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
+        Map<String, Object> variables = flowScopes.isEmpty() ? (Map<String, Object>) caseNode.get("VARS") : flowScopes.peek().runtime;
         variables.put(name, value);
     }
 
-    public Map<String, Object> values() { return root; }
+    public Map<String, Object> values() { return flowScopes.isEmpty() ? root : logicalRoot(); }
     public Map<String, Object> caseTree() { return caseNode; }
     public Path caseOutputDirectory() { return caseOutputDir; }
 
@@ -237,6 +247,13 @@ public final class CaseRuntimeContext {
     }
 
     public void addAction(String actionId, Map<String, Object> action) {
+        if (!flowScopes.isEmpty()) {
+            FlowFrame frame = flowScopes.peek();
+            if (frame.actions.containsKey(actionId)) throw new IllegalArgumentException("Duplicate Flow action id: " + actionId);
+            frame.actions.put(actionId, action);
+            frame.actionViews.put(actionId, flowActionView(action));
+            return;
+        }
         if (currentActions == null) throw new IllegalStateException("No current stage for action: " + actionId);
         if (currentActions.containsKey(actionId)) throw new IllegalArgumentException("Duplicate action id: " + actionId);
         currentActions.put(actionId, action);
@@ -248,8 +265,19 @@ public final class CaseRuntimeContext {
         return new LinkedHashMap<String, Object>(action);
     }
 
+    private Map<String, Object> flowActionView(Map<String, Object> action) {
+        Map<String, Object> view = new LinkedHashMap<String, Object>();
+        for (String key : java.util.Arrays.asList("id", "type", "description", "output")) if (action.containsKey(key)) view.put(key, action.get(key));
+        return view;
+    }
+
     @SuppressWarnings("unchecked")
     public void updateAction(String actionId, Map<String, Object> action) {
+        if (!flowScopes.isEmpty()) {
+            FlowFrame frame = flowScopes.peek();
+            if (!frame.actions.containsKey(actionId)) throw new IllegalArgumentException("Unknown Flow action id: " + actionId);
+            frame.actions.put(actionId, action); frame.actionViews.put(actionId, flowActionView(action)); return;
+        }
         if (currentActions == null || !currentActions.containsKey(actionId)) throw new IllegalArgumentException("Unknown action id: " + actionId);
         currentActions.put(actionId, action);
         actionsView.put(actionId, actionView(action));
@@ -261,10 +289,73 @@ public final class CaseRuntimeContext {
     }
 
     public Path actionOutputDir(String actionId) {
-        Path directory = currentStage == null ? caseOutputDir.resolve(actionId) : caseOutputDir.resolve(currentStage).resolve(actionId);
+        Path directory = currentStage == null ? caseOutputDir : caseOutputDir.resolve(currentStage);
+        if (!flowScopes.isEmpty()) {
+            java.util.List<FlowFrame> frames = new java.util.ArrayList<FlowFrame>(flowScopes);
+            java.util.Collections.reverse(frames);
+            directory = directory.resolve("flows");
+            for (FlowFrame frame : frames) directory = directory.resolve(frame.invocationId).resolve("actions");
+        }
+        directory = directory.resolve(actionId);
         directory = directory.normalize();
         if (!directory.startsWith(caseOutputDir.normalize())) throw new IllegalArgumentException("Action output directory escapes case root: " + actionId);
         return directory;
+    }
+
+    public String scopedArtifactPath(String actionId, String configuredPath) {
+        if (!inFlow()) return configuredPath;
+        Path relative = IdentifierValidator.relativePath(configuredPath, "Flow action artifact path");
+        Path target = actionOutputDir(actionId).resolve(relative).normalize();
+        Path root = caseLogDirectory().toAbsolutePath().normalize();
+        if (!target.toAbsolutePath().normalize().startsWith(root)) throw new IllegalArgumentException("Flow artifact path escapes Case output directory: " + configuredPath);
+        return root.relativize(target.toAbsolutePath().normalize()).toString().replace('\\', '/');
+    }
+
+    public void beginFlow(String flowId, String invocationId, Map<String, Object> input) {
+        flowScopes.push(new FlowFrame(flowId, invocationId, input, flowScopes.size() + 1));
+    }
+
+    public FlowEvidence finishFlow() {
+        if (flowScopes.isEmpty()) throw new IllegalStateException("No active Flow scope");
+        FlowFrame frame = flowScopes.pop();
+        return new FlowEvidence(frame.flow, frame.input, frame.runtime, frame.actions);
+    }
+
+    public boolean inFlow() { return !flowScopes.isEmpty(); }
+    public String qualifiedActionId(String actionId) {
+        if (flowScopes.isEmpty()) return actionId;
+        java.util.List<FlowFrame> frames = new java.util.ArrayList<FlowFrame>(flowScopes);
+        java.util.Collections.reverse(frames);
+        StringBuilder result = new StringBuilder();
+        for (FlowFrame frame : frames) { if (result.length() > 0) result.append('.'); result.append(frame.invocationId); }
+        if (result.length() > 0) result.append('.');
+        return result.append(actionId).toString();
+    }
+
+    public static final class FlowEvidence {
+        private final Map<String, Object> flow, input, runtime, actions;
+        private FlowEvidence(Map<String, Object> flow, Map<String, Object> input, Map<String, Object> runtime, Map<String, Object> actions) {
+            this.flow = new LinkedHashMap<String, Object>(flow); this.input = new LinkedHashMap<String, Object>(input);
+            this.runtime = new LinkedHashMap<String, Object>(runtime); this.actions = new LinkedHashMap<String, Object>(actions);
+        }
+        public Map<String, Object> flow() { return flow; }
+        public Map<String, Object> input() { return input; }
+        public Map<String, Object> runtime() { return runtime; }
+        public Map<String, Object> actions() { return actions; }
+    }
+
+    private static final class FlowFrame {
+        private final String invocationId;
+        private final Map<String, Object> input = new LinkedHashMap<String, Object>();
+        private final Map<String, Object> actionViews = new LinkedHashMap<String, Object>();
+        private final Map<String, Object> actions = new LinkedHashMap<String, Object>();
+        private final Map<String, Object> runtime = new LinkedHashMap<String, Object>();
+        private final Map<String, Object> flow = new LinkedHashMap<String, Object>();
+        private FlowFrame(String flowId, String invocationId, Map<String, Object> input, int depth) {
+            this.invocationId = invocationId;
+            if (input != null) this.input.putAll(input);
+            flow.put("id", flowId); flow.put("invocationId", invocationId); flow.put("depth", Integer.valueOf(depth));
+        }
     }
 
     @SuppressWarnings("unchecked")

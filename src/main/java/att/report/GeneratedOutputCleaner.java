@@ -14,23 +14,9 @@ import java.util.List;
 public final class GeneratedOutputCleaner {
     public void clean(Path projectRoot, FrameworkConfig config) throws IOException {
         Path root = projectRoot.toAbsolutePath().normalize();
-        reportInProgress(resolve(root, config.outputDirectory()));
         List<Path> targets = Arrays.asList(resolve(root, config.outputDirectory()), root.resolve("build/docs"));
         for (Path target : targets) deleteSafe(root, target);
         deleteMatchingFiles(root.resolve("build"), "att-", ".tar.gz");
-    }
-
-    private void reportInProgress(Path outputRoot) throws IOException {
-        Path progress = outputRoot.resolve(".in-progress");
-        if (!Files.isDirectory(progress)) return;
-        try (java.util.stream.Stream<Path> entries = Files.list(progress).filter(Files::isDirectory)) {
-            java.util.Iterator<Path> iterator = entries.sorted().iterator();
-            while (iterator.hasNext()) {
-                Path entry = iterator.next();
-                long ageSeconds = Math.max(0, (System.currentTimeMillis() - Files.getLastModifiedTime(entry).toMillis()) / 1000);
-                System.err.println("ATT-CLEAN-STALE: in-progress run age=" + ageSeconds + "s path=" + entry);
-            }
-        }
     }
 
     private void deleteMatchingFiles(Path directory, String prefix, String suffix) throws IOException {

@@ -480,6 +480,39 @@ class PackageValidatorTest {
         assertEquals("actions.buildTxnSeq.name", duplicateError.field());
     }
 
+    @Test void validateDefersAssignedCaseVariableFlowInputTypeUntilRuntime() throws Exception {
+        Path flowDirectory = tempDir.resolve("flows/copy");
+        Files.createDirectories(flowDirectory);
+        Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\n"
+                + "id: common.copy.v1\nname: Copy\ndescription: Copy\n"
+                + "inputs:\n  SrcRefNo: {type: string, required: true}\n"
+                + "actions:\n  note: {type: log, message: '${input.SrcRefNo}'}\noutputs: {}\n").getBytes("UTF-8"));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Field registryField = PackageValidator.class.getDeclaredField("flows");
+        registryField.setAccessible(true);
+        registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir));
+
+        TemplateAction call = new TemplateAction("copy", map("type", "flow", "use", "common.copy.v1",
+                "with", Collections.<String,Object>singletonMap("SrcRefNo", "${CASE.VARS.SrcRefNo}")),
+                "att-template/v3.0");
+        StageTemplate template = new StageTemplate("COPY", tempDir, Collections.singletonList(call), "att-template/v3.0");
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "COPY", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+        Set<String> assigned = new LinkedHashSet<String>();
+        assigned.add("SrcRefNo");
+
+        assertDoesNotThrow(() -> { try {
+            values.invoke(validator, template, testCase, stage, config, tempDir.resolve("payment.xlsx"), assigned);
+        } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
     @Test void validateAssignExpressionUsesNormalInlineCallContracts() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
                 Collections.<String,ToolConfig>emptyMap(),null,null);

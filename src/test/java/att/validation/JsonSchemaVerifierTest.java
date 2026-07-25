@@ -6,6 +6,18 @@ import java.nio.file.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class JsonSchemaVerifierTest {
+    @Test void acceptsV3FlowAndTemplateSchemas() throws Exception {
+        Path root = java.nio.file.Paths.get("").toAbsolutePath();
+        String flow = "{\"schemaVersion\":\"att-flow/v3.0\",\"id\":\"common.one.v1\",\"name\":\"One\",\"description\":\"One\",\"inputs\":{\"value\":{\"type\":\"string\",\"required\":true}},\"actions\":{\"copy\":{\"type\":\"assign\",\"name\":\"value\",\"expression\":\"${input.value}\"}},\"outputs\":{\"value\":{\"type\":\"string\",\"from\":\"${runtime.value}\"}}}";
+        String template = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"V3\",\"actions\":{\"call\":{\"type\":\"flow\",\"use\":\"common.one.v1\",\"with\":{\"value\":\"${CASE.value}\"},\"runWhen\":\"${CASE.enabled} == true\"}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-flow-v3.0.schema.json"), flow));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v3.0.schema.json"), template));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-flow-v3.0.schema.json"), flow.replace("\"outputs\":", "\"unknown\":true,\"outputs\":")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-flow-v3.0.schema.json"), flow.replace("\"required\":true", "\"required\":true,\"default\":\"x\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-flow-v3.0.schema.json"), flow.replace("\"required\":true", "\"default\":1")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v3.0.schema.json"), template.replace("common.one.v1", "${CASE.flow}")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
+    }
     @TempDir Path tempDir;
     @Test void enforcesDraft202012CompositionAndConstraints() throws Exception {
         JsonSchemaVerifier.clearForTests();

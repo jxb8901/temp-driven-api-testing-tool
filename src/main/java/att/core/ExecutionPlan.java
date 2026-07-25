@@ -32,14 +32,20 @@ public final class ExecutionPlan {
         private final FrameworkConfig config;
         private final List<TestCase> cases;
         private final Map<String, StageTemplate> templates;
+        private final att.flow.FlowRegistry flows;
         public Suite(Path workbook, FrameworkConfig config, List<TestCase> cases, Map<String, StageTemplate> templates) {
+            this(workbook, config, cases, templates, null);
+        }
+        public Suite(Path workbook, FrameworkConfig config, List<TestCase> cases, Map<String, StageTemplate> templates, att.flow.FlowRegistry flows) {
             this.workbook = workbook; this.config = config;
             this.cases = Collections.unmodifiableList(new ArrayList<TestCase>(cases));
             this.templates = Collections.unmodifiableMap(new LinkedHashMap<String, StageTemplate>(templates));
+            this.flows = flows;
         }
         public Path workbook() { return workbook; }
         public FrameworkConfig config() { return config; }
         public List<TestCase> cases() { return cases; }
         public StageTemplate template(String reference) { return templates.get(reference); }
+        public att.flow.FlowRegistry flows() { return flows; }
     }
 }

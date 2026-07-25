@@ -37,10 +37,11 @@ public final class PackageDocumentationGenerator {
         GeneratedOutputCleaner.deleteDirectory(output);
         Files.createDirectories(output);
         Map<String, Set<String>> filters = filterValues(projectRoot, config);
-        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\"><strong>Index</strong><a href=\"#testcases\">Testcases</a><a href=\"#templates\">Templates</a><a href=\"#tools\">Tools</a><a href=\"#dbhelpers\">DB helpers</a><a href=\"#builtins\">Built-ins</a></div><div class=\"filters\"><input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">" + select("workbookFilter", "All workbooks", filters.get("workbook")) + select("sheetFilter", "All sheets", filters.get("sheet")) + select("caseFilter", "All Case IDs", filters.get("caseid")) + select("toolFilter", "All tools / DB helpers / built-ins", filters.get("tool")) + "</div></nav>";
-        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Tools · DB helpers · Built-ins</p></header>" + controls
+        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\"><strong>Index</strong><a href=\"#testcases\">Testcases</a><a href=\"#templates\">Templates</a><a href=\"#flows\">Flows</a><a href=\"#tools\">Tools</a><a href=\"#dbhelpers\">DB helpers</a><a href=\"#builtins\">Built-ins</a></div><div class=\"filters\"><input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">" + select("workbookFilter", "All workbooks", filters.get("workbook")) + select("sheetFilter", "All sheets", filters.get("sheet")) + select("caseFilter", "All Case IDs", filters.get("caseid")) + select("toolFilter", "All tools / DB helpers / built-ins", filters.get("tool")) + "</div></nav>";
+        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Flows · Tools · DB helpers · Built-ins</p></header>" + controls
                 + section("testcases", testcasePage(projectRoot, config, new ArrayList<String>()))
                 + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
+                + section("flows", flowPage(projectRoot, config))
                 + section("tools", toolPage(config, new ArrayList<String>()))
                 + section("dbhelpers", dbHelperPage(config))
                 + section("builtins", builtInPage())
@@ -138,12 +139,29 @@ public final class PackageDocumentationGenerator {
                 body.append("<tr><td>").append(escape(String.valueOf(action.getKey()))).append("</td><td>").append(escape(String.valueOf(value.get("type")))).append("</td><td>");
                 if (!tool.isEmpty()) body.append("<a href=\"../tools/index.html#").append(anchor(tool)).append("\">").append(escape(tool)).append("</a>");
                 else if (!db.isEmpty()) body.append("<a href=\"#dbhelper-").append(anchor(db)).append("\">db.").append(escape(db)).append("</a>");
+                else if (value.get("use") != null) body.append("Flow: <code>").append(escape(String.valueOf(value.get("use")))).append("</code>");
                 else body.append(escape(String.valueOf(value.get("payload") == null ? value.get("assert") : value.get("payload"))));
                 body.append("</td></tr>");
             }
             body.append("</table></section>"); search.add(name); search.add(path);
         }
         return page("Templates", body.toString());
+    }
+
+    private String flowPage(Path root, FrameworkConfig config) throws Exception {
+        StringBuilder body = new StringBuilder("<h1>Flows</h1><p>Static, typed, isolated reusable Action sequences.</p>");
+        att.flow.FlowRegistry registry = new att.flow.FlowRegistry(root, config.templatesRoot());
+        for (att.flow.FlowDefinition flow : registry.all()) {
+            body.append("<section class=\"doc-item\" data-search=\"").append(escape((flow.id()+" "+flow.name()+" "+flow.description()).toLowerCase(java.util.Locale.ROOT))).append("\" id=\"").append(anchor(flow.id())).append("\"><h2>").append(escape(flow.id())).append("</h2><p>").append(escape(flow.description())).append("</p>");
+            body.append("<h3>Inputs</h3><table><tr><th>Name</th><th>Type</th><th>Required</th><th>Default</th></tr>");
+            for (Map.Entry<String, att.flow.FlowDefinition.Input> input : flow.inputs().entrySet()) body.append("<tr><td>").append(escape(input.getKey())).append("</td><td>").append(escape(input.getValue().type())).append("</td><td>").append(input.getValue().required()).append("</td><td>").append(escape(input.getValue().hasDefault() ? String.valueOf(input.getValue().defaultValue()) : "")).append("</td></tr>");
+            body.append("</table><h3>Actions</h3><table><tr><th>Action</th><th>Type</th><th>Target</th></tr>");
+            for (TemplateAction action : flow.actions()) body.append("<tr><td>").append(escape(action.id())).append("</td><td>").append(escape(action.type())).append("</td><td>").append(escape("flow".equalsIgnoreCase(action.type()) ? action.use() : action.call())).append("</td></tr>");
+            body.append("</table><h3>Outputs</h3><table><tr><th>Name</th><th>Type</th><th>Source</th></tr>");
+            for (Map.Entry<String, att.flow.FlowDefinition.Output> output : flow.outputs().entrySet()) body.append("<tr><td>").append(escape(output.getKey())).append("</td><td>").append(escape(output.getValue().type())).append("</td><td><code>").append(escape(output.getValue().from())).append("</code></td></tr>");
+            body.append("</table></section>");
+        }
+        return page("Flows", body.toString());
     }
 
     private String toolPage(FrameworkConfig config, List<String> search) {

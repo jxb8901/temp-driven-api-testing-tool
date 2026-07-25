@@ -1,0 +1,16 @@
+schemaVersion: att-template/v3.0
+name: V3_FLOW_EXAMPLE
+description: Minimal V3 Template composing reusable isolated Flows.
+actions:
+  compose:
+    type: flow
+    description: Compose the Case value through two nested Flows.
+    use: common.compose.v1
+    with:
+      value: "${CASE.caseId}"
+  verify:
+    type: assert
+    description: Verify the declared Flow output only.
+    assert: "${ACTIONS.compose.output.outputs.value} == '${CASE.caseId}-done'"
+    expected: "${CASE.caseId}-done"
+    actual: "${ACTIONS.compose.output.outputs.value}"

@@ -1,6 +1,6 @@
-# ATT 2.6.2 - Automated Testing Tool
+# ATT 3.0.1 - Automated Testing Tool
 
-ATT V2.6.2 loads grouped Excel testcases through mandatory strict-schema sidecar YAML and a version-controlled semantic XML snapshot, executes template actions, process Tools, typed call-backed Tool façades, and configured Java JDBC DB helpers, and produces atomic completed runs, optional result workbooks, offline HTML reports, JSON/JUnit CI output, bounded evidence, performance profiles, logs, and verified run archives.
+ATT V3.0.1 provides statically resolved, typed, isolated and nestable reusable Flows while retaining the V2 Excel → Stage → Template contract, Tool/DB runtime, reports, CI output and release artifacts. This maintenance release also fixes assign-backed Flow input validation, moves malformed Flow invocation configuration into `validate`, and writes live evidence directly below the final Run ID.
 
 V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternative to Tool `command`. A call-backed Tool can wrap a DB query/scalar/update or pure built-in while direct DB Actions and expressions remain available.
 
@@ -63,7 +63,14 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 
 `./att.sh docs` always produces one self-contained page at `build/docs/index.html`; Testcases are grouped by workbook and Sheet, and each table includes the validation-time Expected Result assembled from assert actions. Tool, DB helper, and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, Tool, or DB helper. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, dbhelper, configuration, and documentation source files.
 
-## V2.6 essentials
+## V3.0 essentials
+
+- New authoring schemas are `att-template/v3.0` and `att-flow/v3.0`; V2.6, V2.5 and V2.3 Templates remain readable without semantic changes.
+- Flow descriptors live below `templates/flows/**/flow.yaml`, use a path-independent ID ending in `.vN`, and declare typed `inputs`, ordered `actions`, and typed `outputs`.
+- A V3 Template invokes a Flow with `type: flow`, static `use`, and `with`. Read the result only through `${ACTIONS.<action>.output.outputs.<name>}`.
+- Flow-local expressions use `${input.*}`, `${actions.*}`, `${runtime.*}`, and `${flow.*}`. They cannot access `CASE`, `RUN`, parent/sibling Flow state, or internal Actions of another Flow.
+- V3 Action `runWhen` skips one statically known Action. `runAlways`, warning impact, Flow timeout/retry, dynamic dispatch, loops and parallel branches are not V3.0 features.
+- `validate --package` checks every Flow; `validate --selected` loads and validates only the selected Template dependency closure. Runtime uses the precompiled registry and never discovers Flow files dynamically.
 
 - Current configuration uses `att-config/v2.6`; call-backed groups use `att-tool-group/v2.6`. Existing V2.1/V2.2/V2.5 configuration and V2.2 command-backed groups remain readable.
 - A Tool declares exactly one of `command` or `call`. `call` may target one DB query/scalar/update or pure built-in and keeps typed results. DB update façades work only as the primary call of a Tool Action; READ façades also work in expressions.
@@ -106,21 +113,21 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - Tool command templates are normalized before declared arguments are injected as atomic argv values; resolved values are never tokenized again. Local tools do not use a shell. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys. Tools write results to stdout and diagnostics to stderr; ATT records logical/executed argv, input/stdout/stderr in case evidence and creates a dedicated raw-stdout artifact only when the action sets `saveAs`.
 - In Tool-call expressions, expression quotes delimit strings rather than shell words: the opposite quote is literal, a matching quote may be backslash-escaped, and `${...}` may be interpolated inside a quoted value. Prefer a YAML block scalar for calls mixing apostrophes, double quotes, and Context values; the Reference Manual contains copyable examples.
 
-## V2 Model
+## V3 Model
 
 ```text
-test case --1:n stage--> template --1:n action--> tool
+test case --1:n stage--> template --1:n action--> flow --1:n action--> tool
 ```
 
 - Testcases come from one or more configured Excel sheet groups.
 - A template is a directory containing `template.yaml`.
 - Stage template cells are YAML maps with `name`, or scalar shorthand such as `PAYMENT_INVOKE`.
 - A template selector first resolves a symbolic `template.yaml.name`, then a path relative to `templates.root`.
-- `runWhen` defaults to `normal` and stage/action `onFailure` defaults to `stop`; action `onFailure` accepts only `stop` or `continue`.
-- Context properties are available under uppercase `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and `TOOL` nodes; the complete built-in property reference is in the V2 Reference Manual.
+- Stage `runWhen` defaults to `normal`; V3 Action `runWhen` is an optional boolean expression. Stage/action `onFailure` defaults to `stop` and accepts only `stop` or `continue`.
+- Case/Template Context properties are available under uppercase `CASE`, `STAGES`, `TEMPLATE`, `ACTIONS`, and `TOOL` nodes; Flow-local Context uses lowercase `input`, `actions`, `runtime`, and `flow`. The complete property reference is in the V3 Reference Manual.
 - Runtime data is persisted under the `CASE.STAGES.<key>.TEMPLATE.ACTIONS.<actionId>` tree.
 - V2.6 Tool argument descriptors contain `name`, `description`, `required`, optional `argName`, and optional `argNameMode: once|repeat`. Multi-value calls pass YAML arrays directly.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
-See the [V2.6 Call-backed Tool System Design](docs/02_System_Design_V2.6.md) and [V2.5 Database Helper System Design](docs/02_System_Design_V2.5.md) for normative specifications.
-See the [ATT V2.6.2 Reference Manual](docs/09_Reference_Manual_V2.md) and [ATT V2.6.2 Quick Start](docs/08_Quick_Start_V2.md) for operation and authoring guidance.
+See the [V3 System Design](docs/02_System_Design_V3.md), [V2.6.2 Tool System Design](docs/02_System_Design_V2.6.2.md), and [V2.5 Database Helper System Design](docs/history/02_System_Design_V2.5.md) for normative specifications.
+See the [ATT V3.0.1 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.0.1 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.

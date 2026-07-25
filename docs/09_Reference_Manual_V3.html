@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>09_Reference_Manual_V2.md</title>
+<title>09_Reference_Manual_V3.md</title>
 <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
 
 <style>
@@ -365,9 +365,9 @@ code {
           : 'default'
     });
   </script>
-<h1 id="att-v262-user-manual-and-reference">ATT V2.6.2 User Manual and Reference</h1>
+<h1 id="att-v301-user-manual-and-reference">ATT V3.0.1 User Manual and Reference</h1>
 <p>Author: Jeffrey + ChatGPT
-Version: 2.6.2
+Version: 3.0.1
 Status: Normative end-user documentation</p>
 <p>This manual is designed to be read in two ways:</p>
 <ul>
@@ -375,7 +375,7 @@ Status: Normative end-user documentation</p>
 <li>If you already use ATT, Chapters 5–9 are the daily command, configuration, expression, report, and troubleshooting reference.</li>
 <li>Chapter 10 explains internal behavior for maintainers and users diagnosing lifecycle or integration problems.</li>
 </ul>
-<p>Where an older V2.0 example conflicts with this manual, this manual wins.</p>
+<p>Where an older V2 example conflicts with this manual, this manual wins. V2 schema compatibility is retained unless a section explicitly requires a V3 schema.</p>
 <h2 id="contents">Contents</h2>
 <ol>
 <li><a href="#01-introduction">Introduction</a></li>
@@ -399,10 +399,11 @@ Status: Normative end-user documentation</p>
 <li><a href="#10-architecture-for-maintainers">Architecture for Maintainers</a></li>
 </ol>
 <h2 id="01-introduction">01 Introduction</h2>
-<p>ATT is an offline, template-driven API test runner. Test data lives in Excel, reusable execution logic lives in template directories, and external capabilities are registered as tools.</p>
+<p>ATT is an offline, template-driven API test runner. Test data lives in Excel, complete scenarios live in Template directories, reusable implementation sequences live in Flows, and external capabilities are registered as Tools.</p>
 <pre class="hljs"><code><div>Workbook row → Test case → Ordered stages
 Stage → Template-selector column → Current row&#x27;s selector cell → Template
-Template → Ordered actions → Configured tool (for tool actions)
+Template → Ordered actions → Flow or configured tool
+Flow → Isolated ordered actions → Tool / DB / built-in / nested Flow
 </div></code></pre>
 <p>The four concepts you need first are:</p>
 <table>
@@ -423,7 +424,11 @@ Template → Ordered actions → Configured tool (for tool actions)
 </tr>
 <tr>
 <td>Template</td>
-<td>A reusable ordered list of actions</td>
+<td>A complete scenario expressed as an ordered list of actions</td>
+</tr>
+<tr>
+<td>Flow</td>
+<td>A typed, isolated, reusable ordered action sequence</td>
 </tr>
 <tr>
 <td>Tool</td>
@@ -435,17 +440,19 @@ Template → Ordered actions → Configured tool (for tool actions)
 </tr>
 </tbody>
 </table>
-<p>An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, or assign a Case-scoped runtime value. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.</p>
-<h3 id="what-v26-guarantees">What V2.6 guarantees</h3>
+<p>An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, assign a scoped runtime value, or invoke a Flow. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.</p>
+<h3 id="what-v30-guarantees">What V3.0 guarantees</h3>
 <ul>
 <li>Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.</li>
 <li>Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.</li>
 <li>Every template is a directory containing <code>template.yaml</code>.</li>
+<li>Every Flow is below <code>templates/flows/**/flow.yaml</code>, has a static <code>.vN</code> ID, typed inputs/outputs, and a maximum nesting depth of 3.</li>
 <li><code>validate --package</code> checks the whole package; <code>validate --selected</code> checks only a selected dependency closure.</li>
 <li>Run ID and Case ID are validated and then used directly as output directory names.</li>
 <li>A final run directory is published only after the run is complete.</li>
 <li>FAIL, ERROR, INVALID, SKIPPED, and PASS have stable aggregation and exit-code meanings.</li>
 <li>JSON, XML, JUnit XML, JUnit HTML, and CI JSON outputs have versioned contracts.</li>
+<li>V2.6 Templates remain readable, but only <code>att-template/v3.0</code> may use Flow Actions or Action <code>runWhen</code>.</li>
 </ul>
 <h3 id="package-layout">Package layout</h3>
 <pre class="hljs"><code><div>att-package/
@@ -462,15 +469,57 @@ Template → Ordered actions → Configured tool (for tool actions)
 │   ├── payment.yaml
 │   └── payment.xml
 ├── templates/
-│   └── payment/
-│       ├── template.yaml
-│       └── request.tmp.json
+│   ├── payment/
+│   │   ├── template.yaml
+│   │   └── request.tmp.json
+│   └── flows/common/prepare/
+│       └── flow.yaml
 ├── tools/
 ├── schemas/
 └── output/
 </div></code></pre>
 <p>You normally edit <code>config/config.yaml</code>, referenced dbhelper files, workbooks, sidecars, templates, payloads, and tool scripts. The same-basename testcase XML is normally generated by <code>snapshot</code> and reviewed as source-control evidence; run-only <code>--update-snapshot</code> is an explicit opt-in refresh workflow. ATT owns generated content below the configured output directory and its documented build locations.</p>
 <p>The global <code>testcase.root</code> setting defaults to <code>testcase</code>. Discovery is recursive, and an adjacent same-basename XLSX/YAML/XML triple defines one testcase set at any depth.</p>
+<h3 id="v3-flow-authoring-contract">V3 Flow authoring contract</h3>
+<p>A Flow descriptor has exactly the top-level fields <code>schemaVersion</code>, <code>id</code>, <code>name</code>, <code>description</code>, <code>inputs</code>, <code>actions</code>, and <code>outputs</code>:</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-flow/v3.0</span>
+<span class="hljs-attr">id:</span> <span class="hljs-string">common.decorate.v1</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">Decorate</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">Append</span> <span class="hljs-string">a</span> <span class="hljs-string">stable</span> <span class="hljs-string">suffix.</span>
+<span class="hljs-attr">inputs:</span>
+  <span class="hljs-attr">value:</span> {<span class="hljs-attr">type:</span> <span class="hljs-string">string</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+  <span class="hljs-attr">enabled:</span> {<span class="hljs-attr">type:</span> <span class="hljs-string">boolean</span>, <span class="hljs-attr">default:</span> <span class="hljs-literal">true</span>}
+<span class="hljs-attr">actions:</span>
+  <span class="hljs-attr">decorate:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">assign</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">result</span>
+    <span class="hljs-attr">expression:</span> <span class="hljs-string">&quot;${input.value}-done&quot;</span>
+  <span class="hljs-attr">audit:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">log</span>
+    <span class="hljs-attr">message:</span> <span class="hljs-string">&quot;Decorated ${runtime.result}&quot;</span>
+    <span class="hljs-attr">runWhen:</span> <span class="hljs-string">&quot;${input.enabled} == true&quot;</span>
+<span class="hljs-attr">outputs:</span>
+  <span class="hljs-attr">value:</span> {<span class="hljs-attr">type:</span> <span class="hljs-string">string</span>, <span class="hljs-attr">from:</span> <span class="hljs-string">&quot;${runtime.result}&quot;</span>}
+</div></code></pre>
+<p>A V3 Template invokes the Flow using a literal canonical ID:</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v3.0</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_FLOW</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">Complete</span> <span class="hljs-string">scenario</span> <span class="hljs-string">using</span> <span class="hljs-string">one</span> <span class="hljs-string">reusable</span> <span class="hljs-string">Flow.</span>
+<span class="hljs-attr">actions:</span>
+  <span class="hljs-attr">prepare:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">flow</span>
+    <span class="hljs-attr">use:</span> <span class="hljs-string">common.decorate.v1</span>
+    <span class="hljs-attr">with:</span>
+      <span class="hljs-attr">value:</span> <span class="hljs-string">&quot;${CASE.caseId}&quot;</span>
+  <span class="hljs-attr">verify:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">assert</span>
+    <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${ACTIONS.prepare.output.outputs.value} == &#x27;${CASE.caseId}-done&#x27;&quot;</span>
+</div></code></pre>
+<p>Flow input types are <code>string</code>, <code>integer</code>, <code>number</code>, <code>boolean</code>, <code>object</code>, and <code>array</code>. Required inputs cannot have a default; an omitted optional input is <code>null</code>; values are never coerced. Maps and arrays in <code>with</code> resolve <code>${...}</code> recursively, but <code>#{...}</code> calls are prohibited during binding.</p>
+<p>Validation type-checks literals and declared Flow outputs immediately. A <code>${CASE.VARS.&lt;name&gt;}</code> produced by an earlier ordered <code>assign</code> is known to be available but remains runtime-typed during static validation; its resolved value is still checked strictly immediately before Flow entry.</p>
+<p>Inside a Flow, the only readable Context roots are <code>input</code>, <code>actions</code>, <code>runtime</code>, and <code>flow</code>. <code>${...}</code> reads Context and <code>#{...}</code> invokes a Tool, DB facade, or built-in where the Action permits it. A Flow cannot access <code>CASE</code>, <code>RUN</code>, a parent/sibling Flow, or a future Action. Local <code>assign</code> writes <code>runtime.&lt;name&gt;</code>, not <code>CASE.VARS</code>.</p>
+<p>A Template reads only <code>${ACTIONS.&lt;flowAction&gt;.output.outputs.&lt;name&gt;}</code>. A nested Flow reads <code>${actions.&lt;flowAction&gt;.output.outputs.&lt;name&gt;}</code>. Outputs are evaluated and exported only after PASS. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own <code>runWhen</code> is false is SKIPPED.</p>
+<p>Flow <code>use</code> is never dynamic. <code>runAlways</code>, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.0.1 features. Aggregate priority remains <code>ERROR &gt; INVALID &gt; FAIL &gt; PASS &gt; SKIPPED</code>.</p>
 <h2 id="02-quick-start">02 Quick Start</h2>
 <p>This example creates one payment test that renders JSON, invokes a tool, and verifies the returned status.</p>
 <h3 id="step-1-configure-att">Step 1: configure ATT</h3>
@@ -2874,7 +2923,7 @@ levels=()
 </table>
 <p>Use <code>${output...}</code> for the current action while its runtime assertion, actual value, and final description are evaluated. Use <code>${ACTIONS.&lt;id&gt;...}</code> as a completed current-template convenience view. Use the canonical <code>${CASE.STAGES.&lt;stage&gt;.TEMPLATE.ACTIONS...}</code> form for persisted cross-stage references. Root <code>${TOOL...}</code> and <code>${DB...}</code> scopes are reserved for invocation internals and are not case-wide “latest invocation” APIs. Tool and inline DB evidence is persisted below the containing action and written to the Case log; Case-level DB finalization is available only after Case completion through <code>${CASE.DB.&lt;instance&gt;}</code>. The leading root distinguishes <code>${CASE.DB...}</code> from invocation-local <code>${DB...}</code>.</p>
 <p>V2.4.1 also accepts a case-sensitive path-segment suffix when it identifies exactly one currently readable logical Context path. For example, if <code>CASE.payment.response.resultCode</code> is the only readable path ending with those segments, <code>${payment.response.resultCode}</code>, <code>${response.resultCode}</code>, and <code>${resultCode}</code> resolve to the same value. Matching uses parsed map keys/list indexes, not a raw character suffix. Canonical and convenience aliases of the same logical node count once. If multiple logical paths match, ATT raises <code>ATT-CTX-002</code>, lists every canonical candidate in deterministic order, and requires a longer suffix or full path. Adding a conflicting node therefore makes an existing shorthand invalid rather than silently changing its target. Documentation continues to prefer canonical paths.</p>
-<p><code>${CASE.outputDirectory}</code> is a reserved, normalized absolute path and Case data cannot override it. <code>CASE.VARS</code> and <code>CASE.DB</code> are likewise fixed framework-owned maps, so a sidecar <code>excel.dataColumns</code> alias or any other Case-root alias cannot be named <code>VARS</code> or <code>DB</code>. All three nodes exist before the first stage; <code>CASE.DB</code> remains empty until Case transaction finalization publishes used-instance outcomes. Stage-private selector keys remain below <code>CASE.STAGES.&lt;stage&gt;</code> and do not replace these Case-root nodes. During execution <code>outputDirectory</code> is the physical <code>.in-progress/&lt;RunID&gt;-&lt;nonce&gt;/&lt;CaseID&gt;</code> directory; after successful publication ATT rewrites persisted text evidence to <code>&lt;outputDirectory&gt;/&lt;RunID&gt;/&lt;CaseID&gt;</code>. Validation preserves the output-directory placeholder because no runtime Run directory exists yet.</p>
+<p><code>${CASE.outputDirectory}</code> is a reserved, normalized absolute path and Case data cannot override it. <code>CASE.VARS</code> and <code>CASE.DB</code> are likewise fixed framework-owned maps, so a sidecar <code>excel.dataColumns</code> alias or any other Case-root alias cannot be named <code>VARS</code> or <code>DB</code>. All three nodes exist before the first stage; <code>CASE.DB</code> remains empty until Case transaction finalization publishes used-instance outcomes. Stage-private selector keys remain below <code>CASE.STAGES.&lt;stage&gt;</code> and do not replace these Case-root nodes. During execution <code>outputDirectory</code> is already the final <code>&lt;outputDirectory&gt;/&lt;RunID&gt;/&lt;CaseID&gt;</code> directory, so live evidence and persisted paths are identical. Validation preserves the output-directory placeholder because no runtime Run directory exists yet.</p>
 <p>Map properties use dot navigation and lists use zero-based brackets:</p>
 <pre class="hljs"><code><div>${CASE.amount}
 ${CASE.STAGES.invoke.channel}
@@ -3315,7 +3364,7 @@ ${requestFile.path}
 ├── report/junit.html
 └── &lt;CaseID&gt;/...
 </div></code></pre>
-<p>Run and Case IDs appear unchanged after validation. A final run directory represents a completed publication; interrupted work remains below <code>.in-progress</code>.</p>
+<p>Run and Case IDs appear unchanged after validation. A run is completed only when its <code>run.yaml</code> state is <code>COMPLETE</code>; interrupted work remains directly below its reserved Run ID for debugging.</p>
 <h3 id="human-html-report">Human HTML report</h3>
 <p><code>report/index.html</code> is the primary end-user report. It can be opened without a web server. Groups are summarized by <code>workbookId.groupId</code>; the interface labels <code>groupId</code> as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.</p>
 <p>An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit <code>.log</code>/<code>case.yaml</code> artifact links. Each Action Results row has independent Stage, Action, Description, Status, and Message columns; Description is the final rendered action description and is also persisted in <code>run.yaml</code> and CI JSON. <code>report.html.caseLogInlineLimitBytes</code> controls the head/tail preview; <code>0</code> keeps only the artifact link. For compatibility, Expected remains the ordered LF-joined non-blank assert descriptions and <code>expected</code> values; Actual is the ordered LF-joined non-blank runtime <code>actual</code> values. <code>case.yaml</code> holds the complete structured final Stage/Template/Action/Tool/DB state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, Tool argv/stdout/stderr/retry evidence, DB source/parameter/result/finalization evidence, diagnostics, and saved payload/Tool/DB-output paths. Workbook ID, group ID, and tags are persisted per case in <code>run.yaml</code>, so <code>report --run-id</code> regenerates equivalent controls and grouping.</p>
@@ -3533,17 +3582,14 @@ else: SKIPPED
 </div></code></pre>
 <p>Therefore PASS + SKIPPED is PASS, all SKIPPED is SKIPPED, and a selection that resolves to no cases is a command error rather than a SKIPPED run.</p>
 <p>Report, manifest, CLI summary, CI JSON, JUnit XML, JUnit HTML, and process exit code must derive from the same aggregate model.</p>
-<h3 id="atomic-run-lifecycle">Atomic run lifecycle</h3>
-<p>Before execution ATT creates:</p>
-<pre class="hljs"><code><div>&lt;outputDirectory&gt;/.in-progress/&lt;RunID&gt;-&lt;nonce&gt;/
-</div></code></pre>
-<p>Evidence is written there. After all required outputs are finalized, ATT atomically publishes it as:</p>
+<h3 id="run-lifecycle">Run lifecycle</h3>
+<p>After validation and planning, ATT atomically reserves:</p>
 <pre class="hljs"><code><div>&lt;outputDirectory&gt;/&lt;RunID&gt;/
 </div></code></pre>
-<p>An interrupted run stays in <code>.in-progress</code> and is not eligible for <code>report</code>, <code>build</code>, <code>rerun-failed</code>, or latest-run selection. Publication fails if the final Run ID already exists. <code>latest-run.yaml</code> is replaced atomically only after final publication.</p>
+<p>Evidence is written there and can be inspected while Actions execute. After all required outputs are finalized, ATT writes a <code>COMPLETE</code> manifest and atomically replaces <code>latest-run.yaml</code>. An interrupted run stays at the reserved path without a completed manifest and is not eligible for <code>report</code>, <code>build</code>, <code>rerun-failed</code>, or latest-run selection. A pre-existing Run ID is rejected before execution; move or clean an incomplete directory before retrying that ID.</p>
 <h3 id="process-safety">Process safety</h3>
 <p>ATT constructs argv directly and uses no implicit shell. Local stdout and stderr are drained concurrently, retained in memory only as bounded head/tail previews, and streamed to <code>process-output/*.stdout|stderr</code> artifacts up to <code>execution.processOutput.artifactLimitBytes</code>. Evidence records original byte counts and truncation flags. Timeout termination stops the managed process according to platform support and retains the same bounded evidence. Structured parsers reject malformed/ambiguous input and XML external-resource features.</p>
-<p><code>run --profile</code> writes <code>performance.json</code> beside <code>run.yaml</code>. It records configuration load, validation, plan, Case execution, result-workbook, HTML/CI report, input-hash, and publish-path-rewrite timings; selected/completed Case counts; schema/Template/payload cache loads and hits; process-output bytes/truncations; and a completion-time heap snapshot. It is diagnostic evidence, not a stable CI schema contract.</p>
+<p><code>run --profile</code> writes <code>performance.json</code> beside <code>run.yaml</code>. It records configuration load, validation, plan, Case execution, result-workbook, HTML/CI report, and input-hash timings; selected/completed Case counts; schema/Template/payload cache loads and hits; process-output bytes/truncations; and a completion-time heap snapshot. It is diagnostic evidence, not a stable CI schema contract.</p>
 <p>Workbook import uses Apache POI <code>DataFormatter</code> for ordinary cells and deliberately does not create a <code>FormulaEvaluator</code>; formula expressions, not cached results, enter Context.</p>
 <h3 id="ci-and-parallel-execution">CI and parallel execution</h3>
 <table>
@@ -3556,15 +3602,15 @@ else: SKIPPED
 <tbody>
 <tr>
 <td>Two runs use the same Run ID</td>
-<td>Both may prepare separate <code>.in-progress</code> directories, but only one may publish the final run. The later publisher fails and does not overwrite it.</td>
+<td>Atomic directory reservation allows only one to start; the other fails without overwriting evidence.</td>
 </tr>
 <tr>
 <td>Multiple runs update <code>latest-run.yaml</code></td>
-<td>Each publishes its final directory first; the last completion wins the atomic pointer update. Completion order, not start order, determines latest.</td>
+<td>Each writes its completed manifest first; the last completion wins the atomic pointer update. Completion order, not start order, determines latest.</td>
 </tr>
 <tr>
 <td><code>build</code> and <code>run</code> execute together</td>
-<td>Build pins one completed latest-run/manifest pair and never archives <code>.in-progress</code> content.</td>
+<td>Build pins one completed latest-run/manifest pair and ignores any run without a <code>COMPLETE</code> manifest.</td>
 </tr>
 <tr>
 <td><code>report</code> and <code>clean</code> execute together</td>

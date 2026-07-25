@@ -1,0 +1,24 @@
+schemaVersion: att-flow/v3.0
+id: common.compose.v1
+name: Compose Value
+description: Demonstrate statically nested Flow composition and output transfer.
+inputs:
+  value:
+    type: string
+    required: true
+actions:
+  identity:
+    type: flow
+    use: common.identity.v1
+    with:
+      value: "${input.value}"
+  decorate:
+    type: flow
+    use: common.decorate.v1
+    with:
+      value: "${actions.identity.output.outputs.value}"
+      decorate: true
+outputs:
+  value:
+    type: string
+    from: "${actions.decorate.output.outputs.value}"

@@ -5,6 +5,8 @@ import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
 import att.core.ResultStatus;
 import att.core.ValidationResult;
+import att.flow.FlowDefinition;
+import att.flow.FlowRegistry;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -23,8 +25,10 @@ public class StageTemplateRunner {
     private final ExpressionEvaluator evaluator = new ExpressionEvaluator();
     private final RenderPayloadResolver payloadResolver = new RenderPayloadResolver();
     private final ActionResultArtifactWriter artifactWriter = new ActionResultArtifactWriter();
+    private final FlowRegistry flows;
 
-    public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this.templateEngine = templateEngine; }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this(templateEngine, null); }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this.templateEngine = templateEngine; this.flows = flows; }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         List<ValidationResult> results = new ArrayList<ValidationResult>();
@@ -44,12 +48,23 @@ public class StageTemplateRunner {
             String expected = "", actual = "";
             try {
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
+                if (!action.runWhen().trim().isEmpty() && !evaluator.evaluate(action.runWhen(), context)) {
+                    output.put("status", "SKIPPED"); output.put("success", true);
+                    output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
+                    context.addAction(action.id(), node); recorded = true;
+                    context.setActionOutput(output);
+                    node.put("description", normalizeLines(templateEngine.render(description, context, log)));
+                    context.updateAction(action.id(), node); log.appendAction("ACTION " + action.id() + " SKIPPED", node);
+                    results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")), ResultStatus.SKIPPED, "", "", ""));
+                    continue;
+                }
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
                 else if ("tool".equals(type)) toolStatus = executeTool(action, context, log, output, targets, node);
                 else if ("db".equals(type)) invocationSucceeded = executeDb(action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
+                else if ("flow".equals(type)) toolStatus = executeFlow(stageName, action, context, log, output, node);
                 else throw new IllegalArgumentException("Unsupported action type: " + action.type());
 
                 context.addAction(action.id(), node);
@@ -112,6 +127,80 @@ public class StageTemplateRunner {
         return results;
     }
 
+    private ResultStatus executeFlow(String stageName, TemplateAction action, CaseRuntimeContext context,
+                                     CaseExecutionLog log, Map<String, Object> output, Map<String, Object> node) throws Exception {
+        if (flows == null) throw new IllegalStateException("Flow execution is unavailable");
+        FlowDefinition flow = flows.get(action.use());
+        if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
+        Map<String, Object> input = resolveFlowInputs(action, flow, context, log);
+        Map<String, Object> exported = new LinkedHashMap<String, Object>();
+        List<ValidationResult> internal = new ArrayList<ValidationResult>();
+        CaseRuntimeContext.FlowEvidence evidence = null;
+        context.beginFlow(flow.id(), action.id(), input);
+        try {
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA);
+            internal.addAll(execute(stageName + "." + action.id(), body, context, log));
+            ResultStatus status = aggregateFlow(internal);
+            if (status == ResultStatus.PASS) {
+                for (Map.Entry<String, FlowDefinition.Output> declared : flow.outputs().entrySet()) {
+                    Object value = templateEngine.evaluate(declared.getValue().from(), context, log);
+                    FlowRegistry.requireType("Flow output " + flow.id() + "." + declared.getKey(), declared.getValue().type(), value, false);
+                    exported.put(declared.getKey(), value);
+                }
+            }
+            output.put("outputs", exported); output.put("status", status.name()); output.put("success", status == ResultStatus.PASS);
+            return status;
+        } finally {
+            evidence = context.finishFlow();
+            Map<String, Object> flowNode = new LinkedHashMap<String, Object>();
+            flowNode.putAll(evidence.flow()); flowNode.put("name", flow.name()); flowNode.put("input", evidence.input());
+            flowNode.put("runtime", evidence.runtime()); flowNode.put("actions", evidence.actions());
+            node.put("flow", flowNode);
+        }
+    }
+
+    private Map<String, Object> resolveFlowInputs(TemplateAction action, FlowDefinition flow,
+                                                   CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        flows.validateInvocation(action);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, FlowDefinition.Input> entry : flow.inputs().entrySet()) {
+            Object value;
+            if (action.with().containsKey(entry.getKey())) value = resolveFlowValue(action.with().get(entry.getKey()), context, log);
+            else if (entry.getValue().hasDefault()) value = entry.getValue().defaultValue();
+            else value = null;
+            FlowRegistry.requireType("Flow input " + flow.id() + "." + entry.getKey(), entry.getValue().type(), value, !entry.getValue().required());
+            result.put(entry.getKey(), value);
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object resolveFlowValue(Object value, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        if (value instanceof Map) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) result.put(String.valueOf(entry.getKey()), resolveFlowValue(entry.getValue(), context, log));
+            return result;
+        }
+        if (value instanceof List) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (List<?>) value) result.add(resolveFlowValue(item, context, log));
+            return result;
+        }
+        return value instanceof String ? templateEngine.evaluate((String) value, context, log) : value;
+    }
+
+    private ResultStatus aggregateFlow(List<ValidationResult> results) {
+        boolean invalid = false, fail = false;
+        for (ValidationResult result : results) {
+            if (result.status() == ResultStatus.ERROR) return ResultStatus.ERROR;
+            if (result.status() == ResultStatus.INVALID) invalid = true;
+            else if (result.status() == ResultStatus.FAIL) fail = true;
+        }
+        if (invalid) return ResultStatus.INVALID;
+        if (fail) return ResultStatus.FAIL;
+        return ResultStatus.PASS;
+    }
+
     private void executeRender(TemplateAction action, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log,
                                Map<String, Object> output, List<String> targets) throws Exception {
         Path templateRoot = template.directory().toRealPath();
@@ -124,8 +213,9 @@ public class StageTemplateRunner {
             String rendered = templateEngine.render(content, context, log);
             Object value;
             if ("file".equalsIgnoreCase(action.renderAs())) {
-                Path target = context.caseOutputDirectory().resolve(relative.replace('/', java.io.File.separatorChar)).normalize();
-                if (!target.startsWith(context.caseOutputDirectory())) throw new IllegalArgumentException("Render target escapes Case output directory: " + relative);
+                Path renderRoot = context.inFlow() ? context.actionOutputDir(action.id()) : context.caseOutputDirectory();
+                Path target = renderRoot.resolve(relative.replace('/', java.io.File.separatorChar)).normalize();
+                if (!target.startsWith(renderRoot)) throw new IllegalArgumentException("Render target escapes Action output directory: " + relative);
                 Files.createDirectories(target.getParent());
                 Files.write(target, rendered.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW);
                 value = target.toString();
@@ -220,7 +310,7 @@ public class StageTemplateRunner {
         if (result.success() && action.saveConfig().configured()) {
             String path = templateEngine.render(action.saveConfig().path(), context, log);
             String format = requiredFormat(action.saveConfig(), "DB", "");
-            Path saved = artifactWriter.writeDb(context, path, format, result.result(), action.saveConfig().overwrite());
+            Path saved = artifactWriter.writeDb(context, action.id(), path, format, result.result(), action.saveConfig().overwrite());
             targets.add(saved.toString());
         }
         return result.success();
@@ -242,13 +332,14 @@ public class StageTemplateRunner {
         boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             try {
+                String invokerSaveAs = invokerWritesRaw ? context.scopedArtifactPath(action.id(), saveAs) : "";
                 att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
-                        action.id(), action.timeoutMs(), invokerWritesRaw ? saveAs : "",
+                        context.qualifiedActionId(action.id()), action.timeoutMs(), invokerSaveAs,
                         save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
                 if (save.configured() && !invokerWritesRaw) {
-                    Path saved = artifactWriter.write(context, saveAs, format, result.output(),
+                    Path saved = artifactWriter.write(context, action.id(), saveAs, format, result.output(),
                             save.overwrite() || actionOwnedArtifact);
                     actionOwnedArtifact = true;
                     invocation.put("outputFile", saved.toString());

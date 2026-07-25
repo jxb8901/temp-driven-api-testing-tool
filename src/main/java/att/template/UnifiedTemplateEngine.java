@@ -116,6 +116,7 @@ public class UnifiedTemplateEngine {
             Object value;
             if (validationOnly) {
                 boolean runtimeDependent = "CASE.outputDirectory".equals(expression) || expression.startsWith("CASE.STAGES.") || expression.startsWith("ACTIONS.")
+                        || expression.startsWith("input.") || expression.startsWith("actions.") || expression.startsWith("runtime.") || expression.startsWith("flow.")
                         || expression.startsWith("TOOL.") || expression.startsWith("DB.")
                         || expression.equals("output") || expression.startsWith("output.");
                 if (validationValueAvailable) value = context.require(expression);
@@ -139,6 +140,10 @@ public class UnifiedTemplateEngine {
                 || expression.equals("ACTIONS") || expression.startsWith("ACTIONS.") || expression.startsWith("ACTIONS[")
                 || expression.equals("TOOL") || expression.startsWith("TOOL.") || expression.startsWith("TOOL[")
                 || expression.equals("DB") || expression.startsWith("DB.") || expression.startsWith("DB[")
+                || expression.equals("input") || expression.startsWith("input.") || expression.startsWith("input[")
+                || expression.equals("actions") || expression.startsWith("actions.") || expression.startsWith("actions[")
+                || expression.equals("runtime") || expression.startsWith("runtime.") || expression.startsWith("runtime[")
+                || expression.equals("flow") || expression.startsWith("flow.") || expression.startsWith("flow[")
                 || expression.equals("output") || expression.startsWith("output.") || expression.startsWith("output[");
     }
 
