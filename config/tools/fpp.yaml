@@ -1,4 +1,4 @@
-schemaVersion: att-tool-group/v2.2
+schemaVersion: att-tool-group/v2.6
 id: fpp
 name: FPP reference tools
 description: Reference command contracts for FPP API, SQLPlus, controlled command execution, file, and transaction-log integrations
@@ -35,9 +35,9 @@ tools:
         name: SQLPlus Output File
         description: SQLPlus output using SET COLSEP '|' with one header row and zero or more data rows
         required: true
-  execCommand:
+  exehelper:
     name: Execute command and capture streams
-    description: Execute one command with optional pipe-delimited atomic arguments, optionally persist streams, and return a YAML outcome
+    description: Execute one command with optional atomic argument arrays, expanding pathname wildcards per argument, optionally persist streams, and return a YAML outcome
     command: [./tools/exehelper.sh, "${stdoutPath}", "${stderrPath}", --, "${command}", "${arguments}"]
     output: yaml
     arguments:
@@ -57,9 +57,8 @@ tools:
         argName: --stderr
       arguments:
         name: Arguments
-        description: Optional pipe-delimited command arguments; use an empty value for no arguments
+        description: Optional YAML array of command arguments; each *, ?, or [ pattern expands to sorted filesystem matches, while an unmatched pattern remains literal
         required: false
-        delimit: "|"
   moveFiles:
     name: Move matching files
     description: Move regular files matching one filename glob between directories after collision preflight
@@ -137,15 +136,13 @@ tools:
         argName: --output-prefix
       logFiles:
         name: Log Files
-        description: Pipe-delimited unordered local and remote log file paths
+        description: YAML array of unordered local and remote log file paths or pathname wildcard patterns; every local match must be a regular file
         required: true
-        delimit: "|"
         argName: --log-file
       keywords:
         name: Keywords
-        description: Pipe-delimited literal keywords which must all occur under the same TID
+        description: YAML array of literal keywords which must all occur under the same TID
         required: true
-        delimit: "|"
         argName: --keyword
       recentLogCount:
         name: Recent Log Count
@@ -154,7 +151,7 @@ tools:
         argName: --recent-log-count
       sshOption:
         name: SSH Option
-        description: Optional literal --ssh to search configured remote servers while the minimum TID threshold is unmet
+        description: Optional literal --ssh to search configured servers while the minimum TID threshold is unmet; an entry naming the local host is recognized and not searched twice
         required: false
   querySqlplus:
     name: Query SQLPlus and return XML

@@ -36,12 +36,14 @@ class PackageValidatorTest {
 
         TemplateAction query = new TemplateAction("query", map("type","db","db","orders",
                 "query",map("sqlFile","sql/find.sql","params",Collections.singletonList("${CASE.id}")),
-                "saveAs",map("path","result.json","format","json")), "att-template/v2.5");
+                "saveAs",map("path","result.txt","format","text")), "att-template/v2.5");
         TemplateAction expression = new TemplateAction("check", map("type","assert",
                 "assert","#{db.orders.scalar(sql='select count(*) from orders where id = ?', params=[${CASE.id}, 'OPEN'])} >= 0"),
                 "att-template/v2.5");
+        TemplateAction print = new TemplateAction("print", map("type", "log",
+                "message", "#{dbText(${ACTIONS.query.output.result})}"), "att-template/v2.5");
         assertDoesNotThrow(() -> { try { contract.invoke(validator,
-                new StageTemplate("DB",tempDir,Arrays.asList(query, expression),"att-template/v2.5"),config); }
+                new StageTemplate("DB",tempDir,Arrays.asList(query, print, expression),"att-template/v2.5"),config); }
             catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
             catch (Exception e) { throw new RuntimeException(e); } });
 
@@ -54,6 +56,12 @@ class PackageValidatorTest {
                 "expression","#{db.orders.query(sqlFile=${CASE.file}, params=[])}"), "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("DB",tempDir,Collections.singletonList(dynamicFile),"att-template/v2.5"),config));
+
+        TemplateAction rawDb = new TemplateAction("raw", map("type","db","db","orders",
+                "query",map("sql","select 1"), "saveAs",map("path","result.raw","format","raw")),
+                "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("DB",tempDir,Collections.singletonList(rawDb),"att-template/v2.5"),config));
     }
 
     @Test void validatesCallBackedReadAndWriteToolBoundaries() throws Exception {
@@ -63,10 +71,10 @@ class PackageValidatorTest {
         Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("id",
                 new ToolArgumentConfig("id", "ID", "Order ID", true, ""));
         ToolConfig query = new ToolConfig("orders.find", "find", "orders", "Find", "Find",
-                Collections.<String>emptyList(), "#{db.orders.query(sql='select * from orders where id = ?', params=[input.id])}",
+                Collections.<String>emptyList(), "#{db.orders.query(sql='select * from orders where id = ?', params=[${input.id}])}",
                 "case", Collections.<String>emptyList(), "", arguments, null, null);
         ToolConfig update = new ToolConfig("orders.close", "close", "orders", "Close", "Close",
-                Collections.<String>emptyList(), "#{db.orders.update(sql='update orders set status = 1 where id = ?', params=[input.id])}",
+                Collections.<String>emptyList(), "#{db.orders.update(sql='update orders set status = 1 where id = ?', params=[${input.id}])}",
                 "", Collections.<String>emptyList(), "", arguments, null, null);
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
         tools.put(query.key(), query); tools.put(update.key(), update);
@@ -133,6 +141,20 @@ class PackageValidatorTest {
         method.setAccessible(true);
         assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send(message='hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
         assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send('hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
+    @Test void rejectsBareContextReferencesInsideCalls() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod(
+                "validateToolCall", String.class, FrameworkConfig.class);
+        method.setAccessible(true);
+
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, "#{length(CASE.customerId)}", config));
+        assertTrue(error.getCause().getMessage().contains("${CASE.customerId}"));
     }
 
     @Test void positionalToolArgumentsRemainInvalidForMultiArgumentTools() throws Exception {
@@ -293,7 +315,7 @@ class PackageValidatorTest {
                 Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
 
         for (String invalid : Arrays.asList("${RUN.runID}", "${CASE.STAGES.invkoe.status}", "${ACTIONS.later.output.result}",
-                "#{length(RUN.runID)}", "#{length(CASE.STAGES.invkoe.status)}", "#{length(ACTIONS.later.output.result)}")) {
+                "#{length(${RUN.runID})}", "#{length(${CASE.STAGES.invkoe.status})}", "#{length(${ACTIONS.later.output.result})}")) {
             Map<String,Object> log = new LinkedHashMap<String,Object>();
             log.put("type", "log"); log.put("message", invalid);
             Map<String,Object> later = new LinkedHashMap<String,Object>();

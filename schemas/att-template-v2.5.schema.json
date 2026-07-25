@@ -27,7 +27,7 @@
       "required": ["path", "format"],
       "properties": {
         "path": {"type": "string", "minLength": 1},
-        "format": {"enum": ["json", "yaml", "xml"]},
+        "format": {"enum": ["text", "json", "yaml", "xml"]},
         "overwrite": {"type": "boolean", "default": false}
       },
       "additionalProperties": false

@@ -64,8 +64,8 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context=new CaseRuntimeContext(test,tempDir,"R",tempDir,tempDir.resolve("case.log"));
         context.beginStage(new StageCaseData("verify","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         List<TemplateAction> actions=Arrays.asList(
-                new TemplateAction("note",map("type","log","message","#{lower(CASE.SrcRefNo)}","fields",map("size","#{length(CASE.SrcRefNo)}"),"description","Logged #{upper(output.result)}")),
-                new TemplateAction("check",map("type","assert","assert","#{length(value=CASE.SrcRefNo)} <= 35","description","#{concat('Check ', CASE.caseId)}","expected","#{upper('ok')}","actual","#{lower('OK')}")));
+                new TemplateAction("note",map("type","log","message","#{lower(${CASE.SrcRefNo})}","fields",map("size","#{length(${CASE.SrcRefNo})}"),"description","Logged #{upper(${output.result})}")),
+                new TemplateAction("check",map("type","assert","assert","#{length(value=${CASE.SrcRefNo})} <= 35","description","#{concat('Check ', ${CASE.caseId})}","expected","#{upper('ok')}","actual","#{lower('OK')}")));
 
         List<ValidationResult> results=new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("verify",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(tempDir.resolve("case.log")));
 
@@ -74,6 +74,7 @@ class StageTemplateRunnerTest {
         assertEquals("6", context.resolve("ACTIONS.note.output.fields.size"));
         assertEquals("Logged ABC123", context.resolve("ACTIONS.note.description"));
         assertEquals("6 <= 35", ((Map<?,?>) context.resolve("ACTIONS.check.output.assertion")).get("rendered"));
+        assertEquals("Check g.TC1", results.get(1).description());
         assertEquals("Check g.TC1\nOK", results.get(1).expected());
         assertEquals("ok", results.get(1).actual());
     }
@@ -123,7 +124,7 @@ class StageTemplateRunnerTest {
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("verify","T",Collections.<String,Object>emptyMap()),"T",tempDir);
-        TemplateAction action = new TemplateAction("response", map("type","log","file","#{concat(CASE.outputDirectory, '/response.txt')}","level","DEBUG"));
+        TemplateAction action = new TemplateAction("response", map("type","log","file","#{concat(${CASE.outputDirectory}, '/response.txt')}","level","DEBUG"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
                 .execute("verify",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
@@ -197,6 +198,7 @@ class StageTemplateRunnerTest {
         assertEquals("g.TC1", context.resolve("ACTIONS.yaml.output.result.name"));
         assertEquals("OK", context.resolve("ACTIONS.xml.output.result.Status"));
         assertEquals("hello g.TC1", context.resolve("ACTIONS.text.output.result"));
+        assertEquals("Check g.TC1", results.get(4).description());
         assertEquals("Check g.TC1\nwant g.TC1\nline2", results.get(4).expected());
         assertEquals("true", results.get(4).actual());
     }

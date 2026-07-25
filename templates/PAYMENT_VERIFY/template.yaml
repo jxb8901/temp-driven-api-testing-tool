@@ -34,7 +34,7 @@ actions:
 
   grepLogs:
     type: tool
-    call: "#{grepFromAppLogs(logText=${ACTIONS.getLogs.output.result}, keywords=${CASE.預期結果.keywords})}"
+    call: "#{grepFromAppLogs(logText=${ACTIONS.getLogs.output.result}, keywords=['PAYMENT', ${CASE.預期結果.txnStatus}])}"
     onFailure: continue
 
   checkLogs:

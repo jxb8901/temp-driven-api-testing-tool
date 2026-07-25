@@ -42,9 +42,11 @@ class ExpressionEvaluatorTest {
         assertTrue(evaluator.evaluate("'${CASE.phrase}' == 'rock and roll'",context));
         assertTrue(evaluator.evaluate("${CASE.phrase} like '%${CASE.phrase}%'",context));
         assertTrue(evaluator.evaluate("#{length(value=${CASE.phrase})} <= 35", context));
-        assertTrue(evaluator.evaluate("#{length(value=CASE.phrase)} <= 35", context));
+        assertThrows(IllegalArgumentException.class,
+                () -> evaluator.evaluate("#{length(value=CASE.phrase)} <= 35", context));
         evaluator.validateSyntax("#{length(value=${CASE.phrase})} <= 35");
-        evaluator.validateSyntax("#{length(value=CASE.phrase)} <= 35");
+        assertThrows(IllegalArgumentException.class,
+                () -> evaluator.validateSyntax("#{length(value=CASE.phrase)} <= 35"));
         att.validation.DiagnosticException missing = assertThrows(att.validation.DiagnosticException.class,
                 () -> evaluator.evaluate("${CASE.missing} is null",context));
         assertTrue(missing.format().contains("ATT-CTX-001"));

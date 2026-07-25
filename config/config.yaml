@@ -83,9 +83,8 @@ tools:
         required: true
       keywords:
         name: Keywords
-        description: Comma-delimited keywords expanded as the final argument array
+        description: Ordered YAML array of literal keywords
         required: true
-        delimit: ","
   getAppLogs:
     name: Get application logs
     description: Collect application logs for a case

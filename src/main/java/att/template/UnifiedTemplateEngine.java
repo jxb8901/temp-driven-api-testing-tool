@@ -179,34 +179,16 @@ public class UnifiedTemplateEngine {
         return paths;
     }
 
-    /** Returns interpolation paths plus unquoted canonical Runtime Context paths used as complete call arguments. */
+    /** Returns Context paths written with the mandatory ${...} reference syntax. */
     public java.util.List<String> parseContextPaths(String text) {
-        java.util.List<String> paths = new java.util.ArrayList<String>(parseValuePaths(text));
-        for (ToolCallParser.ParsedCall call : parseCalls(text)) {
-            for (ToolCallParser.Argument argument : call.arguments()) {
-                String expression = argument.expression().trim();
-                if (isExplicitContextPath(expression)) paths.add(expression);
-            }
-        }
-        return paths;
+        return parseValuePaths(text);
     }
 
-    /** True only for complete, unquoted canonical Case-runtime roots; suffix shorthand still requires ${...}. */
+    /** Detects the removed bare canonical-path spelling so callers can report a migration error. */
     public boolean isExplicitContextPath(String expression) {
         if (expression == null) return false;
         String value = expression.trim();
         return value.equals(expression) && explicitContextRoot(value);
-    }
-
-    /** Finds complete unquoted argument tokens equal to a dedicated-scope path. */
-    public boolean referencesBareArgument(String text, String path) {
-        if (path == null || path.isEmpty()) return false;
-        for (ToolCallParser.ParsedCall call : parseCalls(text)) {
-            for (ToolCallParser.Argument argument : call.arguments()) {
-                if (path.equals(argument.expression().trim())) return true;
-            }
-        }
-        return false;
     }
 
     public Object executeCall(String call, CaseRuntimeContext context) throws Exception {
@@ -466,11 +448,16 @@ public class UnifiedTemplateEngine {
 
     private Object resolveDefinitionValue(String expression, Map<String, Object> input) throws Exception {
         expression = expression == null ? "" : expression.trim();
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            java.util.List<Object> values = new java.util.ArrayList<Object>();
+            for (String item : callParser.listItems(expression)) values.add(resolveDefinitionValue(item, input));
+            return values;
+        }
         Map<String, Object> scope = definitionScope(input);
         Matcher exact = VALUE.matcher(expression);
         if (exact.matches()) return requireScoped(scope, exact.group(1), false);
-        if (hasScopedPath(scope, expression) || explicitScopedRoot(expression)) {
-            return requireScoped(scope, expression, false);
+        if (hasScopedPath(scope, expression) || explicitScopedRoot(expression) || isExplicitContextPath(expression)) {
+            throw bareContextReference(expression);
         }
         if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
             return executeScopedCall(expression, scope, false);
@@ -563,7 +550,7 @@ public class UnifiedTemplateEngine {
     private Object resolveDbValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         Matcher exact = VALUE.matcher(expression);
         if (exact.matches()) return context.require(exact.group(1));
-        if (isExplicitContextPath(expression)) return context.require(expression);
+        if (isExplicitContextPath(expression)) throw bareContextReference(expression);
         if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
             return executeCall(expression, context, log, null);
         }
@@ -695,16 +682,23 @@ public class UnifiedTemplateEngine {
     private Map<String, Object> resolveArguments(ToolCallParser.ParsedCall call, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
-            String expression = argument.expression().trim();
-            Matcher exact = VALUE.matcher(expression);
-            Object value;
-            if (exact.matches()) value = context.require(exact.group(1));
-            else if (isExplicitContextPath(expression)) value = context.require(expression);
-            else if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) value = executeCall(expression, context, log, null);
-            else value = callParser.literal(render(expression, context, log));
+            Object value = resolveArgumentValue(argument.expression().trim(), context, log);
             putNested(input, argument.key(), value == null ? "" : value);
         }
         return input;
+    }
+
+    private Object resolveArgumentValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            java.util.List<Object> values = new java.util.ArrayList<Object>();
+            for (String item : callParser.listItems(expression)) values.add(resolveArgumentValue(item.trim(), context, log));
+            return values;
+        }
+        Matcher exact = VALUE.matcher(expression);
+        if (exact.matches()) return context.require(exact.group(1));
+        if (isExplicitContextPath(expression)) throw bareContextReference(expression);
+        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) return executeCall(expression, context, log, null);
+        return callParser.literal(render(expression, context, log));
     }
 
     private String renderScopedCalls(String text, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
@@ -727,18 +721,27 @@ public class UnifiedTemplateEngine {
     private Map<String, Object> resolveScopedArguments(ToolCallParser.ParsedCall call, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
-            String expression = argument.expression().trim();
-            Matcher exact = VALUE.matcher(expression);
-            Object value;
-            if (exact.matches()) value = requireScoped(values, exact.group(1), missingAsEmpty);
-            else if (hasScopedPath(values, expression)) value = requireScoped(values, expression, missingAsEmpty);
-            else if (explicitScopedRoot(expression)) value = requireScoped(values, expression, missingAsEmpty);
-            else if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
-                value = executeScopedCall(expression, values, missingAsEmpty);
-            } else value = callParser.literal(renderScoped(expression, values, missingAsEmpty));
+            Object value = resolveScopedArgumentValue(argument.expression().trim(), values, missingAsEmpty);
             putNested(input, argument.key(), value == null ? "" : value);
         }
         return input;
+    }
+
+    private Object resolveScopedArgumentValue(String expression, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            java.util.List<Object> result = new java.util.ArrayList<Object>();
+            for (String item : callParser.listItems(expression)) result.add(resolveScopedArgumentValue(item.trim(), values, missingAsEmpty));
+            return result;
+        }
+        Matcher exact = VALUE.matcher(expression);
+        if (exact.matches()) return requireScoped(values, exact.group(1), missingAsEmpty);
+        if (hasScopedPath(values, expression) || explicitScopedRoot(expression) || isExplicitContextPath(expression)) {
+            throw bareContextReference(expression);
+        }
+        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
+            return executeScopedCall(expression, values, missingAsEmpty);
+        }
+        return callParser.literal(renderScoped(expression, values, missingAsEmpty));
     }
 
     private Object executeScopedCall(String expression, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
@@ -790,6 +793,10 @@ public class UnifiedTemplateEngine {
 
     private boolean explicitScopedRoot(String expression) {
         return expression != null && (expression.startsWith("input.") || expression.startsWith("TOOL.input."));
+    }
+
+    private IllegalArgumentException bareContextReference(String expression) {
+        return new IllegalArgumentException("Context references in calls must use ${...}: ${" + expression + "}");
     }
 
     private boolean quoted(String expression) {

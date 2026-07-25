@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-# Executes one command with optional atomic arguments and returns its result as YAML.
+#!/bin/bash
+# Executes one command with optional atomic, pathname-expanded arguments and returns its result as YAML.
 set -eu
 
 stdout_path=
@@ -35,6 +35,57 @@ done
 }
 command_name=$1
 shift
+
+expanded_arguments=()
+expanded_argument_count=0
+nullglob_was_set=false
+lc_all_was_set=false
+if [ "${LC_ALL+x}" = x ]; then
+  lc_all_was_set=true
+  saved_lc_all=$LC_ALL
+fi
+LC_ALL=C
+shopt -q nullglob && nullglob_was_set=true
+shopt -s nullglob
+if [ "$#" -gt 0 ]; then
+  for argument in "$@"; do
+    case "$argument" in
+      *\**|*\?*|*\[*)
+        old_ifs=$IFS
+        IFS=
+        # Intentional unquoted expansion: this argument contains glob syntax.
+        # Empty IFS prevents word splitting and preserves spaces in matching paths.
+        matches=( $argument )
+        IFS=$old_ifs
+        set +u
+        match_count=${#matches[@]}
+        set -u
+        if [ "$match_count" -eq 0 ]; then
+          expanded_arguments+=("$argument")
+          expanded_argument_count=$((expanded_argument_count + 1))
+        else
+          expanded_arguments+=("${matches[@]}")
+          expanded_argument_count=$((expanded_argument_count + match_count))
+        fi
+        ;;
+      *)
+        expanded_arguments+=("$argument")
+        expanded_argument_count=$((expanded_argument_count + 1))
+        ;;
+    esac
+  done
+fi
+[ "$nullglob_was_set" = true ] || shopt -u nullglob
+if [ "$lc_all_was_set" = true ]; then
+  LC_ALL=$saved_lc_all
+else
+  unset LC_ALL
+fi
+if [ "$expanded_argument_count" -eq 0 ]; then
+  set --
+else
+  set -- "${expanded_arguments[@]}"
+fi
 
 paths_are_same() {
   [ "$1" = "$2" ] && return 0

@@ -1,0 +1,2941 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>09_Reference_Manual_V2.zh.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="att-v261-中文用户手册与参考手册">ATT V2.6.1 中文用户手册与参考手册</h1>
+<p>作者：Jeffrey + ChatGPT
+版本：2.6.1
+状态：规范性终端用户文档</p>
+<p>本手册设计为两种阅读方式：</p>
+<ul>
+<li>如果你是第一次使用 ATT，请按章节 1–4 顺序阅读。它会从第一个测试用例带你走到实用的开发模式。</li>
+<li>如果你已经在使用 ATT，那么章节 5–9 是你日常使用时最常用的命令、配置、表达式、报表和排障参考。</li>
+<li>第 10 章向维护者与需要诊断生命周期或集成问题的用户解释内部行为。</li>
+</ul>
+<p>如果旧版 V2.0 的示例与本手册冲突，则以本手册为准。</p>
+<h2 id="目录">目录</h2>
+<ol>
+<li><a href="#01-%E7%AE%80%E4%BB%8B">简介</a></li>
+<li><a href="#02-%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B">快速开始</a></li>
+<li><a href="#03-%E7%94%A8%E6%88%B7%E6%8C%87%E5%8D%97">用户指南</a></li>
+</ol>
+<ul>
+<li><a href="#31-%E5%B7%A5%E4%BD%9C%E7%B0%BF">3.1 工作簿</a></li>
+<li><a href="#32-%E6%A8%A1%E6%9D%BF">3.2 模板</a></li>
+<li><a href="#33-%E5%B7%A5%E5%85%B7">3.3 工具</a></li>
+<li><a href="#34-%E8%BF%90%E8%A1%8C%E6%B5%8B%E8%AF%95">3.4 运行测试</a></li>
+<li><a href="#35-%E6%8A%A5%E5%91%8A">3.5 报告</a></li>
+</ul>
+<ol start="4">
+<li><a href="#04-cookbook">Cookbook</a></li>
+<li><a href="#05-cli-%E5%8F%82%E8%80%83">CLI 参考</a></li>
+<li><a href="#06-%E9%85%8D%E7%BD%AE%E5%8F%82%E8%80%83">配置参考</a></li>
+<li><a href="#07-%E8%A1%A8%E8%BE%BE%E5%BC%8F%E5%8F%82%E8%80%83">表达式参考</a></li>
+<li><a href="#08-%E6%8A%A5%E8%A1%A8%E5%8F%82%E8%80%83">报表参考</a></li>
+<li><a href="#09-%E6%95%85%E9%9A%9C%E6%8E%92%E6%9F%A5">故障排查</a></li>
+<li><a href="#10-%E7%BB%B4%E6%8A%A4%E8%80%85%E6%9E%B6%E6%9E%84">维护者架构</a></li>
+</ol>
+<h2 id="01-简介">01 简介</h2>
+<p>ATT 是一个离线的、基于模板驱动的 API 测试执行器。测试数据保存在 Excel 中，可复用的执行逻辑保存在模板目录中，外部能力则注册为工具。</p>
+<pre class="hljs"><code><div>工作簿行 → 测试用例 → 有序阶段
+阶段 → 模板选择列 → 当前行的选择器单元格 → 模板
+模板 → 有序动作 → 配置好的工具（对于工具动作）
+</div></code></pre>
+<p>你首先需要掌握的四个概念是：</p>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>其负责的内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>测试用例</td>
+<td>一行工作簿数据、用例级数据、标签和有序阶段</td>
+</tr>
+<tr>
+<td>阶段</td>
+<td>模板选择、阶段私有数据、执行条件和失败处理</td>
+</tr>
+<tr>
+<td>模板</td>
+<td>一个可复用的有序动作列表</td>
+</tr>
+<tr>
+<td>工具</td>
+<td>一个具有命名输入的能力；可启动外部命令，也可通过 V2.6 <code>call</code> 包装 typed DB 操作或纯 built-in</td>
+</tr>
+<tr>
+<td>Dbhelper</td>
+<td>一个独立配置的 JDBC 连接、SQL timeout、transaction、结果限制与 evidence 策略</td>
+</tr>
+</tbody>
+</table>
+<p>一个动作可以渲染负载、调用工具、断言表达式、写入结构化日志，或分配 Case 作用域的运行时变量。ATT 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。</p>
+<h3 id="v26-的保证">V2.6 的保证</h3>
+<ul>
+<li>配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML 键，以及无效动作形状都是错误。</li>
+<li>dbhelper 使用独立 <code>att-dbhelper/v2.5</code> 文件，并通过一級 <code>type: db</code> Action 或只读 <code>#{db.&lt;instance&gt;...}</code> 表达式调用；它不是 Tool 的特殊配置。</li>
+<li><code>CASE.DB</code> 是固定、区分大小写、由框架拥有的 Case 交易收尾节点，不能由 Excel 或侧车数据覆盖。</li>
+<li>每个工作簿都有一个同名的 YAML 侧车文件和生成的语义 XML 快照。</li>
+<li>每个模板都是包含 <code>template.yaml</code> 的目录。</li>
+<li><code>validate --package</code> 会检查整个包；<code>validate --selected</code> 只检查所选依赖闭包。</li>
+<li>Run ID 和 Case ID 会先被校验，然后直接用作输出目录名。</li>
+<li>只有在运行完成后，最终运行目录才会发布。</li>
+<li>FAIL、ERROR、INVALID、SKIPPED、PASS 具有稳定的聚合与退出码含义。</li>
+<li>JSON、XML、JUnit XML、JUnit HTML 和 CI JSON 输出都有版本化契约。</li>
+</ul>
+<h3 id="包布局">包布局</h3>
+<pre class="hljs"><code><div>att-package/
+├── att.sh
+├── att.bat
+├── config/config.yaml
+├── config/dbhelpers/
+│   └── orders.yaml
+├── config/tools/
+│   └── orders-db.yaml
+├── testcase/
+│   ├── payment.xlsx
+│   ├── payment.yaml
+│   └── payment.xml
+├── templates/
+│   └── payment/
+│       ├── template.yaml
+│       └── request.tmp.json
+├── tools/
+├── lib/                  # 用户提供的 JDBC driver 与其依赖
+├── schemas/
+└── output/
+</div></code></pre>
+<p>你通常会编辑 <code>config/config.yaml</code>、工作簿、侧车、模板、负载和工具脚本。同名 testcase XML 通常由 <code>snapshot</code> 生成，并作为源码控制证据进行审查；仅在运行时使用的 <code>--update-snapshot</code> 是显式的刷新工作流。ATT 拥有配置输出目录及其文档化构建位置下的生成内容。</p>
+<p>全局 <code>testcase.root</code> 设置默认为 <code>testcase</code>。发现是递归进行的，且相邻的同名 XLSX/YAML/XML 三元组定义一个 testcase 集。</p>
+<h2 id="02-快速开始">02 快速开始</h2>
+<p>这个示例会创建一个支付测试：渲染 JSON、调用工具并验证返回状态。</p>
+<h3 id="第-1-步配置-att">第 1 步：配置 ATT</h3>
+<p>创建 <code>config/config.yaml</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-config/v2.6</span>
+<span class="hljs-attr">outputDirectory:</span> <span class="hljs-string">output</span>
+<span class="hljs-attr">environment:</span> <span class="hljs-string">SIT</span>
+<span class="hljs-attr">timeoutMs:</span> <span class="hljs-number">10000</span>
+<span class="hljs-attr">templates:</span>
+  <span class="hljs-attr">root:</span> <span class="hljs-string">templates</span>
+<span class="hljs-attr">report:</span>
+  <span class="hljs-attr">mode:</span> <span class="hljs-string">append-to-copy</span>
+  <span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;${suiteName}.result.xlsx&quot;</span>
+<span class="hljs-attr">xml:</span>
+  <span class="hljs-attr">namespaceMode:</span> <span class="hljs-string">ignore</span>
+<span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">invokePaymentApi:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Invoke</span> <span class="hljs-string">Payment</span> <span class="hljs-string">API</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Send</span> <span class="hljs-string">a</span> <span class="hljs-string">rendered</span> <span class="hljs-string">payment</span> <span class="hljs-string">request</span>
+    <span class="hljs-attr">command:</span> [<span class="hljs-string">&quot;./tools/invoke_payment_api.sh&quot;</span>, <span class="hljs-string">&quot;${requestFile}&quot;</span>, <span class="hljs-string">&quot;${environment}&quot;</span>]
+    <span class="hljs-attr">output:</span> <span class="hljs-string">json</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">requestFile:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Request</span> <span class="hljs-string">File</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Rendered</span> <span class="hljs-string">request</span> <span class="hljs-string">filename</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+      <span class="hljs-attr">environment:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Environment</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Target</span> <span class="hljs-string">environment</span> <span class="hljs-string">name</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+</div></code></pre>
+<p>argv 列表形式的 <code>command</code> 会保留每一项为一个独立进程参数。旧式的标量命令会被 token 化一次并进入相同的内部列表。已声明的参数可直接引用，例如 <code>${requestFile}</code>。</p>
+<h3 id="第-2-步创建工作簿与侧车">第 2 步：创建工作簿与侧车</h3>
+<p>创建 <code>testcase/payment.xlsx</code>，包含一行表头：</p>
+<table>
+<thead>
+<tr>
+<th>Case ID</th>
+<th>Tags</th>
+<th style="text-align:right">Amount</th>
+<th>Expected Status</th>
+<th>Invoke Template</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TC001</td>
+<td>smoke,payment</td>
+<td style="text-align:right">100</td>
+<td>SUCCESS</td>
+<td>PAYMENT_INVOKE</td>
+</tr>
+</tbody>
+</table>
+<p>创建相邻的 <code>testcase/payment.yaml</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.1</span>
+<span class="hljs-attr">id:</span> <span class="hljs-string">payment</span>
+<span class="hljs-attr">excel:</span>
+  <span class="hljs-attr">sheet:</span> <span class="hljs-string">payment=Payment</span> <span class="hljs-string">Cases</span>
+  <span class="hljs-attr">headerRows:</span> <span class="hljs-number">1</span>
+  <span class="hljs-attr">caseId:</span> <span class="hljs-string">Case</span> <span class="hljs-string">ID</span>
+  <span class="hljs-attr">tags:</span> <span class="hljs-string">Tags</span>
+  <span class="hljs-attr">dataColumns:</span> <span class="hljs-string">amount=Amount,</span> <span class="hljs-string">expectedStatus=Expected</span> <span class="hljs-string">Status</span>
+<span class="hljs-attr">stages:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">key:</span> <span class="hljs-string">invoke</span>
+    <span class="hljs-attr">template:</span> <span class="hljs-string">Invoke</span> <span class="hljs-string">Template</span>
+    <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+</div></code></pre>
+<p>完整 Case ID 是 <code>payment.payment.TC001</code>：第一个 <code>payment</code> 是包内唯一的工作簿 <code>id</code>，第二个是工作簿 sheet 映射左侧的逻辑 <code>groupId</code>，<code>TC001</code> 来自该行。</p>
+<h3 id="第-3-步创建模板">第 3 步：创建模板</h3>
+<p>创建 <code>templates/payment/template.yaml</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.5</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_INVOKE</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">Render,</span> <span class="hljs-string">invoke,</span> <span class="hljs-string">and</span> <span class="hljs-string">verify</span> <span class="hljs-string">a</span> <span class="hljs-string">payment</span>
+<span class="hljs-attr">actions:</span>
+  <span class="hljs-attr">renderRequest:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">render</span>
+    <span class="hljs-attr">payload:</span> <span class="hljs-string">request.tmp.json</span>
+    <span class="hljs-attr">renderAs:</span> <span class="hljs-string">file</span>
+  <span class="hljs-attr">callApi:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}&quot;</span>
+  <span class="hljs-attr">assertStatus:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">assert</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Payment</span> <span class="hljs-string">API</span> <span class="hljs-string">status</span> <span class="hljs-string">matches</span> <span class="hljs-string">the</span> <span class="hljs-string">expected</span> <span class="hljs-string">status</span>
+    <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${ACTIONS.callApi.output.result.status} == ${CASE.expectedStatus}&quot;</span>
+    <span class="hljs-attr">expected:</span> <span class="hljs-string">&quot;${CASE.expectedStatus}&quot;</span>
+    <span class="hljs-attr">actual:</span> <span class="hljs-string">&quot;${ACTIONS.callApi.output.result.status}&quot;</span>
+</div></code></pre>
+<p>创建 <code>templates/payment/request.tmp.json</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;caseId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;${CASE.caseId}&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;amount&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;${CASE.amount}&quot;</span>
+<span class="hljs-punctuation">}</span>
+</div></code></pre>
+<h3 id="第-4-步创建模拟工具">第 4 步：创建模拟工具</h3>
+<p>创建 <code>tools/invoke_payment_api.sh</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-meta">#!/usr/bin/env sh</span>
+<span class="hljs-built_in">set</span> -eu
+
+request_file=<span class="hljs-string">&quot;<span class="hljs-variable">${1:?missing request file}</span>&quot;</span>
+environment=<span class="hljs-string">&quot;<span class="hljs-variable">${2:?missing environment}</span>&quot;</span>
+
+[ -f <span class="hljs-string">&quot;<span class="hljs-variable">$request_file</span>&quot;</span> ] || {
+  <span class="hljs-built_in">echo</span> <span class="hljs-string">&quot;request file not found: <span class="hljs-variable">$request_file</span>&quot;</span> &gt;&amp;2
+  <span class="hljs-built_in">exit</span> 2
+}
+
+<span class="hljs-built_in">printf</span> <span class="hljs-string">&#x27;{&quot;status&quot;:&quot;SUCCESS&quot;,&quot;environment&quot;:&quot;%s&quot;}\n&#x27;</span> <span class="hljs-string">&quot;<span class="hljs-variable">$environment</span>&quot;</span>
+</div></code></pre>
+<p>赋予执行权限：</p>
+<pre class="hljs"><code><div><span class="hljs-built_in">chmod</span> +x tools/invoke_payment_api.sh
+</div></code></pre>
+<h3 id="第-5-步校验并运行">第 5 步：校验并运行</h3>
+<pre class="hljs"><code><div>./att.sh validate --package
+./att.sh run --suite testcase/payment.xlsx --<span class="hljs-keyword">case</span> payment.payment.TC001 --run-id SIT-001 --ci-output junit,json
+</div></code></pre>
+<p>在 Windows 上，用 <code>att.bat</code> 替换 <code>./att.sh</code>；命令名、选项、输出和退出码是相同的。这个快速开始示例是 POSIX shell 示例，因此 Windows 包需要在运行前配置等效的 <code>.bat</code>、<code>.cmd</code>、PowerShell 或原生可执行文件。</p>
+<p>在开发阶段，使用选中范围校验会更快：</p>
+<pre class="hljs"><code><div>./att.sh validate --selected --suite testcase/payment.xlsx --<span class="hljs-keyword">case</span> payment.payment.TC001
+</div></code></pre>
+<h3 id="第-6-步查看结果">第 6 步：查看结果</h3>
+<p>成功完成后，打开：</p>
+<pre class="hljs"><code><div>output/SIT-001/report/index.html
+</div></code></pre>
+<p>其他有用文件包括：</p>
+<ul>
+<li><code>output/SIT-001/run.yaml</code> — 版本化运行清单和输入哈希；</li>
+<li><code>output/SIT-001/payment.payment.TC001/case.yaml</code> — 持久化运行时上下文；</li>
+<li><code>output/SIT-001/ci/summary.json</code> — CI JSON 汇总；</li>
+<li><code>output/SIT-001/ci/junit.xml</code> — JUnit XML；</li>
+<li><code>output/SIT-001/report/junit.html</code> — 人类可读的 JUnit 视图。</li>
+</ul>
+<p>你现在已经拥有完整的 ATT 开发闭环：编写、校验、运行、查看和优化。</p>
+<h2 id="03-用户指南">03 用户指南</h2>
+<p>本章说明正常日常工作流中的数据流转顺序。</p>
+<h3 id="31-工作簿">3.1 工作簿</h3>
+<h4 id="工作簿侧车和快照之间的关系">工作簿、侧车和快照之间的关系</h4>
+<p>每个 <code>.xlsx</code> 工作簿都要求有一个 YAML 侧车和一个生成的 XML 快照，它们必须具有相同的基名且位于同一目录：</p>
+<pre class="hljs"><code><div>testcase/payment_regression.xlsx
+testcase/payment_regression.yaml
+testcase/payment_regression.xml
+</div></code></pre>
+<p>侧车将 Excel 结构映射为 ATT 概念。它负责 sheet 映射、表头、用例数据、有序阶段、可选报告列标签，以及可选的工作簿超时。</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.1</span>
+<span class="hljs-attr">id:</span> <span class="hljs-string">paymentRegression</span>
+<span class="hljs-attr">excel:</span>
+  <span class="hljs-attr">sheet:</span> <span class="hljs-string">payment=支付測試案例集,</span> <span class="hljs-string">batch=批量測試案例集</span>
+  <span class="hljs-attr">headerRows:</span> <span class="hljs-number">2</span>
+  <span class="hljs-attr">caseId:</span> <span class="hljs-string">案例編號</span>
+  <span class="hljs-attr">tags:</span> <span class="hljs-string">標籤</span>
+  <span class="hljs-attr">dataColumns:</span> <span class="hljs-string">caseName=案例名稱,</span> <span class="hljs-string">amount=金額,</span> <span class="hljs-string">expected=預期結果(yaml)</span>
+<span class="hljs-attr">stages:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">key:</span> <span class="hljs-string">invoke</span>
+    <span class="hljs-attr">template:</span> <span class="hljs-string">執行模板</span>
+    <span class="hljs-attr">dataColumns:</span> <span class="hljs-string">channel=渠道,</span> <span class="hljs-string">options=執行參數(yaml)</span>
+    <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+    <span class="hljs-attr">runWhen:</span> <span class="hljs-string">normal</span>
+    <span class="hljs-attr">onFailure:</span> <span class="hljs-string">stop</span>
+</div></code></pre>
+<p>根 <code>id</code> 是必需的，并且必须在整个包中唯一。<code>excel.sheet</code> 可以接受一个 sheet 名称，或以逗号分隔的 <code>groupId=sheetName</code> 条目。如果只给出一个 sheet 且没有 group ID，ATT 会使用 <code>default</code>。完整 Case ID 的形式始终是 <code>workbookId.groupId.rowCaseId</code>，并且必须在整个包中唯一。</p>
+<p>在修改 Excel 后，执行 <code>./att.sh snapshot --suite testcase/payment_regression.xlsx</code>。生成的 <code>payment_regression.xml</code> 使用模式 <code>att-testcases/v2.4</code>，并仅存储归一化后的侧车映射语义。它保留 group、Case、标签、map/list 和阶段顺序，使用显式值类型，并排除样式和无关工作簿内容。包含 LF 或 XML 特殊字符 <code>&amp;</code>、<code>&lt;</code>、<code>&gt;</code> 的字符串值会使用 CDATA；文字 <code>]]&gt;</code> 会被拆分成相邻 CDATA 段，并在解析时精确重建。LF 前的空格或制表符会使用 <code>&amp;#32;</code>/<code>&amp;#9;</code> 插入两个 CDATA 段之间，从而保留值而不触发 Git 行尾空白警告。请审查并提交该 XML；不要手工修改它。</p>
+<p>普通 <code>run</code> 和每一种 <code>validate</code> 模式都会保持只读，如果 XML 缺失、无效、非规范或过期，则会在输出创建前失败。<code>run --update-snapshot</code> 会显式允许 ATT 在应用相同验证与校验规则前，仅为选中的完整工作簿刷新已更改的快照。它不会写入部分 Case/标签快照，不会在更新期间调用工具，拒绝快照符号链接，并且当与 <code>--dry-run</code> 组合使用时仍会执行授权更新。字节内容完全相同的快照不会被重写。</p>
+<h4 id="映射数据列">映射数据列</h4>
+<p><code>dataColumns</code> 可以接受：</p>
+<pre class="hljs"><code><div>ColumnName
+alias=ColumnName
+ColumnName(yaml)
+alias=ColumnName(yaml)
+</div></code></pre>
+<p>普通列作为字符串进入 Context。<code>(yaml)</code> 列则会把显示的单元格值解析为 YAML 标量、列表或映射。</p>
+<p>双引号可保护逗号、等号和括号：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">dataColumns:</span> <span class="hljs-string">amount=金額,</span> <span class="hljs-string">note=&quot;備註,補充&quot;,</span> <span class="hljs-string">formula=&quot;規則=值&quot;,</span> <span class="hljs-string">payload=&quot;請求(yaml)&quot;(yaml)</span>
+</div></code></pre>
+<p>最后的 <code>(yaml)</code> 是 ATT 的解析标记。在最后一个例子中，物理 Excel 表头名是 <code>請求(yaml)</code>。</p>
+<h4 id="空白值">空白值</h4>
+<p><code>N/A</code>、<code>NA</code>、<code>NULL</code>、<code>NONE</code>、空单元格和仅包含空白字符的值都会归一化为空白。普通空白数据值会变为空字符串。空白 <code>(yaml)</code> 单元格则保持为空白，不进行解析。</p>
+<p>必需阶段选择器会拒绝空白值。可选阶段如果选择器为空白，则跳过。</p>
+<h4 id="公式日期百分比和科学记数法单元格">公式、日期、百分比和科学记数法单元格</h4>
+<p>V2.4 会拒绝在配置的 Case ID、标签、Case 数据、阶段选择器和阶段数据列中使用公式单元格。公式定义与缓存/显示结果可能不一致，因此不能用于生成可信的语义快照。请在 Excel 中重新计算后将结果粘贴为字面值，或者在专门的 ATT 步骤中进行计算。</p>
+<p>与配置测试用例列相交且位于 <code>excel.headerRows</code> 以下的合并区域也会被拒绝。完全位于配置表头区域内的合并展示单元格则允许。</p>
+<p>对于非公式单元格，ATT 导入显示文本。其精确表示遵循工作簿单元格格式和运行时区域设置：</p>
+<table>
+<thead>
+<tr>
+<th>Excel 值与格式</th>
+<th>Context 值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>45292</code> 格式化为 <code>yyyy-mm-dd</code></td>
+<td><code>2024-01-01</code></td>
+</tr>
+<tr>
+<td><code>0.125</code> 格式化为 <code>0.0%</code></td>
+<td><code>12.5%</code></td>
+</tr>
+<tr>
+<td><code>123000</code> 格式化为 <code>0.00E+00</code></td>
+<td><code>1.23E+05</code></td>
+</tr>
+<tr>
+<td><code>000123</code> 以文本形式存储/格式化</td>
+<td><code>000123</code></td>
+</tr>
+</tbody>
+</table>
+<p>普通列仍然是字符串。<code>(yaml)</code> 列可能将显示文本转换为其他 YAML 类型。对于日期、百分比、科学计数、账号或代码这类文本，应该使用引号把 YAML 标量包起来，以便保持为字符串。</p>
+<h4 id="多行表头">多行表头</h4>
+<p><code>headerRows: 2</code> 表示第 1–2 行是表头，数据从第 3 行开始。ATT 会扫描每个物理列从上到下，使用最后一个非空且已去除首尾空白的表头单元格：</p>
+<pre class="hljs"><code><div>第 1 行：基础数据 |           | 执行 |
+第 2 行：Case ID    | Case name | Template  | Parameters
+有效值：Case ID, Case name, Template, Parameters
+</div></code></pre>
+<p>ATT 不会拼接父子标签。表头匹配会移除空格、制表符、换行符、NBSP 以及其他 Unicode 空白字符；匹配其余部分仍区分大小写。例如，<code>案例 編號</code>、<code>案例\n編號</code>、<code>案例編號</code> 会被视为同一列。每个有效表头在归一化后必须唯一，因此仅因空白差异而不同的两个物理表头会被认为是重复表头错误。测试用例加载和结果工作簿写回使用相同的投影逻辑；结果列如果原本不存在，则会写入最终表头行。</p>
+<h4 id="阶段与模板选择">阶段与模板选择</h4>
+<p>每个侧车阶段都有一个不含点号的 <code>key</code>，以及一个命名物理 Excel 选择器列的 <code>template</code> 字段。选择器单元格可以包含符号模板名、完整相对模板路径，或 YAML 映射：</p>
+<table>
+<thead>
+<tr>
+<th>单元格值</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PAYMENT_INVOKE</code></td>
+<td>符号名称简写</td>
+</tr>
+<tr>
+<td><code>payment/local/CT001</code></td>
+<td>相对 <code>templates.root</code> 的完整路径简写</td>
+</tr>
+<tr>
+<td><code>name: PAYMENT_INVOKE</code></td>
+<td>明确的符号名称映射</td>
+</tr>
+<tr>
+<td><code>name: PAYMENT_INVOKE</code> 加其他键</td>
+<td>模板选择 + 阶段私有行数据</td>
+</tr>
+</tbody>
+</table>
+<p>ATT 会先将 <code>name</code> 作为全局唯一的符号名解析。只有在没有符号名匹配时，才会尝试完整相对模板路径。绝对路径、部分路径、以及逃逸出 <code>templates.root</code> 的路径都是非法的。</p>
+<p>所有选择器映射键（包括 <code>name</code>）都会复制到阶段 Context 中。<code>stages[].dataColumns</code> 会增加更多阶段私有值。选择器映射与阶段数据列之间如果出现重复键，则报错。</p>
+<h4 id="阶段执行控制">阶段执行控制</h4>
+<table>
+<thead>
+<tr>
+<th>设置</th>
+<th>值/默认值</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>required</code></td>
+<td>boolean/<code>false</code></td>
+<td>空白选择器是否视作错误</td>
+</tr>
+<tr>
+<td><code>runWhen</code></td>
+<td><code>normal</code>/默认、<code>onSuccess</code>、<code>onFailure</code>、<code>always</code></td>
+<td>阶段何时有资格运行</td>
+</tr>
+<tr>
+<td><code>onFailure</code></td>
+<td><code>stop</code>/默认、<code>continue</code></td>
+<td>后续适格工作是否继续</td>
+</tr>
+</tbody>
+</table>
+<p><code>continue</code> 不会把 FAIL 或 ERROR 改成 PASS，只是允许后续适格工作继续运行。</p>
+<table>
+<thead>
+<tr>
+<th>先前结果</th>
+<th style="text-align:right">后续 <code>normal</code></th>
+<th style="text-align:right"><code>onSuccess</code></th>
+<th style="text-align:right"><code>onFailure</code></th>
+<th style="text-align:right"><code>always</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PASS</td>
+<td style="text-align:right">运行</td>
+<td style="text-align:right">运行</td>
+<td style="text-align:right">跳过</td>
+<td style="text-align:right">运行</td>
+</tr>
+<tr>
+<td>FAIL/ERROR 且 <code>stop</code></td>
+<td style="text-align:right">跳过</td>
+<td style="text-align:right">跳过</td>
+<td style="text-align:right">运行</td>
+<td style="text-align:right">运行</td>
+</tr>
+<tr>
+<td>FAIL/ERROR 且 <code>continue</code></td>
+<td style="text-align:right">运行</td>
+<td style="text-align:right">跳过</td>
+<td style="text-align:right">运行</td>
+<td style="text-align:right">运行</td>
+</tr>
+</tbody>
+</table>
+<p>使用 <code>onFailure</code> 做回滚/诊断，使用 <code>always</code> 做清理或最终证据收集。</p>
+<h3 id="32-模板">3.2 模板</h3>
+<p>只有当目录直接包含 <code>template.yaml</code> 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.5</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_INVOKE</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">Render</span> <span class="hljs-string">and</span> <span class="hljs-string">invoke</span> <span class="hljs-string">a</span> <span class="hljs-string">payment</span> <span class="hljs-string">request</span>
+<span class="hljs-attr">actions:</span>
+  <span class="hljs-attr">buildReference:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">assign</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">paymentReference</span>
+    <span class="hljs-attr">expression:</span> <span class="hljs-string">&quot;PAY-#{sysdate(&#x27;yyyyMMdd&#x27;)}-#{sample.getSeq(10)}&quot;</span>
+  <span class="hljs-attr">renderRequest:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">render</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">&quot;Render request for ${CASE.caseId}; status=${output.status}&quot;</span>
+    <span class="hljs-attr">payload:</span> <span class="hljs-string">requests/*.xml</span>
+    <span class="hljs-attr">renderAs:</span> <span class="hljs-string">file</span>
+    <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.targetFiles[0]} != null&quot;</span>
+  <span class="hljs-attr">callApi:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span>
+    <span class="hljs-attr">saveAs:</span>
+      <span class="hljs-attr">path:</span> <span class="hljs-string">&quot;${CASE.caseId}-response.json&quot;</span>
+      <span class="hljs-attr">format:</span> <span class="hljs-string">json</span>
+      <span class="hljs-attr">overwrite:</span> <span class="hljs-literal">false</span>
+    <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.result.status} == &#x27;SUCCESS&#x27;&quot;</span>
+  <span class="hljs-attr">recordResult:</span>
+    <span class="hljs-attr">type:</span> <span class="hljs-string">log</span>
+    <span class="hljs-attr">level:</span> <span class="hljs-string">INFO</span>
+    <span class="hljs-attr">message:</span> <span class="hljs-string">&quot;Payment ${CASE.caseId} completed&quot;</span>
+    <span class="hljs-attr">file:</span> <span class="hljs-string">&quot;${ACTIONS.callApi.output.targetFiles[0]}&quot;</span>
+</div></code></pre>
+<p><code>schemaVersion</code>、<code>description</code> 和非空有序 <code>actions</code> 是必需的。<code>name</code> 在模板总是通过完整路径选择时可以省略；可复用模板应使用全局唯一的符号名。</p>
+<h4 id="动作类型">动作类型</h4>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>目的</th>
+<th>必需字段</th>
+<th>常见结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>render</code></td>
+<td>渲染一个或多个 UTF-8 负载</td>
+<td><code>type</code>、<code>payload</code>、<code>renderAs</code></td>
+<td>嵌套 <code>output.result</code> 与 <code>output.targetFiles</code></td>
+</tr>
+<tr>
+<td><code>tool</code></td>
+<td>调用已配置的外部工具</td>
+<td><code>type</code>、<code>call</code></td>
+<td>嵌套类型化结果和进程证据</td>
+</tr>
+<tr>
+<td><code>db</code></td>
+<td>查询或更新已配置数据库</td>
+<td><code>type</code>、<code>db</code>，以及恰好一个 <code>query</code>／<code>update</code> block</td>
+<td>稳定类型化 DB 结果与交易证据</td>
+</tr>
+<tr>
+<td><code>assert</code></td>
+<td>计算布尔表达式</td>
+<td><code>type</code>、<code>assert</code></td>
+<td>PASS/FAIL 或求值 ERROR；可选 Expected/Actual</td>
+</tr>
+<tr>
+<td><code>log</code></td>
+<td>写入渲染后的消息和/或 UTF-8 Case 输出文件</td>
+<td><code>type</code>，至少包含 <code>message</code> 或 <code>file</code></td>
+<td>合并内容、源路径和渲染字段</td>
+</tr>
+<tr>
+<td><code>assign</code></td>
+<td>求值文本并发布 Case 级变量</td>
+<td><code>type</code>、<code>name</code>、<code>expression</code></td>
+<td><code>${CASE.VARS.&lt;name&gt;}</code>、<code>output.name</code>、<code>output.result</code></td>
+</tr>
+</tbody>
+</table>
+<p>动作按 YAML 顺序执行。动作 ID 在模板内唯一，且不能包含点号。每个动作都可以定义 <code>description</code> 和 <code>onFailure: stop|continue</code>。</p>
+<p>动作校验按类型进行。render 动作要求安全且非空的 payload glob，以及 <code>renderAs: file|text|json|yaml|xml</code>；它不能包含 Tool、assert-action、log 或 DB 字段。重试和 Action 级 timeout 仅对 Tool 动作有效。Tool 与 DB Action 可使用共同的 object-shaped <code>saveAs</code>，其他类型不可使用。DB Action 必须指定已配置的 <code>db</code> ID，并在 <code>query</code> 与 <code>update</code> 中恰好选择一个；所选 block 又必须在 <code>sql</code> 与 <code>sqlFile</code> 中恰好选择一个。assert 动作要求 <code>assert</code>，并可包含 <code>expected</code> 和 <code>actual</code>；<code>expression</code>、<code>acture</code>、<code>actural</code> 都是非法字段。log 动作要求 <code>message</code>、<code>file</code> 或两者；并可使用 <code>level</code> 和 <code>fields</code>。assign 动作要求 <code>name</code> 和 <code>expression</code>。不支持的字段会报错，而不是被忽略。</p>
+<p>每个动作都可以使用 <code>assert</code>，但 assert 动作本身把它作为必需主表达式。每个动作结果都嵌套在 <code>output</code> 下，包括 <code>status</code>、<code>success</code>、<code>durationMs</code>、<code>exception</code>、<code>targetFiles</code>、<code>result</code>，以及可选断言详情。操作错误保持 ERROR；否则显式断言决定 PASS/FAIL。一个已完成的工具进程即使返回非零退出码，也不会自动变成 ERROR：需要在 <code>assert</code> 中检查 <code>output.exitCode</code>。</p>
+<p>每个动作都支持表达式型 <code>description</code>。验证时会检查 <code>${...}</code> 引用和 <code>#{...}</code> 调用而不执行它们，尽量解析可知的静态 Case 值，并保留运行时相关引用。执行成功后，ATT 会在当前动作局部 <code>${output...}</code> 作用域下对两种表达式形式进行求值，然后再持久化最终 description。</p>
+<p>assign 动作使用常规 Context、内建函数、配置 Tool 与只读 DB expression 语法求值 <code>expression</code>。其 <code>name</code> 必须符合 <code>[A-Za-z_][A-Za-z0-9_]*</code>，大小写敏感，并且在当前 Case 的 <code>CASE.VARS</code> 下不能已存在。<code>CASE.VARS</code> 会在每个 Test Case 中创建一次，跨阶段和模板保持存在，并将运行时赋值与 Excel 及框架自有 Case 字段区分开。完整的类型化表达式（例如 <code>#{db.orders.query(...)}</code>）保留 Java object，不会转成字符串。成功赋值后，后续动作和阶段可通过 <code>${CASE.VARS.&lt;name&gt;}</code> 读取；同一值也保存在 <code>${ACTIONS.&lt;assignActionId&gt;.output.result}</code>。Assign 支持可选 <code>description</code>、<code>assert</code> 和 <code>onFailure</code>，但不支持 render、tool-action、log、report-only、retry、timeout 或 <code>saveAs</code>。断言 FAIL/ERROR 不会回滚已成功求值的变量；表达式失败则不会创建变量。</p>
+<p>Render 负载路径必须保持在模板根目录下。glob 匹配会取模板相对路径排序后的普通非符号链接文件。<code>renderAs: file</code> 会把渲染结果写入 Case 输出目录中对应的相对路径；冲突会报 ERROR。其他渲染模式不会写文件，而是把一个类型化值，或多个匹配项对应的“相对路径→值”有序映射，写入 <code>output.result</code>。</p>
+<p>log 动作可以输出渲染后的 <code>message</code>、一个 <code>file</code> 的完整内容，或两者同时输出：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">logResponse:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">log</span>
+  <span class="hljs-attr">level:</span> <span class="hljs-string">DEBUG</span>
+  <span class="hljs-attr">message:</span> <span class="hljs-string">&quot;API response for ${CASE.caseId}:&quot;</span>
+  <span class="hljs-attr">file:</span> <span class="hljs-string">&quot;${ACTIONS.callApi.output.targetFiles[0]}&quot;</span>
+  <span class="hljs-attr">fields:</span>
+    <span class="hljs-attr">action:</span> <span class="hljs-string">callApi</span>
+</div></code></pre>
+<p><code>message</code> 与 <code>file</code> 都支持统一的 <code>${...}</code> / <code>#{...}</code> 表达式引擎，并在 log 动作发布自身输出前进行求值。相对 <code>file</code> 路径会解析到 <code>${CASE.outputDirectory}</code> 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前 Case 日志，都会报 ERROR。</p>
+<p>若要用与 DB Action <code>saveAs.format: text</code> 相同的 SQL*Plus 风格输出打印类型化 DB 结果，可在 message 中使用纯内建函数 <code>dbText(...)</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">printOrders:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">log</span>
+  <span class="hljs-attr">message:</span> <span class="hljs-string">&quot;#{dbText(${ACTIONS.queryOrders.output.result})}&quot;</span>
+</div></code></pre>
+<p><code>dbText(...)</code> 只格式化传入值，不执行 JDBC、不改变交易，也不清除 cache。也可以传入巢状只读 DB 表达式，但引用前一个 DB Action 可避免重复查询。</p>
+<p><code>output.sourceFile</code> 记录规范化后的源路径。<code>output.result</code> 包含文件内容一次，CRLF/CR 会被归一化成 LF；当两种输入同时存在时，它包含消息、一个 LF，然后是文件内容。这个相同结果也只会在人工 Case 日志中输出一次，而不会把文件内容复制到多个证据字段。</p>
+<h3 id="33-工具">3.3 工具</h3>
+<p>工具是一个外部能力，可以在全局 <code>config.yaml</code> 中配置，也可以位于独立的工具组文件中，并由模板动作通过命名参数调用。</p>
+<pre class="hljs"><code><div><span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">invokePaymentApi:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Invoke</span> <span class="hljs-string">Payment</span> <span class="hljs-string">API</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Invoke</span> <span class="hljs-string">a</span> <span class="hljs-string">rendered</span> <span class="hljs-string">request</span>
+    <span class="hljs-attr">command:</span> [<span class="hljs-string">&quot;./tools/invoke_payment_api.sh&quot;</span>, <span class="hljs-string">&quot;${requestFile}&quot;</span>, <span class="hljs-string">&quot;${environment}&quot;</span>]
+    <span class="hljs-attr">output:</span> <span class="hljs-string">json</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">requestFile:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Request</span> <span class="hljs-string">File</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Rendered</span> <span class="hljs-string">request</span> <span class="hljs-string">path</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+      <span class="hljs-attr">environment:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Environment</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Target</span> <span class="hljs-string">environment</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+</div></code></pre>
+<p>动作调用必须使用配置的键。多个声明参数的工具会使用命名参数：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">callApi:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}&quot;</span>
+</div></code></pre>
+<p>未知、重复或缺失必需参数都会在验证时失败。参数元数据用于记录和验证契约，不会自动注入值。如果且仅如果工具恰好声明一个参数，调用时可以省略参数名：<code>#{getAppLogs(${CASE.caseId})}</code> 等价于 <code>#{getAppLogs(caseId=${CASE.caseId})}</code>。零参数工具仍然使用 <code>#{tool()}</code>；多参数工具则拒绝位置参数。</p>
+<p>全局工具保留无前缀名称。V2.2 的 tool group 可通过全局配置中的 <code>toolGroups</code> 列出：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">toolGroups:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">config/tools/database.yaml</span>
+</div></code></pre>
+<p>引用文件声明 package 内唯一 ID 及其工具：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-tool-group/v2.2</span>
+<span class="hljs-attr">id:</span> <span class="hljs-string">database</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">Database</span> <span class="hljs-string">tools</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">Read-only</span> <span class="hljs-string">queries</span>
+<span class="hljs-attr">script:</span> [<span class="hljs-string">&quot;/opt/att/database-tools&quot;</span>]
+<span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">selectPayment:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Select</span> <span class="hljs-string">payment</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Query</span> <span class="hljs-string">one</span> <span class="hljs-string">payment</span>
+    <span class="hljs-attr">command:</span> [<span class="hljs-string">&quot;select-payment&quot;</span>, <span class="hljs-string">&quot;--case&quot;</span>, <span class="hljs-string">&quot;${caseId}&quot;</span>]
+    <span class="hljs-attr">output:</span> <span class="hljs-string">json</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">caseId:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Case</span> <span class="hljs-string">ID</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">Full</span> <span class="hljs-string">Case</span> <span class="hljs-string">ID</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+</div></code></pre>
+<p>调用方式为 <code>#{database.selectPayment(caseId=${CASE.caseId})}</code>。在 <code>script</code> 存在时，逻辑 argv 为 <code>/opt/att/database-tools selectPayment select-payment --case &lt;caseId&gt;</code>：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 <code>script</code> 时，工具命令从可执行文件开始。持久化的分组证据可在 <code>TOOL.database.selectPayment</code> 下访问。</p>
+<p>以下两个参考 helper 会明确提供 pathname expansion，但不会改变普通 process-backed Tool 的契约：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">runChecks:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&gt;-
+    #{fpp.exehelper(
+        command=&#x27;wc&#x27;,
+        arguments=[&#x27;-l&#x27;, &#x27;${CASE.outputDirectory}/requests/*.xml&#x27;],
+        stdoutPath=&#x27;${CASE.outputDirectory}/request-counts.txt&#x27;
+    )}
+</span>
+<span class="hljs-attr">findTransactions:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&gt;-
+    #{fpp.loghelper(
+        maxTidFiles=10,
+        minTidFiles=2,
+        outputPrefix=&#x27;${CASE.outputDirectory}/transaction&#x27;,
+        logFiles=[&#x27;/var/log/payment/app*.log&#x27;, &#x27;/archive/payment/app-2026-07-2?.log&#x27;],
+        keywords=[${CASE.caseId}, &#x27;SUCCESS&#x27;],
+        recentLogCount=0,
+        sshOption=&#x27;--ssh&#x27;
+    )}
+</span></div></code></pre>
+<p><code>fpp.exehelper.arguments</code> 是有序 typed array；<code>exehelper.sh</code> 对每个含 <code>*</code>、<code>?</code> 或 <code>[</code> 的参数按其 filesystem working directory 展开。匹配结果使用 C locale 的 pathname 顺序，且每个匹配仍是独立 argv；路径含空格也不会再被拆分。没有匹配的 pattern 会保持为一个字面参数。Executable 名称、stdout/stderr 路径不会展开；shell variable、command substitution、pipe 和 redirection 也不会执行。</p>
+<p><code>fpp.loghelper.logFiles</code> 与 <code>keywords</code> 是有序 typed array；每个 path／pathname pattern 会在被搜索的 host 上独立展开。只接受 regular file；相同 canonical path 只搜索一次；无匹配 pattern 会跳过并输出诊断。如果本地没有任何 pattern 匹配 regular file，调用失败。远程 host 收到的是原始 pattern，因此会按远程 filesystem 展开。</p>
+<p>启用 <code>--ssh</code> 时，可在 <code>tools/loghelper.sh</code> 配置 <code>SSH_SERVERS</code>，或通过 <code>LOGHELPER_SSH_SERVERS</code> 提供多行记录：</p>
+<pre class="hljs"><code><div>localhost||||
+server1.example.com|appuser|22||/opt/att/tools/loghelper.sh
+server2.example.com|appuser|2222|/secure/att_ed25519|/opt/att/tools/loghelper.sh
+</div></code></pre>
+<p>每行格式为 <code>host|user|port|identity-file|remote-loghelper-path</code>。共享 server list 可以包含 <code>localhost</code>、loopback address 或当前 hostname；loghelper 会识别这是已经搜索过的本机，不会 SSH 到自身。非本机记录仍必须提供 user、正整数 port、remote helper path，以及配置时存在的 identity file。</p>
+<h4 id="数据库助手db-helper">数据库助手（DB helper）</h4>
+<p>dbhelper 不属于 <code>tools</code>，也不使用 Tool group schema。全局配置只引用独立文件：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-config/v2.6</span>
+<span class="hljs-attr">dbhelpers:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">config/dbhelpers/orders.yaml</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">config/dbhelpers/audit.yaml</span>
+</div></code></pre>
+<p>每个文件只声明一个实例；ID 在整个包内忽略大小写后必须唯一。下面是完整示例：</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># config/dbhelpers/orders.yaml</span>
+<span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-dbhelper/v2.5</span>
+<span class="hljs-attr">id:</span> <span class="hljs-string">orders</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">Orders</span> <span class="hljs-string">database</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">Order</span> <span class="hljs-string">query</span> <span class="hljs-string">and</span> <span class="hljs-string">update</span> <span class="hljs-string">connection</span>
+<span class="hljs-attr">connection:</span>
+  <span class="hljs-attr">url:</span> <span class="hljs-string">jdbc:postgresql://db.example/orders</span>
+  <span class="hljs-attr">username:</span> <span class="hljs-string">att</span>
+  <span class="hljs-attr">password:</span> <span class="hljs-string">&quot;${ENV:ORDERS_DB_PASSWORD}&quot;</span>
+  <span class="hljs-attr">driverClass:</span> <span class="hljs-string">org.postgresql.Driver</span>
+  <span class="hljs-attr">readOnly:</span> <span class="hljs-literal">false</span>
+  <span class="hljs-attr">isolation:</span> <span class="hljs-string">readCommitted</span>
+  <span class="hljs-attr">properties:</span>
+    <span class="hljs-attr">applicationName:</span> <span class="hljs-string">att</span>
+<span class="hljs-attr">statement:</span>
+  <span class="hljs-attr">timeoutSeconds:</span> <span class="hljs-number">30</span>
+<span class="hljs-attr">transaction:</span>
+  <span class="hljs-attr">scope:</span> <span class="hljs-string">case</span>
+  <span class="hljs-attr">onEnd:</span> <span class="hljs-string">rollback</span>
+<span class="hljs-attr">result:</span>
+  <span class="hljs-attr">maxRows:</span> <span class="hljs-number">1000</span>
+  <span class="hljs-attr">maxCellBytes:</span> <span class="hljs-number">1048576</span>
+  <span class="hljs-attr">maxBytes:</span> <span class="hljs-number">10485760</span>
+<span class="hljs-attr">evidence:</span>
+  <span class="hljs-attr">sql:</span> <span class="hljs-string">full</span>
+  <span class="hljs-attr">parameters:</span> <span class="hljs-string">masked</span>
+</div></code></pre>
+<p><code>connection.url</code> 必填；username、password 和 properties 中的值可写成完整的 <code>${ENV:NAME}</code> 环境变量引用。<code>driverClass</code> 可选，优先使用 JDBC service discovery。<code>readOnly</code> 是 ATT 的 update 拒绝边界，也会传给 JDBC Connection；它不能防止 vendor side effect。<code>isolation</code> 可为 <code>driverDefault</code>、<code>readUncommitted</code>、<code>readCommitted</code>、<code>repeatableRead</code> 或 <code>serializable</code>。</p>
+<p><code>statement.timeoutSeconds</code> 是实例级 SQL timeout，默认 30，范围 1–3600。ATT 对该实例创建的每个 <code>PreparedStatement</code> 调用 <code>setQueryTimeout</code>；DB Action 不接受 Action 级 <code>timeoutMs</code>。</p>
+<p>交易设置组合如下：</p>
+<table>
+<thead>
+<tr>
+<th><code>scope</code></th>
+<th><code>onEnd</code></th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>statement</code></td>
+<td><code>commit</code></td>
+<td>JDBC auto-commit</td>
+</tr>
+<tr>
+<td><code>statement</code></td>
+<td><code>rollback</code></td>
+<td>每次 DB 操作后 rollback</td>
+</tr>
+<tr>
+<td><code>case</code></td>
+<td><code>commit</code></td>
+<td>Case 完成时 commit 每个已使用实例</td>
+</tr>
+<tr>
+<td><code>case</code></td>
+<td><code>rollback</code></td>
+<td>Case 完成时 rollback 每个已使用实例</td>
+</tr>
+</tbody>
+</table>
+<p>默认值为 <code>scope: case</code>、<code>onEnd: rollback</code>。</p>
+<h5 id="db-action">DB Action</h5>
+<p>查询使用 <code>query</code> block，不另设沉重的 <code>operation</code> 字段：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">queryOrder:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">db</span>
+  <span class="hljs-attr">db:</span> <span class="hljs-string">orders</span>
+  <span class="hljs-attr">query:</span>
+    <span class="hljs-attr">sql:</span> <span class="hljs-string">&gt;-
+      select id, status
+      from orders
+      where customer_id = ? and status = ?
+</span>    <span class="hljs-attr">params:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${CASE.customerId}&quot;</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">OPEN</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.result.rowCount} &gt; 0&quot;</span>
+  <span class="hljs-attr">saveAs:</span>
+    <span class="hljs-attr">path:</span> <span class="hljs-string">order-result.json</span>
+    <span class="hljs-attr">format:</span> <span class="hljs-string">json</span>
+    <span class="hljs-attr">overwrite:</span> <span class="hljs-literal">false</span>
+</div></code></pre>
+<p>更新使用 <code>update</code> block：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">closeOrder:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">db</span>
+  <span class="hljs-attr">db:</span> <span class="hljs-string">orders</span>
+  <span class="hljs-attr">update:</span>
+    <span class="hljs-attr">sql:</span> <span class="hljs-string">&quot;update orders set status = ? where id = ?&quot;</span>
+    <span class="hljs-attr">params:</span> [<span class="hljs-string">CLOSED</span>, <span class="hljs-string">&quot;${CASE.orderId}&quot;</span>]
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.result.affectedRows} == 1&quot;</span>
+</div></code></pre>
+<p><code>query</code> 与 <code>update</code> 必须且只能出现一个。block 内的 <code>sql</code> 与 <code>sqlFile</code> 也必须且只能出现一个。<code>params</code> 可省略（默认为空 list），也可使用 YAML list，或一个精确 Context 引用，其类型化值必须是 Java <code>List</code>。ATT 按顺序调用 <code>PreparedStatement.setObject</code>，不会把值转成字符串后重新解析。V2.5 不支持 named parameters、batch、generated keys、callable statements 或多个 JDBC result。</p>
+<p><code>type: db</code> 不支持 <code>retry</code> 或 Action 级 <code>timeoutMs</code>。自动重试 update 并不安全。DB 执行成功后可使用普通 <code>description</code>、<code>assert</code> 和 <code>onFailure</code>；执行失败时不运行断言，状态保持 ERROR。</p>
+<p>DB 的 <code>saveAs</code> 使用共同 object shape，但保存的是类型化 result，而非 stdout。<code>path</code> 与 <code>format: text|json|yaml|xml</code> 必填，<code>overwrite</code> 默认 false，<code>raw</code> 非法。<code>text</code> 使用下述 SQL*Plus 风格。路径必须保持在 Case artifact 目录内；格式化、序列化或写文件失败都是 ERROR。</p>
+<p>查询的 text 输出保持 JDBC column-label 顺序，按 terminal display width（包括中文等全形 Unicode 字符）扩展每列；所有非空值均为数值的列右对齐，<code>NULL</code> 明确显示。末尾为 <code>1 row selected.</code> 或 <code>&lt;n&gt; rows selected.</code>。表头／cell 内的反斜线、控制字符与不可见 format 字符会转义，确保一条 DB row 只占一个物理行。空查询输出 <code>no rows selected.</code>；update 输出 <code>1 row updated.</code> 或 <code>&lt;n&gt; rows updated.</code>。编码为 UTF-8，行尾为 LF。该文本只含表格／update 摘要；若需要完整 transaction metadata，应使用 JSON、YAML 或 XML。</p>
+<pre class="hljs"><code><div>ID    STATUS  AMOUNT
+----  ------  ------
+A100  READY    12.50
+A101  DONE         3
+
+2 rows selected.
+</div></code></pre>
+<h5 id="渲染-sql-与-sql-文件">渲染 SQL 与 SQL 文件</h5>
+<p>inline SQL 在 JDBC prepare 前使用当前 Context 渲染。前置 render Action 也可提供完整 SQL：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">query:</span>
+  <span class="hljs-attr">sql:</span> <span class="hljs-string">&quot;${ACTIONS.renderSql.output.result}&quot;</span>
+  <span class="hljs-attr">params:</span> <span class="hljs-string">&quot;${CASE.queryParams}&quot;</span>
+</div></code></pre>
+<p>也可引用静态、包内 UTF-8 文件：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">query:</span>
+  <span class="hljs-attr">sqlFile:</span> <span class="hljs-string">sql/orders/find-by-customer.sql</span>
+  <span class="hljs-attr">params:</span> [<span class="hljs-string">&quot;${CASE.customerId}&quot;</span>, <span class="hljs-string">OPEN</span>]
+</div></code></pre>
+<p>validate 会确认 <code>sqlFile</code> 是包内普通非符号链接文件。ATT 对文件内容使用与 inline SQL 相同的渲染规则，并记录 source path 与 SQL hash／全文；路径本身不渲染。SQL source 只允许 Context 与 pure built-in，不允许配置 Tool 或巢状 DB 调用。外部准备应在前一 Action 完成，再引用其结果。</p>
+<p>渲染只适合 SQL 结构；测试数据应留在 <code>params</code> 并使用 JDBC <code>?</code>。ATT 不解析、分类、改写 SQL，也不会把参数插入 vendor SQL 字串。</p>
+<h5 id="表达式中的-db-查询">表达式中的 DB 查询</h5>
+<p>只读查询可在所有 Case-runtime expression 位置调用：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">assert:</span> <span class="hljs-string">&gt;-
+  #{db.orders.scalar(
+      sql=&#x27;select count(*) from orders where customer_id = ?&#x27;,
+      params=${CASE.customerParams}
+  )} == 1
+</span></div></code></pre>
+<p>多参数可按 JDBC placeholder 次序 inline 编写：</p>
+<pre class="hljs"><code><div><span class="hljs-comment">#{db.orders.query(</span>
+    <span class="hljs-string">sql=&#x27;select</span> <span class="hljs-string">id</span> <span class="hljs-string">from</span> <span class="hljs-string">orders</span> <span class="hljs-string">where</span> <span class="hljs-string">customer_id</span> <span class="hljs-string">=</span> <span class="hljs-string">?</span> <span class="hljs-string">and</span> <span class="hljs-string">status</span> <span class="hljs-string">=</span> <span class="hljs-string">?</span> <span class="hljs-string">and</span> <span class="hljs-string">amount</span> <span class="hljs-string">&gt;=</span> <span class="hljs-string">?&#x27;,</span>
+    <span class="hljs-string">params=[${CASE.customerId},</span> <span class="hljs-string">&#x27;OPEN&#x27;</span><span class="hljs-string">,</span> <span class="hljs-string">${CASE.minimumAmount}]</span>
+<span class="hljs-string">)}</span>
+</div></code></pre>
+<ul>
+<li><code>#{db.&lt;instance&gt;.query(sql|sqlFile, params?)}</code> 返回稳定查询结果 object。</li>
+<li><code>#{db.&lt;instance&gt;.scalar(sql|sqlFile, params?)}</code> 要求恰好一行一列并返回该 typed cell；其他基数都是 ERROR。</li>
+</ul>
+<p>完整 query call 可在 assign 中保留 Java object：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">loadOrders:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">assign</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">customerOrders</span>
+  <span class="hljs-attr">expression:</span> <span class="hljs-string">&gt;-
+    #{db.orders.query(
+        sql=&#x27;select id, status from orders where customer_id = ?&#x27;,
+        params=${CASE.customerParams}
+    )}
+</span></div></code></pre>
+<p>后续可读取 <code>${CASE.VARS.customerOrders.rows[0].STATUS}</code>。非 scalar 的 query object 不能插入周围文字；请用 assign 或 DB Action。expression update、DDL、callable statement 与 generic execute 一律拒绝。查询失败会使所在 Action 与 Case 成为 ERROR；inline evidence 保存在 <code>ACTIONS.&lt;action&gt;.DB.&lt;instance&gt;.&lt;callId&gt;</code>。</p>
+<h5 id="结果与连接生命周期">结果与连接生命周期</h5>
+<p>查询的 <code>rows</code> 永远是 List，包括零行或一行：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">success:</span> <span class="hljs-literal">true</span>
+<span class="hljs-attr">operation:</span> <span class="hljs-string">query</span>
+<span class="hljs-attr">rowCount:</span> <span class="hljs-number">1</span>
+<span class="hljs-attr">rows:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">ID:</span> <span class="hljs-string">A100</span>
+    <span class="hljs-attr">STATUS:</span> <span class="hljs-string">READY</span>
+<span class="hljs-attr">affectedRows:</span> <span class="hljs-literal">null</span>
+<span class="hljs-attr">transaction:</span> {<span class="hljs-attr">scope:</span> <span class="hljs-string">case</span>, <span class="hljs-attr">onEnd:</span> <span class="hljs-string">rollback</span>, <span class="hljs-attr">state:</span> <span class="hljs-string">PENDING_ROLLBACK</span>}
+<span class="hljs-attr">error:</span> <span class="hljs-literal">null</span>
+</div></code></pre>
+<p>update 使用 <code>rows: []</code>、<code>rowCount: 0</code> 与整数 <code>affectedRows</code>。重复 column label 是 ERROR，需在 SQL 加 alias。binary 使用 Base64，temporal 使用可移植字符串；LOB/cell/row/result 超限会失败而非截断。</p>
+<p>失败仍保留相同顶层形状：<code>success: false</code>、空 rows、零 rowCount、null affectedRows，以及经净化的 <code>error</code>（<code>type</code>、<code>message</code>、<code>sqlState</code>、<code>vendorCode</code>）。类型包括 <code>CONNECTION_ERROR</code>、<code>BIND_ERROR</code>、<code>SQL_ERROR</code>、<code>TIMEOUT</code>、<code>LIMIT_EXCEEDED</code>、<code>ROLLBACK_ONLY</code> 与 <code>FINALIZE_ERROR</code>。</p>
+<p>Connection 的生命周期只与 dbhelper 实例和执行 thread 有关，与 Case 无关。ATT 为每个实例/thread 重用一个 Connection。Case 完成时对该 Case 已使用实例执行配置的 commit/rollback，但不关闭 Connection；thread 结束或 run 结束才关闭。</p>
+<p>新 Case 开始前，ATT 对该 thread 上每个已打开的 non-auto-commit Connection 做一次 rollback，以隔离不同 Case。若 rollback 异常，ATT 丢弃旧 Connection 并立即尝试 reconnect；这不会改变新 Case 状态。数据库仍不可用时，第一个实际 DB Action 才成为 ERROR。</p>
+<p>对 <code>scope: case</code>，任何 SQL/JDBC 错误都会把该实例标为 rollback-only；同一 Case 后续调用不发送 SQL并直接 ERROR，Case 收尾时 rollback。vendor DDL 可能按自身规则隐式 commit，ATT 无法把它强制变成交易式操作。</p>
+<p>最终结果写入固定 <code>${CASE.DB.&lt;instance&gt;}</code>。<code>CASE.DB</code> 由框架拥有、区分大小写、不能改名或由 Case 数据提供：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">CASE:</span>
+  <span class="hljs-attr">DB:</span>
+    <span class="hljs-attr">orders:</span>
+      <span class="hljs-attr">scope:</span> <span class="hljs-string">case</span>
+      <span class="hljs-attr">onEnd:</span> <span class="hljs-string">rollback</span>
+      <span class="hljs-attr">state:</span> <span class="hljs-string">ROLLED_BACK</span>
+      <span class="hljs-attr">success:</span> <span class="hljs-literal">true</span>
+      <span class="hljs-attr">error:</span> <span class="hljs-literal">null</span>
+</div></code></pre>
+<p>三个相似写法职责不同：</p>
+<table>
+<thead>
+<tr>
+<th>写法</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>#{db.orders.query(...)}</code></td>
+<td>小写可调用 namespace，在表达式求值点执行只读查询</td>
+</tr>
+<tr>
+<td><code>${CASE.DB.orders.state}</code></td>
+<td>固定 Case Context 路径，包含 Case 完成后的交易收尾结果</td>
+</tr>
+<tr>
+<td><code>${DB...}</code></td>
+<td>单次调用内部 evidence scope；不是 Case 级“最近一次 DB 调用”API</td>
+</tr>
+</tbody>
+</table>
+<p>ATT 在 Case 初始化时创建空 <code>CASE.DB</code>，所有 Action 完成并执行交易收尾后，才为已使用实例加入 entry。因此同一 Case 的 Action 不能依赖 <code>${CASE.DB.orders.state}</code> 作执行决策。单次操作结果请读 <code>${ACTIONS.&lt;actionId&gt;.output.result}</code>；<code>CASE.DB</code> 用于持久化 Context、Case log、报告或其他 post-Case 处理。</p>
+<p>ATT 不内置特定 JDBC driver。将 driver 与全部依赖放入包根 <code>lib/</code>，更改后重启 ATT。默认使用 JDBC service discovery；旧式 driver 可配置 <code>connection.driverClass</code>。V2.5 使用 flat shared classpath，不支持动态 reload 或 driver 依赖隔离。</p>
+<h4 id="call-backed-toolv26">Call-backed Tool（V2.6）</h4>
+<p>Call-backed Tool 为重复的 DB 操作提供简短、业务化的名称，同时保留一級 dbhelper 的 typed result、SQL timeout、transaction 与 evidence 行为。它是 façade，不取代 <code>type: db</code> 或直接 <code>#{db.&lt;instance&gt;.*}</code>。</p>
+<p>主配置使用 <code>att-config/v2.6</code>，并引用独立的 V2.6 Tool group 与 V2.5 dbhelper：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-config/v2.6</span>
+<span class="hljs-attr">toolGroups:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">config/tools/orders-db.yaml</span>
+<span class="hljs-attr">dbhelpers:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">config/dbhelpers/orders.yaml</span>
+</div></code></pre>
+<p>一个 Tool 必须且只能有 <code>command</code> 或 <code>call</code>。下面配置覆盖多参数 query、scalar、SQL file、update 与两种 cache scope：</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># config/tools/orders-db.yaml</span>
+<span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-tool-group/v2.6</span>
+<span class="hljs-attr">id:</span> <span class="hljs-string">orders</span>
+<span class="hljs-attr">name:</span> <span class="hljs-string">Order</span> <span class="hljs-string">database</span> <span class="hljs-string">tools</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">可复用的</span> <span class="hljs-string">typed</span> <span class="hljs-string">order</span> <span class="hljs-string">操作</span>
+
+<span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">find:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Find</span> <span class="hljs-string">orders</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">按客户与状态查询订单</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{db.orders.query(sql=&#x27;select order_id, status from orders where customer_id = ? and status = ?&#x27;, params=[${input.customerId}, ${input.status}])}&quot;</span>
+    <span class="hljs-attr">cache:</span>
+      <span class="hljs-attr">scope:</span> <span class="hljs-string">case</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">customerId:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Customer</span> <span class="hljs-string">ID</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">要查询的客户</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+      <span class="hljs-attr">status:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Status</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">精确订单状态</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+
+  <span class="hljs-attr">count:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Count</span> <span class="hljs-string">orders</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">返回一个</span> <span class="hljs-string">typed</span> <span class="hljs-string">count</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{db.orders.scalar(sql=&#x27;select count(*) from orders where customer_id = ?&#x27;, params=[${input.customerId}])}&quot;</span>
+    <span class="hljs-attr">cache:</span>
+      <span class="hljs-attr">scope:</span> <span class="hljs-string">db</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">customerId:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Customer</span> <span class="hljs-string">ID</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">要统计的客户</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+
+  <span class="hljs-attr">findByDate:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Find</span> <span class="hljs-string">orders</span> <span class="hljs-string">by</span> <span class="hljs-string">date</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">使用</span> <span class="hljs-string">package</span> <span class="hljs-string">内的</span> <span class="hljs-string">rendered</span> <span class="hljs-string">SQL</span> <span class="hljs-string">file</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{db.orders.query(sqlFile=&#x27;sql/orders-by-date.sql&#x27;, params=[${input.customerId}, ${input.fromDate}])}&quot;</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">customerId:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Customer</span> <span class="hljs-string">ID</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">要查询的客户</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+      <span class="hljs-attr">fromDate:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">From</span> <span class="hljs-string">date</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">包含此日期起的订单</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+
+  <span class="hljs-attr">updateStatus:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Update</span> <span class="hljs-string">order</span> <span class="hljs-string">status</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">更新一个订单</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{db.orders.update(sql=&#x27;update orders set status = ? where order_id = ?&#x27;, params=[${input.status}, ${input.orderId}])}&quot;</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">orderId:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Order</span> <span class="hljs-string">ID</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">要更新的订单</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+      <span class="hljs-attr">status:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Status</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">新状态</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+</div></code></pre>
+<p>Tool 定义必须通过 <code>${input.&lt;argument&gt;}</code> 或 <code>${TOOL.input.&lt;argument&gt;}</code> 读取 typed 参数；裸 <code>input.*</code>／<code>TOOL.input.*</code> 会被拒绝。定义内不能读取 <code>CASE</code>、<code>RUN</code>、<code>ACTIONS</code> 或 evidence root，Case 数据必须从外层调用传入。允许 pure built-in，例如 <code>params=[${input.customerId}, #{upper(${input.status})}]</code>。不允许调用另一 configured Tool，因此不会形成 Tool dependency cycle。</p>
+<p><code>call</code> 必须是一个完整 <code>#{...}</code>，目标只能是 <code>db.&lt;instance&gt;.query|scalar|update</code> 或一个 pure built-in。Call-backed Tool 禁止 <code>output</code>、SSH、group <code>script</code> 及参数的 <code>argName|argNameMode</code>；这些 process-only 字段会报错，不会被静默忽略。</p>
+<p>DB façade 的 <code>sqlFile</code> 必须是静态 package-relative 路径，例如 <code>sqlFile='sql/orders-by-date.sql'</code>；不能从 input 或表达式动态产生路径。ATT 会校验该文件，并以 <code>tool-sql</code> input 将其 SHA-256 写入 <code>run.yaml</code>，执行时再渲染文件内容。因此 package provenance 保持完整，而 SQL 内容仍可读取已声明 Tool input 与 pure built-in。</p>
+<h5 id="场景在表达式中取得-typed-query-result">场景：在表达式中取得 typed query result</h5>
+<p>READ façade 可用于 <code>assign</code>、<code>assert</code>、render payload、log field、description 与普通调用参数：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">loadOrders:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">assign</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">customerOrders</span>
+  <span class="hljs-attr">expression:</span> <span class="hljs-string">&gt;-
+    #{orders.find(
+        customerId=${CASE.customerId},
+        status=&#x27;OPEN&#x27;
+    )}
+</span>
+<span class="hljs-attr">checkOrders:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">assert</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${CASE.VARS.customerOrders.rowCount} &gt; 0&quot;</span>
+  <span class="hljs-attr">expected:</span> <span class="hljs-string">至少一个</span> <span class="hljs-string">OPEN</span> <span class="hljs-string">order</span>
+  <span class="hljs-attr">actual:</span> <span class="hljs-string">&quot;${CASE.VARS.customerOrders.rowCount}&quot;</span>
+</div></code></pre>
+<p>精确调用直接返回与 <code>db.orders.query</code> 相同的 Java object，不经过文本序列化；后续可读取 <code>${CASE.VARS.customerOrders.rows[0].STATUS}</code>。</p>
+<p>Scalar 也可直接放入断言：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">checkOrderCount:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">assert</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;#{orders.count(customerId=${CASE.customerId})} &gt;= 1&quot;</span>
+</div></code></pre>
+<p><code>scalar</code> 仍要求正好一行一列，否则是 ERROR。</p>
+<h5 id="场景tool-actionsaveas-与-update">场景：Tool Action、saveAs 与 update</h5>
+<p>READ façade 可作为主要 Tool Action，并保存 typed result：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">queryOrders:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{orders.find(customerId=${CASE.customerId}, status=&#x27;OPEN&#x27;)}&quot;</span>
+  <span class="hljs-attr">saveAs:</span>
+    <span class="hljs-attr">path:</span> <span class="hljs-string">db/open-orders.json</span>
+    <span class="hljs-attr">format:</span> <span class="hljs-string">json</span>
+    <span class="hljs-attr">overwrite:</span> <span class="hljs-literal">false</span>
+</div></code></pre>
+<p>Call-backed <code>saveAs</code> 与其它 Action 一样使用 <code>path</code>、<code>format</code>、<code>overwrite</code>。<code>format</code> 必填，可为 <code>text|json|yaml|xml</code>；因为没有 process stdout，<code>raw</code> 无效。Query/update object 建议用 JSON/YAML/XML，scalar 才通常使用 text。</p>
+<p>WRITE façade 只能是 <code>type: tool</code> 的主要调用：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">closeOrder:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{orders.updateStatus(orderId=${CASE.orderId}, status=&#x27;CLOSED&#x27;)}&quot;</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.result.affectedRows} == 1&quot;</span>
+</div></code></pre>
+<p>若把 update façade 放入 <code>assign</code>、<code>assert</code>、payload、另一个 Tool 参数或 SQL，validate 与 runtime 都会拒绝。DB 操作异常令 Action/Case 为 ERROR，不是 FAIL。</p>
+<h5 id="场景包装-pure-built-in">场景：包装 pure built-in</h5>
+<pre class="hljs"><code><div><span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">normalizeStatus:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Normalize</span> <span class="hljs-string">status</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">trim</span> <span class="hljs-string">后转大写</span>
+    <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{upper(#{trim(${input.value})})}&quot;</span>
+    <span class="hljs-attr">cache:</span>
+      <span class="hljs-attr">scope:</span> <span class="hljs-string">case</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">value:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Value</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">状态文字</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+</div></code></pre>
+<p>调用方式为 <code>#{normalizeStatus(value=${CASE.status})}</code>。Pure built-in façade 可用 Case cache，但不能用 DB cache。</p>
+<h5 id="cache-scope-与-stale-read-契约">Cache scope 与 stale-read 契约</h5>
+<pre class="hljs"><code><div><span class="hljs-attr">cache:</span>
+  <span class="hljs-attr">scope:</span> <span class="hljs-string">case</span>   <span class="hljs-comment"># 或 db</span>
+</div></code></pre>
+<p>只缓存成功的 query、scalar 或 pure-built-in result；update 不能配置 cache。Key 是「qualified Tool 名称 + typed input 的确定性表示」的 SHA-256；named arguments 的书写顺序不会改变 key，不同 Java 类型则是不同 entry。</p>
+<table>
+<thead>
+<tr>
+<th>scope</th>
+<th>所有者与生命周期</th>
+<th>典型用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>case</code></td>
+<td>当前 <code>CaseRuntimeContext</code>；Case 结束即消失</td>
+<td>同一 Case 内重复 lookup</td>
+</tr>
+<tr>
+<td><code>db</code></td>
+<td>dbhelper instance + executor thread；通常为 worker/suite 生命周期</td>
+<td>跨 Case 重用稳定 reference data</td>
+</tr>
+</tbody>
+</table>
+<p>Cache 有意与 JDBC lifecycle 解耦。DB update、commit、rollback、Case transaction 收尾、Connection close 与自动 reconnect 都<strong>不会</strong>清除任一 cache。DB-scope hit 也不会打开或检查 Connection。因此 <code>db</code> scope 明确可能返回 stale data，只应在 package owner 接受此行为时启用。V2.6 没有 TTL、size limit、持久化或自动一致性。</p>
+<p>Evidence 记录 <code>cache.scope</code>、SHA-256 <code>cache.key</code> 与 <code>cache.hit</code>。Cache miss 有正常 DB evidence；hit 因未执行 JDBC，不产生新 DB invocation。</p>
+<h5 id="timeoutretrylifecycle-与-evidence">Timeout、retry、lifecycle 与 evidence</h5>
+<p>Call-backed DB Tool 继续使用目标 dbhelper 的 <code>statement.timeoutSeconds</code>、read-only、transaction、result limits、每 instance/thread 一个 Connection、Case 前 rollback 与 reconnect 规则。Action <code>timeoutMs</code> 与 process EXIT_CODE <code>retry</code> 对它无意义并会被拒绝。</p>
+<p>Action 保留正常 <code>TOOL</code> wrapper，含 <code>implementation: call</code>、input、typed output、status、duration 与 cache evidence；DB miss 也写入 Action <code>DB</code>。<code>command</code>、<code>argv</code>、<code>stdout</code>、<code>stderr</code>、<code>rawOutput</code>、<code>exitCode</code> 等 process-only 字段不存在。</p>
+<p>选择建议：一次性 SQL 用 <code>type: db</code>；一次性表达式读取用直接 <code>db.*</code>；稳定、重复、有业务名称或需要 cache 的操作用 call-backed Tool；需要 executable、SSH、argv、stdout parser 或 exit-code retry 时继续用 command-backed Tool。</p>
+<p>完整规范见 <a href="02_System_Design_V2.6.md">V2.6 Call-backed Tool System Design</a>。</p>
+<h4 id="命令处理">命令处理</h4>
+<p>ATT 会把每个命令归一化为 argv 模板列表。标量命令会用旧式 token 化器处理一次。YAML 列表已经是归一化形式：每一项恰好是一个 argv 值，不再被 token 化。普通声明标量参数因此保持原子化，不管值中包含空格、引号、反斜杠、前导短横线还是 shell 类字符。Tool call 传入的 typed List 只会在完整 token 占位符位置扩展为零个或多个 argv 值。解析后的值不会再次被 token 化。ATT 不会调用本地 shell。</p>
+<p>V2.3.2 会以 <code>${CASE.outputDirectory}</code> 作为当前工作目录启动每个本地工具进程。以 <code>./</code> 或 <code>../</code> 开头的已配置可执行文件仍保持 package 相对路径：ATT 会在启动前把第一个 argv 值相对于包根解析。裸可执行文件名仍使用 <code>PATH</code>。其它相对路径会被工具从 Case 输出目录解释。这使得相对工具产物成为 Case 输出的一部分，而不要求每个动作都构造绝对路径。</p>
+<p>ATT 会注入并持有这些本地进程环境变量：</p>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>契约</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATT_ROOT_DIR</code></td>
+<td>规范化绝对 ATT 包根目录</td>
+</tr>
+<tr>
+<td><code>ATT_CASE_OUTPUT_DIR</code></td>
+<td>规范化绝对当前 Case 输出目录；在进程启动时与 <code>${CASE.outputDirectory}</code> 相同</td>
+</tr>
+</tbody>
+</table>
+<p>具有这些名称的继承值会被替换。POSIX 脚本可使用 <code>$ATT_CASE_OUTPUT_DIR</code>；Windows batch 脚本使用 <code>%ATT_CASE_OUTPUT_DIR%</code>。</p>
+<p>命令文本的处理规则为：</p>
+<table>
+<thead>
+<tr>
+<th>命令文本</th>
+<th>效果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>引号外的空白</td>
+<td>分隔 argv 元素</td>
+</tr>
+<tr>
+<td><code>'...'</code> 或 <code>&quot;...&quot;</code></td>
+<td>将固定文本分组为一个 argv 元素；引号被移除</td>
+</tr>
+<tr>
+<td>单引号外的反斜杠</td>
+<td>为 ATT 分词转义下一个字符</td>
+</tr>
+<tr>
+<td>`</td>
+<td><code>, </code>&gt;<code>, </code>&lt;<code>, </code>;<code>, </code>&amp;<code>, </code>$<code>, </code>(<code>, </code>)<code>, </code>*<code>, </code>?`</td>
+</tr>
+<tr>
+<td>未配对引号或末尾转义</td>
+<td>报错</td>
+</tr>
+</tbody>
+</table>
+<p>这份配置：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">command:</span> <span class="hljs-string">&quot;./tools/send.sh &#x27;${requestFile}&#x27; --label &#x27;Payment regression&#x27;&quot;</span>
+</div></code></pre>
+<p>会产生这些逻辑参数：</p>
+<pre class="hljs"><code><div>./tools/send.sh
+&lt;request-file-value&gt;
+--label
+Payment regression
+</div></code></pre>
+<p>文本 <code>status|PENDING</code> 仍然是一个字面参数，<code>&gt;result</code> 不会重定向输出。静态模板组模板文本中的引号只是文本内容的一部分，并不是解析后值的转义要求。</p>
+<p>更推荐等价写法为：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">command:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">./tools/send.sh</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${requestFile}&quot;</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">--label</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Payment</span> <span class="hljs-string">regression</span>
+</div></code></pre>
+<p>参数可以定义可选的原子 <code>argName</code> 标记。其占位符决定插入位置，且在 <code>argName</code> 非空时必须占据一个完整命令 token：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">command:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">./tools/send.sh</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${requestFile}&quot;</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${reference}&quot;</span>
+<span class="hljs-attr">arguments:</span>
+  <span class="hljs-attr">requestFile:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Request</span> <span class="hljs-string">File</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">Input</span> <span class="hljs-string">file</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+  <span class="hljs-attr">reference:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Reference</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">Optional</span> <span class="hljs-string">reference</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">false</span>, <span class="hljs-attr">argName:</span> <span class="hljs-string">--reference</span>}
+</div></code></pre>
+<p>当 <code>reference='REF 123'</code> 时，逻辑 argv 的最后一部分为 <code>--reference</code>、<code>REF 123</code>；该值仍是一个原子参数。如果可选值缺失或归一化为空白，则这两个 token 都不会输出。省略 <code>argName</code> 或将 <code>argName: ''</code> 设为空，会使该参数变成位置参数：一个完整 token 占位符只输出其值，或在可选值为空白时输出空。嵌入式占位符如 <code>--reference=${reference}</code> 仍然是一个普通渲染 token，不能接收 List。对于 typed List，<code>argNameMode</code> 控制名称是 <code>once</code>（默认值，出现在整个列表前）还是 <code>repeat</code>（每个值前都重复）；对位置参数没有输出影响。</p>
+<p>优先使用最短的声明参数占位符，如 <code>${keywords}</code>；只有在需要明确命名空间时才使用 <code>${input.keywords}</code>。两者都是大小写敏感，且必须精确匹配参数名。<code>${TOOL.input.keywords}</code> 仍然支持，但不是首选写法。工具会把原始结果写到 stdout，把诊断写到 stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。</p>
+<p>全局工具命令只能引用其声明参数，不能引用 <code>${CASE...}</code>、<code>${ACTIONS...}</code> 或其它运行时 Context 作用域。需要把运行时数据显式传递到动作调用中，然后再在命令中引用对应声明参数。这使全局工具保持独立，并使依赖可静态校验。</p>
+<h4 id="ssh-执行">SSH 执行</h4>
+<p>全局工具和每个工具组都可以在其自身根配置中定义一个执行目标：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">ssh:</span>
+  <span class="hljs-attr">host:</span> <span class="hljs-string">tools.example.internal</span>
+  <span class="hljs-attr">user:</span> <span class="hljs-string">att</span>
+  <span class="hljs-attr">port:</span> <span class="hljs-number">22</span>
+  <span class="hljs-attr">identityFile:</span> <span class="hljs-string">/secure/keys/att_ed25519</span>
+</div></code></pre>
+<p>根 <code>ssh</code> 仅适用于内联全局工具；工具组仅使用其自身 <code>ssh</code>，不会继承根配置。host/user 是必需的，port 默认为 22，key 是可选的。密码字段不受支持。ATT 优先使用本地 OpenSSH，带 <code>BatchMode=yes</code> 和 <code>StrictHostKeyChecking=yes</code>。如果 <code>PATH</code> 中不存在可执行 <code>ssh</code>，ATT 会警告将使用捆绑的 mwiede/jsch Java 库。后者使用严格的 <code>~/.ssh/known_hosts</code>，不会继承 OpenSSH agent 或 <code>~/.ssh/config</code>，通常需要 <code>identityFile</code>。两种传输都会把逻辑 argv 安全地单引号封装为一个 POSIX 远程命令字符串。远程连接性和可执行文件存在性无法通过包验证证明。SSH 的 stdout/stderr/status/timeout/retry/assert/saveAs 行为与本地工具一致，证据中会记录 <code>transport: openssh|mwiede/jsch</code>。</p>
+<p>Case 输出工作目录以及两个环境变量规则仅适用于本地工具进程。ATT 不会为 SSH 远程命令预先 <code>cd</code>，也不会注入本地文件系统路径，因为 <code>${CASE.outputDirectory}</code> 和包根在远端没有定义映射。远程进程会使用 SSH 账户的默认目录。需要共享文件系统或远端目录时，须通过显式声明的工具参数传递。</p>
+<h4 id="输入输出超时和状态">输入、输出、超时和状态</h4>
+<p>可用命令占位符为：</p>
+<table>
+<thead>
+<tr>
+<th>占位符</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>${argument}</code></td>
+<td>首选直接引用已声明参数键</td>
+</tr>
+<tr>
+<td><code>${input.argument}</code></td>
+<td>显式命名空间引用同一已声明参数</td>
+</tr>
+<tr>
+<td><code>${TOOL.input.argument}</code></td>
+<td>对同一参数的支持完整别名</td>
+</tr>
+</tbody>
+</table>
+<p>ATT 按工具配置的 <code>output: txt|yaml|json|xml</code> 解析 stdout，默认 <code>txt</code>。V2.5 Tool Action 的 object <code>saveAs</code> 可保存精确 raw stdout，或把 typed <code>${output.result}</code> 编码为 text/json/yaml/xml；路径写入当前 Case artifact 目录。retry 共用一个渲染后的路径，最终保留最后一次可写 attempt 的内容。不使用 <code>saveAs</code> 时，ATT 不创建额外命名 artifact，但输入、argv、stdout、stderr、解析结果、退出码和 retry evidence 仍保存在 Case evidence 中。</p>
+<p>超时、启动/进程 I/O 失败或结构化输出解析失败是 ERROR，不能被断言覆盖。否则工具动作的 <code>assert</code> 决定 PASS/FAIL。如果未配置断言，操作完成即算 PASS，即使进程退出码非零。退出码仍保留在 <code>action.output.exitCode</code> 中，因此要求零退出码的模板需显式写明。命令、输入、stdout、stderr、原始输出、持续时间、退出码、解析后的 <code>output.result</code> 和断言详情都会保留为证据。</p>
+<p>超时优先级为：</p>
+<pre class="hljs"><code><div>工具动作 timeoutMs → 工作簿侧车 timeoutMs → 全局 timeoutMs → 10000 ms
+</div></code></pre>
+<p>所有配置的超时都是 1 到 3600000 毫秒的整数。</p>
+<h3 id="34-运行测试">3.4 运行测试</h3>
+<h4 id="先校验">先校验</h4>
+<pre class="hljs"><code><div>./att.sh validate --package
+</div></code></pre>
+<p>包模式是默认模式，会检查全局配置、所有发现的工作簿/侧车、配置的 sheets 和行、所有模板（包括未被引用的模板）、表达式、工具、路径和包完整性。它不会调用外部工具，是发布前的必需门槛。</p>
+<pre class="hljs"><code><div>./att.sh validate --selected --<span class="hljs-keyword">case</span> payment.payment.TC001
+</div></code></pre>
+<p>选中模式只检查显式选中的 Case 及其依赖闭包。它适合快速反馈，可报告未选中内容未被检查。<code>run</code> 总是会对其不可变执行计划执行选中范围校验。</p>
+<h4 id="选择-case">选择 Case</h4>
+<table>
+<thead>
+<tr>
+<th>选项</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--all</code></td>
+<td>递归发现 <code>testcase.root</code> 下所有工作簿/侧车对</td>
+</tr>
+<tr>
+<td><code>--suite &lt;xlsx&gt;</code></td>
+<td>选择一个工作簿；可重复</td>
+</tr>
+<tr>
+<td><code>--suite-dir &lt;dir&gt;</code></td>
+<td>在另一个目录下发现工作簿</td>
+</tr>
+<tr>
+<td><code>--case &lt;workbookId.groupId.rowCaseId&gt;</code></td>
+<td>选择一个完整 Case ID</td>
+</tr>
+<tr>
+<td><code>--tag &lt;tag&gt;</code></td>
+<td>包含任何指定标签的 Case</td>
+</tr>
+<tr>
+<td><code>--exclude-tag &lt;tag&gt;</code></td>
+<td>在包含过滤之后排除匹配标签</td>
+</tr>
+</tbody>
+</table>
+<p>空选择是错误。<code>--rerun-failed</code> 本身也是一个有效选择，会从最新完成的持久化 run 中读取 FAIL/ERROR Case ID。额外的 <code>--case</code>、<code>--tag</code>、<code>--exclude-tag</code> 过滤器会进一步收缩该集合。缺失历史、先前无 FAIL/ERROR Case、或保存的 ID 无当前可发现 Case 匹配，都会导致命令错误。当前工作簿、侧车、testcase XML 快照、模板和工具定义都会被校验和执行；ATT 不会重放旧 run 的输入。</p>
+<h4 id="执行">执行</h4>
+<pre class="hljs"><code><div>./att.sh run --all
+./att.sh run --suite testcase/payment.xlsx --tag smoke
+./att.sh run --all --<span class="hljs-keyword">case</span> payment.payment.TC001 --run-id SIT-001
+./att.sh run --rerun-failed
+./att.sh run --rerun-failed --tag payment
+./att.sh run --all --dry-run
+./att.sh run --suite testcase/payment.xlsx --update-snapshot
+</div></code></pre>
+<p><code>--dry-run</code> 会校验/规划并把所选 Case 记录为 SKIPPED，而不调用工具。<code>--fail-fast</code> 会在第一次 FAIL 或 ERROR 后停止调度后续 Case。<code>--output-dir</code> 会为一次命令覆盖输出根目录。</p>
+<p><code>--update-snapshot</code> 仅对 <code>run</code> 有效。它会在验证和输出目录创建前，显式创建或原子替换所选工作簿的已更改规范 XML 快照；字节内容完全相同的文件保留原有字节和修改时间。工作簿准备完成后再替换任何选中的 XML。快照符号链接会被拒绝。后续单文件 I/O 失败会报告先前已完成的更新，并且相同包的并发快照生成/更新阶段会被串行化。结合 <code>--format json</code> 时，成功更新通知会写入 stderr，从而保持 stdout 为单个 JSON 文档；<code>--quiet</code> 会抑制它们。与 <code>--dry-run</code> 组合时，仍然允许 XML 更新，但测试用例工具保持禁用。</p>
+<p>默认人类可读 run 只打印最终结果计数和报告路径。<code>--quiet</code> 会抑制正常输出。<code>--verbose</code> 会增加 run/suite/Case/stage/action 生命周期进度，并把每个完整 Case 日志块镜像到控制台，包括模板/工具输入、逻辑和执行 argv、stdout、stderr、负载和动作证据。Verbose 输出可能包含秘密或个人数据，因此只应在合适受保护的终端中启用。两个选项互斥。</p>
+<h4 id="结果与退出码">结果与退出码</h4>
+<table>
+<thead>
+<tr>
+<th>最高结果</th>
+<th>运行状态</th>
+<th style="text-align:right">退出码</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ERROR</td>
+<td>ERROR</td>
+<td style="text-align:right">3</td>
+</tr>
+<tr>
+<td>无 ERROR 时为 INVALID</td>
+<td>INVALID</td>
+<td style="text-align:right">2</td>
+</tr>
+<tr>
+<td>无 ERROR/INVALID 时为 FAIL</td>
+<td>FAIL</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td>至少一个 PASS 且仅有 PASS/SKIPPED</td>
+<td>PASS</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td>全部选中 Case 都是 SKIPPED</td>
+<td>SKIPPED</td>
+<td style="text-align:right">0</td>
+</tr>
+</tbody>
+</table>
+<p>断言为假是 FAIL。表达式求值、进程、超时、解析、I/O、配置和校验失败是 ERROR 或 INVALID，取决于阶段。包含 FAIL 和 ERROR 的 run 将返回 3。</p>
+<h3 id="35-报告">3.5 报告</h3>
+<p>已完成的 run 会发布到 <code>&lt;outputDirectory&gt;/&lt;RunID&gt;/</code>：</p>
+<pre class="hljs"><code><div>output/&lt;RunID&gt;/
+├── run.yaml
+├── events.jsonl
+├── workbooks/
+├── ci/
+│   ├── summary.json
+│   └── junit.xml
+├── report/
+│   ├── index.html
+│   └── junit.html
+└── &lt;workbookId&gt;.&lt;groupId&gt;.&lt;rowCaseId&gt;/
+    ├── case.yaml
+    ├── &lt;case&gt;.log
+    └── &lt;stage&gt;/&lt;action&gt;/
+</div></code></pre>
+<p>直接从磁盘打开 <code>report/index.html</code> 即可。组按 <code>workbookId.groupId</code> 聚合；界面将 <code>groupId</code> 标记为 Sheet，因为它映射到一个物理工作簿 sheet。Case 页面中，结合 Workbook、Sheet、Status 下拉框，以及对 workbook ID、group ID、完整 Case ID 和标签的全文搜索。点击任何 Cases 表头可切换升序/降序；Duration 按数值排序。</p>
+<p>展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 <code>.log</code> 与 <code>case.yaml</code> 的显式链接。Action Results 的每行独立显示 Stage、Action、Description、Status 与 Message；Description 是动作完成后的最终渲染值，并写入 <code>run.yaml</code> 与 CI JSON。HTML 不会内联完整的持久化 Stage/Template/Action/Tool 树；需要结构化最终运行时状态时，请打开 <code>case.yaml</code>。为兼容既有报表，Expected 仍按动作顺序追加 assert 的非空最终 description 与 <code>expected</code>；Actual 会按动作顺序追加每个非空运行时 <code>actual</code>。</p>
+<p><code>--ci-output junit,json</code> 会生成 JUnit XML、JUnit HTML 和 JSON 汇总：</p>
+<ul>
+<li><code>&lt;run&gt;/ci/junit.xml</code></li>
+<li><code>&lt;run&gt;/report/junit.html</code></li>
+<li><code>&lt;run&gt;/ci/summary.json</code></li>
+</ul>
+<p>JUnit HTML 是与 JUnit XML 相同已完成汇总的人类可读投影，不是第二次聚合。</p>
+<p>可从持久化 run 证据重新生成报告：</p>
+<pre class="hljs"><code><div>./att.sh report --run-id SIT-001
+</div></code></pre>
+<h2 id="04-cookbook">04 Cookbook</h2>
+<p>本章从你想要完成的任务出发，展示对应的 ATT 模式。</p>
+<h3 id="在失败后执行回滚并每次都清理">在失败后执行回滚，并每次都清理</h3>
+<pre class="hljs"><code><div><span class="hljs-attr">stages:</span>
+  <span class="hljs-bullet">-</span> {<span class="hljs-attr">key:</span> <span class="hljs-string">invoke</span>, <span class="hljs-attr">template:</span> <span class="hljs-string">執行模板</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+  <span class="hljs-bullet">-</span> {<span class="hljs-attr">key:</span> <span class="hljs-string">rollback</span>, <span class="hljs-attr">template:</span> <span class="hljs-string">回滾模板</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">false</span>, <span class="hljs-attr">runWhen:</span> <span class="hljs-string">onFailure</span>, <span class="hljs-attr">onFailure:</span> <span class="hljs-string">continue</span>}
+  <span class="hljs-bullet">-</span> {<span class="hljs-attr">key:</span> <span class="hljs-string">cleanup</span>, <span class="hljs-attr">template:</span> <span class="hljs-string">清理模板</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">false</span>, <span class="hljs-attr">runWhen:</span> <span class="hljs-string">always</span>, <span class="hljs-attr">onFailure:</span> <span class="hljs-string">continue</span>}
+</div></code></pre>
+<p>回滚只在先前失败后运行。清理无论先前结果如何都会运行。回滚或清理失败仍会保留在最终聚合中。</p>
+<h3 id="覆盖结果工作簿列标签">覆盖结果工作簿列标签</h3>
+<pre class="hljs"><code><div><span class="hljs-attr">report:</span>
+  <span class="hljs-attr">columns:</span>
+    <span class="hljs-attr">result:</span> <span class="hljs-string">測試結果</span>
+    <span class="hljs-attr">durationMs:</span> <span class="hljs-string">耗時毫秒</span>
+    <span class="hljs-attr">expectedResult:</span> <span class="hljs-string">預期結果</span>
+    <span class="hljs-attr">actualResult:</span> <span class="hljs-string">實際結果</span>
+    <span class="hljs-attr">caseLog:</span> <span class="hljs-string">案例日誌</span>
+    <span class="hljs-attr">reportLink:</span> <span class="hljs-string">詳細報告</span>
+    <span class="hljs-attr">runTime:</span> <span class="hljs-string">執行時間</span>
+</div></code></pre>
+<p>这只会修改复制出来的工作簿标签，不会重命名 Context 键、HTML 字段或 CI schema 属性。</p>
+<h3 id="解析-json-工具输出">解析 JSON 工具输出</h3>
+<p>配置 <code>output: json</code> 后，使用普通 map/list 导航即可：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">assertStatus:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">assert</span>
+  <span class="hljs-attr">description:</span> <span class="hljs-string">API</span> <span class="hljs-string">status</span> <span class="hljs-string">is</span> <span class="hljs-string">successful</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${ACTIONS.callApi.output.result.status} == &#x27;SUCCESS&#x27;&quot;</span>
+  <span class="hljs-attr">expected:</span> <span class="hljs-string">SUCCESS</span>
+  <span class="hljs-attr">actual:</span> <span class="hljs-string">&quot;${ACTIONS.callApi.output.result.status}&quot;</span>
+</div></code></pre>
+<p>JSON 重复对象键、格式错误，或声明为 JSON 但无法解析的输出，都会在进程退出码为 0 时仍然报 ERROR。</p>
+<h3 id="访问-xml-属性文本和重复元素">访问 XML 属性、文本和重复元素</h3>
+<p>ATT 会把 XML 转换为稳定的 map/list 树：</p>
+<pre class="hljs"><code><div><span class="hljs-tag">&lt;<span class="hljs-name">Response</span> <span class="hljs-attr">requestId</span>=<span class="hljs-string">&quot;R-100&quot;</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-name">Status</span> <span class="hljs-attr">code</span>=<span class="hljs-string">&quot;00&quot;</span>&gt;</span>SUCCESS<span class="hljs-tag">&lt;/<span class="hljs-name">Status</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-name">Messages</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">Message</span> <span class="hljs-attr">severity</span>=<span class="hljs-string">&quot;INFO&quot;</span>&gt;</span>accepted<span class="hljs-tag">&lt;/<span class="hljs-name">Message</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">Message</span> <span class="hljs-attr">severity</span>=<span class="hljs-string">&quot;WARN&quot;</span>&gt;</span>review later<span class="hljs-tag">&lt;/<span class="hljs-name">Message</span>&gt;</span>
+  <span class="hljs-tag">&lt;/<span class="hljs-name">Messages</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">Response</span>&gt;</span>
+</div></code></pre>
+<pre class="hljs"><code><div><span class="hljs-attr">name:</span> <span class="hljs-string">Response</span>
+<span class="hljs-attr">attributes:</span>
+  <span class="hljs-attr">requestId:</span> <span class="hljs-string">R-100</span>
+<span class="hljs-attr">Status:</span>
+  <span class="hljs-attr">attributes:</span> {<span class="hljs-attr">code:</span> <span class="hljs-string">&quot;00&quot;</span>}
+  <span class="hljs-attr">text:</span> <span class="hljs-string">SUCCESS</span>
+<span class="hljs-attr">Messages:</span>
+  <span class="hljs-attr">Message:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">attributes:</span> {<span class="hljs-attr">severity:</span> <span class="hljs-string">INFO</span>}
+      <span class="hljs-attr">text:</span> <span class="hljs-string">accepted</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">attributes:</span> {<span class="hljs-attr">severity:</span> <span class="hljs-string">WARN</span>}
+      <span class="hljs-attr">text:</span> <span class="hljs-string">review</span> <span class="hljs-string">later</span>
+</div></code></pre>
+<p>只有重复兄弟节点才会变成数组，因此索引只对重复节点有意义。</p>
+<h3 id="把列表作为单独进程参数传递">把列表作为单独进程参数传递</h3>
+<p>V2.6 调用直接传入 typed YAML array。下面示例在没有分隔符配置的情况下展示两种 <code>argNameMode</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">grepFromAppLogs:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Grep</span> <span class="hljs-string">application</span> <span class="hljs-string">logs</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Search</span> <span class="hljs-string">one</span> <span class="hljs-string">or</span> <span class="hljs-string">more</span> <span class="hljs-string">keywords</span> <span class="hljs-string">and</span> <span class="hljs-string">log</span> <span class="hljs-string">levels</span>
+    <span class="hljs-attr">command:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">./tools/grep_from_app_logs.sh</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${logFile}&quot;</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${keywords}&quot;</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${levels}&quot;</span>
+    <span class="hljs-attr">output:</span> <span class="hljs-string">yaml</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">logFile:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Log</span> <span class="hljs-string">File</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">Source</span> <span class="hljs-string">log</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
+      <span class="hljs-attr">keywords:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Keywords</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">Ordered</span> <span class="hljs-string">keyword</span> <span class="hljs-string">array</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>, <span class="hljs-attr">argName:</span> <span class="hljs-string">--keyword</span>, <span class="hljs-attr">argNameMode:</span> <span class="hljs-string">repeat</span>}
+      <span class="hljs-attr">levels:</span> {<span class="hljs-attr">name:</span> <span class="hljs-string">Levels</span>, <span class="hljs-attr">description:</span> <span class="hljs-string">Ordered</span> <span class="hljs-string">level</span> <span class="hljs-string">array</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">false</span>, <span class="hljs-attr">argName:</span> <span class="hljs-string">--levels</span>, <span class="hljs-attr">argNameMode:</span> <span class="hljs-string">once</span>}
+</div></code></pre>
+<pre class="hljs"><code><div><span class="hljs-attr">grepLogs:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords=[&#x27;PAYMENT&#x27;, &#x27;POSTED&#x27;], levels=[&#x27;ERROR&#x27;, &#x27;WARN&#x27;])}&quot;</span>
+</div></code></pre>
+<p>结果尾部逻辑 argv 为 <code>--keyword</code>、<code>PAYMENT</code>、<code>--keyword</code>、<code>POSTED</code>、<code>--levels</code>、<code>ERROR</code>、<code>WARN</code>。<code>repeat</code> 会对每个关键词重复 <code>--keyword</code>；<code>once</code> 是默认值，可以省略，它只在整个列表前发出一次 <code>--levels</code>。每个 typed List 都在各自的完整命令占位符位置独立扩展。V2.6 schema 拒绝 <code>delimit</code>；旧 schema 只保留历史读取兼容性。</p>
+<h4 id="linux-bash-解析示例">Linux Bash 解析示例</h4>
+<p>本节通过 Bash 示例说明 <code>argNameMode: repeat</code> 与 <code>once</code> 的行为。省略。</p>
+<h3 id="重试指定退出码">重试指定退出码</h3>
+<p>重试属于 tool 动作，而不是工作流或任意 stage：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">callApi:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span>
+  <span class="hljs-attr">timeoutMs:</span> <span class="hljs-number">30000</span>
+  <span class="hljs-attr">retry:</span>
+    <span class="hljs-attr">maxAttempts:</span> <span class="hljs-number">3</span>
+    <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">EXIT_CODE</span>]
+    <span class="hljs-attr">exitCodes:</span> [<span class="hljs-number">1</span>, <span class="hljs-number">75</span>]
+</div></code></pre>
+<p><code>maxAttempts</code> 包含第一次尝试，默认 1。V2.3 只支持 <code>EXIT_CODE</code>；如果省略 <code>exitCodes</code>，则任何非零退出码都可重试。超时、输出解析、I/O、配置、断言、render、log 失败不会重试。V2.3 没有延迟/退避字段，因此符合条件的重试会立即执行。</p>
+<p>每次尝试都直接记录在 Case 日志和动作记录中；不会创建 <code>attempt-001</code> 目录。后续成功尝试会使动作 PASS，同时保留先前证据；耗尽重试次数后则产出 ERROR。只有安全可重复的操作才应使用重试。</p>
+<h2 id="05-cli-参考">05 CLI 参考</h2>
+<h3 id="命令">命令</h3>
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>目的</th>
+<th style="text-align:right">是否调用外部工具</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>help</code></td>
+<td>显示语法和选项；无命令时默认</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>输出 ATT 版本</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>validate</code></td>
+<td>校验包或选中依赖闭包</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>snapshot</code></td>
+<td>生成同名规范 testcase XML</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>run</code></td>
+<td>校验并执行已选 Case</td>
+<td style="text-align:right">是，dry-run 除外</td>
+</tr>
+<tr>
+<td><code>docs</code></td>
+<td>生成可搜索的包文档</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>report</code></td>
+<td>为已完成 run 重新生成报表</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td>归档最新已完成 run</td>
+<td style="text-align:right">否</td>
+</tr>
+<tr>
+<td><code>clean</code></td>
+<td>删除文档化的 ATT 生成输出</td>
+<td style="text-align:right">否</td>
+</tr>
+</tbody>
+</table>
+<h3 id="命令语法">命令语法</h3>
+<p>表格中使用 Linux/macOS 启动器 <code>./att.sh</code>。Windows 上使用 <code>att.bat</code>，命令与选项相同。<code>att.bat snapshot</code>、<code>att.bat validate</code> 和 <code>att.bat docs</code> 不会触发配置的 testcase 工具。Windows 校验会检查 <code>.sh</code> 文件是否存在并路径是否安全，跳过 POSIX 启动/可执行兼容性，并输出一条警告列出受影响工具；一次校验 PASS 并不证明这些脚本能在 Windows 上运行。运行前请提供并测试 Windows 原生等价物。二进制发布要求 Java 8+；源码树 <code>att.bat</code> 会在可用时使用 Maven，否则要求存在 <code>target\classes</code>。</p>
+<table>
+<thead>
+<tr>
+<th>语法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>./att.sh</code> 或 <code>./att.sh help</code></td>
+<td>显示帮助</td>
+</tr>
+<tr>
+<td><code>./att.sh version</code></td>
+<td>输出版本</td>
+</tr>
+<tr>
+<td><code>./att.sh snapshot --suite &lt;xlsx&gt;</code></td>
+<td>生成一个同名 XML 快照</td>
+</tr>
+<tr>
+<td><code>./att.sh snapshot --all</code></td>
+<td>递归生成 <code>testcase.root</code> 下所有快照</td>
+</tr>
+<tr>
+<td><code>./att.sh snapshot --suite-dir &lt;dir&gt;</code></td>
+<td>在某目录下递归生成快照</td>
+</tr>
+<tr>
+<td><code>./att.sh validate --package</code></td>
+<td>校验整个包；默认范围</td>
+</tr>
+<tr>
+<td><code>./att.sh validate --selected &lt;selection&gt;</code></td>
+<td>校验选中依赖闭包</td>
+</tr>
+<tr>
+<td><code>./att.sh validate --package --format json</code></td>
+<td>向 stdout 输出单个校验 JSON 文档</td>
+</tr>
+<tr>
+<td><code>./att.sh run --all</code></td>
+<td>运行所有发现的 Case</td>
+</tr>
+<tr>
+<td><code>./att.sh run --suite &lt;xlsx&gt;</code></td>
+<td>运行一个工作簿；可重复</td>
+</tr>
+<tr>
+<td><code>./att.sh run --suite-dir &lt;dir&gt;</code></td>
+<td>在目录下发现工作簿</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --case &lt;workbookId.groupId.rowCaseId&gt;</code></td>
+<td>包含一个完整 Case ID</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --tag &lt;tag&gt;</code></td>
+<td>包含一个标签</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --exclude-tag &lt;tag&gt;</code></td>
+<td>排除一个标签</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --dry-run</code></td>
+<td>仅校验/规划，不执行工具</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --update-snapshot</code></td>
+<td>在校验前显式刷新已更改的完整工作簿快照</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --fail-fast</code></td>
+<td>在首次 FAIL/ERROR 后停止调度</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --rerun-failed</code></td>
+<td>重新选择先前 FAIL/ERROR 的 Case</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --run-id &lt;id&gt;</code></td>
+<td>设置最终 run 目录名</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --output-dir &lt;dir&gt;</code></td>
+<td>覆盖输出根目录</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --ci-output junit,json</code></td>
+<td>写出 CI XML/JSON 与 JUnit HTML</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --format json</code></td>
+<td>输出机器可读摘要</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --quiet</code></td>
+<td>抑制正常完成输出</td>
+</tr>
+<tr>
+<td><code>./att.sh run &lt;selection&gt; --verbose</code></td>
+<td>显示生命周期进度并镜像完整 Case 日志</td>
+</tr>
+<tr>
+<td><code>./att.sh report --run-id &lt;id&gt;</code></td>
+<td>重建 <code>report/index.html</code> 和 <code>report/junit.html</code></td>
+</tr>
+<tr>
+<td><code>./att.sh docs</code></td>
+<td>生成 <code>build/docs/index.html</code></td>
+</tr>
+<tr>
+<td><code>./att.sh build</code></td>
+<td>在 <code>build/</code> 中归档最新完成 run</td>
+</tr>
+<tr>
+<td><code>./att.sh clean</code></td>
+<td>删除文档化生成输出</td>
+</tr>
+</tbody>
+</table>
+<h3 id="退出码">退出码</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">代码</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">0</td>
+<td>命令/运行成功，且无 FAIL、ERROR、INVALID</td>
+</tr>
+<tr>
+<td style="text-align:right">1</td>
+<td>至少一个 FAIL，且无 ERROR/INVALID</td>
+</tr>
+<tr>
+<td style="text-align:right">2</td>
+<td>CLI/配置/校验/INVALID 失败</td>
+</tr>
+<tr>
+<td style="text-align:right">3</td>
+<td>至少一个 ERROR，或不可恢复运行时失败</td>
+</tr>
+</tbody>
+</table>
+<h2 id="06-配置参考">06 配置参考</h2>
+<p>本章是作者编写配置时的权威阅读参考。下面提到的 <a href="../schemas/"><code>schemas/</code></a> 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。</p>
+<h3 id="配置层与优先级">配置层与优先级</h3>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>来源</th>
+<th>所管辖内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>全局</td>
+<td><code>config/config.yaml</code></td>
+<td>输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH</td>
+</tr>
+<tr>
+<td>DB helper</td>
+<td><code>dbhelpers</code> 引用的独立 YAML</td>
+<td>一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy</td>
+</tr>
+<tr>
+<td>工具组</td>
+<td>配置的 YAML 路径</td>
+<td>组身份、可选 script/SSH、分组工具</td>
+</tr>
+<tr>
+<td>工作簿</td>
+<td><code>&lt;workbook&gt;.yaml</code></td>
+<td>Excel 映射、阶段、工作簿标签、工作簿超时</td>
+</tr>
+<tr>
+<td>模板</td>
+<td><code>template.yaml</code></td>
+<td>模板身份和有序动作</td>
+</tr>
+<tr>
+<td>CLI</td>
+<td>命令选项</td>
+<td>选择、Run ID、输出覆盖、展示、CI 格式</td>
+</tr>
+</tbody>
+</table>
+<p>动作超时覆盖侧车超时，侧车超时覆盖全局超时。CLI 的 <code>--output-dir</code> 和 <code>--run-id</code> 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。</p>
+<h3 id="schema-catalog">Schema catalog</h3>
+<p><a href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a> 使用 <code>att-schema-catalog/v2.6</code>。当前主配置与 Tool group 分别为 <code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>；dbhelper 与 template 仍为 <code>att-dbhelper/v2.5</code>、<code>att-template/v2.5</code>。旧 <code>att-config/v2.1|v2.2|v2.5</code>、<code>att-tool-group/v2.2</code> 与 <code>att-template/v2.3</code> 保持可读，但只有 V2.6 Tool descriptor 可使用 <code>call</code>／<code>cache</code>。</p>
+<h3 id="全局配置">全局配置</h3>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-config/v2.6</span>
+<span class="hljs-attr">outputDirectory:</span> <span class="hljs-string">output</span>
+<span class="hljs-attr">environment:</span> <span class="hljs-string">SIT</span>
+<span class="hljs-attr">timeoutMs:</span> <span class="hljs-number">10000</span>
+<span class="hljs-attr">caseLog:</span> {<span class="hljs-attr">yamlAnchors:</span> <span class="hljs-literal">false</span>}
+<span class="hljs-attr">testcase:</span> {<span class="hljs-attr">root:</span> <span class="hljs-string">testcase</span>}
+<span class="hljs-attr">templates:</span> {<span class="hljs-attr">root:</span> <span class="hljs-string">templates</span>}
+<span class="hljs-attr">run:</span> {<span class="hljs-attr">id:</span> {<span class="hljs-attr">default:</span> <span class="hljs-string">timestamp</span>, <span class="hljs-attr">timestampFormat:</span> <span class="hljs-string">yyyyMMdd-HHmmss</span>}}
+<span class="hljs-attr">report:</span>
+  <span class="hljs-attr">mode:</span> <span class="hljs-string">append-to-copy</span>
+  <span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;${suiteName}.result.xlsx&quot;</span>
+  <span class="hljs-attr">columns:</span> {}
+  <span class="hljs-attr">junit:</span> {<span class="hljs-attr">caseLogEmbedThresholdBytes:</span> <span class="hljs-number">10240</span>}
+<span class="hljs-attr">xml:</span> {<span class="hljs-attr">namespaceMode:</span> <span class="hljs-string">ignore</span>}
+<span class="hljs-attr">toolGroups:</span> [<span class="hljs-string">config/tools/database.yaml</span>]
+<span class="hljs-attr">dbhelpers:</span> [<span class="hljs-string">config/dbhelpers/orders.yaml</span>]
+<span class="hljs-attr">tools:</span> {}
+</div></code></pre>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>必填/默认值</th>
+<th>约束</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schemaVersion</code></td>
+<td>必填</td>
+<td>当前为 <code>att-config/v2.6</code>；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool</td>
+</tr>
+<tr>
+<td><code>outputDirectory</code></td>
+<td><code>output</code></td>
+<td>非空包相对输出根</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td><code>SIT</code></td>
+<td>非空值暴露为 <code>${CASE.environment}</code>；它不会单独选择端点</td>
+</tr>
+<tr>
+<td><code>timeoutMs</code></td>
+<td><code>10000</code></td>
+<td>整数 1–3600000 毫秒</td>
+</tr>
+<tr>
+<td><code>caseLog.yamlAnchors</code></td>
+<td><code>false</code></td>
+<td>布尔值；false 会完全展开重复的 YAML 结构，true 允许锚点/别名</td>
+</tr>
+<tr>
+<td><code>templates.root</code></td>
+<td><code>templates</code></td>
+<td>非空包相对模板根</td>
+</tr>
+<tr>
+<td><code>testcase.root</code></td>
+<td><code>testcase</code></td>
+<td>非空包相对递归工作簿/侧车发现根</td>
+</tr>
+<tr>
+<td><code>run.id.default</code></td>
+<td><code>timestamp</code></td>
+<td>仅支持 <code>timestamp</code></td>
+</tr>
+<tr>
+<td><code>run.id.timestampFormat</code></td>
+<td><code>yyyyMMdd-HHmmss</code></td>
+<td>非空 Java 日期/时间格式</td>
+</tr>
+<tr>
+<td><code>report.mode</code></td>
+<td><code>append-to-copy</code></td>
+<td>仅支持 <code>append-to-copy</code></td>
+</tr>
+<tr>
+<td><code>report.fileNamePattern</code></td>
+<td><code>${suiteName}.result.xlsx</code></td>
+<td>结果工作簿文件名模式</td>
+</tr>
+<tr>
+<td><code>report.columns</code></td>
+<td><code>{}</code></td>
+<td>任意字符串键和字符串标签值</td>
+</tr>
+<tr>
+<td><code>report.junit.caseLogEmbedThresholdBytes</code></td>
+<td><code>10240</code></td>
+<td>整数 0–1048576 UTF-8 字节；0 始终使用链接</td>
+</tr>
+<tr>
+<td><code>xml.namespaceMode</code></td>
+<td><code>ignore</code></td>
+<td><code>ignore</code> 或 <code>preserve</code></td>
+</tr>
+<tr>
+<td><code>toolGroups</code></td>
+<td><code>[]</code></td>
+<td>唯一安全且包相对的工具组 YAML 路径</td>
+</tr>
+<tr>
+<td><code>dbhelpers</code></td>
+<td><code>[]</code></td>
+<td>唯一、安全、包相对的 <code>.yaml</code>／<code>.yml</code> 路径；每个文件声明一个实例</td>
+</tr>
+<tr>
+<td><code>ssh</code></td>
+<td>absent</td>
+<td>内联全局工具的可选 SSH 目标</td>
+</tr>
+<tr>
+<td><code>tools</code></td>
+<td><code>{}</code></td>
+<td>可复用工具契约映射</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dbhelper-配置">Dbhelper 配置</h3>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>必填/默认值</th>
+<th>约束</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schemaVersion</code></td>
+<td>必填</td>
+<td><code>att-dbhelper/v2.5</code></td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>必填</td>
+<td><code>[A-Za-z_][A-Za-z0-9_-]*</code>；全包忽略大小写后唯一</td>
+</tr>
+<tr>
+<td><code>name</code>、<code>description</code></td>
+<td>必填</td>
+<td>非空显示文字</td>
+</tr>
+<tr>
+<td><code>connection.url</code></td>
+<td>必填</td>
+<td>非空 JDBC URL</td>
+</tr>
+<tr>
+<td><code>connection.username/password</code></td>
+<td><code>&quot;&quot;</code></td>
+<td>字符串；可用完整 <code>${ENV:NAME}</code></td>
+</tr>
+<tr>
+<td><code>connection.driverClass</code></td>
+<td><code>&quot;&quot;</code></td>
+<td>可选显式 class；默认 JDBC discovery</td>
+</tr>
+<tr>
+<td><code>connection.properties</code></td>
+<td><code>{}</code></td>
+<td>字符串键和值；敏感键在错误中净化</td>
+</tr>
+<tr>
+<td><code>connection.readOnly</code></td>
+<td><code>false</code></td>
+<td>布尔值；update Action 在 prepare 前拒绝</td>
+</tr>
+<tr>
+<td><code>connection.isolation</code></td>
+<td><code>driverDefault</code></td>
+<td><code>driverDefault</code>／<code>readUncommitted</code>／<code>readCommitted</code>／<code>repeatableRead</code>／<code>serializable</code></td>
+</tr>
+<tr>
+<td><code>statement.timeoutSeconds</code></td>
+<td><code>30</code></td>
+<td>每个 statement 使用的整数 1–3600 秒</td>
+</tr>
+<tr>
+<td><code>transaction.scope</code></td>
+<td><code>case</code></td>
+<td><code>case</code> 或 <code>statement</code></td>
+</tr>
+<tr>
+<td><code>transaction.onEnd</code></td>
+<td><code>rollback</code></td>
+<td><code>commit</code> 或 <code>rollback</code></td>
+</tr>
+<tr>
+<td><code>result.maxRows</code></td>
+<td><code>1000</code></td>
+<td>整数 1–1000000</td>
+</tr>
+<tr>
+<td><code>result.maxCellBytes</code></td>
+<td><code>1048576</code></td>
+<td>整数 1–1073741824</td>
+</tr>
+<tr>
+<td><code>result.maxBytes</code></td>
+<td><code>10485760</code></td>
+<td>整数 1–1073741824，且不小于 maxCellBytes</td>
+</tr>
+<tr>
+<td><code>evidence.sql</code></td>
+<td><code>full</code></td>
+<td><code>full</code> 或 <code>hash</code></td>
+</tr>
+<tr>
+<td><code>evidence.parameters</code></td>
+<td><code>masked</code></td>
+<td><code>masked</code>、<code>types</code> 或 <code>values</code>；使用 values 可能暴露敏感数据</td>
+</tr>
+</tbody>
+</table>
+<p>validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 会在执行前校验。</p>
+<h3 id="工作簿侧车">工作簿侧车</h3>
+<table>
+<thead>
+<tr>
+<th>对象</th>
+<th>允许属性</th>
+<th>必填/约束</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>根对象</td>
+<td><code>schemaVersion</code>、<code>id</code>、<code>excel</code>、<code>stages</code>、<code>report</code>、<code>timeoutMs</code>、<code>x-*</code></td>
+<td><code>schemaVersion</code>、包内唯一 <code>id</code>、<code>excel</code>、非空 <code>stages</code> 必需</td>
+</tr>
+<tr>
+<td><code>excel</code></td>
+<td><code>sheet</code>、<code>headerRows</code>、<code>caseId</code>、<code>tags</code>、<code>dataColumns</code></td>
+<td><code>sheet</code>、<code>caseId</code>、<code>tags</code> 必需；<code>headerRows &gt;= 1</code></td>
+</tr>
+<tr>
+<td><code>stages[]</code></td>
+<td><code>key</code>、<code>template</code>、<code>dataColumns</code>、<code>required</code>、<code>runWhen</code>、<code>onFailure</code></td>
+<td><code>key</code>/<code>template</code> 必需；<code>key</code> 不能含点号</td>
+</tr>
+<tr>
+<td><code>report</code></td>
+<td><code>columns</code></td>
+<td>值为字符串</td>
+</tr>
+</tbody>
+</table>
+<p><code>timeoutMs</code> 为 1–3600000。只有侧车根对象允许 <code>x-*</code>；<code>excel</code>、stages 和侧车 <code>report</code> 拒绝扩展和其他未知字段。侧车不能覆盖工具、模板根、环境或输出根。</p>
+<h3 id="模板与动作">模板与动作</h3>
+<table>
+<thead>
+<tr>
+<th>对象/类型</th>
+<th>允许/必需契约</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>模板根对象</td>
+<td><code>schemaVersion</code>、<code>name</code>、<code>description</code>、<code>actions</code>、<code>x-*</code>；<code>schemaVersion</code>、<code>description</code>、非空 <code>actions</code> 必需</td>
+</tr>
+<tr>
+<td>动作 common</td>
+<td><code>type</code>、<code>description</code>、<code>onFailure</code>，以及其选定类型所属字段；动作 ID 不能含点号</td>
+</tr>
+<tr>
+<td>render</td>
+<td>需要 <code>payload</code>、<code>renderAs</code>；可选 <code>assert</code>; 不允许 saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry</td>
+</tr>
+<tr>
+<td>tool</td>
+<td>需要 <code>call</code>；可选 object <code>saveAs</code> 与 <code>assert</code>；只有主要目标为 command-backed Tool 时才支持 <code>timeoutMs</code>／<code>retry</code>；不允许 DB/render/assert-action/log-only 字段</td>
+</tr>
+<tr>
+<td>db</td>
+<td>需要 <code>db</code> 与恰好一个 <code>query</code>／<code>update</code>；block 内恰好一个 <code>sql</code>／<code>sqlFile</code>；可选 params、object <code>saveAs</code>、<code>assert</code>；不允许 retry 或 Action timeout</td>
+</tr>
+<tr>
+<td>assert</td>
+<td>需要 <code>assert</code>；可选 <code>expected</code>、<code>actual</code>；不允许 expression/render/tool/log-only 字段、timeout 或 retry</td>
+</tr>
+<tr>
+<td>log</td>
+<td>至少需要 <code>message</code> 或 <code>file</code>；可选 <code>level</code>、<code>fields</code>、<code>assert</code>；不允许 render/tool/assert-action-only 字段、timeout 或 retry</td>
+</tr>
+<tr>
+<td>assign</td>
+<td>需要 <code>name</code>、<code>expression</code>；可选 <code>assert</code>；<code>name</code> 在整个 Case 的 <code>CASE.VARS</code> 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry、saveAs 或 overwrite</td>
+</tr>
+<tr>
+<td>retry</td>
+<td><code>maxAttempts</code>、<code>retryOn</code>、<code>exitCodes</code>；<code>retryOn</code> 必填且仅包含 <code>EXIT_CODE</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>renderAs</code> 允许 <code>file</code>、<code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>。<code>maxAttempts</code> 为 1–10；<code>exitCodes</code> 值为 1–255。日志级别为 <code>TRACE</code>、<code>DEBUG</code>、<code>INFO</code>、<code>WARN</code> 或 <code>ERROR</code>。模板根对象与动作都允许 <code>x-*</code>；<code>fields</code> 是无约束日志字段映射。<code>output</code> 是 V2.3 的运行时证据，绝不是动作配置字段。</p>
+<h4 id="assign-变量唯一性与生命周期">Assign 变量唯一性与生命周期</h4>
+<p>assign 动作会在 <code>CASE.VARS</code> 下创建一个不可变、Case 作用域的条目。一个 Case 内每个变量名必须唯一。重复声明会导致校验失败。</p>
+<h4 id="action-saveas">Action <code>saveAs</code></h4>
+<p>V2.5 的 Tool 与 DB Action 共用一个 object shape：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">saveAs:</span>
+  <span class="hljs-attr">path:</span> <span class="hljs-string">relative/path/result.yaml</span>
+  <span class="hljs-attr">format:</span> <span class="hljs-string">yaml</span>
+  <span class="hljs-attr">overwrite:</span> <span class="hljs-literal">false</span>
+</div></code></pre>
+<p><code>path</code> 必填，<code>overwrite</code> 默认 false。<code>format</code> 只控制写入表示，不改变 <code>${output.result}</code> 的 typed value。<code>att-template/v2.5</code> 不允许 sibling <code>overwrite</code> 或 scalar <code>saveAs: file.name</code>。</p>
+<table>
+<thead>
+<tr>
+<th>Action target</th>
+<th>允许格式</th>
+<th>默认</th>
+<th>保存内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>配置 process Tool</td>
+<td><code>raw</code>、<code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
+<td><code>raw</code></td>
+<td>raw 为精确 stdout bytes；其他格式序列化已解析 typed result</td>
+</tr>
+<tr>
+<td><code>type: tool</code> 的主要 Java built-in</td>
+<td><code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
+<td><code>text</code></td>
+<td>built-in typed result；text 使用 UTF-8 字符串表示</td>
+</tr>
+<tr>
+<td>配置 call-backed Tool</td>
+<td><code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
+<td>无，必须明确指定</td>
+<td>typed result；不存在 stdout</td>
+</tr>
+<tr>
+<td><code>type: db</code></td>
+<td><code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
+<td>无，必须明确指定</td>
+<td>text 为 SQL*Plus 风格 rows／update 行数；其他格式为稳定 typed DB result object</td>
+</tr>
+</tbody>
+</table>
+<p><code>raw</code> 仅适用于有原始 stdout 的 process Tool。configured Tool 的 <code>output: txt|json|yaml|xml</code> 继续决定 stdout 如何解析，因此也决定非 raw 格式的 typed source。</p>
+<p>Tool／built-in 的 <code>text</code> 使用 <code>String.valueOf(output.result)</code>；直接 DB Action 的 <code>text</code> 使用上述 SQL*Plus 风格 formatter。任何写入表示都不会替换 Context 中的 typed <code>${output.result}</code>。</p>
+<p><code>saveAs.path</code> 使用 Action 前的正常 expression scope 渲染，必须得到非空安全相对路径并保持在当前 Case artifact 目录内。绝对路径、反斜线、空／<code>.</code>／<code>..</code> segment 与 containment escape 都非法。父目录按需创建。</p>
+<p>写入发生在可选 Action assertion 之前。process Tool 的 raw 即使遇到 parse error、exit-code retry 或最终 Action 不成功，也保存已捕获 stdout；非 raw Tool artifact 要求 parse 成功，built-in artifact 要求调用成功，DB artifact 要求 JDBC 成功。codec、路径、collision 或写入失败都是 ERROR。retry 共用同一路径，后续 attempt 只能覆盖同一 Action 先前 attempt 写入的 artifact。最终路径加入 <code>output.targetFiles</code>。</p>
+<p><code>render</code>、<code>assert</code>、<code>log</code> 与 <code>assign</code> 不支持 <code>saveAs</code>；render file 继续使用 <code>renderAs: file</code>。</p>
+<p><code>att-template/v2.3</code> 保持读取兼容：旧式 Tool <code>saveAs: response.json</code> 加 sibling <code>overwrite</code> 会内部归一化并维持原行为；新模板必须使用 V2.5 object form。</p>
+<h3 id="工具契约">工具契约</h3>
+<p>每个工具要求 <code>name</code>、<code>description</code>，以及恰好一个 <code>command</code> 或 <code>call</code>。Command 可以是非空标量或字符串列表，<code>output</code> 默认为 <code>txt</code> 并支持 <code>txt|yaml|json|xml</code>。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 <code>cache</code> 只含 <code>scope: case|db</code>。Call-backed Tool 禁止 process-only <code>output</code>、SSH/script 与参数 <code>argName|argNameMode</code>。V2.6 不定义 <code>delimit</code>；多值直接在调用中传 typed array。Update 不能缓存，<code>db</code> cache 只适用于 DB query/scalar。</p>
+<p>每个参数都要求 <code>name</code>、<code>description</code> 与 YAML boolean <code>required</code>。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。</p>
+<h3 id="标识符和路径约束">标识符和路径约束</h3>
+<p>Run ID 和完整 Case ID 会直接用作目录名，ATT 不会对合法标识做 slug 化或哈希处理。</p>
+<p>Run ID 必须非空、最多 128 个 Unicode 码点，不能是 <code>.</code> 或 <code>..</code>，不得含前导/尾随空白或尾随 <code>.</code>，且不能包含 <code>/</code>、<code>\</code>、<code>:</code>、<code>*</code>、<code>?</code>、<code>&quot;</code>、<code>&lt;</code>、<code>&gt;</code>、<code>|</code>、NUL、控制字符。Windows 设备名（如 <code>CON</code>、<code>NUL</code>、<code>COM1</code>、<code>LPT1</code>）会按大小写不敏感方式拒绝。</p>
+<p><code>workbookId</code>、<code>groupId</code>、<code>rowCaseId</code> 同样遵循相同字符规则。<code>workbookId</code> 与 <code>groupId</code> 不能含点号，因为点号用于分隔三个组件；<code>rowCaseId</code> 可含点号。模板路径相对 <code>templates.root</code>；render glob 匹配必须保持在模板下，<code>renderAs: file</code> 与 Tool/DB Action <code>saveAs.path</code> 目标必须保持在 Case artifact 目录下。ATT 会规范化并检查根包含性。</p>
+<h3 id="validation-json-合约">Validation JSON 合约</h3>
+<pre class="hljs"><code><div><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;schemaVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;att-validation/v2.1&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;attVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.6.1&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;valid&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">false</span></span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;mode&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;package&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;summary&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;errors&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;warnings&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">0</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;suites&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;cases&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">22</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;templates&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">7</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;tools&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">7</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;diagnostics&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span><span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ATT-TPL-104&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;severity&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ERROR&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;assert action requires a non-blank expression&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;file&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;field&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;actions.assertStatus.expression&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;sheet&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">null</span></span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;row&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">null</span></span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;column&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">null</span></span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;template&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;PAYMENT_VERIFY&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;action&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;assertStatus&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;suggestion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Add expression to the assert action&quot;</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">]</span>
+<span class="hljs-punctuation">}</span>
+</div></code></pre>
+<p>每个诊断都包含 <code>code</code>、<code>severity</code>、<code>message</code>、<code>file</code>、<code>field</code>、<code>sheet</code>、<code>row</code>、<code>column</code>、<code>template</code>、<code>action</code> 和 <code>suggestion</code>。不适用的字段为 <code>null</code>。代码稳定；自动化不能解析人类消息。</p>
+<h3 id="生成输出模式摘要">生成输出模式摘要</h3>
+<table>
+<thead>
+<tr>
+<th>产物</th>
+<th>顶层必需契约</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run.yaml</code></td>
+<td><code>schemaVersion</code>、<code>att</code>、<code>runtime</code>、<code>run</code>、<code>validation</code>、<code>inputs</code>、<code>cases</code>、<code>summary</code>、<code>outputs</code></td>
+</tr>
+<tr>
+<td>Validation JSON</td>
+<td><code>schemaVersion</code>、<code>attVersion</code>、<code>valid</code>、<code>mode</code>、<code>summary</code>、<code>diagnostics</code></td>
+</tr>
+<tr>
+<td>CI summary JSON</td>
+<td><code>schemaVersion</code>、<code>attVersion</code>、<code>runId</code>、<code>environment</code>、<code>startedAt</code>、<code>endedAt</code>、<code>status</code>、<code>summary</code>、<code>durationStatistics</code>、<code>cases</code>、<code>diagnosticCounts</code>、<code>report</code>、<code>inputManifestHash</code></td>
+</tr>
+<tr>
+<td>JUnit XML</td>
+<td>一个 testsuite，含 test/failure/error/skipped 计数，以及每个 ATT 用例的 testcase</td>
+</tr>
+</tbody>
+</table>
+<h2 id="07-表达式参考">07 表达式参考</h2>
+<h3 id="统一表达式引擎">统一表达式引擎</h3>
+<p>V2.4.2 使用同一个解析和渲染器来处理 <code>${...}</code> 值插值和 <code>#{...}</code> 表达式。所有接受 <code>${...}</code> 的用户可见位置也都接受 <code>#{...}</code>；校验使用相同语法，但不会执行内建函数或外部进程。</p>
+<p>两种分隔符指示不同角色，而不是两套不同引擎：</p>
+<ul>
+<li><code>${path}</code> 将一个 Context 值插入周围文本，例如 <code>Reference=${CASE.VARS.SrcRefNo}</code>。</li>
+<li><code>#{name(arguments)}</code> 评估内建函数或已配置 Tool 调用。Context 参数必须保留明确的 <code>${...}</code> 形式，例如 <code>#{length(${CASE.VARS.SrcRefNo})}</code>。</li>
+<li>ASCII <code>'...'</code> 或 <code>&quot;...&quot;</code> 总是在调用内表示字面字符串，例如 <code>#{length('CASE.VARS.SrcRefNo')}</code>。</li>
+</ul>
+<p>即使 Context 引用位于调用内部，也必须明确写出 <code>${...}</code>：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;#{length(value=${CASE.VARS.SrcRefNo})} &lt;= 35&quot;</span>
+<span class="hljs-attr">description:</span> <span class="hljs-string">&quot;Reference length: #{length(${CASE.VARS.SrcRefNo})}&quot;</span>
+</div></code></pre>
+<h4 id="调用参数解析规则">调用参数解析规则</h4>
+<p>ATT 按以下顺序解析每个完整调用参数：</p>
+<ol>
+<li>精确 <code>${...}</code> 引用会被解析为其类型化 Context 值。</li>
+<li>精确嵌套 <code>#{...}</code> 调用会被求值，并把其类型化结果传给外层调用。</li>
+<li>ASCII 单/双引号包裹的文本是显式字符串字面量。数字和布尔字面量保留正常类型。</li>
+<li>其他未引用 token 是 literal；但类似 <code>CASE.customerId</code>、<code>ACTIONS.query.output.result</code> 或 <code>input.customerId</code> 的保留 Context／definition-input path 会直接报迁移错误，必须分别写成 <code>${CASE.customerId}</code>、<code>${ACTIONS.query.output.result}</code>、<code>${input.customerId}</code>。</li>
+</ol>
+<p>周围文字中的 Context interpolation 同样使用 <code>${...}</code>，例如 <code>prefix-${CASE.caseId}</code> 或 <code>#{concat('prefix-', ${CASE.caseId})}</code>。ASCII 引号才是语法，弯引号 <code>“...”</code>／<code>‘...’</code> 会保留为普通 Unicode 字符。</p>
+<p>可用值与可调用能力取决于表达式所在位置。普通 Case-runtime 字段可使用 built-in、配置 Tool 与只读 DB query；<code>report.fileNamePattern</code>、Tool <code>command</code> 与 DB SQL source 是受限 scope，不允许隐藏或递归 external execution。Tool/DB <code>saveAs.path</code>、DB params 在主调用前求值；DB SQL 内容只允许 Context 和 pure built-in。</p>
+<p><code>type: tool</code> 的主 <code>call</code> 可指向配置 Tool 或 ATT built-in。主 built-in 在 JVM 内执行，结果在 <code>${output.result}</code>，记录 <code>type: builtin</code> attempt evidence，但没有 process <code>TOOL</code> 节点、argv、stdout 或 stderr。</p>
+<h3 id="runtime-context">Runtime Context</h3>
+<p>ATT 的持久化运行时树有一个权威根：</p>
+<pre class="hljs"><code><div>CASE
+├── caseId, workbookId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
+├── outputDirectory
+├── environment, status, startedAt, durationMs, error
+├── &lt;case data aliases&gt;
+├── VARS
+│   └── &lt;assignName&gt; (typed runtime value shared by later stages/templates)
+├── DB (fixed framework-owned Case-finalization map)
+│   └── &lt;dbhelperId&gt; (transaction finalization state and sanitized error)
+└── STAGES
+    └── &lt;stageKey&gt;
+        ├── name and stage-private data
+        └── TEMPLATE
+            └── ACTIONS
+                └── &lt;actionId&gt;
+                    ├── id, type, description
+                    ├── output
+                    ├── TOOL
+                    │   └── &lt;toolName&gt;
+                    └── DB
+                        └── &lt;dbhelperId&gt;
+                            └── &lt;callId&gt; (inline query evidence)
+</div></code></pre>
+<p>关键字是大写：<code>CASE</code>、<code>VARS</code>、<code>STAGES</code>、<code>TEMPLATE</code>、<code>ACTIONS</code>、<code>TOOL</code>、<code>DB</code>。元数据保留 camelCase。没有 <code>CASE.fields</code>、<code>CASE.data</code> 或 <code>TOOLS</code> 节点。</p>
+<p>常见作用域包括：</p>
+<table>
+<thead>
+<tr>
+<th>作用域</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CASE</td>
+<td><code>caseId</code>、<code>workbookId</code>、<code>groupId</code>、<code>rowCaseId</code>、<code>workbook</code>、<code>sheet</code>、<code>rowNumber</code>、<code>tags</code>、<code>environment</code>、保留 <code>outputDirectory</code>、Case 数据别名、运行时 <code>VARS</code>、固定交易收尾 map <code>DB</code></td>
+</tr>
+<tr>
+<td>STAGE</td>
+<td><code>key</code>、<code>name</code>、选择器映射数据、侧车阶段数据、状态、计时、错误</td>
+</tr>
+<tr>
+<td>TEMPLATE</td>
+<td><code>name</code>、<code>path</code>、<code>description</code>、状态、计时、错误</td>
+</tr>
+<tr>
+<td>ACTION</td>
+<td><code>id</code>、<code>type</code>、最终 <code>description</code>；嵌套 <code>output.status</code>、<code>success</code>、<code>durationMs</code>、<code>exception</code>、<code>targetFiles</code>、<code>result</code> 与断言/日志数据</td>
+</tr>
+<tr>
+<td>TOOL</td>
+<td>配置工具的限定名称、可选 group ID/tool key、<code>input</code>、逻辑/执行 argv、可选 SSH 目标元数据、<code>stdout</code>、<code>stderr</code>、<code>rawOutput</code>、解析 <code>output</code>、状态、退出码、持续时间、重试证据，以及在 <code>saveAs</code> 使用时的 <code>outputFile</code></td>
+</tr>
+<tr>
+<td>DB</td>
+<td>dbhelper ID、call ID、按 evidence policy 保存的 SQL source/hash、masked/typed/value parameters、duration、typed result 与 sanitized error</td>
+</tr>
+</tbody>
+</table>
+<p>使用 <code>${output...}</code> 访问当前动作在求值 runtime assertion、actual 与最终 description 时的局部 scope。<code>${ACTIONS.&lt;id&gt;...}</code> 是当前模板已完成 Action 的便利视图；跨阶段使用规范 <code>${CASE.STAGES.&lt;stage&gt;.TEMPLATE.ACTIONS...}</code>。根 <code>${TOOL...}</code> 与 <code>${DB...}</code> 保留给调用内部，不是 Case 级“最近一次调用”API。Tool 与 inline DB evidence 保存在所在 Action 并写入 Case log；Case 级 DB 收尾只在完成后通过 <code>${CASE.DB.&lt;instance&gt;}</code> 提供。开头的 <code>CASE</code> 区分 <code>${CASE.DB...}</code> 与 invocation-local <code>${DB...}</code>。</p>
+<p><code>${CASE.outputDirectory}</code> 是保留的标准化绝对路径。<code>CASE.VARS</code> 与 <code>CASE.DB</code> 也是固定 framework-owned map，因此 sidecar <code>excel.dataColumns</code> alias 或其他 Case-root alias 不能名为 <code>VARS</code>／<code>DB</code>。三者在第一个 stage 前已存在；<code>CASE.DB</code> 保持空值，直到 Case transaction finalization 发布已使用实例 outcome。同一 Case 的 Action 不可依赖该 post-Case state。</p>
+<h3 id="configreportfilenamepattern"><code>config.report.fileNamePattern</code></h3>
+<p>该配置使用统一表达式引擎，但拥有独立的非 Case 作用域。它只支持一个大小写敏感的值引用：</p>
+<table>
+<thead>
+<tr>
+<th>占位符</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>${suiteName}</code></td>
+<td>源工作簿 basename，去掉结尾的小写 <code>.xlsx</code> 后缀；例如 <code>testcase/payment_regression.xlsx</code> 变为 <code>payment_regression</code></td>
+</tr>
+</tbody>
+</table>
+<p>配置字符串必须显式引用 <code>${suiteName}</code>，无论它用于文本插值还是内建函数参数。call 内的裸 <code>suiteName</code> 会被拒绝。合法示例包括：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">report:</span>
+  <span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;${suiteName}.result.xlsx&quot;</span>
+</div></code></pre>
+<p>以及：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;result-${suiteName}.xlsx&quot;</span>
+<span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;ATT-${suiteName}-report.xlsx&quot;</span>
+<span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;${suiteName}-${suiteName}.xlsx&quot;</span>
+<span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span>
+<span class="hljs-attr">fileNamePattern:</span> <span class="hljs-string">&quot;#{concat(&#x27;ATT-&#x27;, #{lower(${suiteName})})}.xlsx&quot;</span>
+</div></code></pre>
+<p>但不支持如 <code>${runId}</code>、<code>${workbookId}</code>、<code>${environment}</code>、<code>${CASE.caseId}</code> 等运行时值引用。</p>
+<h3 id="tool-定义中的-command-表达式">Tool 定义中的 <code>command</code> 表达式</h3>
+<p>Tool 的 <code>command</code> 也拥有独立的受限上下文，只能引用该工具 <code>arguments</code> 映射中声明的键。每个声明键允许三种等价占位形式：</p>
+<table>
+<thead>
+<tr>
+<th>形式</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>${requestFile}</code></td>
+<td>首选直接参数引用</td>
+</tr>
+<tr>
+<td><code>${input.requestFile}</code></td>
+<td>显式工具输入命名空间</td>
+</tr>
+<tr>
+<td><code>${TOOL.input.requestFile}</code></td>
+<td>对同一工具输入的支持完整别名</td>
+</tr>
+</tbody>
+</table>
+<p>例如：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">invokePaymentApi:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Invoke</span> <span class="hljs-string">Payment</span> <span class="hljs-string">API</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Invoke</span> <span class="hljs-string">a</span> <span class="hljs-string">rendered</span> <span class="hljs-string">payment</span> <span class="hljs-string">request</span>
+    <span class="hljs-attr">command:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">./tools/invoke_payment_api.sh</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${requestFile}&quot;</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">&quot;${environment}&quot;</span>
+    <span class="hljs-attr">output:</span> <span class="hljs-string">json</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">requestFile:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Request</span> <span class="hljs-string">File</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Rendered</span> <span class="hljs-string">XML</span> <span class="hljs-string">request</span> <span class="hljs-string">path</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+      <span class="hljs-attr">environment:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Environment</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Target</span> <span class="hljs-string">environment</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+</div></code></pre>
+<p>每个 YAML command list item 在 render 后仍是一个 atomic argv；值中含空格、引号或类似 shell 的字符也不会再次分词。ATT 不会启动本地 shell。</p>
+<h4 id="引号context-value-与-atomic-argv">引号、Context value 与 atomic argv</h4>
+<p>Tool call 内的引号属于 ATT expression grammar，并不是 shell quote。外层 <code>'...'</code> 或 <code>&quot;...&quot;</code> delimiter 在调用前会移除；另一种引号是普通字符；与 delimiter 相同的引号可用反斜线 escape。Quoted value 内嵌 <code>${...}</code> 会做 interpolation；未加引号的 canonical Context path 则直接传递 typed value。</p>
+<p>以下 Tool 会把每个输入保持为一个 argv：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">tools:</span>
+  <span class="hljs-attr">writeAudit:</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">Write</span> <span class="hljs-string">audit</span>
+    <span class="hljs-attr">description:</span> <span class="hljs-string">Write</span> <span class="hljs-string">one</span> <span class="hljs-string">audit</span> <span class="hljs-string">message</span> <span class="hljs-string">for</span> <span class="hljs-string">one</span> <span class="hljs-string">source</span> <span class="hljs-string">file</span>
+    <span class="hljs-attr">command:</span> [<span class="hljs-string">./tools/write_audit.sh</span>, <span class="hljs-string">&quot;${message}&quot;</span>, <span class="hljs-string">&quot;${sourceFile}&quot;</span>]
+    <span class="hljs-attr">output:</span> <span class="hljs-string">yaml</span>
+    <span class="hljs-attr">arguments:</span>
+      <span class="hljs-attr">message:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Message</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">Exact</span> <span class="hljs-string">audit</span> <span class="hljs-string">message</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+      <span class="hljs-attr">sourceFile:</span>
+        <span class="hljs-attr">name:</span> <span class="hljs-string">Source</span> <span class="hljs-string">file</span>
+        <span class="hljs-attr">description:</span> <span class="hljs-string">File</span> <span class="hljs-string">associated</span> <span class="hljs-string">with</span> <span class="hljs-string">the</span> <span class="hljs-string">message</span>
+        <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>
+</div></code></pre>
+<p>当 call 同时包含多层引号时，建议使用 YAML block scalar：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">singleQuote:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&gt;-
+    #{writeAudit(
+        message=&quot;Customer O&#x27;Reilly&quot;,
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+</span>
+<span class="hljs-attr">doubleQuote:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&gt;-
+    #{writeAudit(
+        message=&#x27;status=&quot;READY&quot;&#x27;,
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+</span>
+<span class="hljs-attr">mixedQuotesAndContext:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
+  <span class="hljs-attr">call:</span> <span class="hljs-string">&gt;-
+    #{writeAudit(
+        message=&quot;O&#x27;Reilly said \&quot;READY\&quot; for ${CASE.caseId}&quot;,
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+</span></div></code></pre>
+<p>Child process 收到的三条 message 分别是 <code>Customer O'Reilly</code>、<code>status=&quot;READY&quot;</code>，以及例如 <code>O'Reilly said &quot;READY&quot; for payment.payment.TC001</code>。Context value 自身包含任一种引号时，无需 caller 做 shell escaping，仍只占一个 argv。</p>
+<p>如果坚持把 call 写成单行，还需额外处理独立的 YAML escaping 层：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{writeAudit(message=&#x27;status=\&quot;READY\&quot;&#x27;, sourceFile=${CASE.sourceFile})}&quot;</span>
+<span class="hljs-attr">call:</span> <span class="hljs-string">&#x27;#{writeAudit(message=&quot;O<span class="hljs-char escape_">&#x27;&#x27;</span>Reilly&quot;, sourceFile=${CASE.sourceFile})}&#x27;</span>
+</div></code></pre>
+<p>第一行是为 YAML double-quoted scalar escape 双引号；第二行是为 YAML single-quoted scalar 把 apostrophe 写成两个。之后 expression engine 才会解析所得的 <code>#{...}</code>。</p>
+<p>普通 process-backed Tool 不会让 shell 重新解释已解析输入。Context value 内的 <code>$HOME</code>、<code>$(date)</code>、<code>a*.xml</code>、<code>|</code>、<code>&gt;</code> 与引号都按字面传递。需要 shell-like behavior 时应使用经过审查的 wrapper；随包提供的 <code>fpp.exehelper</code> 和 <code>fpp.loghelper</code> 只提供上文明确说明的 pathname expansion。</p>
+<h3 id="tool-定义中的-call-表达式">Tool 定义中的 <code>call</code> 表达式</h3>
+<p>V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value，并只允许 pure built-in 与一个主要 DB query/scalar/update。<code>${input.customerId}</code> 来自外层 Tool call，不是 Case 全局变量；<code>CASE</code>／<code>ACTIONS</code> 等 root 在定义中不可见。Inline SQL 与 package-contained SQL file 内容都在此 scope render，测试数据仍应放在 <code>params</code> 并使用 JDBC <code>?</code>。</p>
+<h3 id="操作符">操作符</h3>
+<p>支持的断言操作符有：</p>
+<ul>
+<li><code>==</code></li>
+<li><code>!=</code></li>
+<li><code>&gt;</code></li>
+<li><code>&gt;=</code></li>
+<li><code>&lt;</code></li>
+<li><code>&lt;=</code></li>
+<li><code>like</code></li>
+<li><code>is null</code></li>
+<li><code>is not null</code></li>
+<li><code>not</code></li>
+<li><code>and</code></li>
+<li><code>or</code></li>
+</ul>
+<p><code>like</code> 是大小写不敏感的操作符关键词，但规范写法使用小写。它匹配完整值，并使用 SQL 风格通配符：</p>
+<ul>
+<li><code>%</code> 匹配零个或多个字符</li>
+<li><code>_</code> 匹配恰好一个字符</li>
+<li>匹配本身是大小写敏感的</li>
+</ul>
+<h3 id="内建函数">内建函数</h3>
+<p>内建函数通过 <code>#{...}</code> 调用。Canonical 名称使用 framework-owned <code>str.*</code>、<code>date.*</code>、<code>file.*</code> 与 <code>misc.*</code> package；旧 flat 名称保留为兼容 alias。Tool group 同样以 <code>group.tool</code> 组成 package-like 调用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。</p>
+<table>
+<thead>
+<tr>
+<th>函数</th>
+<th>目的</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>str.upper/lower/trim</code></td>
+<td>大小写与首尾空白处理</td>
+<td><code>#{str.upper(value=${CASE.currency})}</code></td>
+</tr>
+<tr>
+<td><code>str.ltrim/rtrim</code></td>
+<td>去除前导／尾随空白</td>
+<td><code>#{str.ltrim(${CASE.reference})}</code></td>
+</tr>
+<tr>
+<td><code>str.length</code></td>
+<td>返回文本长度</td>
+<td><code>#{str.length(value=${CASE.reference})}</code></td>
+</tr>
+<tr>
+<td><code>str.concat</code></td>
+<td>拼接参数</td>
+<td><code>#{str.concat(a='PAY-', b=${CASE.caseId})}</code></td>
+</tr>
+<tr>
+<td><code>str.substr/indexOf</code></td>
+<td>截取子串／返回位置</td>
+<td><code>#{str.substr(${CASE.reference}, 0, 8)}</code></td>
+</tr>
+<tr>
+<td><code>str.contains/startsWith/endsWith</code></td>
+<td>测试字面包含、前缀、后缀</td>
+<td><code>#{str.contains(${CASE.message}, 'SUCCESS')}</code></td>
+</tr>
+<tr>
+<td><code>str.replace</code></td>
+<td>字面替换</td>
+<td><code>#{str.replace(${CASE.reference}, '-', '')}</code></td>
+</tr>
+<tr>
+<td><code>str.lpad/rpad</code></td>
+<td>左／右填充</td>
+<td><code>#{str.lpad(${CASE.sequence}, 8, '0')}</code></td>
+</tr>
+<tr>
+<td><code>str.repeat</code></td>
+<td>重复值</td>
+<td><code>#{str.repeat(3, '9')}</code></td>
+</tr>
+<tr>
+<td><code>date.sysdate/systimestamp</code></td>
+<td>返回系统日期／时间戳</td>
+<td><code>#{date.sysdate('yyyyMMdd')}</code></td>
+</tr>
+<tr>
+<td><code>date.format</code></td>
+<td>格式化 ISO 日期</td>
+<td><code>#{date.format(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}</code></td>
+</tr>
+<tr>
+<td><code>date.add</code></td>
+<td>日期增减</td>
+<td><code>#{date.add(${CASE.businessDate}, 1, 'day')}</code></td>
+</tr>
+<tr>
+<td><code>file.exists/directoryExists</code></td>
+<td>测试常规文件／目录</td>
+<td><code>#{file.exists(${CASE.requestFile})}</code></td>
+</tr>
+<tr>
+<td><code>file.size/mkdirs</code></td>
+<td>返回文件大小／创建目录树</td>
+<td><code>#{file.size(${CASE.requestFile})}</code></td>
+</tr>
+<tr>
+<td><code>file.copy/move/delete</code></td>
+<td>复制、移动、删除文件</td>
+<td><code>#{file.move(${CASE.sourceFile}, ${CASE.targetFile})}</code></td>
+</tr>
+<tr>
+<td><code>misc.string/number/boolean</code></td>
+<td>类型转换与归一化</td>
+<td><code>#{misc.number(value='12.50')}</code></td>
+</tr>
+<tr>
+<td><code>misc.coalesce/nvl</code></td>
+<td>返回非空值或默认值</td>
+<td><code>#{misc.nvl(${CASE.optional}, 'N/A')}</code></td>
+</tr>
+<tr>
+<td><code>misc.iif</code></td>
+<td>从布尔值选择两个值之一</td>
+<td><code>#{misc.iif(${CASE.enabled}, 'Y', 'N')}</code></td>
+</tr>
+<tr>
+<td><code>misc.randomChoice</code></td>
+<td>从输入中随机选择</td>
+<td><code>#{misc.randomChoice('A', 'B', 'C')}</code></td>
+</tr>
+<tr>
+<td><code>misc.dbText</code></td>
+<td>将稳定 typed DB result 格式化为 SQL*Plus 风格文字</td>
+<td><code>#{misc.dbText(${ACTIONS.queryOrders.output.result})}</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>misc.dbText</code> 只接受一个位置参数或具名 <code>value</code>。参数必须是直接 DB Action、DB expression 或 DB-backed Tool 返回的稳定 query／update result。它与直接 DB Action 的 <code>saveAs.format: text</code> 共用同一个确定性 formatter，并且没有 JDBC、transaction、connection 或 cache side effect。</p>
+<h2 id="08-报表参考">08 报表参考</h2>
+<h3 id="运行目录">运行目录</h3>
+<pre class="hljs"><code><div>&lt;outputDirectory&gt;/&lt;RunID&gt;/
+├── run.yaml
+├── events.jsonl
+├── workbooks/
+├── ci/summary.json
+├── ci/junit.xml
+├── report/index.html
+├── report/junit.html
+└── &lt;CaseID&gt;/...
+</div></code></pre>
+<p>Run ID 和 Case ID 在校验后保持原样。最终 run 目录表示已完成发布；中断工作仍保留在 <code>.in-progress</code> 下。</p>
+<h3 id="人类可读-html-报告">人类可读 HTML 报告</h3>
+<p><code>report/index.html</code> 是主要终端用户报表。可以直接从磁盘打开。组按 <code>workbookId.groupId</code> 汇总；界面把 <code>groupId</code> 标记为 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、对 workbook/group/full Case ID/tag 的大小写不敏感搜索，以及每列标题的升序/降序排序。Duration 按数值排序。</p>
+<p>展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 <code>.log</code>/<code>case.yaml</code> 的显式链接。Action Results 每行独立显示最终渲染的 Description，并写入 <code>run.yaml</code> 与 CI JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 description 与 <code>expected</code> 的有序 LF 联接；Actual 是所有非空运行时 <code>actual</code> 的有序 LF 联接。</p>
+<h3 id="结果工作簿">结果工作簿</h3>
+<p>ATT 会复制源工作簿，并使用 <code>report.mode: append-to-copy</code> 追加配置的结果列。全局 <code>report.fileNamePattern</code> 控制文件名。侧车 <code>report.columns</code> 只修改工作簿标签。支持的映射包括 <code>result</code>、<code>durationMs</code>、<code>expectedResult</code>、<code>actualResult</code>、<code>caseLog</code>、<code>reportLink</code>、<code>runTime</code>；Expected/Actual 单元格保留 LF 字符并以换行文本显示。结果回填使用与 testcase loader 相同的 Excel 显示格式和空白规范化规则读取 Case ID，因此带前导零等数字格式的 ID 在执行与报表写入时会匹配同一 Case。</p>
+<h3 id="junit-xml">JUnit XML</h3>
+<p>每个 ATT Case 对应一个 <code>&lt;testcase&gt;</code>：</p>
+<table>
+<thead>
+<tr>
+<th>ATT 状态</th>
+<th>JUnit 表示</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PASS</td>
+<td>无 failure 子节点</td>
+</tr>
+<tr>
+<td>FAIL</td>
+<td><code>&lt;failure&gt;</code></td>
+</tr>
+<tr>
+<td>ERROR</td>
+<td><code>&lt;error&gt;</code></td>
+</tr>
+<tr>
+<td>SKIPPED</td>
+<td><code>&lt;skipped&gt;</code></td>
+</tr>
+<tr>
+<td>INVALID</td>
+<td><code>&lt;error type=&quot;ATTValidationError&quot;&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>文本会被 XML 转义。JUnit XML 与 HTML 使用 <code>report.junit.caseLogEmbedThresholdBytes</code>。低于或等于阈值的日志会被嵌入；更大的日志使用相对链接。<code>0</code> 始终使用链接。</p>
+<h3 id="ci-json-汇总">CI JSON 汇总</h3>
+<p><code>ci/summary.json</code> 使用 <code>schemaVersion: att-ci-summary/v2.1</code>，包含 ATT/Run ID、环境、时间、聚合状态/统计、持续时间统计、每个 Case 记录、诊断计数、报表/产物路径以及输入清单哈希。</p>
+<h3 id="运行清单与可复现性">运行清单与可复现性</h3>
+<p><code>run.yaml</code> 使用 <code>schemaVersion: att-run/v2.1</code>，记录 ATT/构建身份、Java/OS/locale/timezone、校验模式、环境、时间戳、状态/摘要、输出路径，以及有效配置、工具组文件、call-backed Tool SQL 文件（<code>tool-sql</code>）、工作簿、侧车、解析模板/负载、包内工具文件和 schema/catalog 版本的 SHA-256 hash。</p>
+<h3 id="文档归档和清理">文档、归档和清理</h3>
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>输出/行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs</code></td>
+<td>在 <code>build/docs/index.html</code> 生成可搜索离线包文档；Testcases 按工作簿和 Sheet 分组</td>
+</tr>
+<tr>
+<td><code>report --run-id &lt;id&gt;</code></td>
+<td>从完成证据重建两个 HTML 报告</td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td>归档最新完成 run，不执行测试</td>
+</tr>
+<tr>
+<td><code>clean</code></td>
+<td>删除配置输出目录、<code>build/docs</code> 与 <code>build/att-*.tar.gz</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="09-故障排查">09 故障排查</h2>
+<h3 id="先从校验开始">先从校验开始</h3>
+<p>在每次工作簿、侧车、模板或工具变更后执行：</p>
+<pre class="hljs"><code><div>./att.sh validate --package
+</div></code></pre>
+<p>然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。</p>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>典型原因</th>
+<th>修正措施</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATT-TC</code></td>
+<td>缺失/过期快照、侧车/Sheet/表头错误、重复 Case ID</td>
+<td>检查快照/基名、sheet 映射、有效表头和完整 ID</td>
+</tr>
+<tr>
+<td><code>ATT-CTX</code></td>
+<td>未知或歧义 Context 路径</td>
+<td>检查请求/当前/缺失字段、最近建议或规范候选</td>
+</tr>
+<tr>
+<td><code>ATT-STG</code></td>
+<td>必需选择器为空白、选择器 YAML 无效、阶段键重复</td>
+<td>检查选择器形式、<code>name</code>、别名和 required 标志</td>
+</tr>
+<tr>
+<td><code>ATT-TPL</code></td>
+<td>未知/重复模板、动作或负载无效</td>
+<td>检查符号名/完整路径、描述符、动作类型和本地文件</td>
+</tr>
+<tr>
+<td><code>ATT-CFG</code></td>
+<td>未知字段、重复键、schema 类型/枚举错误</td>
+<td>与第 6 章对照并移除不支持字段</td>
+</tr>
+<tr>
+<td><code>ATT-TOOL</code></td>
+<td>未知/缺失参数、进程或解析失败</td>
+<td>对比调用契约，检查退出码/stdout/stderr/raw output</td>
+</tr>
+<tr>
+<td><code>ATT-PATH</code></td>
+<td>非法 ID 或路径逃逸</td>
+<td>移除非法字符，并保持内容在配置根目录下</td>
+</tr>
+<tr>
+<td><code>ATT-RUN</code></td>
+<td>超时、非零退出、渲染/运行时失败</td>
+<td>检查 Case 日志和动作/工具证据</td>
+</tr>
+</tbody>
+</table>
+<h3 id="常见问题">常见问题</h3>
+<h4 id="为什么-excel-看起来没问题但-case-id-被拒绝">为什么 Excel 看起来没问题，但 Case ID 被拒绝？</h4>
+<p>ATT 导入的是显示单元格文本，然后应用严格的 ID 安全检查。检查隐藏的首尾空白、尾随 <code>.</code>、路径字符、控制字符以及 Windows 设备名。以文本形式保存标识符，以保留前导零。</p>
+<h4 id="两张-sheet-能同时包含-tc001-吗">两张 sheet 能同时包含 <code>TC001</code> 吗？</h4>
+<p>可以。给 sheet 不同的 group ID，即可生成例如 <code>payment.payment.TC001</code> 和 <code>payment.batch.TC001</code> 这样的 ID。</p>
+<h4 id="为什么-na-变成空了">为什么 <code>N/A</code> 变成空了？</h4>
+<p>ATT 会在数据映射和阶段选择前，把 <code>N/A</code>、<code>NA</code>、<code>NULL</code>、<code>NONE</code>、空和仅空白值归一化为 blank。</p>
+<h4 id="为什么-context-变量失败">为什么 Context 变量失败？</h4>
+<p>ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空字符串。遵循 <code>ATT-CTX-001</code> 的 <code>requestedPath</code>、<code>currentNode</code>、<code>missingSegment</code> 和最近建议，检查大小写敏感的作用域、物理表头/别名、阶段 key、动作 ID，以及可用性时间点。后缀简写必须唯一识别一个可读逻辑路径；<code>ATT-CTX-002</code> 会列出所有冲突候选，以便你加长后缀或使用规范路径。声明的可选字段即使值为空白，仍然是有效空字符串。</p>
+<h4 id="为什么-fail-变成-error">为什么 FAIL 变成 ERROR？</h4>
+<p>假断言是 FAIL。无效表达式语法/导航、工具失败、超时、解析失败、I/O 失败或运行时异常，都是 ERROR。应查看动作证据，而不只看最终聚合状态。</p>
+<h4 id="为什么工具跑了不止一次">为什么工具跑了不止一次？</h4>
+<p>它的动作启用了重试，并收到了符合条件的非零退出码。查看 Case 日志中的尝试列表和最终动作记录。</p>
+<h4 id="我能在-command-中使用-shell-管道吗">我能在 <code>command</code> 中使用 shell 管道吗？</h4>
+<p>不能。ATT 会把 <code>|</code>、<code>&gt;</code>、<code>&lt;</code> 按字面值传递。把 shell 行为放到审查过的工具脚本中。</p>
+<h4 id="为什么必需的-array-参数会拒绝-">为什么必需的 array 参数会拒绝 <code>[]</code>？</h4>
+<p>必需项验证发生在 argv 扩展之前。空 typed List 被视为缺失；请至少传入一个标量 item，或将参数设为 optional。</p>
+<h4 id="我应该使用包校验还是选中校验">我应该使用包校验还是选中校验？</h4>
+<p>本地快速反馈请用 selected 模式。发布前、CI 推进、或共享包时请用 package 模式。</p>
+<h4 id="报告能否不依赖服务器打开">报告能否不依赖服务器打开？</h4>
+<p>可以。保持生成的 run 目录完整即可，相关相对链接仍可工作。</p>
+<h4 id="build-会不会再次执行测试">build 会不会再次执行测试？</h4>
+<p>不会。它只是归档一个已完成的持久化 run。</p>
+<h4 id="为什么-attbat-会要求-maven或者为什么-sh-工具在-windows-上失败">为什么 <code>att.bat</code> 会要求 Maven，或者为什么 <code>.sh</code> 工具在 Windows 上失败？</h4>
+<p>在二进制发布中，<code>att.bat</code> 会找到 <code>lib\att-*.jar</code>，只需要 Java 8+。源码树中，<code>att.bat</code> 会在 Maven 在 <code>PATH</code> 上时使用 Maven；没有 Maven 时，需要已有的 <code>target\classes</code>。先用 <code>att.bat version</code> 确认启动器后再校验包。</p>
+<p>启动器让 ATT 自身跨平台；它无法翻译外部工具可执行文件。请为 Windows 配置 <code>.bat</code>、<code>.cmd</code>、PowerShell 脚本（需要显式 <code>powershell</code>/<code>pwsh</code> argv）或原生可执行文件，而不是 POSIX-only <code>.sh</code>。PATH 校验遵循 Windows <code>PATHEXT</code>，因此如 <code>pwsh</code> 这类名称可解析为 <code>pwsh.exe</code>。维护多平台版本时，请保持参数契约和 stdout 输出格式一致。</p>
+<h4 id="为什么-att-说会使用-mwiedejsch或者-java-ssh-协商失败">为什么 ATT 说会使用 mwiede/jsch，或者 Java SSH 协商失败？</h4>
+<p>当 <code>PATH</code> 中存在可执行 <code>ssh</code> 时，ATT 会优先使用本地 <code>ssh</code>。如果不存在，ATT 会打印 <code>local ssh command not found; ATT will use Java SSH library mwiede/jsch</code>，并改用 Java exec channel。这是自动回退，不是远程连通性测试。</p>
+<p>回退实现非常保守：ATT 包含 <code>com.github.mwiede:jsch:2.28.2</code>，但不捆绑 Bouncy Castle。它要求一个可读、非符号链接的 <code>~/.ssh/known_hosts</code> 用作严格主机验证。它不会读取 <code>~/.ssh/config</code>，也不会自动使用 OpenSSH agent；需配置一个非交互可读的 <code>identityFile</code>。密码和交互式口令提示不支持。</p>
+<p>算法可用性取决于 Java 运行时：</p>
+<table>
+<thead>
+<tr>
+<th>算法</th>
+<th>Java 回退限制</th>
+<th>首选方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ssh-ed25519</code>、<code>ssh-ed448</code></td>
+<td>需要 Java 15+ 或 Bouncy Castle provider</td>
+<td>优先使用本地 OpenSSH 或 Java 15+；否则让管理员把批准的 <code>bcprov-jdk18on</code> 加入运行时 classpath</td>
+</tr>
+<tr>
+<td><code>curve25519-sha256</code>、<code>curve448-sha512</code></td>
+<td>需要 Java 11+ 或 Bouncy Castle</td>
+<td>优先本地 OpenSSH 或 Java 11+；否则使用批准的 Bouncy Castle provider</td>
+</tr>
+<tr>
+<td><code>chacha20-poly1305@openssh.com</code></td>
+<td>在所有 Java 版本上都需要 Bouncy Castle</td>
+<td>优先本地 OpenSSH，或在服务端启用 AES-GCM/CTR cipher，并添加 Bouncy Castle provider</td>
+</tr>
+<tr>
+<td>RSA/SHA-1 <code>ssh-rsa</code> 签名</td>
+<td>默认被 mwiede/jsch 禁用</td>
+<td>更新服务端到 RSA/SHA-2 (<code>rsa-sha2-256</code>/<code>rsa-sha2-512</code>) 或其他现代 host/user-key 算法；不要在未经审查的情况下重启 SHA-1</td>
+</tr>
+</tbody>
+</table>
+<p>协商失败时，先用本地 <code>ssh -v</code> 复现连接，定位 host-key、key-exchange、cipher 或 user-key 不匹配。优先升级 Java 或服务端算法集合，而不是弱化 JSch 默认值。</p>
+<h3 id="安全提醒">安全提醒</h3>
+<p>不要把密码、token、私钥或敏感客户数据放进工作簿单元格、模板描述符、命令字符串、stdout 或 stderr。优先使用工具脚本中经批准的秘密注入方式。在共享报表和归档前进行审查。</p>
+<h2 id="10-维护者架构">10 维护者架构</h2>
+<p>本章解释用户通常不需要在编写 Case 时了解，但维护者在修改校验、执行、持久化或报表时需要了解的行为。</p>
+<h3 id="所有权模型">所有权模型</h3>
+<pre class="hljs"><code><div>case 拥有有序阶段
+stage 定义模板选择列并拥有阶段私有数据
+当前行的选择器单元格命名要解析的模板
+template 拥有有序动作
+tool action 通过声明参数调用一个独立全局工具契约
+</div></code></pre>
+<p>持久化运行时树的权威根只有一个 <code>CASE</code>。如 <code>ACTIONS</code> 和 <code>TOOL</code> 这样的便利作用域不会创建替代持久化根。</p>
+<h3 id="校验流水线">校验流水线</h3>
+<p>ATT 会先使用 Draft 2020-12 schema，然后做语义校验。随后解析工作簿映射、选择器、模板、负载、表达式、工具、参数契约、标识符、路径和包完整性。</p>
+<p>包模式会发现配置根目录下所有内容。选中模式只校验执行所需的不可变依赖闭包。校验在外部工具或最终 run 发布前完成。</p>
+<h3 id="执行与聚合">执行与聚合</h3>
+<p>Runner 会按确定顺序规划选中的 Case，并执行阶段/模板/动作顺序。<code>onFailure</code> 控制继续，但不抑制结果严重度。聚合规则共享给所有消费者：</p>
+<pre class="hljs"><code><div>if any ERROR exists: ERROR
+else if any INVALID exists: INVALID
+else if any FAIL exists: FAIL
+else if any PASS exists: PASS
+else: SKIPPED
+</div></code></pre>
+<p>因此 PASS + SKIPPED 是 PASS，全部是 SKIPPED 时是 SKIPPED，且解析为零 Case 的选择是命令错误，而不是 SKIPPED run。</p>
+<p>报表、清单、CLI 汇总、CI JSON、JUnit XML、JUnit HTML 和进程退出码必须来自同一聚合模型。</p>
+<h3 id="原子运行生命周期">原子运行生命周期</h3>
+<p>执行前，ATT 会创建：</p>
+<pre class="hljs"><code><div>&lt;outputDirectory&gt;/.in-progress/&lt;RunID&gt;-&lt;nonce&gt;/
+</div></code></pre>
+<p>证据写入其中。所有必需输出最终化后，ATT 会原子发布为：</p>
+<pre class="hljs"><code><div>&lt;outputDirectory&gt;/&lt;RunID&gt;/
+</div></code></pre>
+<p>中断运行保留在 <code>.in-progress</code> 中，且不适用于 <code>report</code>、<code>build</code>、<code>rerun-failed</code> 或 latest-run 选择。若最终 Run ID 已存在，则发布失败。<code>latest-run.yaml</code> 只有在最终发布后才原子替换。</p>
+<h3 id="进程安全">进程安全</h3>
+<p>ATT 直接构造 argv，不使用隐式 shell。超时终止必须依据平台支持停止受管进程并保留进程证据。结构化解析器会拒绝格式错误/歧义输入以及 XML 外部资源特性。</p>
+<p>工作簿导入使用 Apache POI <code>DataFormatter</code> 处理普通单元格，刻意不创建 <code>FormulaEvaluator</code>；公式表达式而不是缓存结果进入 Context。</p>
+<h3 id="ci-与并行执行">CI 与并行执行</h3>
+<table>
+<thead>
+<tr>
+<th>并发操作</th>
+<th>契约</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>两个 run 使用相同 Run ID</td>
+<td>两者都可准备各自 <code>.in-progress</code> 目录，但只有一个可发布最终 run。后完成的发布者会失败且不会覆盖。</td>
+</tr>
+<tr>
+<td>多个 run 更新 <code>latest-run.yaml</code></td>
+<td>每个 run 先发布其最终目录；最后完成者赢得原子指针更新。完成顺序而非启动顺序决定 latest。</td>
+</tr>
+<tr>
+<td><code>build</code> 与 <code>run</code> 同时执行</td>
+<td>Build 会固定一个已完成 latest-run/manifest 对，不会归档 <code>.in-progress</code> 内容。</td>
+</tr>
+<tr>
+<td><code>report</code> 与 <code>clean</code> 同时执行</td>
+<td>此破坏性竞态不受支持。Report 会失败而不是产生部分结果；共享一个输出根时应串行化 report/archive/clean 作业。</td>
+</tr>
+</tbody>
+</table>
+<p>并行作业若需要独立运行历史、清理或 latest-run 行为，应使用不同 <code>--output-dir</code>。</p>
+<h3 id="路径与标识符安全">路径与标识符安全</h3>
+<p>已校验的 Run ID 和 Case ID 会直接映射到目录名。每次写入都要针对预期根目录进行解析、规范化、解析相关现有符号链接，并验证严格包含。逻辑 CLI 标识符从不作为任意文件系统路径接受。</p>
+<h3 id="可复现性与版本化输出">可复现性与版本化输出</h3>
+<p>完成的清单会捕获运行时身份、有效输入、哈希、选中 Case、摘要和输出路径。校验 JSON、运行清单和 CI 汇总都具有显式 <code>schemaVersion</code>。JUnit XML 受 XSD 约束。使用者应验证声明版本，而非推断结构。</p>
+<h3 id="维护者发布清单">维护者发布清单</h3>
+<ul>
+<li>运行完整自动化测试套件，并要求全部通过。</li>
+<li>对代表性包运行 <code>validate --package</code>。</li>
+<li>验证 CLI 与所有报表中的 FAIL/ERROR/INVALID 聚合与退出码。</li>
+<li>验证 JSON/XML 解析、重复 XML 子节点、属性和命名空间。</li>
+<li>验证超时和重试证据，包括耗尽重试和后续成功的情况。</li>
+<li>验证 Run ID 冲突、原子完成、latest-run 更新和中断运行。</li>
+<li>验证报表/build/clean 边界与并发命令行为。</li>
+<li>验证 schema、示例、生成文档和本手册保持一致。</li>
+</ul>
+
+</body>
+</html>

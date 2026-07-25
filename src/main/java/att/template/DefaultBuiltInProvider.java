@@ -22,28 +22,24 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.Temporal;
 import java.time.temporal.TemporalAccessor;
-import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-/** The only built-in provider registered by ATT V2.4.2. */
+/** ATT-owned in-process built-in provider. */
 public final class DefaultBuiltInProvider implements BuiltInProvider {
     private static final int MAX_TEXT_LENGTH = 10000;
     private static final int MAX_RANDOM_CHOICES = 1000;
     private static final DateTimeFormatter SYSTEM_TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.ROOT);
-    private static final Set<String> NAMES = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
-            "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
-            "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains",
-            "startswith", "endswith", "replace", "padleft", "padright", "sysdate", "systimestamp",
-            "formatdate", "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories",
-            "copyfile", "movefile", "deletefile", "randomchoice")));
+    private static final Map<String, String> ALIASES = aliases();
+    private static final Set<String> NAMES = Collections.unmodifiableSet(new LinkedHashSet<String>(ALIASES.keySet()));
 
     private final Clock clock;
     private final Random random;
@@ -66,8 +62,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
     @Override public Set<String> names() { return NAMES; }
 
     @Override public Object invoke(String name, Map<String, Object> input) {
-        String function = name.toLowerCase(Locale.ROOT);
-        if (!NAMES.contains(function)) throw new IllegalArgumentException("Unknown built-in: " + name);
+        String function = resolve(name);
 
         if ("sysdate".equals(function)) {
             return systemTime(input, "sysdate", DateTimeFormatter.ISO_LOCAL_DATE,
@@ -76,6 +71,9 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("systimestamp".equals(function)) {
             return systemTime(input, "systimestamp", SYSTEM_TIMESTAMP,
                     OffsetDateTime.ofInstant(clock.instant(), clock.getZone()));
+        }
+        if ("dbtext".equals(function)) {
+            return new DbTextResultFormatter().format(singleValue(input, "dbText"));
         }
         if (isSingleValueFunction(function)) return invokeSingleValue(function, singleValue(input, function));
         if ("concat".equals(function)) {
@@ -136,9 +134,9 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
 
     /** Validates call names/counts/styles without evaluating runtime argument values. */
     public void validateInvocation(String name, Map<String, Object> input) {
-        String function = name.toLowerCase(Locale.ROOT);
-        if (!NAMES.contains(function)) throw new IllegalArgumentException("Unknown built-in: " + name);
+        String function = resolve(name);
         if ("sysdate".equals(function) || "systimestamp".equals(function)) { require(input, function, 0, 1, "format"); return; }
+        if ("dbtext".equals(function)) { singleValue(input, "dbText"); return; }
         if (isSingleValueFunction(function)) { singleValue(input, function); return; }
         if ("concat".equals(function) || "coalesce".equals(function)) { rejectMixedArgumentStyles(input, function); return; }
         if ("randomchoice".equals(function)) {
@@ -162,6 +160,49 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("formatdate".equals(function)) { require(input, "formatDate", 2, 3, "value", "pattern", "zoneId"); return; }
         if ("dateadd".equals(function)) { require(input, "dateAdd", 3, 3, "value", "amount", "unit"); return; }
         throw new IllegalArgumentException("Unknown built-in: " + name);
+    }
+
+    private static String resolve(String name) {
+        String function = name == null ? "" : ALIASES.get(name.toLowerCase(Locale.ROOT));
+        if (function == null) throw new IllegalArgumentException("Unknown built-in: " + name);
+        return function;
+    }
+
+    private static Map<String, String> aliases() {
+        LinkedHashMap<String, String> result = new LinkedHashMap<String, String>();
+        String[] legacy = {"upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
+                "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
+                "endswith", "replace", "padleft", "padright", "sysdate", "systimestamp", "formatdate",
+                "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories", "copyfile",
+                "movefile", "deletefile", "randomchoice", "dbtext"};
+        for (String name : legacy) result.put(name, name);
+
+        alias(result, "str.upper", "upper"); alias(result, "str.lower", "lower");
+        alias(result, "str.trim", "trim"); alias(result, "str.ltrim", "ltrim");
+        alias(result, "str.rtrim", "rtrim"); alias(result, "str.length", "length");
+        alias(result, "str.concat", "concat"); alias(result, "str.substr", "substr");
+        alias(result, "str.indexof", "indexof"); alias(result, "str.contains", "contains");
+        alias(result, "str.startswith", "startswith"); alias(result, "str.endswith", "endswith");
+        alias(result, "str.replace", "replace"); alias(result, "str.lpad", "padleft");
+        alias(result, "str.rpad", "padright"); alias(result, "str.repeat", "nchar");
+
+        alias(result, "date.sysdate", "sysdate"); alias(result, "date.systimestamp", "systimestamp");
+        alias(result, "date.format", "formatdate"); alias(result, "date.add", "dateadd");
+
+        alias(result, "file.exists", "fileexists"); alias(result, "file.directoryexists", "directoryexists");
+        alias(result, "file.size", "filesize"); alias(result, "file.mkdirs", "makedirectories");
+        alias(result, "file.copy", "copyfile"); alias(result, "file.move", "movefile");
+        alias(result, "file.delete", "deletefile");
+
+        alias(result, "misc.string", "string"); alias(result, "misc.number", "number");
+        alias(result, "misc.boolean", "boolean"); alias(result, "misc.coalesce", "coalesce");
+        alias(result, "misc.nvl", "nvl"); alias(result, "misc.iif", "iif");
+        alias(result, "misc.randomchoice", "randomchoice"); alias(result, "misc.dbtext", "dbtext");
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static void alias(Map<String, String> aliases, String name, String function) {
+        aliases.put(name, function);
     }
 
     private Object systemTime(Map<String, Object> input, String function, DateTimeFormatter fallback,
@@ -495,6 +536,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("movefile".equals(function)) return "moveFile";
         if ("deletefile".equals(function)) return "deleteFile";
         if ("randomchoice".equals(function)) return "randomChoice";
+        if ("dbtext".equals(function)) return "dbText";
         return function;
     }
 

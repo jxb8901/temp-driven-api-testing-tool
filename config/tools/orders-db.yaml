@@ -7,7 +7,7 @@ tools:
   find:
     name: Find orders
     description: Find orders for one customer and status
-    call: "#{db.orders.query(sql='select order_id as ORDER_ID, status as STATUS from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    call: "#{db.orders.query(sql='select order_id as ORDER_ID, status as STATUS from orders where customer_id = ? and status = ?', params=[${input.customerId}, ${input.status}])}"
     cache:
       scope: case
     arguments:
@@ -23,7 +23,7 @@ tools:
   count:
     name: Count orders
     description: Return one typed scalar order count
-    call: "#{db.orders.scalar(sql='select count(*) as ORDER_COUNT from orders where customer_id = ?', params=[input.customerId])}"
+    call: "#{db.orders.scalar(sql='select count(*) as ORDER_COUNT from orders where customer_id = ?', params=[${input.customerId}])}"
     cache:
       scope: db
     arguments:
@@ -35,7 +35,7 @@ tools:
   findByDate:
     name: Find orders by date
     description: Query through a package-contained rendered SQL file
-    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[input.customerId, input.fromDate])}"
+    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[${input.customerId}, ${input.fromDate}])}"
     arguments:
       customerId:
         name: Customer ID
@@ -49,7 +49,7 @@ tools:
   updateStatus:
     name: Update order status
     description: Update one order; callable only as the primary call of a tool Action
-    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[input.status, input.orderId])}"
+    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[${input.status}, ${input.orderId}])}"
     arguments:
       orderId:
         name: Order ID

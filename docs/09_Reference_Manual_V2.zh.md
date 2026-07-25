@@ -1,7 +1,7 @@
-# ATT V2.6.0 中文用户手册与参考手册
+# ATT V2.6.1 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：2.6.0
+版本：2.6.1
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -455,6 +455,16 @@ logResponse:
 
 `message` 与 `file` 都支持统一的 `${...}` / `#{...}` 表达式引擎，并在 log 动作发布自身输出前进行求值。相对 `file` 路径会解析到 `${CASE.outputDirectory}` 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前 Case 日志，都会报 ERROR。
 
+若要用与 DB Action `saveAs.format: text` 相同的 SQL*Plus 风格输出打印类型化 DB 结果，可在 message 中使用纯内建函数 `dbText(...)`：
+
+```yaml
+printOrders:
+  type: log
+  message: "#{dbText(${ACTIONS.queryOrders.output.result})}"
+```
+
+`dbText(...)` 只格式化传入值，不执行 JDBC、不改变交易，也不清除 cache。也可以传入巢状只读 DB 表达式，但引用前一个 DB Action 可避免重复查询。
+
 `output.sourceFile` 记录规范化后的源路径。`output.result` 包含文件内容一次，CRLF/CR 会被归一化成 LF；当两种输入同时存在时，它包含消息、一个 LF，然后是文件内容。这个相同结果也只会在人工 Case 日志中输出一次，而不会把文件内容复制到多个证据字段。
 
 ### 3.3 工具
@@ -515,6 +525,46 @@ tools:
 ```
 
 调用方式为 `#{database.selectPayment(caseId=${CASE.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。持久化的分组证据可在 `TOOL.database.selectPayment` 下访问。
+
+以下两个参考 helper 会明确提供 pathname expansion，但不会改变普通 process-backed Tool 的契约：
+
+```yaml
+runChecks:
+  type: tool
+  call: >-
+    #{fpp.exehelper(
+        command='wc',
+        arguments=['-l', '${CASE.outputDirectory}/requests/*.xml'],
+        stdoutPath='${CASE.outputDirectory}/request-counts.txt'
+    )}
+
+findTransactions:
+  type: tool
+  call: >-
+    #{fpp.loghelper(
+        maxTidFiles=10,
+        minTidFiles=2,
+        outputPrefix='${CASE.outputDirectory}/transaction',
+        logFiles=['/var/log/payment/app*.log', '/archive/payment/app-2026-07-2?.log'],
+        keywords=[${CASE.caseId}, 'SUCCESS'],
+        recentLogCount=0,
+        sshOption='--ssh'
+    )}
+```
+
+`fpp.exehelper.arguments` 是有序 typed array；`exehelper.sh` 对每个含 `*`、`?` 或 `[` 的参数按其 filesystem working directory 展开。匹配结果使用 C locale 的 pathname 顺序，且每个匹配仍是独立 argv；路径含空格也不会再被拆分。没有匹配的 pattern 会保持为一个字面参数。Executable 名称、stdout/stderr 路径不会展开；shell variable、command substitution、pipe 和 redirection 也不会执行。
+
+`fpp.loghelper.logFiles` 与 `keywords` 是有序 typed array；每个 path／pathname pattern 会在被搜索的 host 上独立展开。只接受 regular file；相同 canonical path 只搜索一次；无匹配 pattern 会跳过并输出诊断。如果本地没有任何 pattern 匹配 regular file，调用失败。远程 host 收到的是原始 pattern，因此会按远程 filesystem 展开。
+
+启用 `--ssh` 时，可在 `tools/loghelper.sh` 配置 `SSH_SERVERS`，或通过 `LOGHELPER_SSH_SERVERS` 提供多行记录：
+
+```text
+localhost||||
+server1.example.com|appuser|22||/opt/att/tools/loghelper.sh
+server2.example.com|appuser|2222|/secure/att_ed25519|/opt/att/tools/loghelper.sh
+```
+
+每行格式为 `host|user|port|identity-file|remote-loghelper-path`。共享 server list 可以包含 `localhost`、loopback address 或当前 hostname；loghelper 会识别这是已经搜索过的本机，不会 SSH 到自身。非本机记录仍必须提供 user、正整数 port、remote helper path，以及配置时存在的 identity file。
 
 #### 数据库助手（DB helper）
 
@@ -612,7 +662,18 @@ closeOrder:
 
 `type: db` 不支持 `retry` 或 Action 级 `timeoutMs`。自动重试 update 并不安全。DB 执行成功后可使用普通 `description`、`assert` 和 `onFailure`；执行失败时不运行断言，状态保持 ERROR。
 
-DB 的 `saveAs` 使用共同 object shape，但保存的是类型化 result，而非 stdout。`path` 与 `format: json|yaml|xml` 必填，`overwrite` 默认 false。路径必须保持在 Case artifact 目录内。序列化或写文件失败也是 ERROR。
+DB 的 `saveAs` 使用共同 object shape，但保存的是类型化 result，而非 stdout。`path` 与 `format: text|json|yaml|xml` 必填，`overwrite` 默认 false，`raw` 非法。`text` 使用下述 SQL*Plus 风格。路径必须保持在 Case artifact 目录内；格式化、序列化或写文件失败都是 ERROR。
+
+查询的 text 输出保持 JDBC column-label 顺序，按 terminal display width（包括中文等全形 Unicode 字符）扩展每列；所有非空值均为数值的列右对齐，`NULL` 明确显示。末尾为 `1 row selected.` 或 `<n> rows selected.`。表头／cell 内的反斜线、控制字符与不可见 format 字符会转义，确保一条 DB row 只占一个物理行。空查询输出 `no rows selected.`；update 输出 `1 row updated.` 或 `<n> rows updated.`。编码为 UTF-8，行尾为 LF。该文本只含表格／update 摘要；若需要完整 transaction metadata，应使用 JSON、YAML 或 XML。
+
+```text
+ID    STATUS  AMOUNT
+----  ------  ------
+A100  READY    12.50
+A101  DONE         3
+
+2 rows selected.
+```
 
 ##### 渲染 SQL 与 SQL 文件
 
@@ -753,7 +814,7 @@ tools:
   find:
     name: Find orders
     description: 按客户与状态查询订单
-    call: "#{db.orders.query(sql='select order_id, status from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    call: "#{db.orders.query(sql='select order_id, status from orders where customer_id = ? and status = ?', params=[${input.customerId}, ${input.status}])}"
     cache:
       scope: case
     arguments:
@@ -763,7 +824,7 @@ tools:
   count:
     name: Count orders
     description: 返回一个 typed count
-    call: "#{db.orders.scalar(sql='select count(*) from orders where customer_id = ?', params=[input.customerId])}"
+    call: "#{db.orders.scalar(sql='select count(*) from orders where customer_id = ?', params=[${input.customerId}])}"
     cache:
       scope: db
     arguments:
@@ -772,7 +833,7 @@ tools:
   findByDate:
     name: Find orders by date
     description: 使用 package 内的 rendered SQL file
-    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[input.customerId, input.fromDate])}"
+    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[${input.customerId}, ${input.fromDate}])}"
     arguments:
       customerId: {name: Customer ID, description: 要查询的客户, required: true}
       fromDate: {name: From date, description: 包含此日期起的订单, required: true}
@@ -780,15 +841,15 @@ tools:
   updateStatus:
     name: Update order status
     description: 更新一个订单
-    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[input.status, input.orderId])}"
+    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[${input.status}, ${input.orderId}])}"
     arguments:
       orderId: {name: Order ID, description: 要更新的订单, required: true}
       status: {name: Status, description: 新状态, required: true}
 ```
 
-Tool 定义通过 typed `input.<argument>` 读取参数；也兼容 `${input.*}` 与 `TOOL.input.*`。定义内不能读取 `CASE`、`RUN`、`ACTIONS` 或 evidence root，Case 数据必须从外层调用传入。允许 pure built-in，例如 `params=[input.customerId, #{upper(input.status)}]`。不允许调用另一 configured Tool，因此不会形成 Tool dependency cycle。
+Tool 定义必须通过 `${input.<argument>}` 或 `${TOOL.input.<argument>}` 读取 typed 参数；裸 `input.*`／`TOOL.input.*` 会被拒绝。定义内不能读取 `CASE`、`RUN`、`ACTIONS` 或 evidence root，Case 数据必须从外层调用传入。允许 pure built-in，例如 `params=[${input.customerId}, #{upper(${input.status})}]`。不允许调用另一 configured Tool，因此不会形成 Tool dependency cycle。
 
-`call` 必须是一个完整 `#{...}`，目标只能是 `db.<instance>.query|scalar|update` 或一个 pure built-in。Call-backed Tool 禁止 `output`、SSH、group `script` 及参数的 `delimit|argName|argNameMode`；这些 process-only 字段会报错，不会被静默忽略。
+`call` 必须是一个完整 `#{...}`，目标只能是 `db.<instance>.query|scalar|update` 或一个 pure built-in。Call-backed Tool 禁止 `output`、SSH、group `script` 及参数的 `argName|argNameMode`；这些 process-only 字段会报错，不会被静默忽略。
 
 DB façade 的 `sqlFile` 必须是静态 package-relative 路径，例如 `sqlFile='sql/orders-by-date.sql'`；不能从 input 或表达式动态产生路径。ATT 会校验该文件，并以 `tool-sql` input 将其 SHA-256 写入 `run.yaml`，执行时再渲染文件内容。因此 package provenance 保持完整，而 SQL 内容仍可读取已声明 Tool input 与 pure built-in。
 
@@ -859,7 +920,7 @@ tools:
   normalizeStatus:
     name: Normalize status
     description: trim 后转大写
-    call: "#{upper(#{trim(input.value)})}"
+    call: "#{upper(#{trim(${input.value})})}"
     cache:
       scope: case
     arguments:
@@ -898,7 +959,7 @@ Action 保留正常 `TOOL` wrapper，含 `implementation: call`、input、typed 
 
 #### 命令处理
 
-V2.2 会把每个命令归一化为 argv 模板列表。标量命令会用旧式 token 化器处理一次。YAML 列表已经是归一化形式：每一项恰好是一个 argv 值，不再被 token 化。普通声明参数因此保持原子化，不管值中包含空格、引号、反斜杠、前导短横线还是 shell 类字符。任何带 `delimit` 的已声明参数都可能被有意扩展为零个或多个 argv 值，且一个工具中多个参数可以独立如此扩展。解析后的值不会再次被 token 化。ATT 不会调用本地 shell。
+ATT 会把每个命令归一化为 argv 模板列表。标量命令会用旧式 token 化器处理一次。YAML 列表已经是归一化形式：每一项恰好是一个 argv 值，不再被 token 化。普通声明标量参数因此保持原子化，不管值中包含空格、引号、反斜杠、前导短横线还是 shell 类字符。Tool call 传入的 typed List 只会在完整 token 占位符位置扩展为零个或多个 argv 值。解析后的值不会再次被 token 化。ATT 不会调用本地 shell。
 
 V2.3.2 会以 `${CASE.outputDirectory}` 作为当前工作目录启动每个本地工具进程。以 `./` 或 `../` 开头的已配置可执行文件仍保持 package 相对路径：ATT 会在启动前把第一个 argv 值相对于包根解析。裸可执行文件名仍使用 `PATH`。其它相对路径会被工具从 Case 输出目录解释。这使得相对工具产物成为 Case 输出的一部分，而不要求每个动作都构造绝对路径。
 
@@ -960,7 +1021,7 @@ arguments:
   reference: {name: Reference, description: Optional reference, required: false, argName: --reference}
 ```
 
-当 `reference='REF 123'` 时，逻辑 argv 的最后一部分为 `--reference`、`REF 123`；该值仍是一个原子参数。如果可选值缺失或归一化为空白，则这两个 token 都不会输出。省略 `argName` 或将 `argName: ''` 设为空，会使该参数变成位置参数：一个完整 token 占位符只输出其值，或在可选值为空白时输出空。嵌入式占位符如 `--reference=${reference}` 仍然是一个普通渲染 token，不能使用非空 `argName`。对于 delimited 值，`argNameMode` 控制名称是 `once`（向后兼容默认值，出现在整个列表前）还是 `repeat`（每个值前都重复）；对位置参数没有输出影响。
+当 `reference='REF 123'` 时，逻辑 argv 的最后一部分为 `--reference`、`REF 123`；该值仍是一个原子参数。如果可选值缺失或归一化为空白，则这两个 token 都不会输出。省略 `argName` 或将 `argName: ''` 设为空，会使该参数变成位置参数：一个完整 token 占位符只输出其值，或在可选值为空白时输出空。嵌入式占位符如 `--reference=${reference}` 仍然是一个普通渲染 token，不能接收 List。对于 typed List，`argNameMode` 控制名称是 `once`（默认值，出现在整个列表前）还是 `repeat`（每个值前都重复）；对位置参数没有输出影响。
 
 优先使用最短的声明参数占位符，如 `${keywords}`；只有在需要明确命名空间时才使用 `${input.keywords}`。两者都是大小写敏感，且必须精确匹配参数名。`${TOOL.input.keywords}` 仍然支持，但不是首选写法。工具会把原始结果写到 stdout，把诊断写到 stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。
 
@@ -1086,7 +1147,7 @@ output/<RunID>/
 
 直接从磁盘打开 `report/index.html` 即可。组按 `workbookId.groupId` 聚合；界面将 `groupId` 标记为 Sheet，因为它映射到一个物理工作簿 sheet。Case 页面中，结合 Workbook、Sheet、Status 下拉框，以及对 workbook ID、group ID、完整 Case ID 和标签的全文搜索。点击任何 Cases 表头可切换升序/降序；Duration 按数值排序。
 
-展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log` 与 `case.yaml` 的显式链接。HTML 不会内联完整的持久化 Stage/Template/Action/Tool 树；需要结构化最终运行时状态时，请打开 `case.yaml`。只有 `type: assert` 动作会计入：Expected 会按动作顺序追加每个非空最终 description 和验证时的 `expected`；Actual 会按动作顺序追加每个非空运行时 `actual`。值按动作顺序使用一个 LF 分隔非空条目。HTML 会转义并预换行，Excel 保留 LF 并使用自动换行，JSON 使用转义的 `\n`，JUnit 保留相同的换行边界。
+展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log` 与 `case.yaml` 的显式链接。Action Results 的每行独立显示 Stage、Action、Description、Status 与 Message；Description 是动作完成后的最终渲染值，并写入 `run.yaml` 与 CI JSON。HTML 不会内联完整的持久化 Stage/Template/Action/Tool 树；需要结构化最终运行时状态时，请打开 `case.yaml`。为兼容既有报表，Expected 仍按动作顺序追加 assert 的非空最终 description 与 `expected`；Actual 会按动作顺序追加每个非空运行时 `actual`。
 
 `--ci-output junit,json` 会生成 JUnit XML、JUnit HTML 和 JSON 汇总：
 
@@ -1181,7 +1242,7 @@ Messages:
 
 ### 把列表作为单独进程参数传递
 
-多个已声明工具参数可使用 `delimit`。下面示例同时展示两种 `argNameMode`：
+V2.6 调用直接传入 typed YAML array。下面示例在没有分隔符配置的情况下展示两种 `argNameMode`：
 
 ```yaml
 tools:
@@ -1196,17 +1257,17 @@ tools:
     output: yaml
     arguments:
       logFile: {name: Log File, description: Source log, required: true}
-      keywords: {name: Keywords, description: Comma-delimited values, required: true, delimit: ",", argName: --keyword, argNameMode: repeat}
-      levels: {name: Levels, description: Pipe-delimited levels, required: false, delimit: "|", argName: --levels, argNameMode: once}
+      keywords: {name: Keywords, description: Ordered keyword array, required: true, argName: --keyword, argNameMode: repeat}
+      levels: {name: Levels, description: Ordered level array, required: false, argName: --levels, argNameMode: once}
 ```
 
 ```yaml
 grepLogs:
   type: tool
-  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords='PAYMENT,POSTED', levels='ERROR|WARN')}"
+  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords=['PAYMENT', 'POSTED'], levels=['ERROR', 'WARN'])}"
 ```
 
-结果尾部逻辑 argv 为 `--keyword`、`PAYMENT`、`--keyword`、`POSTED`、`--levels`、`ERROR`、`WARN`。`repeat` 会对每个关键词重复 `--keyword`；`once` 是默认值，可以省略，它只在整个列表前发出一次 `--levels`。每个 delimited 参数都在各自的命令占位符位置独立扩展。
+结果尾部逻辑 argv 为 `--keyword`、`PAYMENT`、`--keyword`、`POSTED`、`--levels`、`ERROR`、`WARN`。`repeat` 会对每个关键词重复 `--keyword`；`once` 是默认值，可以省略，它只在整个列表前发出一次 `--levels`。每个 typed List 都在各自的完整命令占位符位置独立扩展。V2.6 schema 拒绝 `delimit`；旧 schema 只保留历史读取兼容性。
 
 #### Linux Bash 解析示例
 
@@ -1428,9 +1489,11 @@ saveAs:
 | 配置 process Tool | `raw`、`text`、`json`、`yaml`、`xml` | `raw` | raw 为精确 stdout bytes；其他格式序列化已解析 typed result |
 | `type: tool` 的主要 Java built-in | `text`、`json`、`yaml`、`xml` | `text` | built-in typed result；text 使用 UTF-8 字符串表示 |
 | 配置 call-backed Tool | `text`、`json`、`yaml`、`xml` | 无，必须明确指定 | typed result；不存在 stdout |
-| `type: db` | `json`、`yaml`、`xml` | 无，必须明确指定 | 稳定 typed DB result object |
+| `type: db` | `text`、`json`、`yaml`、`xml` | 无，必须明确指定 | text 为 SQL*Plus 风格 rows／update 行数；其他格式为稳定 typed DB result object |
 
 `raw` 仅适用于有原始 stdout 的 process Tool。configured Tool 的 `output: txt|json|yaml|xml` 继续决定 stdout 如何解析，因此也决定非 raw 格式的 typed source。
+
+Tool／built-in 的 `text` 使用 `String.valueOf(output.result)`；直接 DB Action 的 `text` 使用上述 SQL*Plus 风格 formatter。任何写入表示都不会替换 Context 中的 typed `${output.result}`。
 
 `saveAs.path` 使用 Action 前的正常 expression scope 渲染，必须得到非空安全相对路径并保持在当前 Case artifact 目录内。绝对路径、反斜线、空／`.`／`..` segment 与 containment escape 都非法。父目录按需创建。
 
@@ -1442,7 +1505,7 @@ saveAs:
 
 ### 工具契约
 
-每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode|delimit`。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
+每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode`。V2.6 不定义 `delimit`；多值直接在调用中传 typed array。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
 
 每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。
 
@@ -1459,7 +1522,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.0",
+  "attVersion": "2.6.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1499,20 +1562,14 @@ V2.4.2 使用同一个解析和渲染器来处理 `${...}` 值插值和 `#{...}`
 两种分隔符指示不同角色，而不是两套不同引擎：
 
 - `${path}` 将一个 Context 值插入周围文本，例如 `Reference=${CASE.VARS.SrcRefNo}`。
-- `#{name(arguments)}` 评估内建函数或已配置 Tool 调用。在其参数中，完整未引用的规范 Context 路径会被直接解析，例如 `#{length(CASE.VARS.SrcRefNo)}`。
+- `#{name(arguments)}` 评估内建函数或已配置 Tool 调用。Context 参数必须保留明确的 `${...}` 形式，例如 `#{length(${CASE.VARS.SrcRefNo})}`。
 - ASCII `'...'` 或 `"..."` 总是在调用内表示字面字符串，例如 `#{length('CASE.VARS.SrcRefNo')}`。
 
-优先使用不嵌套的形式：
-
-```yaml
-assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"
-description: "Reference length: #{length(CASE.VARS.SrcRefNo)}"
-```
-
-旧式嵌套形式仍然兼容，结果相同：
+即使 Context 引用位于调用内部，也必须明确写出 `${...}`：
 
 ```yaml
 assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
+description: "Reference length: #{length(${CASE.VARS.SrcRefNo})}"
 ```
 
 #### 调用参数解析规则
@@ -1520,12 +1577,11 @@ assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
 ATT 按以下顺序解析每个完整调用参数：
 
 1. 精确 `${...}` 引用会被解析为其类型化 Context 值。
-2. 未引用且以 `CASE`、`RUN`、`ACTIONS`、`TOOL`、`DB` 或动作局部 `output` 开头的规范 Case-runtime 路径会被解析为其类型化值。
-3. 精确嵌套 `#{...}` 调用会被求值，并把其类型化结果传给外层调用。
-4. ASCII 单/双引号包裹的文本是显式字符串字面量。数字和布尔字面量保留正常类型。
-5. 其他未引用 token 保留旧式字面行为，以兼容旧写法。新作者应对字符串字面量加引号，以避免歧义。
+2. 精确嵌套 `#{...}` 调用会被求值，并把其类型化结果传给外层调用。
+3. ASCII 单/双引号包裹的文本是显式字符串字面量。数字和布尔字面量保留正常类型。
+4. 其他未引用 token 是 literal；但类似 `CASE.customerId`、`ACTIONS.query.output.result` 或 `input.customerId` 的保留 Context／definition-input path 会直接报迁移错误，必须分别写成 `${CASE.customerId}`、`${ACTIONS.query.output.result}`、`${input.customerId}`。
 
-只有完整参数会执行 bare-path 解析。`prefix-CASE.caseId` 是 literal；应写成 `prefix-${CASE.caseId}` 或 `#{concat('prefix-', CASE.caseId)}`。ASCII 引号才是语法，弯引号 `“...”`／`‘...’` 会保留为普通 Unicode 字符。
+周围文字中的 Context interpolation 同样使用 `${...}`，例如 `prefix-${CASE.caseId}` 或 `#{concat('prefix-', ${CASE.caseId})}`。ASCII 引号才是语法，弯引号 `“...”`／`‘...’` 会保留为普通 Unicode 字符。
 
 可用值与可调用能力取决于表达式所在位置。普通 Case-runtime 字段可使用 built-in、配置 Tool 与只读 DB query；`report.fileNamePattern`、Tool `command` 与 DB SQL source 是受限 scope，不允许隐藏或递归 external execution。Tool/DB `saveAs.path`、DB params 在主调用前求值；DB SQL 内容只允许 Context 和 pure built-in。
 
@@ -1585,7 +1641,7 @@ CASE
 |---|---|
 | `${suiteName}` | 源工作簿 basename，去掉结尾的小写 `.xlsx` 后缀；例如 `testcase/payment_regression.xlsx` 变为 `payment_regression` |
 
-配置字符串必须引用 `suiteName`，可以是 `${suiteName}` 文本插值，也可以是内建函数的完整裸参数。合法示例包括：
+配置字符串必须显式引用 `${suiteName}`，无论它用于文本插值还是内建函数参数。call 内的裸 `suiteName` 会被拒绝。合法示例包括：
 
 ```yaml
 report:
@@ -1598,8 +1654,8 @@ report:
 fileNamePattern: "result-${suiteName}.xlsx"
 fileNamePattern: "ATT-${suiteName}-report.xlsx"
 fileNamePattern: "${suiteName}-${suiteName}.xlsx"
-fileNamePattern: "#{upper(suiteName)}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(suiteName)})}.xlsx"
+fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
 但不支持如 `${runId}`、`${workbookId}`、`${environment}`、`${CASE.caseId}` 等运行时值引用。
@@ -1637,9 +1693,76 @@ tools:
         required: true
 ```
 
+每个 YAML command list item 在 render 后仍是一个 atomic argv；值中含空格、引号或类似 shell 的字符也不会再次分词。ATT 不会启动本地 shell。
+
+#### 引号、Context value 与 atomic argv
+
+Tool call 内的引号属于 ATT expression grammar，并不是 shell quote。外层 `'...'` 或 `"..."` delimiter 在调用前会移除；另一种引号是普通字符；与 delimiter 相同的引号可用反斜线 escape。Quoted value 内嵌 `${...}` 会做 interpolation；未加引号的 canonical Context path 则直接传递 typed value。
+
+以下 Tool 会把每个输入保持为一个 argv：
+
+```yaml
+tools:
+  writeAudit:
+    name: Write audit
+    description: Write one audit message for one source file
+    command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
+    output: yaml
+    arguments:
+      message:
+        name: Message
+        description: Exact audit message
+        required: true
+      sourceFile:
+        name: Source file
+        description: File associated with the message
+        required: true
+```
+
+当 call 同时包含多层引号时，建议使用 YAML block scalar：
+
+```yaml
+singleQuote:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message="Customer O'Reilly",
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+
+doubleQuote:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message='status="READY"',
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+
+mixedQuotesAndContext:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message="O'Reilly said \"READY\" for ${CASE.caseId}",
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+```
+
+Child process 收到的三条 message 分别是 `Customer O'Reilly`、`status="READY"`，以及例如 `O'Reilly said "READY" for payment.payment.TC001`。Context value 自身包含任一种引号时，无需 caller 做 shell escaping，仍只占一个 argv。
+
+如果坚持把 call 写成单行，还需额外处理独立的 YAML escaping 层：
+
+```yaml
+call: "#{writeAudit(message='status=\"READY\"', sourceFile=${CASE.sourceFile})}"
+call: '#{writeAudit(message="O''Reilly", sourceFile=${CASE.sourceFile})}'
+```
+
+第一行是为 YAML double-quoted scalar escape 双引号；第二行是为 YAML single-quoted scalar 把 apostrophe 写成两个。之后 expression engine 才会解析所得的 `#{...}`。
+
+普通 process-backed Tool 不会让 shell 重新解释已解析输入。Context value 内的 `$HOME`、`$(date)`、`a*.xml`、`|`、`>` 与引号都按字面传递。需要 shell-like behavior 时应使用经过审查的 wrapper；随包提供的 `fpp.exehelper` 和 `fpp.loghelper` 只提供上文明确说明的 pathname expansion。
+
 ### Tool 定义中的 `call` 表达式
 
-V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value，并只允许 pure built-in 与一个主要 DB query/scalar/update。`input.customerId` 来自外层 Tool call，不是 Case 全局变量；`CASE`／`ACTIONS` 等 root 在定义中不可见。Inline SQL 与 package-contained SQL file 内容都在此 scope render，测试数据仍应放在 `params` 并使用 JDBC `?`。
+V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value，并只允许 pure built-in 与一个主要 DB query/scalar/update。`${input.customerId}` 来自外层 Tool call，不是 Case 全局变量；`CASE`／`ACTIONS` 等 root 在定义中不可见。Inline SQL 与 package-contained SQL file 内容都在此 scope render，测试数据仍应放在 `params` 并使用 JDBC `?`。
 
 ### 操作符
 
@@ -1666,44 +1789,32 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 
 ### 内建函数
 
-内建函数通过 `#{...}` 调用，表格中说明了常见函数：
+内建函数通过 `#{...}` 调用。Canonical 名称使用 framework-owned `str.*`、`date.*`、`file.*` 与 `misc.*` package；旧 flat 名称保留为兼容 alias。Tool group 同样以 `group.tool` 组成 package-like 调用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。
 
 | 函数 | 目的 | 示例 |
 |---|---|---|
-| `upper` | 转大写 | `#{upper(value=${CASE.currency})}` |
-| `lower` | 转小写 | `#{lower(value=${CASE.channel})}` |
-| `trim` | 去除首尾空白 | `#{trim(value=${CASE.reference})}` |
-| `ltrim` | 去除前导空白 | `#{ltrim(${CASE.reference})}` |
-| `rtrim` | 去除尾随空白 | `#{rtrim(${CASE.reference})}` |
-| `string` | 转文本 | `#{string(value=${CASE.amount})}` |
-| `number` | 解析并归一化数字 | `#{number(value='12.50')}` |
-| `boolean` | 转布尔值 | `#{boolean(yes)}` |
-| `length` | 返回文本长度 | `#{length(value=${CASE.reference})}` |
-| `concat` | 拼接参数 | `#{concat(a='PAY-', b=${CASE.caseId})}` |
-| `coalesce` | 返回第一个非空值 | `#{coalesce(${CASE.optional}, 'N/A')}` |
-| `nvl` | 对 null/empty 返回默认值 | `#{nvl(${CASE.optional}, 'N/A')}` |
-| `iif` | 从布尔值选择两个值之一 | `#{iif(${CASE.enabled}, 'Y', 'N')}` |
-| `nchar` | 重复值 | `#{nchar(3, '9')}` |
-| `substr` | 截取子串 | `#{substr(${CASE.reference}, 0, 8)}` |
-| `indexOf` | 返回位置 | `#{indexOf(${CASE.reference}, '-')}` |
-| `contains` | 测试子串包含 | `#{contains(${CASE.message}, 'SUCCESS')}` |
-| `startsWith` | 测试前缀 | `#{startsWith(${CASE.reference}, 'PAY')}` |
-| `endsWith` | 测试后缀 | `#{endsWith(${CASE.fileName}, '.xml')}` |
-| `replace` | 字面替换 | `#{replace(${CASE.reference}, '-', '')}` |
-| `padLeft` | 左填充 | `#{padLeft(${CASE.sequence}, 8, '0')}` |
-| `padRight` | 右填充 | `#{padRight(${CASE.code}, 5, '_')}` |
-| `sysdate` | 返回系统日期 | `#{sysdate('yyyyMMdd')}` |
-| `systimestamp` | 返回系统时间戳 | `#{systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
-| `formatDate` | 格式化 ISO 日期 | `#{formatDate(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
-| `dateAdd` | 日期增减 | `#{dateAdd(${CASE.businessDate}, 1, 'day')}` |
-| `fileExists` | 测试常规文件是否存在 | `#{fileExists(${CASE.requestFile})}` |
-| `directoryExists` | 测试目录是否存在 | `#{directoryExists(${CASE.outputDirectory})}` |
-| `fileSize` | 返回常规文件大小 | `#{fileSize(${CASE.requestFile})}` |
-| `makeDirectories` | 创建目录树 | `#{makeDirectories(${CASE.archiveDirectory})}` |
-| `copyFile` | 复制文件 | `#{copyFile(${CASE.requestFile}, ${CASE.backupFile}, true)}` |
-| `moveFile` | 移动文件 | `#{moveFile(${CASE.sourceFile}, ${CASE.targetFile})}` |
-| `deleteFile` | 删除文件 | `#{deleteFile(${CASE.temporaryFile}, true)}` |
-| `randomChoice` | 从输入中随机选择 | `#{randomChoice('A', 'B', 'C')}` |
+| `str.upper/lower/trim` | 大小写与首尾空白处理 | `#{str.upper(value=${CASE.currency})}` |
+| `str.ltrim/rtrim` | 去除前导／尾随空白 | `#{str.ltrim(${CASE.reference})}` |
+| `str.length` | 返回文本长度 | `#{str.length(value=${CASE.reference})}` |
+| `str.concat` | 拼接参数 | `#{str.concat(a='PAY-', b=${CASE.caseId})}` |
+| `str.substr/indexOf` | 截取子串／返回位置 | `#{str.substr(${CASE.reference}, 0, 8)}` |
+| `str.contains/startsWith/endsWith` | 测试字面包含、前缀、后缀 | `#{str.contains(${CASE.message}, 'SUCCESS')}` |
+| `str.replace` | 字面替换 | `#{str.replace(${CASE.reference}, '-', '')}` |
+| `str.lpad/rpad` | 左／右填充 | `#{str.lpad(${CASE.sequence}, 8, '0')}` |
+| `str.repeat` | 重复值 | `#{str.repeat(3, '9')}` |
+| `date.sysdate/systimestamp` | 返回系统日期／时间戳 | `#{date.sysdate('yyyyMMdd')}` |
+| `date.format` | 格式化 ISO 日期 | `#{date.format(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
+| `date.add` | 日期增减 | `#{date.add(${CASE.businessDate}, 1, 'day')}` |
+| `file.exists/directoryExists` | 测试常规文件／目录 | `#{file.exists(${CASE.requestFile})}` |
+| `file.size/mkdirs` | 返回文件大小／创建目录树 | `#{file.size(${CASE.requestFile})}` |
+| `file.copy/move/delete` | 复制、移动、删除文件 | `#{file.move(${CASE.sourceFile}, ${CASE.targetFile})}` |
+| `misc.string/number/boolean` | 类型转换与归一化 | `#{misc.number(value='12.50')}` |
+| `misc.coalesce/nvl` | 返回非空值或默认值 | `#{misc.nvl(${CASE.optional}, 'N/A')}` |
+| `misc.iif` | 从布尔值选择两个值之一 | `#{misc.iif(${CASE.enabled}, 'Y', 'N')}` |
+| `misc.randomChoice` | 从输入中随机选择 | `#{misc.randomChoice('A', 'B', 'C')}` |
+| `misc.dbText` | 将稳定 typed DB result 格式化为 SQL*Plus 风格文字 | `#{misc.dbText(${ACTIONS.queryOrders.output.result})}` |
+
+`misc.dbText` 只接受一个位置参数或具名 `value`。参数必须是直接 DB Action、DB expression 或 DB-backed Tool 返回的稳定 query／update result。它与直接 DB Action 的 `saveAs.format: text` 共用同一个确定性 formatter，并且没有 JDBC、transaction、connection 或 cache side effect。
 
 ## 08 报表参考
 
@@ -1727,7 +1838,7 @@ Run ID 和 Case ID 在校验后保持原样。最终 run 目录表示已完成�
 
 `report/index.html` 是主要终端用户报表。可以直接从磁盘打开。组按 `workbookId.groupId` 汇总；界面把 `groupId` 标记为 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、对 workbook/group/full Case ID/tag 的大小写不敏感搜索，以及每列标题的升序/降序排序。Duration 按数值排序。
 
-展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log`/`case.yaml` 的显式链接。Expected 是所有 assert 动作的非空最终 description 和验证时 `expected` 的有序 LF 联接；Actual 是所有非空运行时 `actual` 的有序 LF 联接。详细日志显示按时间顺序的执行证据；`case.yaml` 存储完整结构化最终 Stage/Template/Action/Tool 状态。
+展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log`/`case.yaml` 的显式链接。Action Results 每行独立显示最终渲染的 Description，并写入 `run.yaml` 与 CI JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 description 与 `expected` 的有序 LF 联接；Actual 是所有非空运行时 `actual` 的有序 LF 联接。
 
 ### 结果工作簿
 
@@ -1817,9 +1928,9 @@ ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空
 
 不能。ATT 会把 `|`、`>`、`<` 按字面值传递。把 shell 行为放到审查过的工具脚本中。
 
-#### 为什么必需的 delimited 参数会拒绝 `N/A`？
+#### 为什么必需的 array 参数会拒绝 `[]`？
 
-必需项验证发生在数组扩展之前。`N/A` 会归一化为空白，所以必需输入被视为缺失。
+必需项验证发生在 argv 扩展之前。空 typed List 被视为缺失；请至少传入一个标量 item，或将参数设为 optional。
 
 #### 我应该使用包校验还是选中校验？
 

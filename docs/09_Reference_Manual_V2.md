@@ -1,7 +1,7 @@
-# ATT V2.6.0 User Manual and Reference
+# ATT V2.6.1 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.6.0
+Version: 2.6.1
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -453,6 +453,16 @@ logResponse:
 
 Both `message` and `file` support the unified `${...}` / `#{...}` expression engine and are evaluated before the log action publishes its own output. A relative `file` path resolves below `${CASE.outputDirectory}`; an absolute path is accepted only when its resolved real path is still below that directory. The source must be an existing regular non-symlink UTF-8 file. Path/symlink escapes, malformed UTF-8, blank resolved paths, and attempts to read the current Case log are ERROR.
 
+To print a typed DB result using the same SQL*Plus-style text as DB Action `saveAs.format: text`, format it in the message with the pure `dbText(...)` built-in:
+
+```yaml
+printOrders:
+  type: log
+  message: "#{dbText(${ACTIONS.queryOrders.output.result})}"
+```
+
+`dbText(...)` only formats its argument; it does not execute JDBC, change a transaction, or invalidate a cache. A nested read-only DB expression is also valid, but referencing a preceding DB Action avoids executing the query twice.
+
 `output.sourceFile` records the canonical source path. `output.result` contains the file text once, with CRLF/CR normalized to LF; when both inputs are present, it contains the message, one LF, then the file content. This same result is emitted once in the human Case log rather than copying the file into multiple evidence fields.
 
 ### 3.3 Tool
@@ -517,8 +527,48 @@ Call it as `#{database.selectPayment(caseId=${CASE.caseId})}`. With `script`, lo
 ```text
 #{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
 #{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
-#{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
+#{fpp.exehelper(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
+
+The two reference helpers below deliberately add pathname expansion without changing the normal process-backed Tool contract:
+
+```yaml
+runChecks:
+  type: tool
+  call: >-
+    #{fpp.exehelper(
+        command='wc',
+        arguments=['-l', '${CASE.outputDirectory}/requests/*.xml'],
+        stdoutPath='${CASE.outputDirectory}/request-counts.txt'
+    )}
+
+findTransactions:
+  type: tool
+  call: >-
+    #{fpp.loghelper(
+        maxTidFiles=10,
+        minTidFiles=2,
+        outputPrefix='${CASE.outputDirectory}/transaction',
+        logFiles=['/var/log/payment/app*.log', '/archive/payment/app-2026-07-2?.log'],
+        keywords=[${CASE.caseId}, 'SUCCESS'],
+        recentLogCount=0,
+        sshOption='--ssh'
+    )}
+```
+
+`fpp.exehelper.arguments` is an ordered typed array. `exehelper.sh` expands each argument containing `*`, `?`, or `[` against its filesystem working directory. Matches use C-locale pathname order and remain separate atomic argv values, including paths containing spaces. An unmatched pattern remains one literal argument. The executable name and stdout/stderr paths are not expanded, and no shell syntax, command substitution, variable expansion, pipe, or redirection is evaluated.
+
+`fpp.loghelper.logFiles` and `keywords` are ordered typed arrays; each path or pathname pattern is expanded independently on the host being searched. Only regular files are accepted, duplicate canonical paths are searched once, and unmatched patterns are skipped with a diagnostic. The call fails when no local pattern resolves to a regular file. Remote hosts receive the original patterns so that expansion uses the remote filesystem.
+
+When `--ssh` is enabled, configure `tools/loghelper.sh` with `SSH_SERVERS`, or provide `LOGHELPER_SSH_SERVERS` as newline-separated records:
+
+```text
+localhost||||
+server1.example.com|appuser|22||/opt/att/tools/loghelper.sh
+server2.example.com|appuser|2222|/secure/att_ed25519|/opt/att/tools/loghelper.sh
+```
+
+Each record is `host|user|port|identity-file|remote-loghelper-path`. A shared list may include `localhost`, a loopback address, or the current hostname; loghelper recognizes that entry as the already-searched local host and does not SSH to itself. Non-local entries still require a user, positive port, remote helper path, and any configured identity file.
 
 #### Database helpers
 
@@ -627,7 +677,18 @@ Exactly one of `query` or `update` is required. Its block requires exactly one o
 
 `retry` and Action-level `timeoutMs` are invalid for `type: db`. Automatic SQL retry is unsafe for updates. A DB Action otherwise uses the normal `description`, `assert`, and `onFailure` contract. Assertions run only after successful DB execution. DB errors remain `ERROR` and cannot be downgraded by an assertion.
 
-DB `saveAs` uses the common Tool/DB object shape but serializes the typed result rather than stdout. It requires `path` and `format: json|yaml|xml`; `overwrite` defaults to false. `raw` and `text` are invalid for DB actions. The path must stay under the Case artifact directory. Serialization or writing failure is `ERROR`.
+DB `saveAs` uses the common Tool/DB object shape but serializes the typed result rather than stdout. It requires `path` and `format: text|json|yaml|xml`; `overwrite` defaults to false and `raw` is invalid. `text` produces the SQL*Plus-style representation described below. The path must stay under the Case artifact directory. Formatting, serialization, or writing failure is `ERROR`.
+
+For a query, text output uses JDBC column-label order, expands each column to its widest terminal display width (including wide Unicode characters), right-aligns columns whose non-null values are all numeric, prints `NULL` explicitly, and ends with `1 row selected.` or `<n> rows selected.`. Backslashes, control characters, and non-printing format characters inside a header/cell are escaped so one DB row remains one physical line. An empty query is `no rows selected.`. An update is `1 row updated.` or `<n> rows updated.`. Output is UTF-8 with LF line endings. This representation contains table/update content rather than transaction metadata; use JSON, YAML, or XML when the complete stable result object is required.
+
+```text
+ID    STATUS  AMOUNT
+----  ------  ------
+A100  READY    12.50
+A101  DONE         3
+
+2 rows selected.
+```
 
 ##### Rendered SQL and SQL files
 
@@ -769,7 +830,7 @@ tools:
   find:
     name: Find orders
     description: Find orders by customer and status
-    call: "#{db.orders.query(sql='select order_id, status from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    call: "#{db.orders.query(sql='select order_id, status from orders where customer_id = ? and status = ?', params=[${input.customerId}, ${input.status}])}"
     cache:
       scope: case
     arguments:
@@ -779,7 +840,7 @@ tools:
   count:
     name: Count orders
     description: Return one typed count
-    call: "#{db.orders.scalar(sql='select count(*) from orders where customer_id = ?', params=[input.customerId])}"
+    call: "#{db.orders.scalar(sql='select count(*) from orders where customer_id = ?', params=[${input.customerId}])}"
     cache:
       scope: db
     arguments:
@@ -788,7 +849,7 @@ tools:
   findByDate:
     name: Find orders by date
     description: Use a package-contained rendered SQL file
-    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[input.customerId, input.fromDate])}"
+    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[${input.customerId}, ${input.fromDate}])}"
     arguments:
       customerId: {name: Customer ID, description: Customer to query, required: true}
       fromDate: {name: From date, description: Inclusive lower bound, required: true}
@@ -796,15 +857,15 @@ tools:
   updateStatus:
     name: Update order status
     description: Update one order
-    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[input.status, input.orderId])}"
+    call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[${input.status}, ${input.orderId}])}"
     arguments:
       orderId: {name: Order ID, description: Order to update, required: true}
       status: {name: Status, description: New status, required: true}
 ```
 
-The definition uses typed `input.<argument>` values. `${input.customerId}` and `TOOL.input.*` are supported, but `CASE`, `RUN`, `ACTIONS`, `DB`, and configured Tool chaining are not. Case data must enter through the outer Tool call. Pure built-ins are allowed inside the definition, for example `params=[input.customerId, #{upper(input.status)}]`.
+The definition reads typed values through `${input.<argument>}` or `${TOOL.input.<argument>}`. Bare input paths are rejected. `CASE`, `RUN`, `ACTIONS`, `DB`, and configured Tool chaining are not available. Case data must enter through the outer Tool call. Pure built-ins are allowed inside the definition, for example `params=[${input.customerId}, #{upper(${input.status})}]`.
 
-The `call` value must be one exact `#{...}` expression targeting `db.<instance>.query`, `scalar`, `update`, or one pure built-in. A call-backed Tool cannot configure `output`, SSH, group `script`, or argument `delimit|argName|argNameMode`; those fields describe process execution and are rejected rather than ignored.
+The `call` value must be one exact `#{...}` expression targeting `db.<instance>.query`, `scalar`, `update`, or one pure built-in. A call-backed Tool cannot configure `output`, SSH, group `script`, or argument `argName|argNameMode`; those fields describe process execution and are rejected rather than ignored.
 
 For a DB façade, `sqlFile` must be a static package-relative path, for example `sqlFile='sql/orders-by-date.sql'`; an input- or expression-derived path is invalid. ATT validates the file, includes its SHA-256 in `run.yaml` as a `tool-sql` input, and renders the file contents at invocation time. This keeps package provenance complete while still allowing declared Tool inputs and pure built-ins inside the SQL text.
 
@@ -880,7 +941,7 @@ tools:
   normalizeStatus:
     name: Normalize status
     description: Trim and uppercase a status
-    call: "#{upper(#{trim(input.value)})}"
+    call: "#{upper(#{trim(${input.value})})}"
     cache:
       scope: case
     arguments:
@@ -927,7 +988,7 @@ The complete normative contract is [V2.6 Call-backed Tool System Design](02_Syst
 
 #### Command processing
 
-V2.2 normalizes every command to an argv template list. A scalar command is tokenized once with the legacy tokenizer. A YAML list is already normalized: each item is exactly one argv value and is never tokenized. An ordinary declared argument therefore remains atomic regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. Any declared argument with `delimit` may intentionally expand into zero or more argv values, and multiple arguments in one tool may do so independently. Resolved values are never tokenized again. ATT does not invoke a local shell.
+ATT normalizes every command to an argv template list. A scalar command is tokenized once with the legacy tokenizer. A YAML list is already normalized: each item is exactly one argv value and is never tokenized. An ordinary declared scalar argument therefore remains atomic regardless of spaces, quotes, backslashes, leading dashes, or shell-like characters in its value. A typed List supplied by a Tool call expands into zero or more argv values only at an exact complete-token placeholder. Resolved values are never tokenized again. ATT does not invoke a local shell.
 
 V2.3.2 starts every local tool process with `${CASE.outputDirectory}` as its current working directory. A configured executable beginning with `./` or `../` remains package-relative: ATT resolves that first argv value against the package root before launch. A bare executable name still uses `PATH`. All other relative argv paths are intentionally interpreted by the tool from the Case output directory. This makes relative tool artifacts part of the Case output without requiring every action to build an absolute path.
 
@@ -987,7 +1048,7 @@ arguments:
   reference: {name: Reference, description: Optional reference, required: false, argName: --reference}
 ```
 
-With `reference='REF 123'`, the final portion of logical argv is `--reference`, `REF 123`; the value remains one atomic argument. If the optional value is missing or normalizes to blank, neither token is emitted. Omitting `argName` or setting `argName: ''` makes the argument positional: an exact-token placeholder emits only its value, or emits no argv when the optional value is blank. An embedded placeholder such as `--reference=${reference}` remains one ordinary rendered token and cannot use a non-empty `argName`. For delimited values, `argNameMode` controls whether the name is emitted `once` (the backward-compatible default) before the complete list or `repeat` before every value; it has no output effect for positional arguments.
+With `reference='REF 123'`, the final portion of logical argv is `--reference`, `REF 123`; the value remains one atomic argument. If the optional value is missing or normalizes to blank, neither token is emitted. Omitting `argName` or setting `argName: ''` makes the argument positional: an exact-token placeholder emits only its value, or emits no argv when the optional value is blank. An embedded placeholder such as `--reference=${reference}` remains one ordinary rendered token and cannot receive a List. For typed List values, `argNameMode` controls whether the name is emitted `once` (the default) before the complete list or `repeat` before every value; it has no output effect for positional arguments.
 
 Prefer the shortest declared-argument placeholder, such as `${keywords}`; use `${input.keywords}` when an explicit namespace improves clarity. Both forms are case-sensitive and must exactly match the argument key. `${TOOL.input.keywords}` remains supported but is not the preferred authoring style. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
 
@@ -1113,7 +1174,7 @@ output/<RunID>/
 
 Open `report/index.html` directly from disk. Groups are aggregated by `workbookId.groupId`; the UI labels the logical group as Sheet because it maps to a physical workbook sheet. In Cases, combine Workbook, Sheet, and Status selectors with text search over workbook ID, group ID, full Case ID, and tags. Click any Cases heading to toggle ascending/descending sorting; Duration sorts numerically.
 
-Each expanded case shows its full Case ID, name, status, duration, Expected and Actual results, action-result rows, the detailed execution log, and explicit links to the `.log` and structured `case.yaml` artifacts. The HTML does not duplicate the complete persisted Stage/Template/Action/Tool/DB tree inline; open `case.yaml` when the structured final runtime state is required. Only `type: assert` actions contribute: Expected appends each non-blank final description and validation-time `expected`; Actual appends each non-blank runtime `actual`. Values follow action order and use exactly one LF between non-blank entries. HTML escapes and pre-wraps the text, Excel preserves LF with wrapping, JSON uses escaped `\n`, and JUnit retains the same line boundaries.
+Each expanded case shows its full Case ID, name, status, duration, Expected and Actual results, action-result rows, the detailed execution log, and explicit links to the `.log` and structured `case.yaml` artifacts. The HTML does not duplicate the complete persisted Stage/Template/Action/Tool/DB tree inline; open `case.yaml` when the structured final runtime state is required. Action rows expose final Description independently. Only `type: assert` actions contribute to case Expected/Actual: Expected appends each non-blank final description and validation-time `expected`, while Actual appends each non-blank runtime `actual`. Values follow action order and use exactly one LF between non-blank entries. HTML escapes and pre-wraps the text, Excel preserves LF with wrapping, JSON uses escaped `\n`, and JUnit retains the same line boundaries.
 
 `--ci-output junit,json` requests JUnit XML, JUnit HTML, and JSON summary:
 
@@ -1230,7 +1291,7 @@ A leaf without attributes becomes `ElementName: text`. Any element with attribut
 
 ### Pass a list as separate process arguments
 
-Multiple declared tool arguments may use `delimit`. The following example also shows both `argNameMode` values:
+V2.6 call sites pass typed YAML arrays directly. The following example shows both `argNameMode` values without separator configuration:
 
 ```yaml
 tools:
@@ -1245,17 +1306,17 @@ tools:
     output: yaml
     arguments:
       logFile: {name: Log File, description: Source log, required: true}
-      keywords: {name: Keywords, description: Comma-delimited values, required: true, delimit: ",", argName: --keyword, argNameMode: repeat}
-      levels: {name: Levels, description: Pipe-delimited levels, required: false, delimit: "|", argName: --levels, argNameMode: once}
+      keywords: {name: Keywords, description: Ordered keyword array, required: true, argName: --keyword, argNameMode: repeat}
+      levels: {name: Levels, description: Ordered level array, required: false, argName: --levels, argNameMode: once}
 ```
 
 ```yaml
 grepLogs:
   type: tool
-  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords='PAYMENT,POSTED', levels='ERROR|WARN')}"
+  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords=['PAYMENT', 'POSTED'], levels=['ERROR', 'WARN'])}"
 ```
 
-The resulting tail of logical argv is `--keyword`, `PAYMENT`, `--keyword`, `POSTED`, `--levels`, `ERROR`, `WARN`. Explicit `repeat` repeats `--keyword` for every keyword. `once` is the default and may be omitted; it emits `--levels` only once before the complete levels list. Each delimited argument expands independently at its own command-placeholder position.
+The resulting tail of logical argv is `--keyword`, `PAYMENT`, `--keyword`, `POSTED`, `--levels`, `ERROR`, `WARN`. Explicit `repeat` repeats `--keyword` for every keyword. `once` is the default and may be omitted; it emits `--levels` only once before the complete levels list. Each typed List expands independently at its own command-placeholder position.
 
 #### Linux Bash parsing examples
 
@@ -1315,7 +1376,7 @@ done
 
 Given `--levels ERROR WARN`, the array contains `ERROR` and `WARN`. If a `once` list is not last, the script needs an unambiguous boundary defined by its own protocol, such as a fixed item count or an explicit terminator argument. Do not infer the boundary merely from the next value beginning with `--`: ATT preserves leading dashes as data, so a legitimate list value may also begin with `--`. Use `repeat` when each option-value pair must be independently parseable.
 
-Surrounding whitespace is trimmed; empty middle elements are preserved; blank markers produce an empty array. A required blank value fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. Every delimited placeholder must occupy one complete static command token; quoting it in the template is allowed but unnecessary because static tokenization happens before value expansion. An empty optional list emits neither its `argName` nor values.
+String items are normalized individually; blank markers become empty strings, while an explicitly empty array remains empty. A required empty List fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. Every List placeholder must occupy one complete static command token. Nested Lists and maps are rejected as argv items. An empty optional List emits neither its `argName` nor values. Current `att-config/v2.6` and `att-tool-group/v2.6` schemas reject `delimit`; legacy configuration schemas retain their historical split behavior only for read compatibility.
 
 ### Retry selected exit codes
 
@@ -1510,7 +1571,7 @@ Allowed global object properties are:
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 | `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; process Tools may use `output`, call-backed Tools may use `cache`; `x-*` |
 | call-backed `tools.<key>.cache` | required `scope: case|db` |
-| `arguments.<key>` | `name`, `description`, `required`, `argName`, `argNameMode`, `delimit`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, `argName`, `argNameMode`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
@@ -1619,9 +1680,9 @@ callApi:
 | configured process Tool | `raw`, `text`, `json`, `yaml`, `xml` | `raw` | exact stdout bytes for `raw`; parsed typed `output.result` otherwise |
 | primary built-in called by `type: tool` | `text`, `json`, `yaml`, `xml` | `text` | typed `output.result` |
 | configured call-backed Tool | `text`, `json`, `yaml`, `xml` | none; required | typed `output.result`; no stdout exists |
-| `type: db` | `json`, `yaml`, `xml` | none; required | stable typed DB result |
+| `type: db` | `text`, `json`, `yaml`, `xml` | none; required | SQL*Plus-style rows/update count for `text`; stable typed DB result otherwise |
 
-For a configured Tool, `raw` writes stdout exactly as produced by the process, including any final line ending; it is not the trimmed `rawOutput` string or parsed `output.result`. A built-in and DB action have no process stdout, so `raw` is invalid. `text` writes `String.valueOf(output.result)` as UTF-8. `json`, `yaml`, and `xml` serialize the typed result using the selected codec and never serialize raw process stdout. Serialization does not replace the typed Context value.
+For a configured Tool, `raw` writes stdout exactly as produced by the process, including any final line ending; it is not the trimmed `rawOutput` string or parsed `output.result`. A built-in and DB action have no process stdout, so `raw` is invalid. For Tool/built-in targets, `text` writes `String.valueOf(output.result)` as UTF-8; for a direct DB Action it uses the SQL*Plus-style formatter above. `json`, `yaml`, and `xml` serialize the typed result using the selected codec and never serialize raw process stdout. Serialization does not replace the typed Context value.
 
 ATT resolves the path below the current Case artifact directory, normally alongside `case.log` under `output/<RunID>/<CaseID>/`. Parent directories such as `responses/` are created. The saved path appears in the Action's `output.targetFiles`; configured Tool attempt evidence also records it as `outputFile`. Without `saveAs`, ATT creates no separate output file.
 
@@ -1654,12 +1715,12 @@ DB therefore uses the same shape without pretending it has process output:
 
 ```yaml
 saveAs:
-  path: "db/${CASE.rowCaseId}-orders.json"
-  format: json
+  path: "db/${CASE.rowCaseId}-orders.txt"
+  format: text
   overwrite: false
 ```
 
-`path` and `format` are required for DB; format is `json`, `yaml`, or `xml`. The serialized representation never replaces `${output.result}`'s typed Java object.
+`path` and `format` are required for DB; format is `text`, `json`, `yaml`, or `xml`. The written representation never replaces `${output.result}`'s typed Java object.
 
 `att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.5` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
 
@@ -1667,11 +1728,11 @@ saveAs:
 
 Each Tool requires `name`, `description`, and exactly one of `command` or `call`. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
 
-Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`. Any number of command arguments may define `delimit`, and each delimited placeholder must occupy one complete command token. These three argv properties are invalid for call-backed arguments.
+Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`; it controls a typed List supplied at the call site. These two argv properties are invalid for call-backed arguments. V2.6 does not define `delimit`.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
-A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Group calls use `group.tool`; inline global calls remain unqualified. Built-in names are reserved only in the global namespace.
+A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
 
 ### Identifier and path constraints
 
@@ -1686,7 +1747,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.0",
+  "attVersion": "2.6.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1728,20 +1789,14 @@ V2.4.2 uses one parser and renderer for `${...}` value interpolation and `#{...}
 The two delimiters identify different expression roles rather than two separate engines:
 
 - `${path}` inserts one Context value into surrounding text, for example `Reference=${CASE.VARS.SrcRefNo}`.
-- `#{name(arguments)}` evaluates a built-in or configured Tool call. Inside its arguments, a complete unquoted canonical Context path is resolved directly, for example `#{length(CASE.VARS.SrcRefNo)}`.
+- `#{name(arguments)}` evaluates a built-in or configured Tool call. Context arguments must retain the explicit `${...}` form, for example `#{length(${CASE.VARS.SrcRefNo})}`.
 - ASCII `'...'` or `"..."` always denotes a literal string inside a call, for example `#{length('CASE.VARS.SrcRefNo')}`.
 
-The preferred V2.4.2 form therefore avoids nested delimiters:
-
-```yaml
-assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"
-description: "Reference length: #{length(CASE.VARS.SrcRefNo)}"
-```
-
-The older nested form remains fully supported for compatibility and produces the same value:
+Context references remain explicit even when nested inside a call:
 
 ```yaml
 assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
+description: "Reference length: #{length(${CASE.VARS.SrcRefNo})}"
 ```
 
 #### Call-argument resolution rules
@@ -1749,23 +1804,21 @@ assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
 ATT resolves each complete call argument in this order:
 
 1. An exact `${...}` reference is resolved as its typed Context value.
-2. An unquoted canonical Case-runtime path beginning with `CASE`, `RUN`, `ACTIONS`, `TOOL`, `DB`, or action-local `output` is resolved as its typed Context value.
-3. An exact nested `#{...}` call is evaluated and its typed result is passed to the outer call.
-4. ASCII single- or double-quoted text is an explicit string literal. Numeric and boolean literals retain their normal types.
-5. Other unquoted tokens retain the legacy literal behaviour for backward compatibility. Authors should quote new literal strings so their intent remains unambiguous.
+2. An exact nested `#{...}` call is evaluated and its typed result is passed to the outer call.
+3. ASCII single- or double-quoted text is an explicit string literal. Numeric and boolean literals retain their normal types.
+4. Other unquoted tokens are literal values. However, unquoted tokens that look like reserved Context or definition-input paths, such as `CASE.customerId`, `ACTIONS.query.output.result`, or `input.customerId`, are rejected with a migration error; write `${CASE.customerId}`, `${ACTIONS.query.output.result}`, or `${input.customerId}`.
 
-Only complete arguments receive bare-path resolution. `prefix-CASE.caseId` is literal text, not interpolation; write `prefix-${CASE.caseId}` or `#{concat('prefix-', CASE.caseId)}`. Unique-suffix Context lookup also remains `${...}` syntax: use `${SrcRefNo}` when the shorthand is unambiguous, while the bare expression form should use the canonical `CASE.VARS.SrcRefNo` path.
+Context interpolation within surrounding text also uses `${...}`: write `prefix-${CASE.caseId}` or `#{concat('prefix-', ${CASE.caseId})}`. Unique-suffix lookup remains available only inside `${...}`, although canonical paths such as `${CASE.VARS.SrcRefNo}` are preferred.
 
 Quotation marks must be the ASCII characters `'` or `"`. Typographic quotes such as `“...”` and `‘...’` are ordinary Unicode characters and remain part of the literal token. For example:
 
 | Expression | Value passed to `length` | Result |
 |---|---|---:|
-| `#{length(value=CASE.VARS.SrcRefNo)}` | Actual value of the canonical Context path | Length of the runtime value |
-| `#{length(value=${CASE.VARS.SrcRefNo})}` | Same actual Context value; compatibility form | Length of the runtime value |
+| `#{length(value=${CASE.VARS.SrcRefNo})}` | Actual value of the canonical Context path | Length of the runtime value |
 | `#{length(value="CASE.VARS.SrcRefNo")}` | Literal `CASE.VARS.SrcRefNo` | `18` |
 | `#{length(value=“CASE.VARS.SrcRefNo”)}` | Literal including both typographic quote characters | `20` |
 
-Calls may be nested without returning to `${...}`, for example `#{upper(#{trim(CASE.name)})}`. Context paths and exact nested calls retain typed values; they are not converted to text until the receiving built-in/Tool or surrounding template requires text.
+Calls may be nested, for example `#{upper(#{trim(${CASE.name})})}`. Context references still require `${...}`; Context paths and exact nested calls retain typed values until the receiving built-in/Tool or surrounding template requires text.
 
 The available values and callable capabilities still depend on the location's scope:
 
@@ -1782,16 +1835,16 @@ The available values and callable capabilities still depend on the location's sc
 | Tool/DB-action `saveAs.path` | Runtime Context before current output | Yes | Yes | Yes | Before the primary Tool/JDBC invocation |
 | DB-action `query/update.params` | Runtime Context before current output | Yes | Yes | Yes | Before primary JDBC binding |
 | DB-action `query/update.sql` or `sqlFile` content | Runtime Context before current output | Pure built-ins only | No | No | Before JDBC prepare |
-| `config.report.fileNamePattern` | `${suiteName}` or bare `suiteName` inside a call | Yes | No | No | When writing the result workbook |
-| Tool-definition `command` tokens | declared Tool-input aliases, including bare arguments inside a call | Yes | No | No | When constructing logical argv |
-| Tool-definition `call` | declared typed `input.*` only | Pure built-ins | No configured Tool chaining | One primary DB query/scalar/update | When invoking the façade |
+| `config.report.fileNamePattern` | `${suiteName}` | Yes | No | No | When writing the result workbook |
+| Tool-definition `command` tokens | declared Tool-input `${...}` aliases | Yes | No | No | When constructing logical argv |
+| Tool-definition `call` | declared typed `${input.*}` only | Pure built-ins | No configured Tool chaining | One primary DB query/scalar/update | When invoking the façade |
 
 For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in-process and publishes its value at `${output.result}`; it has `exitCode: 0`, supports the action's assertion and optional `saveAs`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. `timeoutMs` cannot pre-empt an in-process built-in, and `EXIT_CODE` retry does not repeat its successful zero-exit result. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
 
 ```yaml
 normalizeReference:
   type: tool
-  call: "#{upper(CASE.reference)}"
+  call: "#{upper(${CASE.reference})}"
   saveAs:
     path: "normalized-reference.txt"
     format: text
@@ -1801,7 +1854,7 @@ normalizeReference:
 `#{...}` is not restricted to text replacement. An exact nested call argument retains its typed result, and assertion calls are evaluated before comparison parsing. Therefore this is valid:
 
 ```yaml
-assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"
+assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
 ```
 
 ATT first evaluates `length`, producing an expression such as `28 <= 35`, then applies the assertion operators documented below. A configured Tool or DB query called from a Case-runtime field is a real external invocation and produces evidence; do not use either merely for formatting when a built-in or existing Context value is sufficient.
@@ -1903,7 +1956,7 @@ Validation resolves available static values and preserves only values that are l
 |---|---|
 | `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
 
-The configured string must reference `suiteName`, either as `${suiteName}` text interpolation or as the complete bare argument of a built-in call. Legal examples include:
+The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. Bare `suiteName` inside a call is rejected. Legal examples include:
 
 ```yaml
 report:
@@ -1914,8 +1967,8 @@ report:
 fileNamePattern: "result-${suiteName}.xlsx"
 fileNamePattern: "ATT-${suiteName}-report.xlsx"
 fileNamePattern: "${suiteName}-${suiteName}.xlsx"
-fileNamePattern: "#{upper(suiteName)}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(suiteName)})}.xlsx"
+fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
 For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
@@ -1984,21 +2037,21 @@ The action call is the boundary between the general Runtime Context and this res
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=ACTIONS.renderRequest.output.targetFiles[0], environment=CASE.environment)}"
+  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
 ```
 
-The call resolves the canonical Runtime Context paths first and creates Tool inputs named `requestFile` and `environment`. The older `${ACTIONS...}` / `${CASE...}` argument form remains legal. The command then substitutes `${requestFile}` and `${environment}` from those inputs; `${environment}` does not read global configuration directly. The two command arguments could equivalently use `${input.requestFile}` / `${input.environment}` or `${TOOL.input.requestFile}` / `${TOOL.input.environment}`. Mixing the three forms is legal, although one consistent style is easier to review.
+The call resolves the explicit `${ACTIONS...}` and `${CASE...}` references first and creates Tool inputs named `requestFile` and `environment`. The command then substitutes `${requestFile}` and `${environment}` from those inputs; `${environment}` does not read global configuration directly. Command tokens may equivalently use `${input.requestFile}` / `${input.environment}` or `${TOOL.input.requestFile}` / `${TOOL.input.environment}`. Mixing the three placeholder forms is legal, although one consistent style is easier to review.
 
 Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
 
 ```yaml
 command:
   - ./tools/invoke_payment_api.sh
-  - "--environment=#{upper(environment)}"
-  - "--label=#{concat('ATT-', #{lower(input.requestFile)})}"
+  - "--environment=#{upper(${environment})}"
+  - "--label=#{concat('ATT-', #{lower(${input.requestFile})})}"
 ```
 
-Inside a command call, the three bare forms `requestFile`, `input.requestFile`, and `TOOL.input.requestFile` resolve to the same declared argument. Outside `#{...}`, command text continues to use `${requestFile}` interpolation.
+Inside a command-side built-in call, declared inputs must also use placeholders: `${requestFile}`, `${input.requestFile}`, and `${TOOL.input.requestFile}` resolve to the same value. Bare `requestFile` or `input.requestFile` is not inferred. Outside `#{...}`, command text continues to use `${requestFile}` interpolation.
 
 A normal argument placeholder may occupy a complete argv token, which is preferred, or be embedded in fixed text:
 
@@ -2010,6 +2063,71 @@ command:
 ```
 
 Because this is a YAML argv list, each list item remains one atomic process argument even when its resolved value contains spaces or shell-like characters. ATT does not invoke a local shell.
+
+#### Quotes, Context values, and atomic argv
+
+Quotes inside a Tool call belong to the ATT expression grammar; they are not shell quotes. The outer `'...'` or `"..."` delimiters are removed before invocation, the opposite quote is literal, and a matching quote can be escaped with a backslash. A `${...}` reference embedded in a quoted value is interpolated, while an unquoted canonical Context path passes its typed value directly.
+
+The following configured Tool keeps each declared input as one argv value:
+
+```yaml
+tools:
+  writeAudit:
+    name: Write audit
+    description: Write one audit message for one source file
+    command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
+    output: yaml
+    arguments:
+      message:
+        name: Message
+        description: Exact audit message
+        required: true
+      sourceFile:
+        name: Source file
+        description: File associated with the message
+        required: true
+```
+
+Use a YAML block scalar when a call contains several quote layers:
+
+```yaml
+singleQuote:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message="Customer O'Reilly",
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+
+doubleQuote:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message='status="READY"',
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+
+mixedQuotesAndContext:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message="O'Reilly said \"READY\" for ${CASE.caseId}",
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+```
+
+The child process receives the three messages exactly as `Customer O'Reilly`, `status="READY"`, and, for example, `O'Reilly said "READY" for payment.payment.TC001`. A Context value that itself contains either quote needs no caller-side shell escaping and still occupies one argv item.
+
+If a call is kept on one YAML line, YAML escaping is an additional and separate layer:
+
+```yaml
+call: "#{writeAudit(message='status=\"READY\"', sourceFile=${CASE.sourceFile})}"
+call: '#{writeAudit(message="O''Reilly", sourceFile=${CASE.sourceFile})}'
+```
+
+The first line escapes double quotes for the YAML double-quoted scalar. The second doubles the apostrophe for the YAML single-quoted scalar. The expression engine then evaluates the resulting `#{...}` text.
+
+Ordinary process-backed Tools never ask a shell to reinterpret resolved inputs. Text such as `$HOME`, `$(date)`, `a*.xml`, `|`, `>`, and quotes carried by a Context value is passed literally. Use an explicitly reviewed wrapper when shell-like behavior is required; the shipped `fpp.exehelper` and `fpp.loghelper` provide only the narrowly documented pathname expansion above.
 
 #### Illegal forms and token restrictions
 
@@ -2045,7 +2163,7 @@ arguments:
     argName: --request
 ```
 
-ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${requestFile}` or a transformed form such as `#{upper(${requestFile})}` is invalid when `argName` is non-empty. Likewise, every argument declaring `delimit` must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded placeholder instead leaves its surrounding fixed token in argv.
+ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${requestFile}` or a transformed form such as `#{str.upper(${requestFile})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
 
 ### Operators
 
@@ -2063,46 +2181,44 @@ Comparison first recognizes boolean literals. If both operands are valid decimal
 
 ### Built-in functions
 
-Built-ins are called with `#{...}`. Tool calls use the same outer syntax but are resolved against configured tools.
+Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, and `misc.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
 
 | Function | Purpose | Example |
 |---|---|---|
-| `upper` | Convert text to upper case | `#{upper(value=${CASE.currency})}` |
-| `lower` | Convert text to lower case | `#{lower(value=${CASE.channel})}` |
-| `trim` | Remove surrounding whitespace | `#{trim(value=${CASE.reference})}` |
-| `ltrim` | Remove leading whitespace | `#{ltrim(${CASE.reference})}` |
-| `rtrim` | Remove trailing whitespace | `#{rtrim(${CASE.reference})}` |
-| `string` | Convert a value to text | `#{string(value=${CASE.amount})}` |
-| `number` | Parse and normalize a number | `#{number(value='12.50')}` |
-| `boolean` | Convert true/false, yes/no, or 1/0 | `#{boolean(yes)}` |
-| `length` | Return text length | `#{length(value=${CASE.reference})}` |
-| `concat` | Concatenate arguments in call order | `#{concat(a='PAY-', b=${CASE.caseId})}` |
-| `coalesce` | Return first non-blank value | `#{coalesce(${CASE.optional}, 'N/A')}` |
-| `nvl` | Return a default for null/empty text | `#{nvl(${CASE.optional}, 'N/A')}` |
-| `iif` | Select one of two values from a boolean | `#{iif(${CASE.enabled}, 'Y', 'N')}` |
-| `nchar` | Repeat a value 0–10000 times | `#{nchar(3, '9')}` |
-| `substr` | Extract text from a zero-based start | `#{substr(${CASE.reference}, 0, 8)}` |
-| `indexOf` | Return zero-based position or `-1` | `#{indexOf(${CASE.reference}, '-')}` |
-| `contains` | Test literal substring membership | `#{contains(${CASE.message}, 'SUCCESS')}` |
-| `startsWith` | Test a literal prefix | `#{startsWith(${CASE.reference}, 'PAY')}` |
-| `endsWith` | Test a literal suffix | `#{endsWith(${CASE.fileName}, '.xml')}` |
-| `replace` | Replace every literal target | `#{replace(${CASE.reference}, '-', '')}` |
-| `padLeft` | Pad to a minimum length | `#{padLeft(${CASE.sequence}, 8, '0')}` |
-| `padRight` | Pad to a minimum length | `#{padRight(${CASE.code}, 5, '_')}` |
-| `sysdate` | Return system-zone date, optionally formatted | `#{sysdate('yyyyMMdd')}` |
-| `systimestamp` | Return system-zone timestamp, optionally formatted | `#{systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
-| `formatDate` | Format an ISO-8601 value | `#{formatDate(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
-| `dateAdd` | Add a calendar/time amount | `#{dateAdd(${CASE.businessDate}, 1, 'day')}` |
-| `fileExists` | Test whether a regular file exists | `#{fileExists(${CASE.requestFile})}` |
-| `directoryExists` | Test whether a directory exists | `#{directoryExists(${CASE.outputDirectory})}` |
-| `fileSize` | Return regular-file size in bytes | `#{fileSize(${CASE.requestFile})}` |
-| `makeDirectories` | Create a directory tree and return its absolute path | `#{makeDirectories(${CASE.archiveDirectory})}` |
-| `copyFile` | Copy a regular file and return the target path | `#{copyFile(${CASE.requestFile}, ${CASE.backupFile}, true)}` |
-| `moveFile` | Move a regular file and return the target path | `#{moveFile(${CASE.sourceFile}, ${CASE.targetFile})}` |
-| `deleteFile` | Delete a non-directory file | `#{deleteFile(${CASE.temporaryFile}, true)}` |
-| `randomChoice` | Return one of 1–1000 input values | `#{randomChoice('A', 'B', 'C')}` |
+| `str.upper` | Convert text to upper case | `#{str.upper(value=${CASE.currency})}` |
+| `str.lower` | Convert text to lower case | `#{str.lower(value=${CASE.channel})}` |
+| `str.trim` | Remove surrounding whitespace | `#{str.trim(value=${CASE.reference})}` |
+| `str.ltrim` / `str.rtrim` | Remove leading/trailing whitespace | `#{str.ltrim(${CASE.reference})}` |
+| `str.length` | Return text length | `#{str.length(value=${CASE.reference})}` |
+| `str.concat` | Concatenate arguments in call order | `#{str.concat(a='PAY-', b=${CASE.caseId})}` |
+| `str.substr` | Extract text from a zero-based start | `#{str.substr(${CASE.reference}, 0, 8)}` |
+| `str.indexOf` | Return zero-based position or `-1` | `#{str.indexOf(${CASE.reference}, '-')}` |
+| `str.contains` | Test literal substring membership | `#{str.contains(${CASE.message}, 'SUCCESS')}` |
+| `str.startsWith` / `str.endsWith` | Test a literal prefix/suffix | `#{str.startsWith(${CASE.reference}, 'PAY')}` |
+| `str.replace` | Replace every literal target | `#{str.replace(${CASE.reference}, '-', '')}` |
+| `str.lpad` / `str.rpad` | Pad to a minimum length | `#{str.lpad(${CASE.sequence}, 8, '0')}` |
+| `str.repeat` | Repeat a value 0–10000 times | `#{str.repeat(3, '9')}` |
+| `date.sysdate` | Return system-zone date, optionally formatted | `#{date.sysdate('yyyyMMdd')}` |
+| `date.systimestamp` | Return system-zone timestamp, optionally formatted | `#{date.systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
+| `date.format` | Format an ISO-8601 value | `#{date.format(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
+| `date.add` | Add a calendar/time amount | `#{date.add(${CASE.businessDate}, 1, 'day')}` |
+| `file.exists` | Test whether a regular file exists | `#{file.exists(${CASE.requestFile})}` |
+| `file.directoryExists` | Test whether a directory exists | `#{file.directoryExists(${CASE.outputDirectory})}` |
+| `file.size` | Return regular-file size in bytes | `#{file.size(${CASE.requestFile})}` |
+| `file.mkdirs` | Create a directory tree and return its absolute path | `#{file.mkdirs(${CASE.archiveDirectory})}` |
+| `file.copy` | Copy a regular file and return the target path | `#{file.copy(${CASE.requestFile}, ${CASE.backupFile}, true)}` |
+| `file.move` | Move a regular file and return the target path | `#{file.move(${CASE.sourceFile}, ${CASE.targetFile})}` |
+| `file.delete` | Delete a non-directory file | `#{file.delete(${CASE.temporaryFile}, true)}` |
+| `misc.string` | Convert a value to text | `#{misc.string(value=${CASE.amount})}` |
+| `misc.number` | Parse and normalize a number | `#{misc.number(value='12.50')}` |
+| `misc.boolean` | Convert true/false, yes/no, or 1/0 | `#{misc.boolean(yes)}` |
+| `misc.coalesce` | Return first non-blank value | `#{misc.coalesce(${CASE.optional}, 'N/A')}` |
+| `misc.nvl` | Return a default for null/empty text | `#{misc.nvl(${CASE.optional}, 'N/A')}` |
+| `misc.iif` | Select one of two values from a boolean | `#{misc.iif(${CASE.enabled}, 'Y', 'N')}` |
+| `misc.randomChoice` | Return one of 1–1000 input values | `#{misc.randomChoice('A', 'B', 'C')}` |
+| `misc.dbText` | Format one stable typed DB result as SQL*Plus-style text | `#{misc.dbText(${ACTIONS.queryOrders.output.result})}` |
 
-`upper`, `lower`, `trim`, `ltrim`, `rtrim`, `string`, `number`, `boolean`, and `length` require exactly one argument and accept either `value=...` or one unnamed value. Other built-ins accept either their documented names or a complete positional list; do not mix named and positional arguments in one call. Case conversion is locale-independent. `number` rejects non-numeric input and removes unnecessary trailing zeroes. `boolean` accepts true/false, yes/no, and 1/0. `concat` treats null as empty; `coalesce` skips null and whitespace-only values and returns empty when none qualifies. `nvl` tests null/empty without trimming. `iif` accepts the same boolean text forms and resolves all three arguments eagerly. `nchar` requires an integer count from 0 through 10000 and repeats the complete value.
+The single-value `str.upper/lower/trim/ltrim/rtrim/length` and `misc.string/number/boolean` functions accept either `value=...` or one unnamed value. Other built-ins accept either their documented names or a complete positional list; do not mix named and positional arguments in one call. Case conversion is locale-independent. `misc.number` rejects non-numeric input and removes unnecessary trailing zeroes. `misc.boolean` accepts true/false, yes/no, and 1/0. `str.concat` treats null as empty; `misc.coalesce` skips null and whitespace-only values and returns empty when none qualifies. `misc.nvl` tests null/empty without trimming. `misc.iif` accepts the same boolean text forms and resolves all three arguments eagerly. `str.repeat` requires an integer count from 0 through 10000 and repeats the complete value.
 
 `substr(value, start[, length])` uses zero-based UTF-16 indexes. A negative start counts from the end; an out-of-range start or negative length is an error, while an overlong length stops at the end. `indexOf` is case-sensitive, accepts an optional zero-based `fromIndex`, and returns `-1` when absent. Match and replacement functions are case-sensitive and literal, not regular expressions. Padding defaults to one space, never truncates an already long value, rejects an empty pad, and limits target length to 10000.
 
@@ -2112,7 +2228,9 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-Use built-ins for in-process transformations, time values, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins remain global. V2.4.2 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+`dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as direct DB Action `saveAs.format: text` and has no JDBC, transaction, connection, or cache side effects.
+
+Use built-ins for in-process transformations, time values, DB-result formatting, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins occupy reserved framework packages. V2.6 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -2145,7 +2263,7 @@ Run and Case IDs appear unchanged after validation. A final run directory repres
 
 `report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
 
-An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit `.log`/`case.yaml` artifact links. `report.html.caseLogInlineLimitBytes` controls the head/tail preview; `0` keeps only the artifact link. Expected is the ordered LF-joined non-blank descriptions and `expected` values from assert actions; Actual is the ordered LF-joined non-blank runtime `actual` values. `case.yaml` holds the complete structured final Stage/Template/Action/Tool/DB state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, Tool argv/stdout/stderr/retry evidence, DB source/parameter/result/finalization evidence, diagnostics, and saved payload/Tool/DB-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
+An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit `.log`/`case.yaml` artifact links. Each Action Results row has independent Stage, Action, Description, Status, and Message columns; Description is the final rendered action description and is also persisted in `run.yaml` and CI JSON. `report.html.caseLogInlineLimitBytes` controls the head/tail preview; `0` keeps only the artifact link. For compatibility, Expected remains the ordered LF-joined non-blank assert descriptions and `expected` values; Actual is the ordered LF-joined non-blank runtime `actual` values. `case.yaml` holds the complete structured final Stage/Template/Action/Tool/DB state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, Tool argv/stdout/stderr/retry evidence, DB source/parameter/result/finalization evidence, diagnostics, and saved payload/Tool/DB-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
 
 `report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
 
@@ -2243,9 +2361,9 @@ Its action used retry and received an eligible non-zero exit code. Inspect the a
 
 No. ATT passes `|`, `>`, and `<` literally. Put shell behavior inside a reviewed tool script.
 
-#### Why does a required delimited argument reject `N/A`?
+#### Why does a required array argument reject `[]`?
 
-Required validation happens before array expansion. `N/A` normalizes to blank, so the required input is missing.
+Required validation happens before argv expansion. An empty typed List is missing input; pass at least one scalar item or make the argument optional.
 
 #### Should I use package or selected validation?
 

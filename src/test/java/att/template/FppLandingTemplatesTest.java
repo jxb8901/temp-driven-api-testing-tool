@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +31,10 @@ class FppLandingTemplatesTest {
         assertPolling(actions.get("queryDsrFinalTxn"));
         assertTrue(actions.get("assertDrrTxn").expected().contains("CAPT or CRJT"));
         assertTrue(actions.get("assertDsrTxn").expected().contains("ACPT or UCPT"));
+        assertTrue(actions.get("runJob2D3i").call().contains("fpp.exehelper"));
+        for (TemplateAction action : actions.values()) {
+            assertFalse(action.call().contains("fpp.execCommand"));
+        }
     }
 
     @Test void ctoRtiTemplateActivatesPrecheckAndKeepsLaterFlowStaged() throws Exception {

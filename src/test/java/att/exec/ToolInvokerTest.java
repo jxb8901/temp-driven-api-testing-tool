@@ -169,6 +169,37 @@ class ToolInvokerTest {
         assertEquals(Arrays.asList("capture", "--keyword", "PAYMENT", "--keyword", "POSTED", "--types", "CARD", "TRANSFER"), runner.argv);
     }
 
+    @Test void expandsTypedYamlArraysWithoutDelimiterConfiguration() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("keywords", new ToolArgumentConfig("keywords", "Keywords", "Search words", true, "", "--keyword", "repeat"));
+        arguments.put("types", new ToolArgumentConfig("types", "Types", "Transaction types", true, "", "--types", "once"));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "capture", "", "Capture", "Capture typed lists", Arrays.asList("capture", "${keywords}", "${types}"), Collections.<String>emptyList(), "txt", arguments, null));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        CapturingRunner runner = new CapturingRunner();
+        Map<String,Object> input = new LinkedHashMap<String,Object>();
+        input.put("keywords", Arrays.asList("PAYMENT", " POSTED "));
+        input.put("types", Arrays.asList("CARD", "TRANSFER"));
+
+        new ToolInvoker(tempDir, config, runner).invokeAttempt("values", "capture", input, context(), new CaseExecutionLog(tempDir.resolve("typed-lists.log")), 1000L);
+
+        assertEquals(Arrays.asList("capture", "--keyword", "PAYMENT", "--keyword", "POSTED", "--types", "CARD", "TRANSFER"), runner.argv);
+    }
+
+    @Test void rejectsListInsideEmbeddedArgvToken() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("values", new ToolArgumentConfig("values", "Values", "Values", true, ""));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("capture", new ToolConfig("capture", "Capture", "Capture", "echo --values=${values}", "txt", arguments));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
+                new ToolInvoker(tempDir, config, new CapturingRunner()).invokeAttempt("values", "capture",
+                        Collections.<String,Object>singletonMap("values", Arrays.asList("A", "B")), context(),
+                        new CaseExecutionLog(tempDir.resolve("embedded-list.log")), 1000L));
+        assertTrue(error.getMessage().contains("complete argv token"));
+    }
+
     @Test void treatsMissingOrEmptyArgNameAsAnOptionalPositionalArgument() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("reference", new ToolArgumentConfig("reference", "Reference", "Optional positional reference", false, "", ""));

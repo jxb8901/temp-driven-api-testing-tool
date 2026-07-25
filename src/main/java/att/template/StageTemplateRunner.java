@@ -68,7 +68,8 @@ public class StageTemplateRunner {
                 context.updateAction(action.id(), node);
                 log.appendAction("ACTION " + action.id(), node);
                 String reportExpected = "assert".equals(type) ? joinLines(String.valueOf(node.get("description")), expected) : "";
-                results.add(new ValidationResult(stageName, action.id(), status, reportExpected, "assert".equals(type) ? actual : "", assertionMessage(output)));
+                results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")), status,
+                        reportExpected, "assert".equals(type) ? actual : "", assertionMessage(output)));
                 if (status != ResultStatus.PASS && stopOnFailure(action)) break;
             } catch (Exception e) {
                 att.validation.DiagnosticException typed = detailed(e, template, action);
@@ -93,7 +94,8 @@ public class StageTemplateRunner {
                     log.appendAction("ACTION " + action.id() + " ERROR", node);
                 } catch (Exception ignored) { }
                 String reportExpected = "assert".equalsIgnoreCase(action.type()) ? joinLines(String.valueOf(node.get("description")), expected) : "";
-                results.add(new ValidationResult(stageName, action.id(), ResultStatus.ERROR, reportExpected, actual, message));
+                results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")),
+                        ResultStatus.ERROR, reportExpected, actual, message));
                 if (stopOnFailure(action)) break;
             } finally {
                 context.clearActionOutput();
@@ -210,7 +212,7 @@ public class StageTemplateRunner {
         if (result.success() && action.saveConfig().configured()) {
             String path = templateEngine.render(action.saveConfig().path(), context, log);
             String format = requiredFormat(action.saveConfig(), "DB", "");
-            Path saved = artifactWriter.write(context, path, format, result.result(), action.saveConfig().overwrite());
+            Path saved = artifactWriter.writeDb(context, path, format, result.result(), action.saveConfig().overwrite());
             targets.add(saved.toString());
         }
         return result.success();
@@ -297,8 +299,8 @@ public class StageTemplateRunner {
         String format = save.format() == null ? "" : save.format().trim().toLowerCase(java.util.Locale.ROOT);
         if (format.isEmpty()) format = fallback;
         if (format.isEmpty()) throw new IllegalArgumentException(owner + " saveAs.format is required");
-        if ("DB".equals(owner) && !("json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
-            throw new IllegalArgumentException("DB saveAs.format must be json, yaml, or xml: " + format);
+        if ("DB".equals(owner) && !("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
+            throw new IllegalArgumentException("DB saveAs.format must be text, json, yaml, or xml: " + format);
         }
         return format;
     }

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
@@ -19,6 +20,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultBuiltInProviderTest {
+    @Test void exposesCanonicalPackageQualifiedAliases() throws Exception {
+        DefaultBuiltInProvider provider = new DefaultBuiltInProvider();
+        assertEquals("0007", provider.invoke("str.lpad", args("value", "7", "length", 4, "pad", "0")));
+        assertEquals("fallback", provider.invoke("misc.nvl", args("value", "", "defaultValue", "fallback")));
+        assertTrue(provider.names().contains("file.move"));
+    }
     @TempDir Path tempDir;
 
     @Test void supportsSafeEverydayFileOperations() throws Exception {
@@ -57,6 +64,18 @@ class DefaultBuiltInProviderTest {
         assertEquals(Integer.valueOf(3), provider.invoke("randomChoice", args("first", 1, "second", 2, "third", 3)));
         assertThrows(IllegalArgumentException.class, () -> provider.invoke("randomChoice", new LinkedHashMap<String, Object>()));
         assertThrows(IllegalArgumentException.class, () -> provider.invoke("randomChoice", args("arg0", "A", "second", "B")));
+    }
+
+    @Test void dbTextFormatsTypedDbResultsWithoutChangingThem() {
+        DefaultBuiltInProvider provider = new DefaultBuiltInProvider(Clock.systemUTC(), new LastChoiceRandom());
+        Map<String, Object> row = args("ID", "A100", "AMOUNT", Integer.valueOf(7));
+        Map<String, Object> result = args("operation", "query", "rows", Collections.singletonList(row));
+
+        provider.validateInvocation("dbText", args("value", result));
+        assertEquals("ID    AMOUNT\n----  ------\nA100       7\n\n1 row selected.\n",
+                provider.invoke("dbText", args("value", result)));
+        assertThrows(IllegalArgumentException.class,
+                () -> provider.invoke("dbText", args("value", "not-a-db-result")));
     }
 
     @Test void fileOperationsDoNotFollowFinalSymbolicLinks() throws Exception {

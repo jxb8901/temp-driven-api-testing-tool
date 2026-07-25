@@ -84,6 +84,7 @@ class FrameworkEngineTest {
 
         assertEquals(1, summary.passed());
         assertEquals("API status\nSUCCESS", summary.results().get(0).expected());
+        assertEquals("API status", summary.results().get(0).validations().get(1).description());
         assertEquals("SUCCESS", summary.results().get(0).actual());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/payments.payment.TC001.TEST.V2.001.log")));

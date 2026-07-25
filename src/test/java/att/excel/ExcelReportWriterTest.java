@@ -68,7 +68,7 @@ class ExcelReportWriterTest {
         Path source = tempDir.resolve("payment.xlsx");
         writeSource(source);
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "#{upper(suiteName)}.result.xlsx", Collections.<String,String>emptyMap()),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "#{upper(${suiteName})}.result.xlsx", Collections.<String,String>emptyMap()),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList());
 

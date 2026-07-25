@@ -47,7 +47,10 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("<strong>Index</strong>"));
         assertTrue(html.contains("Built-in functions"));
         assertTrue(html.contains("Global tools"));
-        assertTrue(html.contains("Tool group: sample"));
+        assertTrue(html.contains("Tool package: sample"));
+        assertTrue(html.contains("str.lpad"));
+        assertTrue(html.contains("file.move"));
+        assertTrue(html.contains("misc.nvl"));
         assertTrue(html.contains("sample.date"));
         assertTrue(html.contains("orders.count"));
         assertTrue(html.contains("call: <code>#{db.orders.scalar"));
@@ -56,19 +59,21 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("17 seconds"));
         assertFalse(html.contains("jdbc:test:orders"));
         assertTrue(html.contains("<th>argName</th>"));
+        assertFalse(html.contains("<th>Delimiter</th>"));
         assertTrue(html.contains("<th>argNameMode</th>"));
         assertTrue(html.contains("<td>--value</td>"));
         assertTrue(html.contains("<td>once</td>"));
-        assertTrue(html.contains("nvl(value, defaultValue)"));
-        assertTrue(html.contains("iif(condition, trueValue, falseValue)"));
-        assertTrue(html.contains("nchar(count, value)"));
-        assertTrue(html.contains("substr(value, start[, length])"));
-        assertTrue(html.contains("systimestamp([format])"));
-        assertTrue(html.contains("dateAdd(value, amount, unit)"));
-        assertTrue(html.contains("fileExists(path)"));
-        assertTrue(html.contains("copyFile(source, target[, overwrite])"));
-        assertTrue(html.contains("randomChoice(first, ...)"));
-        assertTrue(html.contains("<h2>indexOf</h2>"));
+        assertTrue(html.contains("misc.nvl(value, defaultValue)"));
+        assertTrue(html.contains("misc.iif(condition, trueValue, falseValue)"));
+        assertTrue(html.contains("str.repeat(count, value)"));
+        assertTrue(html.contains("str.substr(value, start[, length])"));
+        assertTrue(html.contains("date.systimestamp([format])"));
+        assertTrue(html.contains("date.add(value, amount, unit)"));
+        assertTrue(html.contains("file.exists(path)"));
+        assertTrue(html.contains("file.copy(source, target[, overwrite])"));
+        assertTrue(html.contains("misc.randomChoice(first, ...)"));
+        assertTrue(html.contains("misc.dbText(value)"));
+        assertTrue(html.contains("<h2>str.indexOf</h2>"));
         assertNotEquals(HtmlSupport.id("中文一"), HtmlSupport.id("中文二"));
     }
 

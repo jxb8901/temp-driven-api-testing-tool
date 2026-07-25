@@ -226,7 +226,7 @@ class DbHelperExecutorTest {
         executor.close();
     }
 
-    @Test void dbActionsAndExpressionsPreserveTypedResultsAndWriteStructuredArtifacts() throws Exception {
+    @Test void dbActionsAndExpressionsPreserveTypedResultsAndWriteStructuredAndTextArtifacts() throws Exception {
         Map<String, DbHelperConfig> helpers = Collections.singletonMap("orders",
                 db("orders", "jdbc:att-test:actions", "case", "rollback", 12, 10));
         DbHelperExecutor executor = executor(helpers);
@@ -247,25 +247,37 @@ class DbHelperExecutorTest {
                 "query", map("sqlFile", "sql/orders.sql", "params",
                         Collections.<Object>singletonList("${CASE.customerId}")),
                 "saveAs", map("path", "db/orders.json", "format", "json")), "att-template/v2.5"));
+        actions.add(new TemplateAction("queryText", map("type", "db", "db", "orders",
+                "query", map("sql", "select ONE", "params", Collections.emptyList()),
+                "saveAs", map("path", "db/orders.txt", "format", "text")), "att-template/v2.5"));
         actions.add(new TemplateAction("assign", map("type", "assign", "name", "orders",
                 "expression", "#{db.orders.query(sql='select ONE', params=[${CASE.customerId}, 'OPEN'])}"),
                 "att-template/v2.5"));
         actions.add(new TemplateAction("scalar", map("type", "assign", "name", "orderId",
                 "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"),
                 "att-template/v2.5"));
+        actions.add(new TemplateAction("printRows", map("type", "log",
+                "message", "#{dbText(${ACTIONS.queryText.output.result})}"), "att-template/v2.5"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, executor))
                 .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v2.5"), context, log);
         assertEquals(ResultStatus.PASS, results.get(0).status());
         assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
-        assertEquals(3, results.size());
+        assertEquals(5, results.size());
         assertEquals(ResultStatus.PASS, results.get(2).status());
+        assertEquals(ResultStatus.PASS, results.get(3).status());
+        assertEquals(ResultStatus.PASS, results.get(4).status());
         assertTrue(context.resolve("ACTIONS.query.output.result.rows") instanceof List);
         assertEquals("A100", context.resolve("CASE.VARS.orders.rows[0].ID"));
         assertEquals("A100", context.resolve("CASE.VARS.orderId"));
         Path artifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.query.output.targetFiles[0]")));
         assertTrue(artifact.startsWith(tempDir));
         assertTrue(new String(java.nio.file.Files.readAllBytes(artifact), "UTF-8").contains("\"rows\""));
+        Path textArtifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.queryText.output.targetFiles[0]")));
+        assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
+                new String(java.nio.file.Files.readAllBytes(textArtifact), "UTF-8"));
+        assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
+                context.resolve("ACTIONS.printRows.output.result"));
         assertTrue(context.resolve("ACTIONS.assign.DB.orders") instanceof Map);
         assertTrue(executor.finishCase(context, log).isEmpty());
         assertEquals("ROLLED_BACK", context.resolve("CASE.DB.orders.state"));
@@ -281,11 +293,11 @@ class DbHelperExecutorTest {
         findArguments.put("status", new att.config.ToolArgumentConfig("status", "Status", "Order status", true, ""));
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
         tools.put("orders.find", callTool("orders.find", "find", "orders",
-                "#{db.orders.query(sql='select ONE', params=[input.customerId, #{upper(input.status)}])}", "case", findArguments));
+                "#{db.orders.query(sql='select ONE', params=[${input.customerId}, #{upper(${input.status})}])}", "case", findArguments));
         tools.put("orders.id", callTool("orders.id", "id", "orders",
                 "#{db.orders.scalar(sql='select SCALAR', params=[])}", Collections.<String, att.config.ToolArgumentConfig>emptyMap()));
         tools.put("orders.close", callTool("orders.close", "close", "orders",
-                "#{db.orders.update(sql='update orders set status = ?', params=[input.status])}",
+                "#{db.orders.update(sql='update orders set status = ?', params=[${input.status}])}",
                 Collections.singletonMap("status", new att.config.ToolArgumentConfig("status", "Status", "Status", true, ""))));
         FrameworkConfig config = frameworkConfig(tools, helpers);
         DbHelperExecutor executor = new DbHelperExecutor(tempDir, config);
@@ -338,7 +350,7 @@ class DbHelperExecutorTest {
         Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("id",
                 new att.config.ToolArgumentConfig("id", "ID", "ID", true, ""));
         ToolConfig lookup = callTool("reference.lookup", "lookup", "reference",
-                "#{db.reference.query(sql='select ONE', params=[input.id])}", "db", arguments);
+                "#{db.reference.query(sql='select ONE', params=[${input.id}])}", "db", arguments);
         FrameworkConfig config = frameworkConfig(Collections.singletonMap(lookup.key(), lookup), helpers);
         DbHelperExecutor executor = new DbHelperExecutor(tempDir, config);
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(tempDir, config), executor);

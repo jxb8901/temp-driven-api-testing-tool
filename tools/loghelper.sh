@@ -3,7 +3,7 @@
 # 提取特定交易應用日誌的工具：在給定的多個日誌文件中搜索包括全部 keywords 的交易日誌，
 # 每筆交易日誌保存為獨立文件，最多保存給定個數。具體要求如下：
 #    1. 配置：交易日誌目錄、交易開始 pattern、交易結束 pattern、其它模式匹配所用的正則表達式
-#    2. Usage: $0 --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]，log_file 是無序的
+#    2. Usage: $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]，log_file 是無序的
 #    3. 應用日誌由 log4j 生成，日誌格式為：[DEBUG] [2026/07/15 13:25:32.589] [JavaClass.method] [TID123456] ...
 #       Messages…\n multiple line \n …，每條日誌的第 4 個欄位 TID 為一筆交易的唯一 ID
 #    4. 一筆交易的第一／最後一條日誌可能匹配，也可能不匹配可配置的交易開始／結束 pattern；
@@ -14,7 +14,7 @@
 #    8. 為控制內存使用兩遍掃描：第一遍倒序找到最新的符合 TID，第二遍正序提取，並使用開始／結束 pattern 限定範圍
 #    9. 結果寫入 <output_prefix>-<TID>-<HOST>.log，每個 TID 一個獨立文件；output_prefix 未指定目錄時使用 /tmp
 #   10. 最多返回 --max-tid-files 個結果文件，默認 10；--min-tid-files 默認 1；相同 TID 在不同 HOST 的文件分別計數
-#   11. 默認只搜索按文件首個 timestamp 排序後最近 2 個日誌；--recent-log-count 0 表示搜索全部日誌
+#   11. 默認只搜索按文件最近修改時間排序後最近 2 個日誌；--recent-log-count 0 表示搜索全部日誌
 #   12. 指定 --ssh 且已收集的結果文件少於 --min-tid-files 時，按配置順序繼續搜索遠程服務器，並將新結果複製到本地相同路徑
 #   13. 標準輸出只輸出 ATT output: yaml 可直接解析的結果；掃描進度及診斷寫入標準錯誤
 # ==============================================================================
@@ -28,6 +28,8 @@ export LC_ALL=C
 # the caller continue to work as-is. LOG_DIR may also be overridden by the caller.
 readonly LOG_DIR="${LOG_DIR:-.}"
 readonly DEFAULT_OUTPUT_DIR='/tmp'
+readonly REMOTE_OUTPUT_PREFIX="/tmp/att-loghelper-$$-$RANDOM$RANDOM"
+readonly PASS1_MAX_RETRIES="${LOGHELPER_PASS1_MAX_RETRIES:-3}"
 
 # Result filename host identifier. Override with LOGHELPER_HOST when required;
 # otherwise use the last two characters of the current hostname.
@@ -39,6 +41,7 @@ unset DEFAULT_HOSTNAME
 # Leave identity_file empty to use the SSH agent/default identities.
 # Servers are searched in the order listed. For example:
 # SSH_SERVERS=(
+#     'localhost||||' # shared lists may include the current host; it is skipped
 #     'server1.example.com|appuser|22||/opt/att/tools/loghelper.sh'
 #     'server2.example.com|appuser|2222|/path/to/id_ed25519|/opt/att/tools/loghelper.sh'
 # )
@@ -76,6 +79,7 @@ function initialize_common() {
     tx_start = ENVIRON["LOGHELPER_TX_START"]
     tx_end = ENVIRON["LOGHELPER_TX_END"]
     tids_file = ENVIRON["LOGHELPER_TIDS_FILE"]
+    early_exit_file = ENVIRON["LOGHELPER_EARLY_EXIT_FILE"]
 }
 function extract_tid(line,    header_part, tags, tag_count, tid) {
     if (match(line, re_tid_ext) == 0) {
@@ -96,7 +100,7 @@ function extract_tid(line,    header_part, tags, tag_count, tid) {
 '
 
 usage() {
-    echo "Usage: $0 --output-prefix <path> --log-file <path> [<path> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]" >&2
+    echo "Usage: $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]" >&2
 }
 
 yaml_escape() {
@@ -174,27 +178,104 @@ canonical_path() {
     )
 }
 
-extract_first_log_timestamp() {
-    awk '
-        BEGIN {
-            re_header = ENVIRON["LOGHELPER_RE_HEADER"]
-        }
-        $0 ~ re_header {
-            count = split($0, fields, /\] \[/)
-            if (count >= 2) {
-                print fields[2]
-                exit
-            }
-        }
-    ' "$1"
+add_log_file() {
+    local path=$1
+    local candidate existing
+
+    candidate=$(canonical_path "$path" existing-file 2>/dev/null || true)
+    [ -n "$candidate" ] || return 1
+    EXPANSION_FOUND=true
+    for existing in "${FILES[@]}"; do
+        if [ "$existing" = "$candidate" ] || [ "$existing" -ef "$candidate" ]; then
+            return 0
+        fi
+    done
+    FILES+=("$candidate")
+    return 0
+}
+
+expand_log_file_pattern() {
+    local pattern=$1
+    local match old_ifs
+    local nullglob_was_set=false
+    local -a matches
+
+    shopt -q nullglob && nullglob_was_set=true
+    shopt -s nullglob
+    old_ifs=$IFS
+    IFS=
+    # Intentional unquoted expansion: pathname expansion is the feature here.
+    # Empty IFS prevents word splitting, so paths containing spaces stay atomic.
+    matches=( $pattern )
+    IFS=$old_ifs
+    [ "$nullglob_was_set" = true ] || shopt -u nullglob
+
+    for match in "${matches[@]}"; do
+        add_log_file "$match" || true
+    done
+}
+
+is_local_host() {
+    local configured=$1
+    local configured_lower local_name local_short local_fqdn candidate candidate_lower
+
+    configured_lower=$(printf '%s' "$configured" | tr '[:upper:]' '[:lower:]')
+    case "$configured_lower" in
+        localhost|localhost.localdomain|127.0.0.1|::1) return 0 ;;
+    esac
+
+    local_name=$(hostname 2>/dev/null || true)
+    local_short=$(hostname -s 2>/dev/null || true)
+    local_fqdn=$(hostname -f 2>/dev/null || true)
+    for candidate in "$local_name" "$local_short" "$local_fqdn"; do
+        [ -n "$candidate" ] || continue
+        candidate_lower=$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')
+        [ "$configured_lower" != "$candidate_lower" ] || return 0
+    done
+    return 1
+}
+
+get_file_size() {
+    stat -c '%s' -- "$1"
+}
+
+get_file_mtime() {
+    stat -c '%Y' -- "$1"
 }
 
 reverse_file() {
+    local file=$1
     if [ "$REVERSE_COMMAND" = tac ]; then
-        tac -- "$1"
+        tac -- "$file"
     else
-        tail -r "$1"
+        tail -r -- "$file"
     fi
+}
+
+record_input_sizes() {
+    local file size
+    FILE_SIZES=()
+    for file in "${FILES[@]}"; do
+        size=$(get_file_size "$file") || fail "could not read the size of log file '$file'."
+        FILE_SIZES+=("$size")
+    done
+}
+
+find_shrunken_input() {
+    local file_index file current_size recorded_size
+    SHRUNKEN_FILE=''
+    file_index=0
+    while [ "$file_index" -lt "${#FILES[@]}" ]; do
+        file=${FILES[$file_index]}
+        recorded_size=${FILE_SIZES[$file_index]}
+        current_size=$(get_file_size "$file") || return 2
+        if [ "$current_size" -lt "$recorded_size" ]; then
+            SHRUNKEN_FILE=$file
+            return 0
+        fi
+        file_index=$((file_index + 1))
+    done
+    return 1
 }
 
 yaml_boolean() {
@@ -204,6 +285,30 @@ yaml_boolean() {
     printf '%s\n' "$payload" | awk -v key="$field:" '
         $1 == key && ($2 == "true" || $2 == "false") {
             print $2
+            exit
+        }
+    '
+}
+
+yaml_error_message() {
+    local payload=$1
+
+    printf '%s\n' "$payload" | awk '
+        BEGIN {
+            quote = sprintf("%c", 39)
+        }
+        function unquote(value) {
+            if (substr(value, 1, 1) != quote || substr(value, length(value), 1) != quote) {
+                return ""
+            }
+            value = substr(value, 2, length(value) - 2)
+            gsub(quote quote, quote, value)
+            return value
+        }
+        /^errorMessage:[[:space:]]/ {
+            value = $0
+            sub(/^errorMessage:[[:space:]]*/, "", value)
+            print unquote(value)
             exit
         }
     '
@@ -259,8 +364,9 @@ cleanup_copy_temps() {
 copy_remote_results() {
     local ssh_destination=$1
     local payload=$2
-    local remote_tid remote_file local_directory copy_temp copy_status copy_index parsed_record_count
-    local -a remote_tids remote_files copy_temp_files
+    local remote_tid remote_file remote_suffix local_file local_directory copy_temp copy_status copy_index parsed_record_count
+    local remote_cleanup_command cleanup_status
+    local -a remote_tids remote_files local_files copy_temp_files
 
     COPY_ERROR=''
     parsed_record_count=0
@@ -291,21 +397,39 @@ copy_remote_results() {
                 ;;
         esac
 
-        local_directory=${remote_file%/*}
+        case "$remote_file" in
+            "$REMOTE_OUTPUT_PREFIX"-*.log) ;;
+            *)
+                COPY_ERROR="remote result path is outside the temporary output prefix: $remote_file"
+                cleanup_copy_temps "${copy_temp_files[@]}"
+                return 1
+                ;;
+        esac
+        remote_suffix=${remote_file#"$REMOTE_OUTPUT_PREFIX-"}
+        case "$remote_suffix" in
+            ''|*/*|*\\*)
+                COPY_ERROR="remote result filename contains a path separator: $remote_file"
+                cleanup_copy_temps "${copy_temp_files[@]}"
+                return 1
+                ;;
+        esac
+        local_file="$OUTPUT_PREFIX-$remote_suffix"
+        local_files+=("$local_file")
+        local_directory=${local_file%/*}
         [ -n "$local_directory" ] || local_directory=/
         if [ ! -d "$local_directory" ] || [ ! -w "$local_directory" ]; then
             COPY_ERROR="local result directory does not exist or is not writable: $local_directory"
             cleanup_copy_temps "${copy_temp_files[@]}"
             return 1
         fi
-        if [ -L "$remote_file" ]; then
-            COPY_ERROR="local result path must not be a symbolic link: $remote_file"
+        if [ -L "$local_file" ]; then
+            COPY_ERROR="local result path must not be a symbolic link: $local_file"
             cleanup_copy_temps "${copy_temp_files[@]}"
             return 1
         fi
 
-        copy_temp=$(mktemp "${remote_file}.loghelper.XXXXXX") || {
-            COPY_ERROR="could not create a local temporary file for: $remote_file"
+        copy_temp=$(mktemp "${local_file}.loghelper.XXXXXX") || {
+            COPY_ERROR="could not create a local temporary file for: $local_file"
             cleanup_copy_temps "${copy_temp_files[@]}"
             return 1
         }
@@ -322,17 +446,25 @@ copy_remote_results() {
 
     copy_index=0
     while [ "$copy_index" -lt "${#remote_files[@]}" ]; do
-        mv -f -- "${copy_temp_files[$copy_index]}" "${remote_files[$copy_index]}" || {
-            COPY_ERROR="could not install local result file: ${remote_files[$copy_index]}"
+        mv -f -- "${copy_temp_files[$copy_index]}" "${local_files[$copy_index]}" || {
+            COPY_ERROR="could not install local result file: ${local_files[$copy_index]}"
             copy_temp_files[$copy_index]=''
             cleanup_copy_temps "${copy_temp_files[@]}"
             return 1
         }
         copy_temp_files[$copy_index]=''
         SELECTED_TIDS+=("${remote_tids[$copy_index]}")
-        OUTPUT_FILES+=("${remote_files[$copy_index]}")
+        OUTPUT_FILES+=("${local_files[$copy_index]}")
         copy_index=$((copy_index + 1))
     done
+
+    remote_cleanup_command='rm -f --'
+    for remote_file in "${remote_files[@]}"; do
+        remote_cleanup_command="$remote_cleanup_command $(remote_quote "$remote_file")"
+    done
+    if ! ssh "${SSH_OPTIONS[@]}" -- "$ssh_destination" "$remote_cleanup_command"; then
+        echo "Warning: could not remove remote temporary result files on $ssh_destination" >&2
+    fi
 
     return 0
 }
@@ -348,9 +480,10 @@ append_remote_error() {
 
 search_remote_servers() {
     local server_record SSH_HOST SSH_USER SSH_PORT SSH_IDENTITY_FILE REMOTE_LOGHELPER EXTRA_FIELD
-    local SSH_DESTINATION REMOTE_COMMAND REMOTE_OUTPUT REMOTE_STATUS REMOTE_SUCCESS REMOTE_MATCHED
+    local SSH_DESTINATION REMOTE_COMMAND REMOTE_OUTPUT REMOTE_STATUS REMOTE_SUCCESS REMOTE_MATCHED REMOTE_ERROR
     local REMOTE_ERRORS=''
     local REMOTE_SUCCEEDED=false
+    local SSH_AVAILABLE_CHECKED=false
     local search_arg
 
     if [ -n "$SSH_SERVERS_OVERRIDE" ]; then
@@ -364,7 +497,6 @@ search_remote_servers() {
     fi
 
     [ "${#SSH_SERVERS[@]}" -gt 0 ] || fail "SSH_SERVERS must be configured at the top of loghelper.sh when --ssh is used."
-    command -v ssh >/dev/null 2>&1 || fail "required command 'ssh' was not found."
 
     for server_record in "${SSH_SERVERS[@]}"; do
         if [ "${#OUTPUT_FILES[@]}" -ge "$MIN_FILES" ] || [ "${#OUTPUT_FILES[@]}" -ge "$MAX_FILES" ]; then
@@ -374,7 +506,16 @@ search_remote_servers() {
         IFS='|' read -r SSH_HOST SSH_USER SSH_PORT SSH_IDENTITY_FILE REMOTE_LOGHELPER EXTRA_FIELD <<< "$server_record"
         SSH_DESTINATION="$SSH_USER@$SSH_HOST"
 
-        if [ -n "$EXTRA_FIELD" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$REMOTE_LOGHELPER" ]; then
+        if [ -n "$EXTRA_FIELD" ] || [ -z "$SSH_HOST" ]; then
+            append_remote_error "$SSH_DESTINATION has an invalid SSH_SERVERS entry"
+            continue
+        fi
+        if is_local_host "$SSH_HOST"; then
+            echo "Configured server '$SSH_HOST' is the local host and was already searched; skipping SSH." >&2
+            REMOTE_SUCCEEDED=true
+            continue
+        fi
+        if [ -z "$SSH_USER" ] || [ -z "$REMOTE_LOGHELPER" ]; then
             append_remote_error "$SSH_DESTINATION has an invalid SSH_SERVERS entry"
             continue
         fi
@@ -387,6 +528,10 @@ search_remote_servers() {
         if [ -n "$SSH_IDENTITY_FILE" ] && { [ ! -f "$SSH_IDENTITY_FILE" ] || [ -L "$SSH_IDENTITY_FILE" ]; }; then
             append_remote_error "$SSH_DESTINATION has an invalid identity file: $SSH_IDENTITY_FILE"
             continue
+        fi
+        if [ "$SSH_AVAILABLE_CHECKED" = false ]; then
+            command -v ssh >/dev/null 2>&1 || fail "required command 'ssh' was not found."
+            SSH_AVAILABLE_CHECKED=true
         fi
 
         SSH_OPTIONS=(
@@ -415,13 +560,22 @@ search_remote_servers() {
         REMOTE_STATUS=$?
         REMOTE_SUCCESS=$(yaml_boolean "$REMOTE_OUTPUT" success)
         REMOTE_MATCHED=$(yaml_boolean "$REMOTE_OUTPUT" matched)
+        REMOTE_ERROR=$(yaml_error_message "$REMOTE_OUTPUT")
 
         if [ -z "$REMOTE_SUCCESS" ] || [ -z "$REMOTE_MATCHED" ]; then
-            append_remote_error "$SSH_DESTINATION returned invalid YAML (ssh status $REMOTE_STATUS)"
+            if [ -n "$REMOTE_ERROR" ]; then
+                append_remote_error "$SSH_DESTINATION returned an error (ssh status $REMOTE_STATUS): $REMOTE_ERROR"
+            else
+                append_remote_error "$SSH_DESTINATION returned invalid YAML (ssh status $REMOTE_STATUS)"
+            fi
             continue
         fi
         if [ "$REMOTE_STATUS" -ne 0 ] || [ "$REMOTE_SUCCESS" != true ]; then
-            append_remote_error "$SSH_DESTINATION failed (ssh status $REMOTE_STATUS)"
+            if [ -n "$REMOTE_ERROR" ]; then
+                append_remote_error "$SSH_DESTINATION failed (ssh status $REMOTE_STATUS): $REMOTE_ERROR"
+            else
+                append_remote_error "$SSH_DESTINATION failed (ssh status $REMOTE_STATUS)"
+            fi
             continue
         fi
         REMOTE_SUCCEEDED=true
@@ -567,7 +721,7 @@ done
 REMOTE_SEARCH_ARGS=(
     --max-tid-files "$MAX_FILES"
     --min-tid-files "$MIN_FILES"
-    --output-prefix "$OUTPUT_PREFIX"
+    --output-prefix "$REMOTE_OUTPUT_PREFIX"
     --recent-log-count "$RECENT_LOG_COUNT"
     --log-file
 )
@@ -604,23 +758,14 @@ esac
 
 FILES=()
 for arg in "${LOG_FILES[@]}"; do
-    candidate=$(canonical_path "$arg" existing-file 2>/dev/null || true)
-    if [ -z "$candidate" ]; then
-        candidate=$(canonical_path "$LOG_DIR/$arg" existing-file 2>/dev/null || true)
+    EXPANSION_FOUND=false
+    expand_log_file_pattern "$arg"
+    if [ "$EXPANSION_FOUND" = false ]; then
+        expand_log_file_pattern "$LOG_DIR/$arg"
     fi
-    if [ -z "$candidate" ]; then
-        echo "Warning: Log file '$arg' was not found; skipping it." >&2
-        continue
+    if [ "$EXPANSION_FOUND" = false ]; then
+        echo "Warning: Log file pattern '$arg' matched no regular files; skipping it." >&2
     fi
-
-    duplicate=false
-    for existing in "${FILES[@]}"; do
-        if [ "$existing" = "$candidate" ]; then
-            duplicate=true
-            break
-        fi
-    done
-    [ "$duplicate" = true ] || FILES+=("$candidate")
 done
 
 [ "${#FILES[@]}" -gt 0 ] || fail "no valid log files were provided."
@@ -632,6 +777,10 @@ OUTPUT_DIR=${OUTPUT_PREFIX%/*}
 
 command -v awk >/dev/null 2>&1 || fail "required command 'awk' was not found."
 command -v mktemp >/dev/null 2>&1 || fail "required command 'mktemp' was not found."
+command -v stat >/dev/null 2>&1 || fail "required command 'stat' was not found."
+case "$PASS1_MAX_RETRIES" in
+    ''|*[!0-9]*) fail "LOGHELPER_PASS1_MAX_RETRIES must be zero or a positive integer." ;;
+esac
 if command -v tac >/dev/null 2>&1; then
     readonly REVERSE_COMMAND=tac
 elif tail -r /dev/null >/dev/null 2>&1; then
@@ -640,16 +789,16 @@ else
     fail "neither 'tac' nor a 'tail -r' fallback is available."
 fi
 
-# Sort unordered files by the first Log4j timestamp in their content. Rotated
-# files are assumed to represent non-overlapping chronological ranges.
+# Sort unordered files by filesystem modification time. Rotated logs are
+# searched from the oldest selected file to the newest in Pass 2, and in the
+# opposite order in Pass 1. Equal mtimes preserve the caller-expanded order.
 SORTED_FILES=()
 SORTED_KEYS=()
 for file in "${FILES[@]}"; do
-    time_key=$(extract_first_log_timestamp "$file")
-    [ -n "$time_key" ] || fail "log file '$file' contains no recognized Log4j header."
+    time_key=$(get_file_mtime "$file") || fail "could not read the modification time of log file '$file'."
 
     position=${#SORTED_FILES[@]}
-    while [ "$position" -gt 0 ] && [[ "${SORTED_KEYS[$((position - 1))]}" > "$time_key" ]]; do
+    while [ "$position" -gt 0 ] && [ "${SORTED_KEYS[$((position - 1))]}" -gt "$time_key" ]; do
         SORTED_FILES[$position]=${SORTED_FILES[$((position - 1))]}
         SORTED_KEYS[$position]=${SORTED_KEYS[$((position - 1))]}
         position=$((position - 1))
@@ -678,14 +827,17 @@ for keyword in "${KEYWORDS[@]}"; do
 done
 
 MATCHED_TIDS_FILE=$(mktemp "${TMPDIR:-/tmp}/loghelper-tids.XXXXXX") || fail "could not create a temporary file."
+PASS1_EARLY_EXIT_FILE="${MATCHED_TIDS_FILE}.early-exit"
 export LOGHELPER_TIDS_FILE="$MATCHED_TIDS_FILE"
-trap 'rm -f "$MATCHED_TIDS_FILE"' EXIT HUP INT TERM
+export LOGHELPER_EARLY_EXIT_FILE="$PASS1_EARLY_EXIT_FILE"
+trap 'rm -f "$MATCHED_TIDS_FILE" "$PASS1_EARLY_EXIT_FILE"' EXIT HUP INT TERM
 
 # ------------------------------------------------------------------------------
 # 3. PASS 1: REVERSE TIME ORDER SCANNING (FIND ELIGIBLE TIDs)
 # ------------------------------------------------------------------------------
-echo "Pass 1: scanning logs newest-to-oldest with '$REVERSE_COMMAND'" >&2
-
+run_pass1() {
+    : > "$MATCHED_TIDS_FILE" || fail "could not reset the temporary TID file."
+    rm -f -- "$PASS1_EARLY_EXIT_FILE"
 {
     file_index=$((${#FILES[@]} - 1))
     while [ "$file_index" -ge 0 ]; do
@@ -776,6 +928,8 @@ BEGIN {
         # missing keyword. Once the prefix contains n matches, older and unseen
         # TIDs cannot change the selected top n.
         if (state_changed == 1 && advance_resolved_prefix() == 1) {
+            print "intentional" > early_exit_file
+            close(early_exit_file)
             exit
         }
     }
@@ -796,10 +950,53 @@ PASS1_PIPE_STATUS=("${PIPESTATUS[@]}")
 PASS1_PRODUCER_STATUS=${PASS1_PIPE_STATUS[0]}
 PASS1_AWK_STATUS=${PASS1_PIPE_STATUS[1]}
 
-[ "$PASS1_AWK_STATUS" -eq 0 ] || fail "reverse log scan failed in awk."
-if [ "$PASS1_PRODUCER_STATUS" -ne 0 ] && [ "$PASS1_PRODUCER_STATUS" -ne 141 ]; then
-    fail "reverse log reader failed with status $PASS1_PRODUCER_STATUS."
-fi
+return 0
+}
+
+PASS1_RETRY_COUNT=0
+while :; do
+    record_input_sizes
+    echo "Pass 1: scanning logs newest-to-oldest with '$REVERSE_COMMAND' (attempt $((PASS1_RETRY_COUNT + 1)))" >&2
+    run_pass1
+
+    # An awk failure indicates a scanner/program error and is not expected to
+    # recover by rereading the same files.
+    [ "$PASS1_AWK_STATUS" -eq 0 ] || fail "reverse log scan failed in awk with status $PASS1_AWK_STATUS."
+
+    # Producer status 0 is a complete successful read. Status 1/141 is also
+    # successful only when awk intentionally stopped after resolving enough
+    # matching TIDs.
+    if [ "$PASS1_PRODUCER_STATUS" -eq 0 ] || {
+         [ -s "$PASS1_EARLY_EXIT_FILE" ] &&
+         { [ "$PASS1_PRODUCER_STATUS" -eq 1 ] || [ "$PASS1_PRODUCER_STATUS" -eq 141 ]; }
+       }; then
+        break
+    fi
+
+    # A reverse-reader failure may be caused by rename rotation even when the
+    # new pathname is not smaller than the previously opened file. Therefore
+    # retry every unexpected producer failure. The size comparison is retained
+    # for diagnosis, not as a prerequisite for retry.
+    find_shrunken_input
+    SHRINK_STATUS=$?
+    if [ "$SHRINK_STATUS" -eq 2 ]; then
+        fail "Pass 1 failed with reader status $PASS1_PRODUCER_STATUS and the current size of an input log file could not be read."
+    fi
+
+    if [ "$PASS1_RETRY_COUNT" -ge "$PASS1_MAX_RETRIES" ]; then
+        if [ "$SHRINK_STATUS" -eq 0 ]; then
+            fail "reverse log reader failed with status $PASS1_PRODUCER_STATUS while '$SHRUNKEN_FILE' became smaller; Pass 1 retry limit ($PASS1_MAX_RETRIES) was reached."
+        fi
+        fail "reverse log reader failed with status $PASS1_PRODUCER_STATUS; Pass 1 retry limit ($PASS1_MAX_RETRIES) was reached."
+    fi
+
+    PASS1_RETRY_COUNT=$((PASS1_RETRY_COUNT + 1))
+    if [ "$SHRINK_STATUS" -eq 0 ]; then
+        echo "Pass 1 reader failed with status $PASS1_PRODUCER_STATUS and log file '$SHRUNKEN_FILE' became smaller; retrying Pass 1 ($PASS1_RETRY_COUNT/$PASS1_MAX_RETRIES)." >&2
+    else
+        echo "Pass 1 reader failed with status $PASS1_PRODUCER_STATUS; retrying Pass 1 in case a log rotation changed the input path ($PASS1_RETRY_COUNT/$PASS1_MAX_RETRIES)." >&2
+    fi
+done
 
 SELECTED_TIDS=()
 OUTPUT_FILES=()
@@ -901,7 +1098,9 @@ BEGIN {
         emit(current_output_tid, $0)
     }
 }
-' "${FILES[@]}" || fail "forward log extraction failed."
+' "${FILES[@]}"
+PASS2_AWK_STATUS=$?
+[ "$PASS2_AWK_STATUS" -eq 0 ] || fail "forward log extraction failed in awk with status $PASS2_AWK_STATUS."
 
 for output_file in "${OUTPUT_FILES[@]}"; do
     [ -s "$output_file" ] || fail "selected transaction produced no output in '$output_file'."

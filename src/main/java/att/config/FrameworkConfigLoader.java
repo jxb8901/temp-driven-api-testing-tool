@@ -45,7 +45,7 @@ public final class FrameworkConfigLoader {
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
-                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", path, v26);
+                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "tools", path, v26, !v26);
                 if (v26 || v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools);
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
@@ -135,17 +135,19 @@ public final class FrameworkConfigLoader {
 
     private static void addTools(Object configured, Map<String, ToolConfig> result, String groupId,
                                  List<String> script, SshConfig ssh, String owner, Path sourceFile,
-                                 boolean allowCall) {
+                                 boolean allowCall, boolean allowLegacyDelimit) {
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Tool keys must be strings");
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Tool must be a map: " + entry.getKey());
             String localKey = String.valueOf(entry.getKey());
             if (!localKey.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Tool key must match [A-Za-z_][A-Za-z0-9_-]*: " + localKey);
-            if (groupId.isEmpty() && new att.template.DefaultBuiltInProvider().names().contains(localKey.toLowerCase(java.util.Locale.ROOT))) {
-                throw new IllegalArgumentException("Global tool key is reserved for built-in function: " + localKey);
-            }
             String key = groupId.isEmpty() ? localKey : groupId + "." + localKey;
+            att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
+            if (builtIns.names().contains(key.toLowerCase(java.util.Locale.ROOT))
+                    || reservedBuiltInPackage(builtIns, groupId.isEmpty() ? localKey : groupId)) {
+                throw new IllegalArgumentException("Tool name is reserved for built-in function: " + key);
+            }
             Map<?, ?> tool = (Map<?, ?>) entry.getValue();
             SchemaSupport.rejectUnknown(tool, owner + "." + localKey, "name", "description", "command", "call", "cache", "output", "arguments");
             boolean hasCommand = tool.get("command") != null;
@@ -167,7 +169,7 @@ public final class FrameworkConfigLoader {
             if (hasCommand && !("txt".equals(output) || "yaml".equals(output) || "json".equals(output) || "xml".equals(output))) {
                 throw new IllegalArgumentException("Tool output must be txt, yaml, json, or xml: " + key);
             }
-            Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"));
+            Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"), allowLegacyDelimit);
             List<String> command = hasCommand ? command(tool.get("command"), "tool " + key + ".command") : Collections.<String>emptyList();
             String call = hasCall ? SchemaSupport.string(tool.get("call"), "tool " + key + ".call", true) : "";
             if (hasCommand) validateCommandArguments(key, command, arguments, script.isEmpty());
@@ -179,6 +181,14 @@ public final class FrameworkConfigLoader {
             ToolConfig previous = result.put(key, configuredTool);
             if (previous != null) throw new IllegalArgumentException("Duplicate qualified tool name: " + key);
         }
+    }
+
+    private static boolean reservedBuiltInPackage(att.template.DefaultBuiltInProvider builtIns, String candidate) {
+        String normalized = candidate.toLowerCase(java.util.Locale.ROOT);
+        if (builtIns.names().contains(normalized)) return true;
+        String prefix = normalized + ".";
+        for (String name : builtIns.names()) if (name.startsWith(prefix)) return true;
+        return false;
     }
 
     private static void validateCallDefinition(String tool, String expression, String cache,
@@ -215,6 +225,7 @@ public final class FrameworkConfigLoader {
         }
         java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\$\\{([^}]+)}");
         for (att.template.ToolCallParser.ParsedCall parsedCall : calls) for (att.template.ToolCallParser.Argument callArgument : parsedCall.arguments()) {
+            rejectBareCallReference(callArgument.expression(), engine, arguments.keySet(), "Tool definition");
             java.util.List<String> fragments = new java.util.ArrayList<String>();
             fragments.add(callArgument.expression());
             if (callArgument.expression().trim().startsWith("[") && callArgument.expression().trim().endsWith("]")) {
@@ -224,14 +235,6 @@ public final class FrameworkConfigLoader {
                 engine.validateValueSyntax(fragment);
                 java.util.regex.Matcher matcher = placeholder.matcher(fragment);
                 while (matcher.find()) validateCallInputReference(tool, matcher.group(1), arguments);
-                String trimmed = fragment.trim();
-                if (trimmed.startsWith("input.") || trimmed.startsWith("TOOL.input.")) {
-                    validateCallInputReference(tool, trimmed, arguments);
-                }
-                if (trimmed.equals("CASE") || trimmed.startsWith("CASE.") || trimmed.startsWith("ACTIONS.")
-                        || trimmed.startsWith("RUN.") || trimmed.startsWith("DB.")) {
-                    throw new IllegalArgumentException("Tool definition call is limited to input.* and pure built-ins: " + tool + "." + trimmed);
-                }
             }
         }
         for (ToolArgumentConfig argument : arguments.values()) {
@@ -252,8 +255,7 @@ public final class FrameworkConfigLoader {
             if ("params".equals(argument.key())) {
                 String value = argument.expression().trim();
                 boolean list = value.startsWith("[") && value.endsWith("]");
-                boolean input = value.startsWith("input.") || value.startsWith("TOOL.input.")
-                        || value.startsWith("${input.") || value.startsWith("${TOOL.input.");
+                boolean input = value.startsWith("${input.") || value.startsWith("${TOOL.input.");
                 if (!(list || input)) throw new IllegalArgumentException(call.name() + ".params must be an inline list or typed input List: " + tool);
             }
         }
@@ -263,8 +265,7 @@ public final class FrameworkConfigLoader {
         for (att.template.ToolCallParser.Argument argument : call.arguments()) {
             if (!"sqlFile".equals(argument.key())) continue;
             String expression = argument.expression().trim();
-            if (expression.contains("${") || expression.contains("#{")
-                    || expression.startsWith("input.") || expression.startsWith("TOOL.input.")) {
+            if (expression.contains("${") || expression.contains("#{")) {
                 throw new IllegalArgumentException(call.name() + ".sqlFile must be a static package-relative path: " + tool);
             }
         }
@@ -283,6 +284,21 @@ public final class FrameworkConfigLoader {
         }
     }
 
+    private static void rejectBareCallReference(String value, att.template.UnifiedTemplateEngine engine,
+                                                java.util.Set<String> scopedNames, String location) {
+        String expression = value == null ? "" : value.trim();
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            for (String item : new att.template.ToolCallParser().listItems(expression)) {
+                rejectBareCallReference(item, engine, scopedNames, location);
+            }
+            return;
+        }
+        if (scopedNames.contains(expression) || expression.startsWith("input.")
+                || expression.startsWith("TOOL.input.") || engine.isExplicitContextPath(expression)) {
+            throw new IllegalArgumentException(location + " Context references must use ${...}: ${" + expression + "}");
+        }
+    }
+
     private static void validateCommandArguments(String tool, List<String> tokens, Map<String, ToolArgumentConfig> arguments, boolean commandOwnsExecutable) {
             if (tokens.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool);
             if (tokens.get(0).trim().isEmpty()) throw new IllegalArgumentException("Tool command first argv item must be non-blank: " + tool);
@@ -293,11 +309,8 @@ public final class FrameworkConfigLoader {
                 for (att.template.ToolCallParser.ParsedCall call : expressionEngine.parseCalls(token)) expressionEngine.validateBuiltInCall(call);
                 for (att.template.ToolCallParser.ParsedCall call : expressionEngine.parseCalls(token)) {
                     for (att.template.ToolCallParser.Argument callArgument : call.arguments()) {
-                        String expression = callArgument.expression().trim();
-                        if (expression.startsWith("input.") || expression.startsWith("TOOL.input.")) {
-                            String argument = expression.startsWith("TOOL.input.") ? expression.substring(11) : expression.substring(6);
-                            if (!arguments.containsKey(argument)) throw new IllegalArgumentException("Tool command expression must reference a declared argument: " + tool + "." + expression);
-                        }
+                        rejectBareCallReference(callArgument.expression(), expressionEngine,
+                                arguments.keySet(), "Tool command");
                     }
                 }
                 java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\$\\{([^}]+)}").matcher(token);
@@ -322,18 +335,8 @@ public final class FrameworkConfigLoader {
                         if (argument.key().equals(key)) references++;
                     }
                     boolean exact = token.equals(direct) || token.equals(input) || token.equals(legacy);
-                    for (att.template.ToolCallParser.ParsedCall call : expressionEngine.parseCalls(token)) {
-                        for (att.template.ToolCallParser.Argument callArgument : call.arguments()) {
-                            String expression = callArgument.expression().trim();
-                            if (argument.key().equals(expression) || ("input." + argument.key()).equals(expression)
-                                    || ("TOOL.input." + argument.key()).equals(expression)) references++;
-                        }
-                    }
                     if (exact) exactReferences++;
-                    boolean transformedReference = expressionEngine.referencesBareArgument(token, argument.key())
-                            || expressionEngine.referencesBareArgument(token, "input." + argument.key())
-                            || expressionEngine.referencesBareArgument(token, "TOOL.input." + argument.key());
-                    if (argument.multiValue() && (token.contains(direct) || token.contains(input) || token.contains(legacy) || transformedReference) && !exact) {
+                    if (argument.multiValue() && (token.contains(direct) || token.contains(input) || token.contains(legacy)) && !exact) {
                         throw new IllegalArgumentException("Delimited argument placeholder must occupy one complete argv token: " + tool + "." + argument.key());
                     }
                 }
@@ -382,7 +385,7 @@ public final class FrameworkConfigLoader {
             }
             SshConfig ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
-            addTools(group.get("tools"), tools, id, script, ssh, "tool group " + id + ".tools", file, v26);
+            addTools(group.get("tools"), tools, id, script, ssh, "tool group " + id + ".tools", file, v26, !v26);
         } catch (att.validation.DiagnosticException e) {
             throw e;
         } catch (Exception e) {
@@ -440,7 +443,7 @@ public final class FrameworkConfigLoader {
 
     private static boolean invalidSshText(String value) { return value.matches(".*[\\s\\p{Cntrl}].*"); }
 
-    private static Map<String, ToolArgumentConfig> arguments(String toolKey, Object value) {
+    private static Map<String, ToolArgumentConfig> arguments(String toolKey, Object value, boolean allowLegacyDelimit) {
         Map<String, ToolArgumentConfig> result = new LinkedHashMap<String, ToolArgumentConfig>();
         if (value == null) return result;
         if (!(value instanceof Map)) throw new IllegalArgumentException("arguments must be a map for tool: " + toolKey);
@@ -450,7 +453,13 @@ public final class FrameworkConfigLoader {
             if (!key.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Tool argument name must match [A-Za-z_][A-Za-z0-9_]*: " + toolKey + "." + key);
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Argument descriptor must be a map: " + toolKey + "." + key);
             Map<?, ?> descriptor = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key, "name", "description", "required", "delimit", "argName", "argNameMode");
+            if (allowLegacyDelimit) {
+                SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key,
+                        "name", "description", "required", "delimit", "argName", "argNameMode");
+            } else {
+                SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key,
+                        "name", "description", "required", "argName", "argNameMode");
+            }
             if (!descriptor.containsKey("required")) throw new IllegalArgumentException("required is mandatory for argument: " + toolKey + "." + key);
             String delimit = descriptor.get("delimit") == null ? "" : SchemaSupport.string(descriptor.get("delimit"), "tools." + toolKey + ".arguments." + key + ".delimit", true);
             Object argNameValue = descriptor.get("argName");
@@ -473,9 +482,15 @@ public final class FrameworkConfigLoader {
         String mode = report.get("mode") == null ? "append-to-copy" : SchemaSupport.string(report.get("mode"), "report.mode", true); if (!("append-to-copy".equals(mode) || "none".equals(mode))) throw new IllegalArgumentException("report.mode must be append-to-copy or none");
         String pattern = report.get("fileNamePattern") == null ? "${suiteName}.result.xlsx" : SchemaSupport.string(report.get("fileNamePattern"), "report.fileNamePattern", true);
         att.template.UnifiedTemplateEngine reportExpressions = new att.template.UnifiedTemplateEngine(null);
-        if (!pattern.contains("${suiteName}") && !reportExpressions.referencesBareArgument(pattern, "suiteName")) throw new IllegalArgumentException("report.fileNamePattern must reference suiteName");
+        if (!pattern.contains("${suiteName}")) throw new IllegalArgumentException("report.fileNamePattern must reference ${suiteName}");
         reportExpressions.validateValueSyntax(pattern);
-        for (att.template.ToolCallParser.ParsedCall call : reportExpressions.parseCalls(pattern)) reportExpressions.validateBuiltInCall(call);
+        for (att.template.ToolCallParser.ParsedCall call : reportExpressions.parseCalls(pattern)) {
+            reportExpressions.validateBuiltInCall(call);
+            for (att.template.ToolCallParser.Argument argument : call.arguments()) {
+                rejectBareCallReference(argument.expression(), reportExpressions,
+                        java.util.Collections.singleton("suiteName"), "report.fileNamePattern");
+            }
+        }
         for (String path : reportExpressions.parseValuePaths(pattern)) if (!"suiteName".equals(path)) throw new IllegalArgumentException("report.fileNamePattern only supports ${suiteName}: ${" + path + "}");
         Object junitValue = report.get("junit");
         Map<?, ?> junit = junitValue instanceof Map ? (Map<?, ?>) junitValue : java.util.Collections.emptyMap();

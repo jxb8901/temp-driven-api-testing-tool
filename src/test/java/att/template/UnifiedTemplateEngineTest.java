@@ -59,13 +59,15 @@ class UnifiedTemplateEngineTest {
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
 
-        assertEquals("ABC", engine.render("#{upper(#{trim(CASE.reference)})}", context));
-        assertEquals("7|7", engine.render("#{length(CASE.reference)}|#{length(${CASE.reference})}", context));
+        assertEquals("ABC", engine.render("#{upper(#{trim(${CASE.reference})})}", context));
+        assertEquals("7", engine.render("#{length(${CASE.reference})}", context));
         assertEquals("18|20", engine.render("#{length('CASE.VARS.SrcRefNo')}|#{length(“CASE.VARS.SrcRefNo”)}", context));
-        assertThrows(att.validation.DiagnosticException.class, () -> engine.render("#{length(CASE.missing)}", context));
+        IllegalArgumentException bare = assertThrows(IllegalArgumentException.class,
+                () -> engine.render("#{length(CASE.reference)}", context));
+        assertTrue(bare.getMessage().contains("${CASE.reference}"));
         assertEquals("0 <= 35", engine.maskCalls("#{length(value=${CASE.reference})} <= 35"));
         assertEquals("PAYMENT.result.xlsx", engine.renderScoped("#{upper(${suiteName})}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
-        assertEquals("PAYMENT.result.xlsx", engine.renderScoped("#{upper(suiteName)}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
+        assertThrows(IllegalArgumentException.class, () -> engine.renderScoped("#{upper(suiteName)}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
         assertThrows(IllegalArgumentException.class, () -> engine.renderScoped("#{external()}", Collections.<String,Object>emptyMap()));
     }
 
@@ -146,7 +148,7 @@ class UnifiedTemplateEngineTest {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("message", new ToolArgumentConfig("message", "Message", "Text", true, ""));
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("echoOne", new ToolConfig("echoOne", "Echo one", "Echo one value", "echo #{upper(input.message)}", "txt", arguments));
+        tools.put("echoOne", new ToolConfig("echoOne", "Echo one", "Echo one value", "echo #{upper(${input.message})}", "txt", arguments));
         CapturingRunner runner = new CapturingRunner();
         ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tools,null,null), runner);
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
@@ -161,13 +163,30 @@ class UnifiedTemplateEngineTest {
         data.put("account","00123"); data.put("count",7); data.put("enabled",true); data.put("items",Collections.singletonList(Collections.singletonMap("status","READY")));
         CaseRuntimeContext context=new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
         CapturingInvoker invoker=new CapturingInvoker(tempDir);
-        Object output=new UnifiedTemplateEngine(invoker).executeCall("#{capture(account=CASE.account, count=CASE.count, enabled=${CASE.enabled}, message='hello, world', first=CASE.items[0].status)}",context,new CaseExecutionLog(tempDir.resolve("tool.log")),"call");
+        Object output=new UnifiedTemplateEngine(invoker).executeCall(
+                "#{capture(account=${CASE.account}, count=${CASE.count}, enabled=${CASE.enabled}, " +
+                        "message='hello, world', quoted=\"O'Reilly said \\\"READY\\\" for ${CASE.caseId}\", " +
+                        "doubleQuote='state=\"READY\"', first=${CASE.items[0].status})}",
+                context,new CaseExecutionLog(tempDir.resolve("tool.log")),"call");
         assertEquals("ok",output);
         assertEquals("00123",invoker.input.get("account"));
         assertEquals(Integer.valueOf(7),invoker.input.get("count"));
         assertEquals(Boolean.TRUE,invoker.input.get("enabled"));
         assertEquals("hello, world",invoker.input.get("message"));
+        assertEquals("O'Reilly said \"READY\" for payment.TC001",invoker.input.get("quoted"));
+        assertEquals("state=\"READY\"",invoker.input.get("doubleQuote"));
         assertEquals("READY",invoker.input.get("first"));
+    }
+
+    @Test void toolCallArgumentsAcceptTypedInlineArrays() throws Exception {
+        CaseRuntimeContext context=new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),Collections.<String,Object>singletonMap("keyword","POSTED"),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        CapturingInvoker invoker=new CapturingInvoker(tempDir);
+
+        new UnifiedTemplateEngine(invoker).executeCall(
+                "#{capture(values=['PAYMENT', ${CASE.keyword}, 7, true])}", context,
+                new CaseExecutionLog(tempDir.resolve("array.log")), "array");
+
+        assertEquals(Arrays.asList("PAYMENT", "POSTED", new java.math.BigDecimal("7"), Boolean.TRUE), invoker.input.get("values"));
     }
 
     @Test void executesGlobalAndQualifiedGroupedCallsThroughTheSameTemplatePath() throws Exception {

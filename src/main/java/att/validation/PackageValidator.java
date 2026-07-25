@@ -431,8 +431,8 @@ public final class PackageValidator {
         validateInlineExpressions(action.saveAs(), engine, config);
         if (action.saveConfig().configured()) {
             String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
-            if (!("json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
-                throw new IllegalArgumentException("DB saveAs.format must be json, yaml, or xml: " + action.id());
+            if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
+                throw new IllegalArgumentException("DB saveAs.format must be text, json, yaml, or xml: " + action.id());
             }
         }
     }
@@ -750,9 +750,18 @@ public final class PackageValidator {
     private void validateCallArguments(ToolCallParser.ParsedCall call, att.core.CaseRuntimeContext context,
                                        att.template.UnifiedTemplateEngine engine) {
         for (ToolCallParser.Argument argument : call.arguments()) {
-            String expression = argument.expression().trim();
-            if (engine.isExplicitContextPath(expression)) engine.renderValidationValues("${" + expression + "}", context);
-            else engine.renderValidationValues(argument.expression(), context);
+            validateCallArgumentValue(argument.expression(), context, engine);
+        }
+    }
+
+    private void validateCallArgumentValue(String value, att.core.CaseRuntimeContext context,
+                                           att.template.UnifiedTemplateEngine engine) {
+        String expression = value.trim();
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            for (String item : new ToolCallParser().listItems(expression)) validateCallArgumentValue(item, context, engine);
+        } else {
+            rejectBareCallReference(expression, engine);
+            engine.renderValidationValues(value, context);
         }
     }
 
@@ -811,6 +820,9 @@ public final class PackageValidator {
     }
 
     private void validateCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config, boolean allowWriteFacade) {
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            rejectBareCallReference(argument.expression(), expressionEngine);
+        }
         String toolName = parsed.name();
         if (toolName.startsWith("db.")) {
             validateDbExpressionCall(parsed, config);
@@ -820,8 +832,7 @@ public final class PackageValidator {
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
             for (ToolCallParser.Argument argument : parsed.arguments()) {
-                boolean dynamic = argument.expression().contains("${") || argument.expression().contains("#{")
-                        || expressionEngine.isExplicitContextPath(argument.expression().trim());
+                boolean dynamic = argument.expression().contains("${") || argument.expression().contains("#{");
                 Object value = dynamic ? "<validation-value>" : callParser.literal(argument.expression());
                 staticArguments &= !dynamic;
                 if (shape.put(argument.key(), value) != null) throw builtInCallError(toolName,
@@ -930,7 +941,7 @@ public final class PackageValidator {
         }
         if (arguments.containsKey("sqlFile")) {
             String expression = arguments.get("sqlFile").expression().trim();
-            if (expression.contains("${") || expression.contains("#{") || expressionEngine.isExplicitContextPath(expression)) {
+            if (expression.contains("${") || expression.contains("#{")) {
                 throw new IllegalArgumentException(parsed.name() + ".sqlFile must be a static package-relative path");
             }
             try {
@@ -941,16 +952,27 @@ public final class PackageValidator {
             catch (Exception error) { throw new IllegalArgumentException(error.getMessage(), error); }
         } else {
             String expression = arguments.get("sql").expression().trim();
-            if (!(expression.contains("${") || expressionEngine.isExplicitContextPath(expression))) {
+            if (!expression.contains("${")) {
                 validateDbSql(String.valueOf(callParser.literal(expression)), expressionEngine, config);
             }
         }
         if (arguments.containsKey("params")) {
             String expression = arguments.get("params").expression().trim();
             if (expression.startsWith("[") && expression.endsWith("]")) callParser.listItems(expression);
-            else if (!(expression.startsWith("${") || expressionEngine.isExplicitContextPath(expression))) {
+            else if (!expression.startsWith("${")) {
                 throw new IllegalArgumentException(parsed.name() + ".params must be an inline list or exact Context List expression");
             }
+        }
+    }
+
+    private void rejectBareCallReference(String value, att.template.UnifiedTemplateEngine engine) {
+        String expression = value == null ? "" : value.trim();
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            for (String item : callParser.listItems(expression)) rejectBareCallReference(item, engine);
+            return;
+        }
+        if (engine.isExplicitContextPath(expression)) {
+            throw new IllegalArgumentException("Context references in calls must use ${...}: ${" + expression + "}");
         }
     }
 

@@ -433,7 +433,7 @@ public class FrameworkEngine {
             item.put("expected", result.expected());
             item.put("actual", result.actual());
             List<Map<String,Object>> actionResults = new ArrayList<Map<String,Object>>();
-            for (ValidationResult action : result.validations()) { Map<String,Object> detail = new LinkedHashMap<String,Object>(); detail.put("stage", action.source()); detail.put("action", action.name()); detail.put("status", action.status().name()); detail.put("expected", action.expected()); detail.put("actual", action.actual()); detail.put("message", action.message()); actionResults.add(detail); }
+            for (ValidationResult action : result.validations()) { Map<String,Object> detail = new LinkedHashMap<String,Object>(); detail.put("stage", action.source()); detail.put("action", action.name()); detail.put("description", action.description()); detail.put("status", action.status().name()); detail.put("expected", action.expected()); detail.put("actual", action.actual()); detail.put("message", action.message()); actionResults.add(detail); }
             item.put("actions", actionResults);
             item.put("caseLog", result.caseLogPath() == null ? "" : runDirectory.relativize(result.caseLogPath()).toString().replace('\\', '/'));
             cases.add(item);

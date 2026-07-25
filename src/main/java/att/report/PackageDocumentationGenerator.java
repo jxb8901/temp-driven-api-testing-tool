@@ -154,7 +154,7 @@ public final class PackageDocumentationGenerator {
         for (ToolConfig tool : config.tools().values()) {
             String group = tool.grouped() ? tool.groupId() : "";
             if (!group.equals(activeGroup)) {
-                body.append("<h2 class=\"tool-group\">").append(group.isEmpty() ? "Global tools" : "Tool group: " + escape(group)).append("</h2>");
+                body.append("<h2 class=\"tool-group\">").append(group.isEmpty() ? "Global tools" : "Tool package: " + escape(group)).append("</h2>");
                 activeGroup = group;
             }
             body.append("<section class=\"doc-item\" data-search=\"").append(escape((tool.key()+" "+tool.name()+" "+tool.description()).toLowerCase(java.util.Locale.ROOT))).append("\" data-tool=\"").append(escape(tool.key())).append("\" id=\"").append(anchor(tool.key())).append("\"><h3>").append(escape(tool.name())).append(" <code>").append(escape(tool.key())).append("</code></h3><p>").append(escape(tool.description())).append("</p><p>");
@@ -168,8 +168,8 @@ public final class PackageDocumentationGenerator {
             body.append("</p>");
             if (!tool.groupScriptArgv().isEmpty()) body.append("<p>group script argv: <code>[\"").append(escape(joinEscaped(tool.groupScriptArgv()))).append("\"]</code></p>");
             if (tool.ssh() != null) body.append("<p>SSH: <code>").append(escape(tool.ssh().destination())).append(":").append(tool.ssh().port()).append("</code></p>");
-            body.append("<table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>argName</th><th>argNameMode</th><th>Delimiter</th></tr>");
-            for (ToolArgumentConfig arg : tool.arguments().values()) body.append("<tr><td>").append(escape(arg.key())).append("</td><td>").append(escape(arg.name())).append("</td><td>").append(escape(arg.description())).append("</td><td>").append(arg.required()).append("</td><td>").append(escape(arg.argName())).append("</td><td>").append(escape(arg.namedArgv() && arg.multiValue() ? arg.argNameMode() : "")).append("</td><td>").append(escape(arg.delimit())).append("</td></tr>");
+            body.append("<table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>argName</th><th>argNameMode</th></tr>");
+            for (ToolArgumentConfig arg : tool.arguments().values()) body.append("<tr><td>").append(escape(arg.key())).append("</td><td>").append(escape(arg.name())).append("</td><td>").append(escape(arg.description())).append("</td><td>").append(arg.required()).append("</td><td>").append(escape(arg.argName())).append("</td><td>").append(escape(arg.namedArgv() ? arg.argNameMode() : "")).append("</td></tr>");
             body.append("</table></section>"); search.add(tool.key()); search.add(tool.name()); search.add(tool.description());
         }
         return page("Tools", body.toString());
@@ -199,31 +199,12 @@ public final class PackageDocumentationGenerator {
     }
 
     private String builtInPage() {
-        String[][] functions = {{"upper","upper(value)","Convert text to upper case"},{"lower","lower(value)","Convert text to lower case"},{"trim","trim(value)","Trim surrounding whitespace"},{"ltrim","ltrim(value)","Trim leading whitespace"},{"rtrim","rtrim(value)","Trim trailing whitespace"},{"string","string(value)","Convert a value to text"},{"number","number(value)","Normalize a number"},{"boolean","boolean(value)","Normalize a boolean"},{"length","length(value)","Return text length"},{"concat","concat(first, ...)","Concatenate values"},{"coalesce","coalesce(first, ...)","Return the first non-blank value"},{"nvl","nvl(value, defaultValue)","Return the default for null or empty text"},{"iif","iif(condition, trueValue, falseValue)","Return one branch for a boolean condition"},{"nchar","nchar(count, value)","Repeat a value count times"},{"substr","substr(value, start[, length])","Extract text using a zero-based index"},{"indexof","indexOf(value, search[, fromIndex])","Return a zero-based text index"},{"contains","contains(value, search)","Test whether text contains a value"},{"startswith","startsWith(value, prefix)","Test a text prefix"},{"endswith","endsWith(value, suffix)","Test a text suffix"},{"replace","replace(value, target, replacement)","Replace literal text"},{"padleft","padLeft(value, length[, pad])","Pad the left side of text"},{"padright","padRight(value, length[, pad])","Pad the right side of text"},{"sysdate","sysdate([format])","Return the optionally formatted system date"},{"systimestamp","systimestamp([format])","Return the optionally formatted system timestamp"},{"formatdate","formatDate(value, pattern[, zoneId])","Format an ISO-8601 date or timestamp"},{"dateadd","dateAdd(value, amount, unit)","Add an amount to an ISO-8601 value"},{"fileexists","fileExists(path)","Test whether a regular file exists"},{"directoryexists","directoryExists(path)","Test whether a directory exists"},{"filesize","fileSize(path)","Return regular-file size in bytes"},{"makedirectories","makeDirectories(path)","Create a directory tree"},{"copyfile","copyFile(source, target[, overwrite])","Copy a regular file"},{"movefile","moveFile(source, target[, overwrite])","Move a regular file"},{"deletefile","deleteFile(path[, missingOk])","Delete a non-directory file"},{"randomchoice","randomChoice(first, ...)","Randomly return one of 1 to 1000 input values"}};
-        StringBuilder body = new StringBuilder("<h1>Built-in functions</h1><div class=\"index\"><strong>Index:</strong> ");
-        for (String[] fn : functions) body.append("<a href=\"#builtin-").append(anchor(fn[0])).append("\">").append(builtInName(fn[0])).append("</a> ");
+        String[][] functions = {{"str.upper","str.upper(value)","Convert text to upper case"},{"str.lower","str.lower(value)","Convert text to lower case"},{"str.trim","str.trim(value)","Trim surrounding whitespace"},{"str.ltrim","str.ltrim(value)","Trim leading whitespace"},{"str.rtrim","str.rtrim(value)","Trim trailing whitespace"},{"str.length","str.length(value)","Return text length"},{"str.concat","str.concat(first, ...)","Concatenate values"},{"str.substr","str.substr(value, start[, length])","Extract text using a zero-based index"},{"str.indexOf","str.indexOf(value, search[, fromIndex])","Return a zero-based text index"},{"str.contains","str.contains(value, search)","Test whether text contains a value"},{"str.startsWith","str.startsWith(value, prefix)","Test a text prefix"},{"str.endsWith","str.endsWith(value, suffix)","Test a text suffix"},{"str.replace","str.replace(value, target, replacement)","Replace literal text"},{"str.lpad","str.lpad(value, length[, pad])","Pad the left side of text"},{"str.rpad","str.rpad(value, length[, pad])","Pad the right side of text"},{"str.repeat","str.repeat(count, value)","Repeat a value count times"},{"date.sysdate","date.sysdate([format])","Return the optionally formatted system date"},{"date.systimestamp","date.systimestamp([format])","Return the optionally formatted system timestamp"},{"date.format","date.format(value, pattern[, zoneId])","Format an ISO-8601 date or timestamp"},{"date.add","date.add(value, amount, unit)","Add an amount to an ISO-8601 value"},{"file.exists","file.exists(path)","Test whether a regular file exists"},{"file.directoryExists","file.directoryExists(path)","Test whether a directory exists"},{"file.size","file.size(path)","Return regular-file size in bytes"},{"file.mkdirs","file.mkdirs(path)","Create a directory tree"},{"file.copy","file.copy(source, target[, overwrite])","Copy a regular file"},{"file.move","file.move(source, target[, overwrite])","Move a regular file"},{"file.delete","file.delete(path[, missingOk])","Delete a non-directory file"},{"misc.string","misc.string(value)","Convert a value to text"},{"misc.number","misc.number(value)","Normalize a number"},{"misc.boolean","misc.boolean(value)","Normalize a boolean"},{"misc.coalesce","misc.coalesce(first, ...)","Return the first non-blank value"},{"misc.nvl","misc.nvl(value, defaultValue)","Return the default for null or empty text"},{"misc.iif","misc.iif(condition, trueValue, falseValue)","Return one branch for a boolean condition"},{"misc.randomChoice","misc.randomChoice(first, ...)","Randomly return one of 1 to 1000 input values"},{"misc.dbText","misc.dbText(value)","Format a stable typed DB result as SQL*Plus-style text"}};
+        StringBuilder body = new StringBuilder("<h1>Built-in functions</h1><p>Package-qualified names are canonical. Legacy flat names remain callable for compatibility.</p><div class=\"index\"><strong>Index:</strong> ");
+        for (String[] fn : functions) body.append("<a href=\"#builtin-").append(anchor(fn[0])).append("\">").append(fn[0]).append("</a> ");
         body.append("</div>");
-        for (String[] fn : functions) body.append("<section class=\"doc-item\" data-search=\"").append((fn[0]+" "+fn[2]).toLowerCase(java.util.Locale.ROOT)).append("\" data-tool=\"").append(fn[0]).append("\" id=\"builtin-").append(anchor(fn[0])).append("\"><h2>").append(builtInName(fn[0])).append("</h2><p>").append(fn[2]).append("</p><p><code>#{").append(fn[1]).append("}</code></p></section>");
+        for (String[] fn : functions) body.append("<section class=\"doc-item\" data-search=\"").append((fn[0]+" "+fn[2]).toLowerCase(java.util.Locale.ROOT)).append("\" data-tool=\"").append(fn[0]).append("\" id=\"builtin-").append(anchor(fn[0])).append("\"><h2>").append(fn[0]).append("</h2><p>").append(fn[2]).append("</p><p><code>#{").append(fn[1]).append("}</code></p></section>");
         return page("Built-in functions", body.toString());
-    }
-
-    private String builtInName(String key) {
-        if ("indexof".equals(key)) return "indexOf";
-        if ("startswith".equals(key)) return "startsWith";
-        if ("endswith".equals(key)) return "endsWith";
-        if ("padleft".equals(key)) return "padLeft";
-        if ("padright".equals(key)) return "padRight";
-        if ("formatdate".equals(key)) return "formatDate";
-        if ("dateadd".equals(key)) return "dateAdd";
-        if ("fileexists".equals(key)) return "fileExists";
-        if ("directoryexists".equals(key)) return "directoryExists";
-        if ("filesize".equals(key)) return "fileSize";
-        if ("makedirectories".equals(key)) return "makeDirectories";
-        if ("copyfile".equals(key)) return "copyFile";
-        if ("movefile".equals(key)) return "moveFile";
-        if ("deletefile".equals(key)) return "deleteFile";
-        if ("randomchoice".equals(key)) return "randomChoice";
-        return key;
     }
 
     private Map<String, Set<String>> filterValues(Path root, FrameworkConfig global) throws Exception {

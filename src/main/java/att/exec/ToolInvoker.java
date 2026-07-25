@@ -251,15 +251,20 @@ public class ToolInvoker {
     private Map<String, Object> resolveMap(Map<String, Object> input) {
         Map<String, Object> resolved = new LinkedHashMap<String, Object>();
         for (Map.Entry<String, Object> entry : input.entrySet()) {
-            if (entry.getValue() instanceof Map) {
-                resolved.put(entry.getKey(), resolveMap((Map<String, Object>) entry.getValue()));
-            } else if (entry.getValue() instanceof String) {
-                resolved.put(entry.getKey(), att.core.ValueNormalizer.normalize((String) entry.getValue()));
-            } else {
-                resolved.put(entry.getKey(), entry.getValue());
-            }
+            resolved.put(entry.getKey(), normalizeValue(entry.getValue()));
         }
         return resolved;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object normalizeValue(Object value) {
+        if (value instanceof Map) return resolveMap((Map<String, Object>) value);
+        if (value instanceof List) {
+            List<Object> values = new ArrayList<Object>();
+            for (Object item : (List<?>) value) values.add(normalizeValue(item));
+            return values;
+        }
+        return value instanceof String ? att.core.ValueNormalizer.normalize((String) value) : value;
     }
 
     private void validateArguments(ToolConfig tool, Map<String, Object> input) {
@@ -310,7 +315,10 @@ public class ToolInvoker {
         }
     }
 
-    private boolean blank(Object value) { return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty(); }
+    private boolean blank(Object value) {
+        if (value instanceof List) return ((List<?>) value).isEmpty();
+        return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty();
+    }
 
     private List<String> expandCommand(ToolConfig tool, Map<String, Object> input) throws Exception {
         List<String> tokens = tool.commandArgv();
@@ -334,6 +342,9 @@ public class ToolInvoker {
                 if (value instanceof List) {
                     if (exact.namedArgv() && !exact.repeatArgName()) argv.add(exact.argName());
                     for (Object item : (List<?>) value) {
+                        if (item instanceof List || item instanceof Map) {
+                            throw new IllegalArgumentException("Tool argv arrays must contain scalar values: " + tool.key() + "." + exact.key());
+                        }
                         if (exact.namedArgv() && exact.repeatArgName()) argv.add(exact.argName());
                         argv.add(item == null ? "" : String.valueOf(item));
                     }
@@ -342,6 +353,14 @@ public class ToolInvoker {
                     argv.add(String.valueOf(value));
                 }
                 continue;
+            }
+            Matcher placeholder = VALUE.matcher(token);
+            while (placeholder.find()) {
+                Object value = input.get(argumentKey(placeholder.group(1)));
+                if (value instanceof List) {
+                    throw new IllegalArgumentException("List argument placeholder must occupy one complete argv token: "
+                            + tool.key() + "." + argumentKey(placeholder.group(1)));
+                }
             }
             argv.add(expressionEngine.renderScoped(token, scopedValues));
         }

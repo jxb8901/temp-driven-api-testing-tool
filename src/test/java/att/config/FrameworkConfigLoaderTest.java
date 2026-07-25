@@ -36,7 +36,7 @@ class FrameworkConfigLoaderTest {
                 "id: orderTools\nname: Order tools\ndescription: Typed order queries\n" +
                 "tools:\n  find:\n    name: Find order\n    description: Find by two parameters\n" +
                 "    cache: {scope: case}\n" +
-                "    call: \"#{db.orders.query(sql='select * from orders where id = ? and status = ?', params=[input.id, #{upper(input.status)}])}\"\n" +
+                "    call: \"#{db.orders.query(sql='select * from orders where id = ? and status = ?', params=[${input.id}, #{upper(${input.status})}])}\"\n" +
                 "    arguments:\n      id: {name: ID, description: Order ID, required: true}\n" +
                 "      status: {name: Status, description: Order status, required: true}\n").getBytes("UTF-8"));
         Path config = configDirectory.resolve("config.yaml");
@@ -44,7 +44,7 @@ class FrameworkConfigLoaderTest {
                 "dbhelpers: [config/dbhelpers/orders.yaml]\n" +
                 "toolGroups: [config/tools/orders.yaml]\n" +
                 "tools:\n  today:\n    name: Today\n    description: Normalized date\n" +
-                "    call: \"#{upper(input.value)}\"\n" +
+                "    call: \"#{upper(${input.value})}\"\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
@@ -63,19 +63,24 @@ class FrameworkConfigLoaderTest {
 
     @Test void rejectsAmbiguousAndProcessOnlyCallBackedToolFields() throws Exception {
         String prefix = "schemaVersion: att-config/v2.6\ntools:\n  bad:\n    name: Bad\n    description: Bad\n";
+        IllegalArgumentException bareInput = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().load(write("bare-input.yaml",
+                        prefix + "    call: '#{upper(input.value)}'\n" +
+                                "    arguments:\n      value: {name: Value, description: Value, required: true}\n")));
+        assertTrue(bareInput.getMessage().contains("${input.value}"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("both.yaml",
-                prefix + "    command: [echo]\n    call: '#{upper(input.value)}'\n")));
+                prefix + "    command: [echo]\n    call: '#{upper(${input.value})}'\n")));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("output.yaml",
-                prefix + "    call: '#{upper(input.value)}'\n    output: json\n")));
+                prefix + "    call: '#{upper(${input.value})}'\n    output: json\n")));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("context.yaml",
-                prefix + "    call: '#{upper(CASE.value)}'\n")));
+                prefix + "    call: '#{upper(${CASE.value})}'\n")));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("nested-context.yaml",
-                prefix + "    call: \"#{db.orders.query(sql='select ?', params=[#{upper(CASE.value)}])}\"\n")));
+                prefix + "    call: \"#{db.orders.query(sql='select ?', params=[#{upper(${CASE.value})}])}\"\n")));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("dynamic-sql-file.yaml",
-                prefix + "    call: '#{db.orders.query(sqlFile=input.file, params=[])}'\n" +
+                prefix + "    call: '#{db.orders.query(sqlFile=${input.file}, params=[])}'\n" +
                         "    arguments:\n      file: {name: File, description: SQL file, required: true}\n")));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("argv.yaml",
-                prefix + "    call: '#{upper(input.value)}'\n    arguments:\n" +
+                prefix + "    call: '#{upper(${input.value})}'\n    arguments:\n" +
                         "      value: {name: Value, description: Value, required: true, argName: --value}\n")));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("cached-update.yaml",
                 prefix + "    call: \"#{db.orders.update(sql='update t set v=1')}\"\n    cache: {scope: db}\n")));
@@ -115,16 +120,22 @@ class FrameworkConfigLoaderTest {
     @Test void validatesBuiltInsInReportAndToolCommandScopes() throws Exception {
         Path valid = tempDir.resolve("expressions.yaml");
         Files.write(valid, ("schemaVersion: att-config/v2.2\n" +
-                "report: {fileNamePattern: \"#{upper(suiteName)}.result.xlsx\"}\n" +
+                "report: {fileNamePattern: \"#{upper(${suiteName})}.result.xlsx\"}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo\n" +
-                "    command: [echo, \"#{trim(input.value)}\"]\n" +
+                "    command: [echo, \"#{trim(${input.value})}\"]\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfigLoader().load(valid);
-        assertEquals("#{upper(suiteName)}.result.xlsx", config.report().fileNamePattern());
+        assertEquals("#{upper(${suiteName})}.result.xlsx", config.report().fileNamePattern());
 
         Path invalidReport = tempDir.resolve("invalid-report-expression.yaml");
         Files.write(invalidReport, "schemaVersion: att-config/v2.2\nreport: {fileNamePattern: \"${suiteName}-#{external()}.xlsx\"}\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidReport));
+
+        Path bareReport = tempDir.resolve("bare-report-expression.yaml");
+        Files.write(bareReport, "schemaVersion: att-config/v2.2\nreport: {fileNamePattern: \"#{upper(suiteName)}-${suiteName}.xlsx\"}\n".getBytes("UTF-8"));
+        IllegalArgumentException bareReportError = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().load(bareReport));
+        assertTrue(bareReportError.getMessage().contains("${suiteName}"));
 
         Path invalidCommand = tempDir.resolve("invalid-command-expression.yaml");
         Files.write(invalidCommand, ("schemaVersion: att-config/v2.2\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
@@ -134,9 +145,17 @@ class FrameworkConfigLoaderTest {
 
         Path invalidScopedPath = tempDir.resolve("invalid-command-scope.yaml");
         Files.write(invalidScopedPath, ("schemaVersion: att-config/v2.2\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
-                "    command: [echo, \"#{upper(input.missing)}\"]\n" +
+                "    command: [echo, \"#{upper(${input.missing})}\"]\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidScopedPath));
+
+        Path bareArray = tempDir.resolve("bare-command-array.yaml");
+        Files.write(bareArray, ("schemaVersion: att-config/v2.2\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+                "    command: [echo, \"#{concat(value=[input.value])}\"]\n" +
+                "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
+        IllegalArgumentException bareArrayError = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().load(bareArray));
+        assertTrue(bareArrayError.getMessage().contains("${input.value}"));
     }
 
     @Test void loadsV2AndRejectsGlobalStages() throws Exception {
@@ -250,6 +269,18 @@ class FrameworkConfigLoaderTest {
         assertEquals("repeat", tool.arguments().get("keywords").argNameMode());
         assertEquals("|", tool.arguments().get("types").delimit());
         assertEquals("once", tool.arguments().get("types").argNameMode());
+    }
+
+    @Test void v26RejectsLegacyDelimitAndReservedQualifiedBuiltInNames() throws Exception {
+        Path delimiter = write("v26-delimit.yaml", "schemaVersion: att-config/v2.6\ntools:\n  capture:\n    name: Capture\n    description: Capture\n    command: [capture, '${values}']\n    arguments:\n      values: {name: Values, description: Values, required: true, delimit: ','}\n");
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(delimiter));
+
+        Path configDirectory = tempDir.resolve("config");
+        Files.createDirectories(configDirectory.resolve("tools"));
+        Files.write(configDirectory.resolve("tools/str.yaml"), ("schemaVersion: att-tool-group/v2.6\nid: str\nname: Strings\ndescription: Strings\ntools:\n  custom:\n    name: Custom\n    description: Reserved package\n    command: [echo]\n").getBytes("UTF-8"));
+        Path reserved = configDirectory.resolve("reserved-qualified.yaml");
+        Files.write(reserved, "schemaVersion: att-config/v2.6\ntoolGroups: [config/tools/str.yaml]\n".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(reserved));
     }
 
     @Test void rejectsDuplicateGroupIdsUnsafePathsAndReservedGlobalNames() throws Exception {

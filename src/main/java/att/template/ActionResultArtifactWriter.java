@@ -13,9 +13,20 @@ import java.nio.file.StandardOpenOption;
 /** Writes a typed Tool/DB result to a safe Case-contained artifact path. */
 final class ActionResultArtifactWriter {
     private final ObjectOutputCodec codec = new ObjectOutputCodec();
+    private final DbTextResultFormatter dbText = new DbTextResultFormatter();
 
     Path write(CaseRuntimeContext context, String configuredPath, String format, Object value,
                boolean overwrite) throws Exception {
+        return write(context, configuredPath, format, value, overwrite, false);
+    }
+
+    Path writeDb(CaseRuntimeContext context, String configuredPath, String format, Object value,
+                 boolean overwrite) throws Exception {
+        return write(context, configuredPath, format, value, overwrite, true);
+    }
+
+    private Path write(CaseRuntimeContext context, String configuredPath, String format, Object value,
+                       boolean overwrite, boolean dbResult) throws Exception {
         Path root = context.caseOutputDirectory().toAbsolutePath().normalize();
         Files.createDirectories(root);
         Path target = root.resolve(IdentifierValidator.relativePath(configuredPath, "action saveAs.path")).normalize();
@@ -28,7 +39,8 @@ final class ActionResultArtifactWriter {
         }
         byte[] bytes;
         if ("text".equalsIgnoreCase(format)) {
-            bytes = (value == null ? "" : String.valueOf(value)).getBytes(StandardCharsets.UTF_8);
+            String text = dbResult ? dbText.format(value) : (value == null ? "" : String.valueOf(value));
+            bytes = text.getBytes(StandardCharsets.UTF_8);
         } else {
             bytes = codec.encode(value, format).getBytes(StandardCharsets.UTF_8);
         }

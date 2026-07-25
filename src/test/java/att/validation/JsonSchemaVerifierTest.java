@@ -27,6 +27,14 @@ class JsonSchemaVerifierTest {
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,valid.replace("EXIT_CODE","OUTPUT_PARSE")));
     }
 
+    @Test void v25TemplateSchemaAcceptsDbTextSaveAsAndRejectsRaw() throws Exception {
+        Path schema = Paths.get("schemas/att-template-v2.5.schema.json");
+        String valid = "{\"schemaVersion\":\"att-template/v2.5\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"db\",\"db\":\"orders\",\"query\":{\"sql\":\"select 1\"},\"saveAs\":{\"path\":\"orders.txt\",\"format\":\"text\"}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
+                valid.replace("\"format\":\"text\"", "\"format\":\"raw\"")));
+    }
+
     @Test void v23TemplateSchemaEnforcesCanonicalRenderAndAssertFields() throws Exception {
         Path schema=Paths.get("schemas/att-template-v2.3.schema.json");
         String render="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"render\":{\"type\":\"render\",\"payload\":\"data/*.json\",\"renderAs\":\"json\"}}}";

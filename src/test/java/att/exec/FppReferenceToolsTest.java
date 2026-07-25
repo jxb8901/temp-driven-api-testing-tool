@@ -95,6 +95,92 @@ class FppReferenceToolsTest {
         assertTrue(new String(Files.readAllBytes(stderr), StandardCharsets.UTF_8).contains("Command not found"));
     }
 
+    @Test void exeHelperExpandsWildcardArgumentsAndPreservesUnmatchedPatterns() throws Exception {
+        requirePosix();
+        Path data = tempDir.resolve("glob-data");
+        Files.createDirectories(data);
+        Files.write(data.resolve("a.txt"), new byte[0]);
+        Files.write(data.resolve("b file.txt"), new byte[0]);
+        Path child = tempDir.resolve("print-arguments.sh");
+        Files.write(child, ("#!/bin/bash\n" +
+                "for argument in \"$@\"; do printf '<%s>\\n' \"$argument\"; done\n").getBytes(StandardCharsets.UTF_8));
+        child.toFile().setExecutable(true);
+        Path stdout = tempDir.resolve("glob-output/stdout.log");
+        String pattern = data.resolve("*.txt").toString();
+        String unmatched = data.resolve("missing-*.txt").toString();
+
+        CommandResult result = run("./tools/exehelper.sh", "--stdout", stdout.toString(), "--",
+                child.toString(), pattern, unmatched);
+
+        assertEquals(0, result.exitCode());
+        assertEquals("<" + data.resolve("a.txt") + ">\n" +
+                        "<" + data.resolve("b file.txt") + ">\n" +
+                        "<" + unmatched + ">\n",
+                new String(Files.readAllBytes(stdout), StandardCharsets.UTF_8));
+    }
+
+    @Test void logHelperExpandsFileGlobsAndAcceptsStatusOneOnlyForIntentionalEarlyStop() throws Exception {
+        requirePosix();
+        Path fakeBin = tempDir.resolve("fake-bin");
+        Path logs = tempDir.resolve("logs");
+        Path output = tempDir.resolve("log-results");
+        Files.createDirectories(fakeBin);
+        Files.createDirectories(logs);
+        Files.createDirectories(output);
+        Path fakeTac = fakeBin.resolve("tac");
+        Files.write(fakeTac, ("#!/bin/sh\n" +
+                "awk '{ lines[NR]=$0 } END { for (i=NR; i>=1; i--) print lines[i] }' \"$2\"\n" +
+                "exit 1\n").getBytes(StandardCharsets.UTF_8));
+        fakeTac.toFile().setExecutable(true);
+        Files.write(logs.resolve("app-main.log"), (
+                "[INFO] [2026/07/23 10:00:00.000] [Order.start] [TID100] Transaction Started MATCH-ME\n" +
+                "[INFO] [2026/07/23 10:00:01.000] [Order.end] [TID100] Transaction Completed\n"
+        ).getBytes(StandardCharsets.UTF_8));
+        String path = fakeBin + File.pathSeparator + System.getenv("PATH");
+        String logPattern = logs.resolve("app-*.log").toString();
+
+        CommandResult accepted = run("/usr/bin/env", "PATH=" + path, "./tools/loghelper.sh",
+                "--output-prefix", output.resolve("accepted").toString(),
+                "--log-file", logPattern, "--keyword", "MATCH-ME",
+                "--max-tid-files", "1", "--recent-log-count", "0");
+
+        assertEquals(0, accepted.exitCode(), accepted.stderr());
+        assertEquals(Boolean.TRUE, yaml(accepted.stdout()).get("matched"));
+        assertEquals(1, ((Number) yaml(accepted.stdout()).get("count")).intValue());
+        assertTrue(Files.isRegularFile(output.resolve("accepted-TID100-" + hostSuffix() + ".log")));
+
+        CommandResult rejected = run("/usr/bin/env", "PATH=" + path, "./tools/loghelper.sh",
+                "--output-prefix", output.resolve("rejected").toString(),
+                "--log-file", logPattern, "--keyword", "MATCH-ME",
+                "--max-tid-files", "2", "--recent-log-count", "0");
+
+        assertEquals(1, rejected.exitCode());
+        assertEquals(Boolean.FALSE, yaml(rejected.stdout()).get("success"));
+        assertTrue(rejected.stderr().contains("reverse log reader failed with status 1"));
+    }
+
+    @Test void logHelperAllowsLocalHostInConfiguredSshServerListWithoutSshingItself() throws Exception {
+        requirePosix();
+        Path logs = tempDir.resolve("local-server-logs");
+        Path output = tempDir.resolve("local-server-results");
+        Files.createDirectories(logs);
+        Files.createDirectories(output);
+        Files.write(logs.resolve("app.log"), (
+                "[INFO] [2026/07/23 11:00:00.000] [Order.start] [TID200] Transaction Started LOCAL-MATCH\n" +
+                "[INFO] [2026/07/23 11:00:01.000] [Order.end] [TID200] Transaction Completed\n"
+        ).getBytes(StandardCharsets.UTF_8));
+
+        CommandResult result = run("/usr/bin/env", "LOGHELPER_SSH_SERVERS=localhost||||",
+                "./tools/loghelper.sh", "--output-prefix", output.resolve("local").toString(),
+                "--log-file", logs.resolve("app.log").toString(), "--keyword", "LOCAL-MATCH",
+                "--max-tid-files", "2", "--min-tid-files", "2", "--recent-log-count", "0", "--ssh");
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertEquals(Boolean.TRUE, yaml(result.stdout()).get("success"));
+        assertEquals(1, ((Number) yaml(result.stdout()).get("count")).intValue());
+        assertTrue(result.stderr().contains("is the local host and was already searched; skipping SSH"));
+    }
+
     @Test void fileHelpersMoveInspectAndSearchLiteralText() throws Exception {
         requirePosix();
         Path source = tempDir.resolve("input");
@@ -166,6 +252,12 @@ class FppReferenceToolsTest {
 
     private Map<?, ?> yaml(String text) throws Exception {
         return (Map<?, ?>) new ToolInvoker(tempDir, emptyConfig()).parseOutput(text, "yaml");
+    }
+
+    private String hostSuffix() throws Exception {
+        CommandResult hostname = run("hostname");
+        String value = hostname.stdout().trim();
+        return value.length() <= 2 ? value : value.substring(value.length() - 2);
     }
 
     private void requirePosix() {

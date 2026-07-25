@@ -24,6 +24,11 @@ public class ExpressionEvaluator {
         if (expression == null || expression.trim().isEmpty()) throw new IllegalArgumentException("Assertion expression must not be blank");
         UnifiedTemplateEngine expressions = new UnifiedTemplateEngine(null);
         expressions.validateValueSyntax(expression);
+        for (ToolCallParser.ParsedCall call : expressions.parseCalls(expression)) {
+            for (ToolCallParser.Argument argument : call.arguments()) {
+                rejectBareContextReference(argument.expression(), expressions);
+            }
+        }
         expression = expressions.maskCalls(expression);
         StringBuilder normalized = new StringBuilder();
         for (int index = 0; index < expression.length();) {
@@ -39,6 +44,19 @@ public class ExpressionEvaluator {
             normalized.append('0'); index = end + 1;
         }
         evaluate(normalized.toString());
+    }
+
+    private void rejectBareContextReference(String value, UnifiedTemplateEngine expressions) {
+        String expression = value == null ? "" : value.trim();
+        if (expression.startsWith("[") && expression.endsWith("]")) {
+            for (String item : new ToolCallParser().listItems(expression)) {
+                rejectBareContextReference(item, expressions);
+            }
+            return;
+        }
+        if (expressions.isExplicitContextPath(expression)) {
+            throw new IllegalArgumentException("Context references in calls must use ${...}: ${" + expression + "}");
+        }
     }
 
     /** Resolves Context values as typed expression literals before parsing. */

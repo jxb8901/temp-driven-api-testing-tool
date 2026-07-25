@@ -1,8 +1,8 @@
-# ATT V2.6.0 新手入門
+# ATT V2.6.1 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.6.0 的 command/call-backed 工具、Java JDBC dbhelper、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.6.1 的 command/call-backed 工具、Java JDBC dbhelper、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.6.0 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.6.1 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -114,7 +114,7 @@ tools:
 
 Case log 中 `ERROR`、`FAIL`、`INVALID` 區塊會以 `【!!!!!】` 開頭，例如 `【!!!!!】[ACTION invokeApi]`。可直接搜尋 `【!!!!!】` 快速定位異常日誌。
 
-工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，並可選 `argName`、`argNameMode` 及 `delimit`；同一工具可有多個參數使用 `delimit`。例如 `traceId` 有值時產生 `--trace-id <value>` 兩個 argv；缺少或空白時兩者都不產生。多值具名參數預設使用兼容既有行為的 `argNameMode: once`，名稱只在第一個 value 前產生一次；`repeat` 則在每個 value 前重複。省略 `argName` 或設為空字串代表 positional argument，optional positional 值為空時也不產生 argv。
+工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，並可選 `argName`、`argNameMode`。例如 `traceId` 有值時產生 `--trace-id <value>` 兩個 argv；缺少或空白時兩者都不產生。多值參數直接在 call 傳 YAML array，例如 `keywords=['PAYMENT', 'POSTED']`，不可在 V2.6 descriptor 配置 `delimit`。具名 List 預設 `argNameMode: once`，名稱只在第一個 value 前產生一次；`repeat` 則在每個 value 前重複。省略 `argName` 或設為空字串代表 positional argument，optional positional 值為空時也不產生 argv。舊 config/tool-group schema 的 `delimit` 只保留讀取相容性。
 
 `command` 推薦使用多行 argv list：每一項就是一個 argv，不會再次分詞。原有單行字串仍支持，ATT 只在載入時拆分一次，再統一轉為 argv list。具名參數優先以 `${requestFile}` 直接引用，需要明確命名空間時使用 `${input.requestFile}`；名稱大小寫必須與 arguments key 完全一致。command 只能引用已聲明參數，不能直接引用 `${CASE...}` 或 `${ACTIONS...}`。本地工具以當前 Case 輸出目錄作為工作目錄；以 `./` 或 `../` 開頭的 executable 仍相對套件根目錄解析，其他相對 argv 路徑則由工具從 Case 目錄解讀。工具將結果寫到 stdout、診斷寫到 stderr。只有 action 明確設定 `saveAs` 時才另存 raw stdout。
 
@@ -178,7 +178,7 @@ tools:
   find:
     name: Find orders
     description: 按客戶與狀態查詢
-    call: "#{db.orders.query(sql='select id, status from orders where customer_id = ? and status = ?', params=[input.customerId, input.status])}"
+    call: "#{db.orders.query(sql='select id, status from orders where customer_id = ? and status = ?', params=[${input.customerId}, ${input.status}])}"
     cache: {scope: case}
     arguments:
       customerId: {name: Customer ID, description: 客戶, required: true}
@@ -196,11 +196,35 @@ loadOrders:
 
 `cache.scope` 可為 `case` 或 `db`。`db` 可跨 Case 重用，但 DB update、commit、rollback 或 reconnect 都不會清除 cache，因此可能返回 stale data，只應用於穩定/reference 資料。DB update façade 不可 cache，且只能作為 `type: tool` 的主要 call。Call-backed Tool 使用 dbhelper 的 SQL timeout，不支持 process `timeoutMs`／retry／stdout `raw`。
 
-例如下列 `note` 可包含空格並保持為一個 argv：
+例如以下 process-backed Tool 可接收含單引號、雙引號及 Context interpolation 的完整 message：
+
+先在 global config 的 `tools` 內宣告：
 
 ```yaml
-command: "./tools/invoke_payment_api.sh '${requestFile}' --label 'Payment regression'"
+tools:
+  writeAudit:
+    name: Write audit
+    description: Write one audit message for one source file
+    command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
+    output: yaml
+    arguments:
+      message: {name: Message, description: 完整訊息, required: true}
+      sourceFile: {name: Source file, description: 關聯檔案, required: true}
 ```
+
+再於 template action 調用：
+
+```yaml
+writeAudit:
+  type: tool
+  call: >-
+    #{writeAudit(
+        message="O'Reilly said \"READY\" for ${CASE.caseId}",
+        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+```
+
+Child process 會收到例如 `O'Reilly said "READY" for payment.payment.TC001` 的一個 atomic argv。這些是 ATT expression quote，不是 shell quote；Context value 自身含引號也無需 shell escaping。YAML block scalar 可避免再增加一層 YAML quote escaping。普通 Tool 不會展開 `$HOME`、`$(date)` 或 `*.xml`，完整規則與更多單／雙引號例子見 Reference Manual。
 
 工具組是獨立配置文件。`config/tools/payment.yaml` 的最小例子：
 
@@ -299,7 +323,7 @@ actions:
 ```yaml
 normalizeReference:
   type: tool
-  call: "#{upper(CASE.reference)}"
+  call: "#{upper(${CASE.reference})}"
   saveAs:
     path: normalized-reference.txt
     format: text
@@ -320,10 +344,10 @@ Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `
 
 - `render` 必須有 `payload` glob 及 `renderAs: file|text|json|yaml|xml`。`file` 把每個匹配文件 render 到 Case output 目錄的同名相對路徑，目標清單位於 `output.targetFiles`；其他類型把單一值或按相對路徑排序的多值 map 放在 `output.result`。render 不再使用 `saveAs`、`overwrite` 或配置 `output.mode`。
 - `tool` 必須有一個指向已配置 Tool 或 ATT built-in 的 `call`；V2.5 `saveAs` 使用 `{path, format, overwrite}`。process Tool 預設 `raw` 並可另選 text/json/yaml/xml；built-in 預設 text 且不支持 raw。`timeoutMs` 和 EXIT_CODE retry 只對外部 Tool 執行有實際控制作用。
-- `db` 必須指定实例 `db`，并在 `query`／`update` 中选一个；DB `saveAs` 要求 format 为 json/yaml/xml。DB timeout 来自实例的 `statement.timeoutSeconds`，不使用 Action `timeoutMs`，也不自动 retry SQL。
+- `db` 必須指定实例 `db`，并在 `query`／`update` 中选一个；DB `saveAs` 要求 format 为 text/json/yaml/xml。text 会输出 SQL*Plus 风格的查询表格或 update 行数摘要。DB timeout 来自实例的 `statement.timeoutSeconds`，不使用 Action `timeoutMs`，也不自动 retry SQL。
 - `assert` action 必須有非空 `assert`，不再使用 `expression`；可加 `expected`（validate 階段求值）和 `actual`（runtime 求值）。
-- 任何可寫 `${...}` 的使用者欄位也可寫 `#{...}`。`${...}` 用於文字插值；在 `#{...}` 參數內可直接寫 canonical Context path，例如 `assert: "#{length(value=CASE.VARS.SrcRefNo)} <= 35"`、`description: "#{upper(CASE.caseId)}"` 和 `saveAs.path: "#{lower(CASE.caseId)}.txt"`。普通 Case-runtime expression 也可调用只读 `#{db.<instance>.query/scalar(...)}`。字面字串使用 ASCII 單／雙引號；舊巢狀 `${...}` 仍相容。
-- `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。
+- 任何可寫 `${...}` 的使用者欄位也可寫 `#{...}`。`${...}` 用於 Context 引用及文字插值；`#{...}` 的參數也必須用 `${...}` 引用 Context，例如 `assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"`、`description: "#{upper(${CASE.caseId})}"` 和 `saveAs.path: "#{lower(${CASE.caseId})}.txt"`。裸 `CASE.*`、`ACTIONS.*`、`input.*` 等 path 會被拒絕。普通 Case-runtime expression 也可调用只读 `#{db.<instance>.query/scalar(...)}`。字面字串使用 ASCII 單／雙引號。
+- `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。要把先前 DB 结果直接打印成相同表格，可使用 `message: "#{dbText(${ACTIONS.queryOrders.output.result})}"`，不必建立中间文件。
 - render、tool、log 都可用 `assert` 決定 PASS/FAIL；操作異常仍是 ERROR。tool exit code 是 `output.exitCode` 證據，不再單獨決定 action 結果。
 
 所有 action 的結果統一位於 `ACTIONS.<id>.output`：`status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及有設定時的 `assertion`。不要再讀取 action 頂層 `status`、`outputFile` 或舊式 scalar `output`。
@@ -390,7 +414,7 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.6.0：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.6.1：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
@@ -447,7 +471,8 @@ ATT 內置函數包括：
 - `makeDirectories(path)`：建立完整目錄樹；
 - `copyFile(source, target[, overwrite])`、`moveFile(...)`：複製／移動一般文件，預設不覆蓋同名目標；
 - `deleteFile(path[, missingOk])`：刪除非目錄文件，預設在文件不存在時報錯；
-- `randomChoice(first, ...)`：從 1 至 1000 個輸入值中隨機返回一個值。
+- `randomChoice(first, ...)`：從 1 至 1000 個輸入值中隨機返回一個值；
+- `dbText(value)`：把 `type: db` 或 DB expression 的 typed result 轉成 SQL*Plus 風格文字，不執行新查詢。
 
 例如：
 
@@ -462,11 +487,14 @@ ATT 內置函數包括：
 #{boolean(yes)}
 #{nvl(${CASE.optionalReference}, 'NO-REFERENCE')}
 #{iif(${CASE.enabled}, 'Y', 'N')}
-#{nchar(3, '9')}
-#{fileExists(${CASE.requestFile})}
-#{copyFile(${CASE.requestFile}, ${CASE.backupFile}, true)}
-#{randomChoice('PRIMARY', 'SECONDARY', 'FALLBACK')}
+#{str.repeat(3, '9')}
+#{file.exists(${CASE.requestFile})}
+#{file.copy(${CASE.requestFile}, ${CASE.backupFile}, true)}
+#{misc.randomChoice('PRIMARY', 'SECONDARY', 'FALLBACK')}
+#{misc.dbText(${ACTIONS.queryOrders.output.result})}
 ```
+
+V2.6 canonical built-in 以 package 分組：`str.*`、`date.*`、`file.*`、`misc.*`，例如 `str.lpad`、`file.move`、`misc.nvl`。舊 flat 名稱仍可調用以兼容既有 template。Tool group 的 `id` 同樣是 call package；例如 group `fpp` 的工具使用 `fpp.exehelper`。
 
 只有一個 `value` 的 built-in 可省略 `value=`。配置中只宣告一個 argument 的 tool 也可省略名稱，如 `#{getAppLogs(${CASE.caseId})}`；只要 tool 宣告零個或多個 argument，就必須沿用原有的空參數／具名參數寫法，多參數 tool 不接受位置參數。
 
@@ -477,10 +505,40 @@ ATT 內置函數包括：
 ```text
 #{fpp.invokeApi(requestId=${CASE.requestId}, requestType=${CASE.requestType}, requestFile=${CASE.requestFile}, apiLogPath=${CASE.apiLogPath})}
 #{fpp.sqlplusToXml(inputFile=${CASE.sqlplusOutput})}
-#{fpp.execCommand(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
+#{fpp.exehelper(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`execCommand` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.4.3](09_Reference_Manual_V2.md#built-in-functions)。
+V2.6.1 的 reference helper 另可明確展開 pathname wildcard：
+
+```yaml
+countRequests:
+  type: tool
+  call: >-
+    #{fpp.exehelper(
+        command='wc',
+        arguments=['-l', '${CASE.outputDirectory}/requests/*.xml'],
+        stdoutPath='${CASE.outputDirectory}/request-counts.txt'
+    )}
+
+findTransactions:
+  type: tool
+  call: >-
+    #{fpp.loghelper(
+        maxTidFiles=10,
+        minTidFiles=2,
+        outputPrefix='${CASE.outputDirectory}/transaction',
+        logFiles=['/var/log/payment/app*.log', '/archive/payment/app-2026-07-2?.log'],
+        keywords=[${CASE.caseId}, 'SUCCESS'],
+        recentLogCount=0,
+        sshOption='--ssh'
+    )}
+```
+
+`fpp.exehelper.arguments`、`fpp.loghelper.logFiles` 和 `fpp.loghelper.keywords` 都是有序 YAML array，不會按字元分隔。ATT 將每個 item 保持為獨立 argv；List placeholder 必須獨佔一個 command token。`exehelper` 對每個含 `*`、`?` 或 `[` 的 child argument 展開 matching path；unmatched pattern 保持字面值。`loghelper` 在每台 host 展開 log path，只接受 regular file；無任何本地匹配時失敗。匹配結果依 C locale pathname 排序，路徑含空格仍維持一個 argv。這是 helper 自身的明確功能，不會令普通 Tool 使用 shell。
+
+`loghelper` 的 SSH server list 每行格式為 `host|user|port|identity-file|remote-loghelper-path`，可包含 `localhost||||` 或當前 hostname；本機已在 local pass 搜索，不會再 SSH 自身。非本機 entry 仍需完整 SSH 資料。
+
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`exehelper` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.6.1](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -539,7 +597,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.0",
+  "attVersion": "2.6.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -580,6 +638,8 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 - CI JUnit XML：`output/<RunID>/ci/junit.xml`
 - JUnit HTML 報告：`output/<RunID>/report/junit.html`（可直接開啟閱讀）
 - 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
+
+單頁測試報告的 Action Results table 分別顯示 Stage、Action、Description、Status、Message。Description 是 action 完成後的最終渲染值；同一欄位亦寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Case Expected 仍按順序包含 assert description 與 `expected`。
 
 `./att.sh docs` 的 Testcases 區段先按 workbook、再按 Sheet 分組。Sheet 名稱只顯示於分組標題，table 依序包含 Case ID、Name、Tags、Stages → Templates 及最後一欄 Expected Result；Expected Result 依 action 順序組合所有 assert action 在 validation 階段可解析的 `description` 與 `expected`，未解析的 runtime placeholder 保持原樣，換行統一為 LF。
 
@@ -667,7 +727,7 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 #{boolean(yes)}
 ```
 
-外部工具只接受已在 `config/config.yaml` 或其 `toolGroups` 文件宣告的命名參數。全局工具使用 `tool(...)`，組內工具使用 `group.tool(...)`。參數可用 `argName: --reference` 在有值時生成名稱和值兩個 argv；optional 空值會連名稱一起省略。省略／清空 `argName` 表示 process positional argument。多個參數都可使用 `delimit`，例如把 `PAYMENT,POSTED` 解析為有順序的多個命令參數；多值具名參數以 `argNameMode: once`（預設）或 `repeat` 控制名稱是否逐值重複。
+外部工具只接受已在 `config/config.yaml` 或其 `toolGroups` 文件宣告的命名參數。全局工具使用 `tool(...)`，組內工具使用 `group.tool(...)`。參數可用 `argName: --reference` 在有值時生成名稱和值兩個 argv；optional 空值會連名稱一起省略。省略／清空 `argName` 表示 process positional argument。多值直接傳 array，例如 `keywords=['PAYMENT', 'POSTED']`；`argNameMode: once`（預設）或 `repeat` 控制名稱是否逐值重複。
 
 ### 11.4 V2.3 開發檢查表
 
@@ -686,4 +746,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、報告、打包及診斷內容見 [ATT V2.6.0 Reference Manual](09_Reference_Manual_V2.md)。
+完整配置、Context、報告、打包及診斷內容見 [ATT V2.6.1 Reference Manual](09_Reference_Manual_V2.md)。

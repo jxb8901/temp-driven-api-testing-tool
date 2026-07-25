@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.6.1 - 2026-07-23
+
+- Added canonical package-qualified built-ins under `str.*`, `date.*`, `file.*`, and `misc.*`, retained flat aliases for compatibility, and reserved both qualified and legacy names against Tool collisions.
+- Replaced V2.6 Tool `delimit` configuration with typed YAML array call arguments. Exact placeholders expand Lists into atomic argv with existing `argNameMode: once|repeat`; legacy schemas keep delimiter read compatibility.
+- Renamed the shipped FPP command-wrapper Tool from `fpp.execCommand` to `fpp.exehelper`, matching its `tools/exehelper.sh` implementation.
+- Removed bare Context-path inference inside calls; Context and definition-input values must now use explicit `${...}` references such as `${CASE.customerId}` and `${input.customerId}`.
+- Added the final rendered Action `description` as an independent HTML Action Results column and machine-readable action-result field while preserving existing Case Expected aggregation.
+- Fixed intermittent `loghelper.sh` failures where an intentional early reverse scan made macOS `tail -r` report status 1; status 1 or SIGPIPE 141 is accepted only when the scanner has written an explicit early-stop marker.
+- Added deterministic pathname wildcard expansion for `loghelper.sh --log-file` values and per-argument wildcard expansion in `exehelper.sh`, preserving unmatched exehelper patterns as literal atomic arguments.
+- Allowed shared loghelper SSH server lists to contain localhost, loopback, or the current hostname; the already-searched local entry is skipped without requiring SSH credentials or an SSH client.
+- Expanded process-backed Tool documentation with executable examples for single quotes, double quotes, escaped mixed quotes, Context interpolation, atomic argv behavior, and the FPP wildcard helpers.
+- Added `format: text` for direct DB Action `saveAs`, producing deterministic SQL*Plus-style query tables or update row-count messages, plus the pure `dbText(...)` built-in for printing the same representation from log actions and other expressions.
+
 ## 2.6.0 - 2026-07-22
 
 - Added `att-config/v2.6` and `att-tool-group/v2.6` with exactly-one `command|call` Tool implementations while retaining V2.1/V2.2/V2.5 configuration and V2.2 Tool-group read compatibility.
