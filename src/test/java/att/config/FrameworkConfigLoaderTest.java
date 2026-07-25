@@ -35,6 +35,7 @@ class FrameworkConfigLoaderTest {
         Files.write(configDirectory.resolve("tools/orders.yaml"), ("schemaVersion: att-tool-group/v2.6\n" +
                 "id: orderTools\nname: Order tools\ndescription: Typed order queries\n" +
                 "tools:\n  find:\n    name: Find order\n    description: Find by two parameters\n" +
+                "    timeoutMs: 4321\n" +
                 "    cache: {scope: case}\n" +
                 "    call: \"#{db.orders.query(sql='select * from orders where id = ? and status = ?', params=[${input.id}, #{upper(${input.status})}])}\"\n" +
                 "    arguments:\n      id: {name: ID, description: Order ID, required: true}\n" +
@@ -44,14 +45,17 @@ class FrameworkConfigLoaderTest {
                 "dbhelpers: [config/dbhelpers/orders.yaml]\n" +
                 "toolGroups: [config/tools/orders.yaml]\n" +
                 "tools:\n  today:\n    name: Today\n    description: Normalized date\n" +
+                "    timeoutMs: 3210\n" +
                 "    call: \"#{upper(${input.value})}\"\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
         assertTrue(loaded.tool("orderTools.find").callBacked());
         assertTrue(loaded.tool("orderTools.find").caseCached());
+        assertEquals(Long.valueOf(4321), loaded.tool("orderTools.find").timeoutMs());
         assertEquals("db.orders.query", new att.template.ToolCallParser().parse(loaded.tool("orderTools.find").call()).name());
         assertTrue(loaded.tool("today").callBacked());
+        assertEquals(Long.valueOf(3210), loaded.tool("today").timeoutMs());
         assertTrue(loaded.tool("today").commandArgv().isEmpty());
 
         Path legacy = tempDir.resolve("legacy-v25-call.yaml");

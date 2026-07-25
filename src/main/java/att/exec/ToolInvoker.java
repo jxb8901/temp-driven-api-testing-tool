@@ -61,6 +61,14 @@ public class ToolInvoker {
     }
 
     public ToolConfig tool(String name) { return config.tool(name); }
+    public long effectiveTimeoutMs(String toolName, Long actionTimeoutMs) {
+        if (actionTimeoutMs != null) return actionTimeoutMs.longValue();
+        ToolConfig tool = config.tool(toolName);
+        return tool != null && tool.timeoutMs() != null ? tool.timeoutMs().longValue() : config.timeoutMs();
+    }
+    public long defaultTimeoutMs(Long actionTimeoutMs) {
+        return actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
+    }
 
     /** Applies the common Tool argument contract without performing a process invocation. */
     public Map<String, Object> prepareInput(String toolName, Map<String, Object> input) {
@@ -110,7 +118,7 @@ public class ToolInvoker {
         List<String> argv = tool.ssh() == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;
         String sshTransport = tool.ssh() == null ? "" : sshCommandRunner.transportName();
         CommandResult commandResult;
-        long timeoutMs = actionTimeoutMs == null ? config.timeoutMs() : actionTimeoutMs.longValue();
+        long timeoutMs = effectiveTimeoutMs(toolName, actionTimeoutMs);
         CommandRunner.CapturePolicy capture = capturePolicy(context, id);
         try {
             if (tool.ssh() == null) {

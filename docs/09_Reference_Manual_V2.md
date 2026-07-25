@@ -1,7 +1,7 @@
-# ATT V2.6.1 User Manual and Reference
+# ATT V2.6.2 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 2.6.1
+Version: 2.6.2
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -142,7 +142,7 @@ Create `testcase/payment.xlsx` with one header row:
 Create the adjacent `testcase/payment.yaml`:
 
 ```yaml
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: payment
 excel:
   sheet: payment=Payment Cases
@@ -163,7 +163,7 @@ The full Case ID is `payment.payment.TC001`: the first `payment` is the mandator
 Create `templates/payment/template.yaml`:
 
 ```yaml
-schemaVersion: att-template/v2.5
+schemaVersion: att-template/v2.6
 name: PAYMENT_INVOKE
 description: Render, invoke, and verify a payment
 actions:
@@ -265,10 +265,10 @@ testcase/payment_regression.yaml
 testcase/payment_regression.xml
 ```
 
-The sidecar maps Excel structure into ATT concepts. It owns the sheet mapping, headers, case data, ordered stages, optional report-column labels, and an optional workbook timeout.
+The sidecar maps Excel structure into ATT concepts. It owns the sheet mapping, headers, case data, ordered stages, and optional report-column labels. Timeout and retry policy do not belong to the workbook.
 
 ```yaml
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: paymentRegression
 excel:
   sheet: payment=支付測試案例集, batch=批量測試案例集
@@ -385,7 +385,7 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
 
 ```yaml
-schemaVersion: att-template/v2.5
+schemaVersion: att-template/v2.6
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -970,7 +970,7 @@ Evidence records `cache.scope`, the SHA-256 `cache.key`, and `cache.hit`. A miss
 
 ##### Timeout, retry, lifecycle, and evidence
 
-Call-backed DB Tools use the target dbhelper's `statement.timeoutSeconds`, read-only policy, transaction configuration, result limits, one-connection-per-instance/thread lifecycle, and Case pre-rollback/reconnect behavior. Action `timeoutMs` and process EXIT_CODE `retry` are invalid because they cannot safely override JDBC semantics.
+Call-backed DB Tools retain the target dbhelper's read-only, transaction, result-limit, connection, and Case lifecycle rules. They now use the same Tool Action `timeoutMs` and ASSERTION/TIMEOUT retry contract as command-backed Tools. The effective JDBC query timeout is the shorter of the Tool attempt timeout and the dbhelper `statement.timeoutSeconds`; a retry-enabled Action bypasses call-backed cache so polling cannot reuse a stale value.
 
 The Action keeps a normal `TOOL` wrapper with `implementation: call`, input, typed output, status, duration, and cache details. A DB cache miss also produces the ordinary Action `DB` evidence. Fields that only exist for a process—`command`, `logicalArgv`, `argv`, `stdout`, `stderr`, `rawOutput`, and `exitCode`—are absent.
 
@@ -982,7 +982,7 @@ Choose the lightest authoring form:
 | one-off read inside an expression | `#{db.orders.query|scalar(...)}` |
 | repeated operation with a business name and stable arguments | call-backed Tool |
 | intentional in-memory reuse | call-backed Tool with explicit cache |
-| external executable, SSH, argv, stdout parser, or exit-code retry | command-backed Tool |
+| external executable, SSH, argv, or stdout parser | command-backed Tool |
 
 The complete normative contract is [V2.6 Call-backed Tool System Design](02_System_Design_V2.6.md).
 
@@ -1087,10 +1087,21 @@ Timeout, launch/process I/O failure, or structured-output parse failure is ERROR
 Timeout precedence is:
 
 ```text
-tool action timeoutMs → workbook sidecar timeoutMs → global timeoutMs → 10000 ms
+tool action timeoutMs → Tool descriptor timeoutMs → global timeoutMs → 10000 ms
 ```
 
 Every configured timeout is an integer from 1 to 3600000 milliseconds.
+
+Retry is valid only on `type: tool` Actions and has no global, Tool, Template, stage, or sidecar default:
+
+```yaml
+retry:
+  maxAttempts: 3
+  intervalMs: 1000
+  retryOn: [ASSERTION, TIMEOUT]
+```
+
+`maxAttempts` includes the first attempt and is 2–10; `intervalMs` is 0–3600000. `ASSERTION` requires an Action `assert`: ATT evaluates it after every normal result and retries only when it is false. `TIMEOUT` retries only an attempt timeout. Exit code has no retry category and remains available at `${output.exitCode}` for the assertion. Configuration, argument, I/O, parse, non-timeout DB, and assertion-evaluation errors are not retried.
 
 ### 3.4 Running Tests
 
@@ -1378,7 +1389,7 @@ Given `--levels ERROR WARN`, the array contains `ERROR` and `WARN`. If a `once` 
 
 String items are normalized individually; blank markers become empty strings, while an explicitly empty array remains empty. A required empty List fails before expansion. Spaces, quotes, backslashes, leading dashes, and `|><` inside an item remain literal data. Every List placeholder must occupy one complete static command token. Nested Lists and maps are rejected as argv items. An empty optional List emits neither its `argName` nor values. Current `att-config/v2.6` and `att-tool-group/v2.6` schemas reject `delimit`; legacy configuration schemas retain their historical split behavior only for read compatibility.
 
-### Retry selected exit codes
+### Retry assertion polling or timeout
 
 Retry belongs to a tool action, not to a workflow or arbitrary stage:
 
@@ -1387,13 +1398,14 @@ callApi:
   type: tool
   call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
   timeoutMs: 30000
+  assert: "${output.result.status} == 'COMPLETED'"
   retry:
     maxAttempts: 3
-    retryOn: [EXIT_CODE]
-    exitCodes: [1, 75]
+    intervalMs: 1000
+    retryOn: [ASSERTION, TIMEOUT]
 ```
 
-`maxAttempts` includes the first attempt and defaults to 1. V2.3 supports only `EXIT_CODE`; if `exitCodes` is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.3 has no delay/backoff fields, so eligible retries are immediate.
+`maxAttempts` includes the first attempt. ATT evaluates the Tool Action assertion after every normal result; `ASSERTION` retries a false result, while `TIMEOUT` independently permits retry after the attempt timeout. Exit codes are ordinary evidence and can be included in the same assertion. The retry block has no defaults outside the Action.
 
 Each attempt is recorded directly in the case log/action record; no `attempt-001` directory is created. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.
 
@@ -1475,15 +1487,15 @@ This chapter is the authoritative reading reference for author-authored configur
 | Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, optional global SSH |
 | Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
-| Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels, workbook timeout |
+| Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
 
-Tool Action timeout overrides sidecar timeout, which overrides global timeout. DB statement timeout comes only from the referenced dbhelper's `statement.timeoutSeconds`. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
+Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
 ### Schema catalog
 
-V2.6 changes the main and Tool-group schemas for call-backed Tools. The V2.5 dbhelper and template schemas remain current because their contracts did not change.
+V2.6.2 adds `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy. The dbhelper schema remains V2.5.
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
@@ -1492,9 +1504,10 @@ V2.6 changes the main and Tool-group schemas for call-backed Tools. The V2.5 dbh
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
 | Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../schemas/att-tool-group-v2.6.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
-| Workbook sidecar | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
-| Template descriptor | `att-template/v2.5` | [att-template-v2.5.schema.json](../schemas/att-template-v2.5.schema.json) |
-| Legacy template descriptor (read compatibility) | `att-template/v2.3` | [att-template-v2.3.schema.json](../schemas/att-template-v2.3.schema.json) |
+| Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
+| Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
+| Template descriptor | `att-template/v2.6` | [att-template-v2.6.schema.json](../schemas/att-template-v2.6.schema.json) |
+| Legacy template descriptor (read compatibility) | `att-template/v2.5`, `att-template/v2.3` | [att-template-v2.5.schema.json](../schemas/att-template-v2.5.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) |
 | CI summary | `att-ci-summary/v2.1` | [att-ci-summary-v2.1.schema.json](../schemas/att-ci-summary-v2.1.schema.json) |
@@ -1598,12 +1611,12 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 
 | Object | Allowed properties | Required/constraints |
 |---|---|---|
-| root | `schemaVersion`, `id`, `excel`, `stages`, `report`, `timeoutMs`, `x-*` | schemaVersion, package-unique id, excel, non-empty stages required |
+| root | `schemaVersion`, `id`, `excel`, `stages`, `report`, `x-*` | schemaVersion, package-unique id, excel, non-empty stages required |
 | `excel` | `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns` | sheet, caseId, tags required; headerRows ≥ 1 |
 | `stages[]` | `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure` | key/template required; key has no dot |
 | `report` | `columns` | values are strings |
 
-`timeoutMs` is 1–3600000. Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` reject extensions and other unknown fields. The sidecar cannot override tools, dbhelpers, template root, environment, or output root.
+Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` reject extensions and other unknown fields. The sidecar cannot override timeout, retry, tools, dbhelpers, template root, environment, or output root.
 
 ### Template and action
 
@@ -1612,15 +1625,15 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
 | render | requires `payload`, `renderAs`; optional `assert`; no saveAs/output/call/expression/message/file/level/fields/timeout/retry/DB fields |
-| tool | requires `call`; optional object-shaped `saveAs` and `assert`; `timeoutMs`/`retry` are supported only when the primary configured Tool is command-backed; no action-level `overwrite` or render/assert-action/log-only fields |
+| tool | requires `call`; optional object-shaped `saveAs`, `assert`, `expected`, `actual`, `timeoutMs`, and Action-only `retry`; command/call-backed Tools share this contract |
 | db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and optional typed-list `params`; optional `assert` and object-shaped `saveAs`; no action-level `overwrite`, `call`, retry, or Action timeout |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
 | assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `CASE.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or saveAs |
 | `saveAs` | requires safe relative `path`; optional `format` and `overwrite`; target-specific format/default rules below; `overwrite` defaults false |
-| retry | `maxAttempts`, `retryOn`, `exitCodes`; retryOn required and contains only `EXIT_CODE` |
+| retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
 
-`renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. `maxAttempts` is 1–10; `exitCodes` values are 1–255. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
+`renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
 
 #### Assign variable uniqueness and lifetime
 
@@ -1660,7 +1673,7 @@ If an assign expression fails, ATT does not create its variable. This does not r
 
 #### Action `saveAs`
 
-`saveAs` is an optional property of `type: tool` and `type: db` actions. V2.5 uses one object shape:
+`saveAs` is an optional property of `type: tool` and `type: db` actions. V2.6 uses one object shape:
 
 ```yaml
 callApi:
@@ -1722,11 +1735,11 @@ saveAs:
 
 `path` and `format` are required for DB; format is `text`, `json`, `yaml`, or `xml`. The written representation never replaces `${output.result}`'s typed Java object.
 
-`att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.5` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
+`att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.6` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
 
 ### Tool contract
 
-Each Tool requires `name`, `description`, and exactly one of `command` or `call`. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
+Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
 
 Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`; it controls a typed List supplied at the call site. These two argv properties are invalid for call-backed arguments. V2.6 does not define `delimit`.
 
@@ -1747,7 +1760,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.1",
+  "attVersion": "2.6.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1839,7 +1852,7 @@ The available values and callable capabilities still depend on the location's sc
 | Tool-definition `command` tokens | declared Tool-input `${...}` aliases | Yes | No | No | When constructing logical argv |
 | Tool-definition `call` | declared typed `${input.*}` only | Pure built-ins | No configured Tool chaining | One primary DB query/scalar/update | When invoking the façade |
 
-For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in-process and publishes its value at `${output.result}`; it has `exitCode: 0`, supports the action's assertion and optional `saveAs`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. `timeoutMs` cannot pre-empt an in-process built-in, and `EXIT_CODE` retry does not repeat its successful zero-exit result. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
+For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in a bounded daemon executor and publishes its value at `${output.result}`; it has `exitCode: 0`, supports timeout, Action assertion/retry, and optional `saveAs`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
 
 ```yaml
 normalizeReference:

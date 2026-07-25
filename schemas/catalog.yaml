@@ -7,10 +7,12 @@ schemas:
   dbhelper: att-dbhelper-v2.5.schema.json
   toolGroup: att-tool-group-v2.6.schema.json
   legacyToolGroup: att-tool-group-v2.2.schema.json
-  sidecar: att-sidecar-v2.1.schema.json
+  sidecar: att-sidecar-v2.2.schema.json
+  legacySidecar: att-sidecar-v2.1.schema.json
   testcaseSnapshot: att-testcases-v2.4.xsd
-  template: att-template-v2.5.schema.json
-  legacyTemplate: att-template-v2.3.schema.json
+  template: att-template-v2.6.schema.json
+  legacyTemplate: att-template-v2.5.schema.json
+  olderTemplate: att-template-v2.3.schema.json
   runManifest: att-run-v2.1.schema.json
   validation: att-validation-v2.1.schema.json
   ciSummary: att-ci-summary-v2.1.schema.json

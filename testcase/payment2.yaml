@@ -1,4 +1,4 @@
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: payment2
 excel:
   sheet: CT

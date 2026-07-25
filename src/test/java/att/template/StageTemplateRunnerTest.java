@@ -87,7 +87,7 @@ class StageTemplateRunnerTest {
         List<ValidationResult> results=new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("verify",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(tempDir.resolve("case.log")));
         assertEquals(2,results.size()); assertEquals(ResultStatus.PASS,results.get(1).status());
     }
-    @Test void retriesEligibleExitCodeAndNeverRetriesTimeout() throws Exception {
+    @Test void retriesFailedAssertionAndRetriesTimeoutOnlyWhenConfigured() throws Exception {
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null);
         CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("case1"),"R",tempDir,tempDir.resolve("case1.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
@@ -95,7 +95,7 @@ class StageTemplateRunnerTest {
         tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         SequencedRunner runner = new SequencedRunner(false);
-        Map<String,Object> retry = map("maxAttempts",3,"retryOn",Arrays.asList("EXIT_CODE"),"exitCodes",Arrays.asList(75));
+        Map<String,Object> retry = map("maxAttempts",3,"intervalMs",0,"retryOn",Arrays.asList("ASSERTION"));
         TemplateAction action = new TemplateAction("call",map("type","tool","call","#{sample()}","saveAs","${CASE.caseId}-response.txt","assert","${output.result} == 'ok'","retry",retry));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,runner))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(tempDir.resolve("case1.log")));
         assertEquals(ResultStatus.PASS, results.get(0).status()); assertEquals(2, runner.calls);
@@ -106,7 +106,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext timeoutContext = new CaseRuntimeContext(test,tempDir.resolve("case2"),"R2",tempDir,tempDir.resolve("case2.log"));
         timeoutContext.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         SequencedRunner timeout = new SequencedRunner(true);
-        TemplateAction timeoutAction = new TemplateAction("call",map("type","tool","call","#{sample()}","retry",map("maxAttempts",3,"retryOn",Arrays.asList("EXIT_CODE"))));
+        TemplateAction timeoutAction = new TemplateAction("call",map("type","tool","call","#{sample()}"));
         List<ValidationResult> timeoutResults = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,timeout))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(timeoutAction)),timeoutContext,new CaseExecutionLog(tempDir.resolve("case2.log")));
         assertEquals(ResultStatus.ERROR, timeoutResults.get(0).status()); assertEquals(1, timeout.calls);
         String timeoutLog = new String(Files.readAllBytes(tempDir.resolve("case2.log")),"UTF-8");
@@ -114,6 +114,15 @@ class StageTemplateRunnerTest {
         assertEquals(1, occurrences(timeoutLog, "Tool timed out: sample"));
         assertEquals(1, occurrences(timeoutLog, "[ACTION call ERROR]"));
         assertFalse(timeoutLog.contains("TOOL:"));
+
+        CaseRuntimeContext retryTimeoutContext = new CaseRuntimeContext(test,tempDir.resolve("case3"),"R3",tempDir,tempDir.resolve("case3.log"));
+        retryTimeoutContext.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        SequencedRunner retriedTimeout = new SequencedRunner(true);
+        TemplateAction retryTimeoutAction = new TemplateAction("call",map("type","tool","call","#{sample()}",
+                "retry",map("maxAttempts",3,"intervalMs",0,"retryOn",Arrays.asList("TIMEOUT"))));
+        List<ValidationResult> retryTimeoutResults = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,retriedTimeout))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(retryTimeoutAction)),retryTimeoutContext,new CaseExecutionLog(tempDir.resolve("case3.log")));
+        assertEquals(ResultStatus.ERROR, retryTimeoutResults.get(0).status()); assertEquals(3, retriedTimeout.calls);
+        assertEquals(3, ((List<?>) retryTimeoutContext.resolve("ACTIONS.call.output.attempts")).size());
     }
 
     @Test void logActionCanEmitUtf8FileContentWithoutDuplicatingIt() throws Exception {

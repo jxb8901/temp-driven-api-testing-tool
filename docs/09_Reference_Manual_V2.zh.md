@@ -1,7 +1,7 @@
-# ATT V2.6.1 中文用户手册与参考手册
+# ATT V2.6.2 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：2.6.1
+版本：2.6.2
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -144,7 +144,7 @@ argv 列表形式的 `command` 会保留每一项为一个独立进程参数。�
 创建相邻的 `testcase/payment.yaml`：
 
 ```yaml
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: payment
 excel:
   sheet: payment=Payment Cases
@@ -165,7 +165,7 @@ stages:
 创建 `templates/payment/template.yaml`：
 
 ```yaml
-schemaVersion: att-template/v2.5
+schemaVersion: att-template/v2.6
 name: PAYMENT_INVOKE
 description: Render, invoke, and verify a payment
 actions:
@@ -267,10 +267,10 @@ testcase/payment_regression.yaml
 testcase/payment_regression.xml
 ```
 
-侧车将 Excel 结构映射为 ATT 概念。它负责 sheet 映射、表头、用例数据、有序阶段、可选报告列标签，以及可选的工作簿超时。
+侧车将 Excel 结构映射为 ATT 概念。它负责 sheet 映射、表头、用例数据、有序阶段及可选报告列标签；timeout/retry 不属于工作簿配置。
 
 ```yaml
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: paymentRegression
 excel:
   sheet: payment=支付測試案例集, batch=批量測試案例集
@@ -387,7 +387,7 @@ ATT 会先将 `name` 作为全局唯一的符号名解析。只有在没有符�
 只有当目录直接包含 `template.yaml` 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。
 
 ```yaml
-schemaVersion: att-template/v2.5
+schemaVersion: att-template/v2.6
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -949,7 +949,7 @@ Evidence 记录 `cache.scope`、SHA-256 `cache.key` 与 `cache.hit`。Cache miss
 
 ##### Timeout、retry、lifecycle 与 evidence
 
-Call-backed DB Tool 继续使用目标 dbhelper 的 `statement.timeoutSeconds`、read-only、transaction、result limits、每 instance/thread 一个 Connection、Case 前 rollback 与 reconnect 规则。Action `timeoutMs` 与 process EXIT_CODE `retry` 对它无意义并会被拒绝。
+Call-backed DB Tool 保留目标 dbhelper 的 read-only、transaction、result limits、Connection 与 Case lifecycle 规则，并与 command-backed Tool 共用 Action `timeoutMs` 和 ASSERTION/TIMEOUT retry。JDBC query timeout 取 Tool attempt timeout 与 `statement.timeoutSeconds` 中较短者；配置 retry 的 Action 会绕过 call-backed cache，避免轮询旧值。
 
 Action 保留正常 `TOOL` wrapper，含 `implementation: call`、input、typed output、status、duration 与 cache evidence；DB miss 也写入 Action `DB`。`command`、`argv`、`stdout`、`stderr`、`rawOutput`、`exitCode` 等 process-only 字段不存在。
 
@@ -1053,17 +1053,28 @@ Case 输出工作目录以及两个环境变量规则仅适用于本地工具进
 | `${input.argument}` | 显式命名空间引用同一已声明参数 |
 | `${TOOL.input.argument}` | 对同一参数的支持完整别名 |
 
-ATT 按工具配置的 `output: txt|yaml|json|xml` 解析 stdout，默认 `txt`。V2.5 Tool Action 的 object `saveAs` 可保存精确 raw stdout，或把 typed `${output.result}` 编码为 text/json/yaml/xml；路径写入当前 Case artifact 目录。retry 共用一个渲染后的路径，最终保留最后一次可写 attempt 的内容。不使用 `saveAs` 时，ATT 不创建额外命名 artifact，但输入、argv、stdout、stderr、解析结果、退出码和 retry evidence 仍保存在 Case evidence 中。
+ATT 按工具配置的 `output: txt|yaml|json|xml` 解析 stdout，默认 `txt`。V2.6 Tool Action 的 object `saveAs` 可保存精确 raw stdout，或把 typed `${output.result}` 编码为 text/json/yaml/xml；路径写入当前 Case artifact 目录。retry 共用一个渲染后的路径，最终保留最后一次可写 attempt 的内容。不使用 `saveAs` 时，ATT 不创建额外命名 artifact，但输入、argv、stdout、stderr、解析结果、退出码和 retry evidence 仍保存在 Case evidence 中。
 
 超时、启动/进程 I/O 失败或结构化输出解析失败是 ERROR，不能被断言覆盖。否则工具动作的 `assert` 决定 PASS/FAIL。如果未配置断言，操作完成即算 PASS，即使进程退出码非零。退出码仍保留在 `action.output.exitCode` 中，因此要求零退出码的模板需显式写明。命令、输入、stdout、stderr、原始输出、持续时间、退出码、解析后的 `output.result` 和断言详情都会保留为证据。
 
 超时优先级为：
 
 ```text
-工具动作 timeoutMs → 工作簿侧车 timeoutMs → 全局 timeoutMs → 10000 ms
+工具动作 timeoutMs → Tool descriptor timeoutMs → 全局 timeoutMs → 10000 ms
 ```
 
 所有配置的超时都是 1 到 3600000 毫秒的整数。
+
+retry 只属于 `type: tool` Action，不存在全局、Tool、Template、stage 或 sidecar 默认：
+
+```yaml
+retry:
+  maxAttempts: 3
+  intervalMs: 1000
+  retryOn: [ASSERTION, TIMEOUT]
+```
+
+`maxAttempts` 包含首次 attempt，范围 2–10；`intervalMs` 范围 0–3600000。`ASSERTION` 要求同一 Tool Action 配置 `assert`，每次正常返回后立即判断，false 才重试；`TIMEOUT` 独立控制单次超时是否重试。exit code 只作为 `${output.exitCode}` 证据，由 assert 判断。配置、参数、I/O、解析、非 timeout DB 错误及 assertion 求值错误均不重试。
 
 ### 3.4 运行测试
 
@@ -1273,7 +1284,7 @@ grepLogs:
 
 本节通过 Bash 示例说明 `argNameMode: repeat` 与 `once` 的行为。省略。
 
-### 重试指定退出码
+### 重试 assertion 轮询或 timeout
 
 重试属于 tool 动作，而不是工作流或任意 stage：
 
@@ -1282,13 +1293,14 @@ callApi:
   type: tool
   call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
   timeoutMs: 30000
+  assert: "${output.result.status} == 'COMPLETED'"
   retry:
     maxAttempts: 3
-    retryOn: [EXIT_CODE]
-    exitCodes: [1, 75]
+    intervalMs: 1000
+    retryOn: [ASSERTION, TIMEOUT]
 ```
 
-`maxAttempts` 包含第一次尝试，默认 1。V2.3 只支持 `EXIT_CODE`；如果省略 `exitCodes`，则任何非零退出码都可重试。超时、输出解析、I/O、配置、断言、render、log 失败不会重试。V2.3 没有延迟/退避字段，因此符合条件的重试会立即执行。
+`maxAttempts` 包含第一次尝试。ATT 每次取得正常结果后立即执行 Tool Action assertion；`ASSERTION` 重试 false，`TIMEOUT` 则独立允许超时重试。已移除的 `EXIT_CODE`／`exitCodes` 在 2.6.2 中属于 validation error。
 
 每次尝试都直接记录在 Case 日志和动作记录中；不会创建 `attempt-001` 目录。后续成功尝试会使动作 PASS，同时保留先前证据；耗尽重试次数后则产出 ERROR。只有安全可重复的操作才应使用重试。
 
@@ -1363,15 +1375,15 @@ callApi:
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
-| 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签、工作簿超时 |
+| 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
 | CLI | 命令选项 | 选择、Run ID、输出覆盖、展示、CI 格式 |
 
-动作超时覆盖侧车超时，侧车超时覆盖全局超时。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
+Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v2.6`。当前主配置与 Tool group 分别为 `att-config/v2.6`、`att-tool-group/v2.6`；dbhelper 与 template 仍为 `att-dbhelper/v2.5`、`att-template/v2.5`。旧 `att-config/v2.1|v2.2|v2.5`、`att-tool-group/v2.2` 与 `att-template/v2.3` 保持可读，但只有 V2.6 Tool descriptor 可使用 `call`／`cache`。
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v2.6`。当前主配置、Tool group、sidecar 与 template 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v2.6`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。
 
 ### 全局配置
 
@@ -1444,12 +1456,12 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 
 | 对象 | 允许属性 | 必填/约束 |
 |---|---|---|
-| 根对象 | `schemaVersion`、`id`、`excel`、`stages`、`report`、`timeoutMs`、`x-*` | `schemaVersion`、包内唯一 `id`、`excel`、非空 `stages` 必需 |
+| 根对象 | `schemaVersion`、`id`、`excel`、`stages`、`report`、`x-*` | `schemaVersion`、包内唯一 `id`、`excel`、非空 `stages` 必需 |
 | `excel` | `sheet`、`headerRows`、`caseId`、`tags`、`dataColumns` | `sheet`、`caseId`、`tags` 必需；`headerRows >= 1` |
 | `stages[]` | `key`、`template`、`dataColumns`、`required`、`runWhen`、`onFailure` | `key`/`template` 必需；`key` 不能含点号 |
 | `report` | `columns` | 值为字符串 |
 
-`timeoutMs` 为 1–3600000。只有侧车根对象允许 `x-*`；`excel`、stages 和侧车 `report` 拒绝扩展和其他未知字段。侧车不能覆盖工具、模板根、环境或输出根。
+只有侧车根对象允许 `x-*`；`excel`、stages 和侧车 `report` 拒绝扩展和其他未知字段。侧车不能覆盖 timeout、retry、工具、模板根、环境或输出根。
 
 ### 模板与动作
 
@@ -1458,14 +1470,14 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | 模板根对象 | `schemaVersion`、`name`、`description`、`actions`、`x-*`；`schemaVersion`、`description`、非空 `actions` 必需 |
 | 动作 common | `type`、`description`、`onFailure`，以及其选定类型所属字段；动作 ID 不能含点号 |
 | render | 需要 `payload`、`renderAs`；可选 `assert`; 不允许 saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry |
-| tool | 需要 `call`；可选 object `saveAs` 与 `assert`；只有主要目标为 command-backed Tool 时才支持 `timeoutMs`／`retry`；不允许 DB/render/assert-action/log-only 字段 |
+| tool | 需要 `call`；可选 object `saveAs`、`assert`、`expected`、`actual`、`timeoutMs` 与 Action-only `retry`；command/call-backed 共用契约 |
 | db | 需要 `db` 与恰好一个 `query`／`update`；block 内恰好一个 `sql`／`sqlFile`；可选 params、object `saveAs`、`assert`；不允许 retry 或 Action timeout |
 | assert | 需要 `assert`；可选 `expected`、`actual`；不允许 expression/render/tool/log-only 字段、timeout 或 retry |
 | log | 至少需要 `message` 或 `file`；可选 `level`、`fields`、`assert`；不允许 render/tool/assert-action-only 字段、timeout 或 retry |
 | assign | 需要 `name`、`expression`；可选 `assert`；`name` 在整个 Case 的 `CASE.VARS` 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry、saveAs 或 overwrite |
-| retry | `maxAttempts`、`retryOn`、`exitCodes`；`retryOn` 必填且仅包含 `EXIT_CODE` |
+| retry | 必填 `maxAttempts`、`intervalMs`、`retryOn`；category 仅 `ASSERTION`、`TIMEOUT` |
 
-`renderAs` 允许 `file`、`text`、`json`、`yaml`、`xml`。`maxAttempts` 为 1–10；`exitCodes` 值为 1–255。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是 V2.3 的运行时证据，绝不是动作配置字段。
+`renderAs` 允许 `file`、`text`、`json`、`yaml`、`xml`。retry `maxAttempts` 为 2–10，`intervalMs` 为 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
 
 #### Assign 变量唯一性与生命周期
 
@@ -1473,7 +1485,7 @@ assign 动作会在 `CASE.VARS` 下创建一个不可变、Case 作用域的条�
 
 #### Action `saveAs`
 
-V2.5 的 Tool 与 DB Action 共用一个 object shape：
+V2.6 的 Tool 与 DB Action 共用一个 object shape：
 
 ```yaml
 saveAs:
@@ -1482,7 +1494,7 @@ saveAs:
   overwrite: false
 ```
 
-`path` 必填，`overwrite` 默认 false。`format` 只控制写入表示，不改变 `${output.result}` 的 typed value。`att-template/v2.5` 不允许 sibling `overwrite` 或 scalar `saveAs: file.name`。
+`path` 必填，`overwrite` 默认 false。`format` 只控制写入表示，不改变 `${output.result}` 的 typed value。`att-template/v2.6` 不允许 sibling `overwrite` 或 scalar `saveAs: file.name`。
 
 | Action target | 允许格式 | 默认 | 保存内容 |
 |---|---|---|---|
@@ -1505,7 +1517,7 @@ Tool／built-in 的 `text` 使用 `String.valueOf(output.result)`；直接 DB Ac
 
 ### 工具契约
 
-每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode`。V2.6 不定义 `delimit`；多值直接在调用中传 typed array。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
+每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`；可选 descriptor `timeoutMs` 提供 Tool 默认值。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode`。V2.6 不定义 `delimit`；多值直接在调用中传 typed array。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
 
 每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。
 
@@ -1522,7 +1534,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.1",
+  "attVersion": "2.6.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

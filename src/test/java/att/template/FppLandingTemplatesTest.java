@@ -26,11 +26,11 @@ class FppLandingTemplatesTest {
                 "runJob3Drr", "moveDsrFiles", "runJob2Dsr", "runJob3Dsr", "inspectDsrAftOutput"}) {
             assertNotNull(actions.get(id), "missing D3I phase action " + id);
         }
-        assertTrue(template.actions().size() >= 70, "D3I template should preserve the complete photographed flow");
+        assertTrue(template.actions().size() >= 50, "D3I template should preserve the complete photographed flow");
         assertPolling(actions.get("queryD3iTxn"));
         assertPolling(actions.get("queryDsrFinalTxn"));
-        assertTrue(actions.get("assertDrrTxn").expected().contains("CAPT or CRJT"));
-        assertTrue(actions.get("assertDsrTxn").expected().contains("ACPT or UCPT"));
+        assertTrue(actions.get("queryDrrTxn").expected().contains("CAPT or CRJT"));
+        assertTrue(actions.get("queryDsrTxn").expected().contains("ACPT or UCPT"));
         assertTrue(actions.get("runJob2D3i").call().contains("fpp.exehelper"));
         for (TemplateAction action : actions.values()) {
             assertFalse(action.call().contains("fpp.execCommand"));
@@ -65,7 +65,9 @@ class FppLandingTemplatesTest {
         assertNotNull(action);
         assertEquals(Long.valueOf(10000), action.timeoutMs());
         assertEquals("3", String.valueOf(action.retry().get("maxAttempts")));
-        assertTrue(String.valueOf(action.retry().get("retryOn")).contains("EXIT_CODE"));
+        assertEquals("1000", String.valueOf(action.retry().get("intervalMs")));
+        assertTrue(String.valueOf(action.retry().get("retryOn")).contains("ASSERTION"));
+        assertTrue(action.assertion().contains("${output.result"));
         assertTrue(action.call().contains("fpp.querySqlplus"));
     }
 }

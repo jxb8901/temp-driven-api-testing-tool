@@ -99,10 +99,12 @@ class PackageValidatorTest {
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("Facade", tempDir, Collections.singletonList(writeExpression), "att-template/v2.5"), config));
 
-        TemplateAction processOptions = new TemplateAction("bad", map("type","tool",
+        TemplateAction processOptions = new TemplateAction("readWithTimeout", map("type","tool",
                 "call","#{orders.find(id=${CASE.id})}", "timeoutMs", 1000), "att-template/v2.5");
-        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
-                new StageTemplate("Facade", tempDir, Collections.singletonList(processOptions), "att-template/v2.5"), config));
+        assertDoesNotThrow(() -> { try { contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(processOptions), "att-template/v2.5"), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); } });
 
         TemplateAction rawSave = new TemplateAction("bad", map("type","tool",
                 "call","#{orders.find(id=${CASE.id})}", "saveAs", map("path","out.json","format","raw")), "att-template/v2.5");

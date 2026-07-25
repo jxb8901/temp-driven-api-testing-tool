@@ -1,4 +1,4 @@
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: payment
 excel:
   sheet: payment=支付測試案例集, batch=批量測試案例集

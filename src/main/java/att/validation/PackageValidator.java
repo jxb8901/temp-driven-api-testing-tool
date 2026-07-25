@@ -334,7 +334,7 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateCallBackedActionOptions(action, config); validateToolSaveAs(action, config); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolSaveAs(action, config); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
@@ -458,14 +458,6 @@ public final class PackageValidator {
         }
         if ((builtIn || callBacked) && "raw".equals(format)) {
             throw new IllegalArgumentException("Built-in and call-backed Tool saveAs.format do not support raw: " + action.id());
-        }
-    }
-
-    private void validateCallBackedActionOptions(TemplateAction action, FrameworkConfig config) {
-        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
-        ToolConfig tool = config.tool(parsed.name());
-        if (tool != null && tool.callBacked() && (action.timeoutMs() != null || !action.retry().isEmpty())) {
-            throw new IllegalArgumentException("call-backed Tool uses dbhelper/built-in limits and does not support process timeoutMs or retry: " + action.id());
         }
     }
 
@@ -776,16 +768,20 @@ public final class PackageValidator {
     }
     private static void validateRetry(TemplateAction action) {
         Map<String, Object> retry = action.retry(); if (retry.isEmpty()) return;
-        att.config.SchemaSupport.rejectUnknown(retry, "actions." + action.id() + ".retry", "maxAttempts", "retryOn", "exitCodes");
-        int attempts = integer(retry.get("maxAttempts"), 1); if (attempts < 1 || attempts > 10) throw new IllegalArgumentException("retry.maxAttempts must be 1..10: " + action.id());
+        att.config.SchemaSupport.rejectUnknown(retry, "actions." + action.id() + ".retry", "maxAttempts", "intervalMs", "retryOn");
+        if (!retry.containsKey("maxAttempts") || !retry.containsKey("intervalMs") || !retry.containsKey("retryOn")) throw new IllegalArgumentException("retry requires maxAttempts, intervalMs, and retryOn: " + action.id());
+        int attempts = integer(retry.get("maxAttempts"), 0); if (attempts < 2 || attempts > 10) throw new IllegalArgumentException("retry.maxAttempts must be 2..10: " + action.id());
+        int interval = integer(retry.get("intervalMs"), -1); if (interval < 0 || interval > 3600000) throw new IllegalArgumentException("retry.intervalMs must be 0..3600000: " + action.id());
         Object retryOn = retry.get("retryOn"); if (!(retryOn instanceof Iterable)) throw new IllegalArgumentException("retry.retryOn must be a list: " + action.id());
-        boolean includesExitCode = false;
-        for (Object category : (Iterable<?>) retryOn) { if (!(category instanceof String)) throw new IllegalArgumentException("retry.retryOn values must be strings"); includesExitCode |= "EXIT_CODE".equals(category); if (!"EXIT_CODE".equals(category)) throw new IllegalArgumentException("Unknown retry category: " + category); }
-        if (retry.get("exitCodes") != null) {
-            if (!includesExitCode) throw new IllegalArgumentException("retry.exitCodes requires EXIT_CODE in retryOn");
-            if (!(retry.get("exitCodes") instanceof Iterable)) throw new IllegalArgumentException("retry.exitCodes must be a list");
-            for (Object code : (Iterable<?>) retry.get("exitCodes")) if (!(code instanceof Number) || ((Number) code).intValue() < 1 || ((Number) code).intValue() > 255) throw new IllegalArgumentException("retry.exitCodes values must be integers between 1 and 255");
+        java.util.Set<String> categories = new java.util.LinkedHashSet<String>();
+        for (Object category : (Iterable<?>) retryOn) {
+            if (!(category instanceof String)) throw new IllegalArgumentException("retry.retryOn values must be strings");
+            String value = String.valueOf(category);
+            if (!("ASSERTION".equals(value) || "TIMEOUT".equals(value))) throw new IllegalArgumentException("Unknown retry category '" + value + "'; use ASSERTION or TIMEOUT: " + action.id());
+            if (!categories.add(value)) throw new IllegalArgumentException("Duplicate retry category: " + value);
         }
+        if (categories.isEmpty()) throw new IllegalArgumentException("retry.retryOn must not be empty: " + action.id());
+        if (categories.contains("ASSERTION") && action.assertion().trim().isEmpty()) throw new IllegalArgumentException("retryOn ASSERTION requires action assert: " + action.id());
     }
     private static int integer(Object value, int fallback) { if (value == null) return fallback; if (!(value instanceof Number)) throw new IllegalArgumentException("Expected integer retry value"); return ((Number) value).intValue(); }
 

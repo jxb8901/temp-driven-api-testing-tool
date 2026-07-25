@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.6.2 - 2026-07-25
+
+- Unified command-backed, call-backed DB/built-in, and primary built-in Tool Actions behind one per-attempt timeout contract with precedence Action → Tool descriptor → global → 10,000 ms.
+- Removed workbook-sidecar timeout and process-specific EXIT_CODE retry. Retry is now Action-only and explicitly driven by `ASSERTION` and/or `TIMEOUT`, with required bounded attempts and interval.
+- Evaluated Tool Action assertions after every returned attempt so asynchronous API/DB results can be polled until business expectations pass; command exit codes remain ordinary assertion evidence.
+- Added Tool descriptor `timeoutMs`, `att-template/v2.6`, and `att-sidecar/v2.2`; legacy EXIT_CODE/exitCodes and sidecar timeout configurations now fail with migration diagnostics.
+- Applied Tool timeouts to JDBC query ceilings and bounded built-ins, bypassed call-backed caches during retry polling, and retained ordered attempt/assertion/retry evidence plus final Action-owned artifacts.
+- Migrated the shipped FPP polling templates and synchronized the design, Quick Start, English/Chinese reference manuals, README, schemas, generated documentation, and regression coverage for V2.6.2.
+
 ## 2.6.1 - 2026-07-23
 
 - Added canonical package-qualified built-ins under `str.*`, `date.*`, `file.*`, and `misc.*`, retained flat aliases for compatibility, and reserved both qualified and legacy names against Tool collisions.

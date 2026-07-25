@@ -22,6 +22,7 @@ public final class ToolConfig {
     private final SshConfig ssh;
     private final Path sourceFile;
     private final String output;
+    private final Long timeoutMs;
     private final Map<String, ToolArgumentConfig> arguments;
 
     public ToolConfig(String key, String name, String description, String command, String output,
@@ -45,12 +46,20 @@ public final class ToolConfig {
                       List<String> commandArgv, String call, List<String> groupScriptArgv, String output,
                       Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile) {
         this(key, localKey, groupId, name, description, commandArgv, call, "", groupScriptArgv,
-                output, arguments, ssh, sourceFile);
+                output, arguments, ssh, sourceFile, null);
     }
 
     public ToolConfig(String key, String localKey, String groupId, String name, String description,
                       List<String> commandArgv, String call, String cache, List<String> groupScriptArgv,
                       String output, Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile) {
+        this(key, localKey, groupId, name, description, commandArgv, call, cache, groupScriptArgv,
+                output, arguments, ssh, sourceFile, null);
+    }
+
+    public ToolConfig(String key, String localKey, String groupId, String name, String description,
+                      List<String> commandArgv, String call, String cache, List<String> groupScriptArgv,
+                      String output, Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile,
+                      Long timeoutMs) {
         this.key = key;
         this.localKey = localKey;
         this.groupId = groupId == null ? "" : groupId;
@@ -61,6 +70,7 @@ public final class ToolConfig {
         this.cache = cache == null ? "" : cache.trim();
         this.groupScriptArgv = immutable(groupScriptArgv);
         this.output = output;
+        this.timeoutMs = timeoutMs;
         this.arguments = arguments == null ? Collections.<String, ToolArgumentConfig>emptyMap()
                 : new LinkedHashMap<String, ToolArgumentConfig>(arguments);
         this.ssh = ssh;
@@ -85,6 +95,7 @@ public final class ToolConfig {
     public SshConfig ssh() { return ssh; }
     public Path sourceFile() { return sourceFile; }
     public String output() { return output; }
+    public Long timeoutMs() { return timeoutMs; }
     public Map<String, ToolArgumentConfig> arguments() { return Collections.unmodifiableMap(arguments); }
 
     private static List<String> parse(String command) {

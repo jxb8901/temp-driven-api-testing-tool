@@ -149,7 +149,7 @@ public final class FrameworkConfigLoader {
                 throw new IllegalArgumentException("Tool name is reserved for built-in function: " + key);
             }
             Map<?, ?> tool = (Map<?, ?>) entry.getValue();
-            SchemaSupport.rejectUnknown(tool, owner + "." + localKey, "name", "description", "command", "call", "cache", "output", "arguments");
+            SchemaSupport.rejectUnknown(tool, owner + "." + localKey, "name", "description", "command", "call", "cache", "output", "arguments", "timeoutMs");
             boolean hasCommand = tool.get("command") != null;
             boolean hasCall = tool.get("call") != null;
             if (hasCommand == hasCall) throw new IllegalArgumentException("Tool requires exactly one of command or call: " + key);
@@ -165,6 +165,7 @@ public final class FrameworkConfigLoader {
                 }
             }
             String output = tool.get("output") == null ? (hasCommand ? "txt" : "") : SchemaSupport.string(tool.get("output"), owner + "." + localKey + ".output", true);
+            Long timeoutMs = tool.get("timeoutMs") == null ? null : Long.valueOf(boundedInteger(tool.get("timeoutMs"), 10000, 1, 3600000, owner + "." + localKey + ".timeoutMs"));
             if (hasCall && !output.isEmpty()) throw new IllegalArgumentException("call-backed Tool does not support process-only output: " + key);
             if (hasCommand && !("txt".equals(output) || "yaml".equals(output) || "json".equals(output) || "xml".equals(output))) {
                 throw new IllegalArgumentException("Tool output must be txt, yaml, json, or xml: " + key);
@@ -177,7 +178,7 @@ public final class FrameworkConfigLoader {
             ToolConfig configuredTool = new ToolConfig(key, localKey, groupId,
                     required(tool, "name", "tool " + key), required(tool, "description", "tool " + key),
                     command, call, cache, hasCommand ? script : Collections.<String>emptyList(), output, arguments,
-                    hasCommand ? ssh : null, sourceFile);
+                    hasCommand ? ssh : null, sourceFile, timeoutMs);
             ToolConfig previous = result.put(key, configuredTool);
             if (previous != null) throw new IllegalArgumentException("Duplicate qualified tool name: " + key);
         }

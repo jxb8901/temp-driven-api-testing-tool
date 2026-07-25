@@ -365,9 +365,9 @@ code {
           : 'default'
     });
   </script>
-<h1 id="att-v261-中文用户手册与参考手册">ATT V2.6.1 中文用户手册与参考手册</h1>
+<h1 id="att-v262-中文用户手册与参考手册">ATT V2.6.2 中文用户手册与参考手册</h1>
 <p>作者：Jeffrey + ChatGPT
-版本：2.6.1
+版本：2.6.2
 状态：规范性终端用户文档</p>
 <p>本手册设计为两种阅读方式：</p>
 <ul>
@@ -528,7 +528,7 @@ code {
 </tbody>
 </table>
 <p>创建相邻的 <code>testcase/payment.yaml</code>：</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.1</span>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.2</span>
 <span class="hljs-attr">id:</span> <span class="hljs-string">payment</span>
 <span class="hljs-attr">excel:</span>
   <span class="hljs-attr">sheet:</span> <span class="hljs-string">payment=Payment</span> <span class="hljs-string">Cases</span>
@@ -544,7 +544,7 @@ code {
 <p>完整 Case ID 是 <code>payment.payment.TC001</code>：第一个 <code>payment</code> 是包内唯一的工作簿 <code>id</code>，第二个是工作簿 sheet 映射左侧的逻辑 <code>groupId</code>，<code>TC001</code> 来自该行。</p>
 <h3 id="第-3-步创建模板">第 3 步：创建模板</h3>
 <p>创建 <code>templates/payment/template.yaml</code>：</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.5</span>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.6</span>
 <span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_INVOKE</span>
 <span class="hljs-attr">description:</span> <span class="hljs-string">Render,</span> <span class="hljs-string">invoke,</span> <span class="hljs-string">and</span> <span class="hljs-string">verify</span> <span class="hljs-string">a</span> <span class="hljs-string">payment</span>
 <span class="hljs-attr">actions:</span>
@@ -616,8 +616,8 @@ environment=<span class="hljs-string">&quot;<span class="hljs-variable">${2:?mis
 testcase/payment_regression.yaml
 testcase/payment_regression.xml
 </div></code></pre>
-<p>侧车将 Excel 结构映射为 ATT 概念。它负责 sheet 映射、表头、用例数据、有序阶段、可选报告列标签，以及可选的工作簿超时。</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.1</span>
+<p>侧车将 Excel 结构映射为 ATT 概念。它负责 sheet 映射、表头、用例数据、有序阶段及可选报告列标签；timeout/retry 不属于工作簿配置。</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.2</span>
 <span class="hljs-attr">id:</span> <span class="hljs-string">paymentRegression</span>
 <span class="hljs-attr">excel:</span>
   <span class="hljs-attr">sheet:</span> <span class="hljs-string">payment=支付測試案例集,</span> <span class="hljs-string">batch=批量測試案例集</span>
@@ -784,7 +784,7 @@ alias=ColumnName(yaml)
 <p>使用 <code>onFailure</code> 做回滚/诊断，使用 <code>always</code> 做清理或最终证据收集。</p>
 <h3 id="32-模板">3.2 模板</h3>
 <p>只有当目录直接包含 <code>template.yaml</code> 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.5</span>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.6</span>
 <span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_INVOKE</span>
 <span class="hljs-attr">description:</span> <span class="hljs-string">Render</span> <span class="hljs-string">and</span> <span class="hljs-string">invoke</span> <span class="hljs-string">a</span> <span class="hljs-string">payment</span> <span class="hljs-string">request</span>
 <span class="hljs-attr">actions:</span>
@@ -1301,7 +1301,7 @@ A101  DONE         3
 <p>Cache 有意与 JDBC lifecycle 解耦。DB update、commit、rollback、Case transaction 收尾、Connection close 与自动 reconnect 都<strong>不会</strong>清除任一 cache。DB-scope hit 也不会打开或检查 Connection。因此 <code>db</code> scope 明确可能返回 stale data，只应在 package owner 接受此行为时启用。V2.6 没有 TTL、size limit、持久化或自动一致性。</p>
 <p>Evidence 记录 <code>cache.scope</code>、SHA-256 <code>cache.key</code> 与 <code>cache.hit</code>。Cache miss 有正常 DB evidence；hit 因未执行 JDBC，不产生新 DB invocation。</p>
 <h5 id="timeoutretrylifecycle-与-evidence">Timeout、retry、lifecycle 与 evidence</h5>
-<p>Call-backed DB Tool 继续使用目标 dbhelper 的 <code>statement.timeoutSeconds</code>、read-only、transaction、result limits、每 instance/thread 一个 Connection、Case 前 rollback 与 reconnect 规则。Action <code>timeoutMs</code> 与 process EXIT_CODE <code>retry</code> 对它无意义并会被拒绝。</p>
+<p>Call-backed DB Tool 保留目标 dbhelper 的 read-only、transaction、result limits、Connection 与 Case lifecycle 规则，并与 command-backed Tool 共用 Action <code>timeoutMs</code> 和 ASSERTION/TIMEOUT retry。JDBC query timeout 取 Tool attempt timeout 与 <code>statement.timeoutSeconds</code> 中较短者；配置 retry 的 Action 会绕过 call-backed cache，避免轮询旧值。</p>
 <p>Action 保留正常 <code>TOOL</code> wrapper，含 <code>implementation: call</code>、input、typed output、status、duration 与 cache evidence；DB miss 也写入 Action <code>DB</code>。<code>command</code>、<code>argv</code>、<code>stdout</code>、<code>stderr</code>、<code>rawOutput</code>、<code>exitCode</code> 等 process-only 字段不存在。</p>
 <p>选择建议：一次性 SQL 用 <code>type: db</code>；一次性表达式读取用直接 <code>db.*</code>；稳定、重复、有业务名称或需要 cache 的操作用 call-backed Tool；需要 executable、SSH、argv、stdout parser 或 exit-code retry 时继续用 command-backed Tool。</p>
 <p>完整规范见 <a href="02_System_Design_V2.6.md">V2.6 Call-backed Tool System Design</a>。</p>
@@ -1422,12 +1422,19 @@ Payment regression
 </tr>
 </tbody>
 </table>
-<p>ATT 按工具配置的 <code>output: txt|yaml|json|xml</code> 解析 stdout，默认 <code>txt</code>。V2.5 Tool Action 的 object <code>saveAs</code> 可保存精确 raw stdout，或把 typed <code>${output.result}</code> 编码为 text/json/yaml/xml；路径写入当前 Case artifact 目录。retry 共用一个渲染后的路径，最终保留最后一次可写 attempt 的内容。不使用 <code>saveAs</code> 时，ATT 不创建额外命名 artifact，但输入、argv、stdout、stderr、解析结果、退出码和 retry evidence 仍保存在 Case evidence 中。</p>
+<p>ATT 按工具配置的 <code>output: txt|yaml|json|xml</code> 解析 stdout，默认 <code>txt</code>。V2.6 Tool Action 的 object <code>saveAs</code> 可保存精确 raw stdout，或把 typed <code>${output.result}</code> 编码为 text/json/yaml/xml；路径写入当前 Case artifact 目录。retry 共用一个渲染后的路径，最终保留最后一次可写 attempt 的内容。不使用 <code>saveAs</code> 时，ATT 不创建额外命名 artifact，但输入、argv、stdout、stderr、解析结果、退出码和 retry evidence 仍保存在 Case evidence 中。</p>
 <p>超时、启动/进程 I/O 失败或结构化输出解析失败是 ERROR，不能被断言覆盖。否则工具动作的 <code>assert</code> 决定 PASS/FAIL。如果未配置断言，操作完成即算 PASS，即使进程退出码非零。退出码仍保留在 <code>action.output.exitCode</code> 中，因此要求零退出码的模板需显式写明。命令、输入、stdout、stderr、原始输出、持续时间、退出码、解析后的 <code>output.result</code> 和断言详情都会保留为证据。</p>
 <p>超时优先级为：</p>
-<pre class="hljs"><code><div>工具动作 timeoutMs → 工作簿侧车 timeoutMs → 全局 timeoutMs → 10000 ms
+<pre class="hljs"><code><div>工具动作 timeoutMs → Tool descriptor timeoutMs → 全局 timeoutMs → 10000 ms
 </div></code></pre>
 <p>所有配置的超时都是 1 到 3600000 毫秒的整数。</p>
+<p>retry 只属于 <code>type: tool</code> Action，不存在全局、Tool、Template、stage 或 sidecar 默认：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">retry:</span>
+  <span class="hljs-attr">maxAttempts:</span> <span class="hljs-number">3</span>
+  <span class="hljs-attr">intervalMs:</span> <span class="hljs-number">1000</span>
+  <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">ASSERTION</span>, <span class="hljs-string">TIMEOUT</span>]
+</div></code></pre>
+<p><code>maxAttempts</code> 包含首次 attempt，范围 2–10；<code>intervalMs</code> 范围 0–3600000。<code>ASSERTION</code> 要求同一 Tool Action 配置 <code>assert</code>，每次正常返回后立即判断，false 才重试；<code>TIMEOUT</code> 独立控制单次超时是否重试。exit code 只作为 <code>${output.exitCode}</code> 证据，由 assert 判断。配置、参数、I/O、解析、非 timeout DB 错误及 assertion 求值错误均不重试。</p>
 <h3 id="34-运行测试">3.4 运行测试</h3>
 <h4 id="先校验">先校验</h4>
 <pre class="hljs"><code><div>./att.sh validate --package
@@ -1630,18 +1637,19 @@ Payment regression
 <p>结果尾部逻辑 argv 为 <code>--keyword</code>、<code>PAYMENT</code>、<code>--keyword</code>、<code>POSTED</code>、<code>--levels</code>、<code>ERROR</code>、<code>WARN</code>。<code>repeat</code> 会对每个关键词重复 <code>--keyword</code>；<code>once</code> 是默认值，可以省略，它只在整个列表前发出一次 <code>--levels</code>。每个 typed List 都在各自的完整命令占位符位置独立扩展。V2.6 schema 拒绝 <code>delimit</code>；旧 schema 只保留历史读取兼容性。</p>
 <h4 id="linux-bash-解析示例">Linux Bash 解析示例</h4>
 <p>本节通过 Bash 示例说明 <code>argNameMode: repeat</code> 与 <code>once</code> 的行为。省略。</p>
-<h3 id="重试指定退出码">重试指定退出码</h3>
+<h3 id="重试-assertion-轮询或-timeout">重试 assertion 轮询或 timeout</h3>
 <p>重试属于 tool 动作，而不是工作流或任意 stage：</p>
 <pre class="hljs"><code><div><span class="hljs-attr">callApi:</span>
   <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
   <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span>
   <span class="hljs-attr">timeoutMs:</span> <span class="hljs-number">30000</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.result.status} == &#x27;COMPLETED&#x27;&quot;</span>
   <span class="hljs-attr">retry:</span>
     <span class="hljs-attr">maxAttempts:</span> <span class="hljs-number">3</span>
-    <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">EXIT_CODE</span>]
-    <span class="hljs-attr">exitCodes:</span> [<span class="hljs-number">1</span>, <span class="hljs-number">75</span>]
+    <span class="hljs-attr">intervalMs:</span> <span class="hljs-number">1000</span>
+    <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">ASSERTION</span>, <span class="hljs-string">TIMEOUT</span>]
 </div></code></pre>
-<p><code>maxAttempts</code> 包含第一次尝试，默认 1。V2.3 只支持 <code>EXIT_CODE</code>；如果省略 <code>exitCodes</code>，则任何非零退出码都可重试。超时、输出解析、I/O、配置、断言、render、log 失败不会重试。V2.3 没有延迟/退避字段，因此符合条件的重试会立即执行。</p>
+<p><code>maxAttempts</code> 包含第一次尝试。ATT 每次取得正常结果后立即执行 Tool Action assertion；<code>ASSERTION</code> 重试 false，<code>TIMEOUT</code> 则独立允许超时重试。已移除的 <code>EXIT_CODE</code>／<code>exitCodes</code> 在 2.6.2 中属于 validation error。</p>
 <p>每次尝试都直接记录在 Case 日志和动作记录中；不会创建 <code>attempt-001</code> 目录。后续成功尝试会使动作 PASS，同时保留先前证据；耗尽重试次数后则产出 ERROR。只有安全可重复的操作才应使用重试。</p>
 <h2 id="05-cli-参考">05 CLI 参考</h2>
 <h3 id="命令">命令</h3>
@@ -1882,7 +1890,7 @@ Payment regression
 <tr>
 <td>工作簿</td>
 <td><code>&lt;workbook&gt;.yaml</code></td>
-<td>Excel 映射、阶段、工作簿标签、工作簿超时</td>
+<td>Excel 映射、阶段、工作簿标签</td>
 </tr>
 <tr>
 <td>模板</td>
@@ -1896,9 +1904,9 @@ Payment regression
 </tr>
 </tbody>
 </table>
-<p>动作超时覆盖侧车超时，侧车超时覆盖全局超时。CLI 的 <code>--output-dir</code> 和 <code>--run-id</code> 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。</p>
+<p>Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 <code>--output-dir</code> 和 <code>--run-id</code> 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。</p>
 <h3 id="schema-catalog">Schema catalog</h3>
-<p><a href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a> 使用 <code>att-schema-catalog/v2.6</code>。当前主配置与 Tool group 分别为 <code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>；dbhelper 与 template 仍为 <code>att-dbhelper/v2.5</code>、<code>att-template/v2.5</code>。旧 <code>att-config/v2.1|v2.2|v2.5</code>、<code>att-tool-group/v2.2</code> 与 <code>att-template/v2.3</code> 保持可读，但只有 V2.6 Tool descriptor 可使用 <code>call</code>／<code>cache</code>。</p>
+<p><a href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a> 使用 <code>att-schema-catalog/v2.6</code>。当前主配置、Tool group、sidecar 与 template 分别为 <code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v2.6</code>。旧 schema 保持有限 read compatibility，但旧 <code>EXIT_CODE</code> retry 与 sidecar timeout 必须迁移。</p>
 <h3 id="全局配置">全局配置</h3>
 <pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-config/v2.6</span>
 <span class="hljs-attr">outputDirectory:</span> <span class="hljs-string">output</span>
@@ -2129,7 +2137,7 @@ Payment regression
 <tbody>
 <tr>
 <td>根对象</td>
-<td><code>schemaVersion</code>、<code>id</code>、<code>excel</code>、<code>stages</code>、<code>report</code>、<code>timeoutMs</code>、<code>x-*</code></td>
+<td><code>schemaVersion</code>、<code>id</code>、<code>excel</code>、<code>stages</code>、<code>report</code>、<code>x-*</code></td>
 <td><code>schemaVersion</code>、包内唯一 <code>id</code>、<code>excel</code>、非空 <code>stages</code> 必需</td>
 </tr>
 <tr>
@@ -2149,7 +2157,7 @@ Payment regression
 </tr>
 </tbody>
 </table>
-<p><code>timeoutMs</code> 为 1–3600000。只有侧车根对象允许 <code>x-*</code>；<code>excel</code>、stages 和侧车 <code>report</code> 拒绝扩展和其他未知字段。侧车不能覆盖工具、模板根、环境或输出根。</p>
+<p>只有侧车根对象允许 <code>x-*</code>；<code>excel</code>、stages 和侧车 <code>report</code> 拒绝扩展和其他未知字段。侧车不能覆盖 timeout、retry、工具、模板根、环境或输出根。</p>
 <h3 id="模板与动作">模板与动作</h3>
 <table>
 <thead>
@@ -2173,7 +2181,7 @@ Payment regression
 </tr>
 <tr>
 <td>tool</td>
-<td>需要 <code>call</code>；可选 object <code>saveAs</code> 与 <code>assert</code>；只有主要目标为 command-backed Tool 时才支持 <code>timeoutMs</code>／<code>retry</code>；不允许 DB/render/assert-action/log-only 字段</td>
+<td>需要 <code>call</code>；可选 object <code>saveAs</code>、<code>assert</code>、<code>expected</code>、<code>actual</code>、<code>timeoutMs</code> 与 Action-only <code>retry</code>；command/call-backed 共用契约</td>
 </tr>
 <tr>
 <td>db</td>
@@ -2193,21 +2201,21 @@ Payment regression
 </tr>
 <tr>
 <td>retry</td>
-<td><code>maxAttempts</code>、<code>retryOn</code>、<code>exitCodes</code>；<code>retryOn</code> 必填且仅包含 <code>EXIT_CODE</code></td>
+<td>必填 <code>maxAttempts</code>、<code>intervalMs</code>、<code>retryOn</code>；category 仅 <code>ASSERTION</code>、<code>TIMEOUT</code></td>
 </tr>
 </tbody>
 </table>
-<p><code>renderAs</code> 允许 <code>file</code>、<code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>。<code>maxAttempts</code> 为 1–10；<code>exitCodes</code> 值为 1–255。日志级别为 <code>TRACE</code>、<code>DEBUG</code>、<code>INFO</code>、<code>WARN</code> 或 <code>ERROR</code>。模板根对象与动作都允许 <code>x-*</code>；<code>fields</code> 是无约束日志字段映射。<code>output</code> 是 V2.3 的运行时证据，绝不是动作配置字段。</p>
+<p><code>renderAs</code> 允许 <code>file</code>、<code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>。retry <code>maxAttempts</code> 为 2–10，<code>intervalMs</code> 为 0–3600000；<code>ASSERTION</code> 要求 Tool Action 有非空 <code>assert</code>。日志级别为 <code>TRACE</code>、<code>DEBUG</code>、<code>INFO</code>、<code>WARN</code> 或 <code>ERROR</code>。模板根对象与动作都允许 <code>x-*</code>；<code>fields</code> 是无约束日志字段映射。<code>output</code> 是运行时证据，绝不是动作配置字段。</p>
 <h4 id="assign-变量唯一性与生命周期">Assign 变量唯一性与生命周期</h4>
 <p>assign 动作会在 <code>CASE.VARS</code> 下创建一个不可变、Case 作用域的条目。一个 Case 内每个变量名必须唯一。重复声明会导致校验失败。</p>
 <h4 id="action-saveas">Action <code>saveAs</code></h4>
-<p>V2.5 的 Tool 与 DB Action 共用一个 object shape：</p>
+<p>V2.6 的 Tool 与 DB Action 共用一个 object shape：</p>
 <pre class="hljs"><code><div><span class="hljs-attr">saveAs:</span>
   <span class="hljs-attr">path:</span> <span class="hljs-string">relative/path/result.yaml</span>
   <span class="hljs-attr">format:</span> <span class="hljs-string">yaml</span>
   <span class="hljs-attr">overwrite:</span> <span class="hljs-literal">false</span>
 </div></code></pre>
-<p><code>path</code> 必填，<code>overwrite</code> 默认 false。<code>format</code> 只控制写入表示，不改变 <code>${output.result}</code> 的 typed value。<code>att-template/v2.5</code> 不允许 sibling <code>overwrite</code> 或 scalar <code>saveAs: file.name</code>。</p>
+<p><code>path</code> 必填，<code>overwrite</code> 默认 false。<code>format</code> 只控制写入表示，不改变 <code>${output.result}</code> 的 typed value。<code>att-template/v2.6</code> 不允许 sibling <code>overwrite</code> 或 scalar <code>saveAs: file.name</code>。</p>
 <table>
 <thead>
 <tr>
@@ -2251,7 +2259,7 @@ Payment regression
 <p><code>render</code>、<code>assert</code>、<code>log</code> 与 <code>assign</code> 不支持 <code>saveAs</code>；render file 继续使用 <code>renderAs: file</code>。</p>
 <p><code>att-template/v2.3</code> 保持读取兼容：旧式 Tool <code>saveAs: response.json</code> 加 sibling <code>overwrite</code> 会内部归一化并维持原行为；新模板必须使用 V2.5 object form。</p>
 <h3 id="工具契约">工具契约</h3>
-<p>每个工具要求 <code>name</code>、<code>description</code>，以及恰好一个 <code>command</code> 或 <code>call</code>。Command 可以是非空标量或字符串列表，<code>output</code> 默认为 <code>txt</code> 并支持 <code>txt|yaml|json|xml</code>。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 <code>cache</code> 只含 <code>scope: case|db</code>。Call-backed Tool 禁止 process-only <code>output</code>、SSH/script 与参数 <code>argName|argNameMode</code>。V2.6 不定义 <code>delimit</code>；多值直接在调用中传 typed array。Update 不能缓存，<code>db</code> cache 只适用于 DB query/scalar。</p>
+<p>每个工具要求 <code>name</code>、<code>description</code>，以及恰好一个 <code>command</code> 或 <code>call</code>；可选 descriptor <code>timeoutMs</code> 提供 Tool 默认值。Command 可以是非空标量或字符串列表，<code>output</code> 默认为 <code>txt</code> 并支持 <code>txt|yaml|json|xml</code>。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 <code>cache</code> 只含 <code>scope: case|db</code>。Call-backed Tool 禁止 process-only <code>output</code>、SSH/script 与参数 <code>argName|argNameMode</code>。V2.6 不定义 <code>delimit</code>；多值直接在调用中传 typed array。Update 不能缓存，<code>db</code> cache 只适用于 DB query/scalar。</p>
 <p>每个参数都要求 <code>name</code>、<code>description</code> 与 YAML boolean <code>required</code>。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。</p>
 <h3 id="标识符和路径约束">标识符和路径约束</h3>
 <p>Run ID 和完整 Case ID 会直接用作目录名，ATT 不会对合法标识做 slug 化或哈希处理。</p>
@@ -2260,7 +2268,7 @@ Payment regression
 <h3 id="validation-json-合约">Validation JSON 合约</h3>
 <pre class="hljs"><code><div><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;schemaVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;att-validation/v2.1&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;attVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.6.1&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;attVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.6.2&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;valid&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">false</span></span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;mode&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;package&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;summary&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;errors&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;warnings&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">0</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;suites&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;cases&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">22</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;templates&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">7</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;tools&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">7</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>

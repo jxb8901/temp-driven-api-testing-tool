@@ -40,11 +40,12 @@ public class StageTemplateRunner {
             node.put("output", output);
             boolean recorded = false;
             boolean invocationSucceeded = true;
+            ResultStatus toolStatus = null;
             String expected = "", actual = "";
             try {
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
-                else if ("tool".equals(type)) invocationSucceeded = executeTool(action, context, log, output, targets, node);
+                else if ("tool".equals(type)) toolStatus = executeTool(action, context, log, output, targets, node);
                 else if ("db".equals(type)) invocationSucceeded = executeDb(action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
@@ -54,11 +55,18 @@ public class StageTemplateRunner {
                 context.addAction(action.id(), node);
                 recorded = true;
                 context.setActionOutput(output);
-                ResultStatus status = applyAssertion(action, output, context, log, invocationSucceeded);
+                ResultStatus status = toolStatus == null ? applyAssertion(action, output, context, log, invocationSucceeded) : toolStatus;
                 if ("assert".equals(type)) {
                     output.put("result", Boolean.valueOf(status == ResultStatus.PASS));
                     actual = normalizeLines(templateEngine.render(action.actual(), context, log));
                     expected = normalizeLines(expected);
+                    output.put("expected", expected);
+                    output.put("actual", actual);
+                }
+                boolean assertionReport = "assert".equals(type) || ("tool".equals(type) && !action.assertion().trim().isEmpty());
+                if ("tool".equals(type) && assertionReport) {
+                    expected = normalizeLines(templateEngine.render(action.expected(), context, log));
+                    actual = normalizeLines(templateEngine.render(action.actual(), context, log));
                     output.put("expected", expected);
                     output.put("actual", actual);
                 }
@@ -67,9 +75,9 @@ public class StageTemplateRunner {
                 mergeDbEvidence(node, context.drainDbInvocations());
                 context.updateAction(action.id(), node);
                 log.appendAction("ACTION " + action.id(), node);
-                String reportExpected = "assert".equals(type) ? joinLines(String.valueOf(node.get("description")), expected) : "";
+                String reportExpected = assertionReport ? joinLines(String.valueOf(node.get("description")), expected) : "";
                 results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")), status,
-                        reportExpected, "assert".equals(type) ? actual : "", assertionMessage(output)));
+                        reportExpected, assertionReport ? actual : "", assertionMessage(output)));
                 if (status != ResultStatus.PASS && stopOnFailure(action)) break;
             } catch (Exception e) {
                 att.validation.DiagnosticException typed = detailed(e, template, action);
@@ -218,20 +226,17 @@ public class StageTemplateRunner {
         return result.success();
     }
 
-    private boolean executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
+    private ResultStatus executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
                              List<String> targets, Map<String, Object> node) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
         java.util.Set<String> retryOn = strings(retry.get("retryOn"));
-        java.util.Set<Integer> exitCodes = integers(retry.get("exitCodes"));
+        int intervalMs = integer(retry.get("intervalMs"), 0);
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
         output.put("attempts", attempts);
         ActionSaveConfig save = action.saveConfig();
         String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
         String kind = templateEngine.callKind(action.call());
-        if ("call-tool".equals(kind) && (action.timeoutMs() != null || !retry.isEmpty())) {
-            throw new IllegalArgumentException("call-backed Tool uses dbhelper/built-in limits and does not support process timeoutMs or retry: " + action.id());
-        }
         String format = save.configured() ? toolFormat(save, kind) : "";
         boolean invokerWritesRaw = save.configured() && "tool".equals(kind) && "raw".equals(format);
         boolean actionOwnedArtifact = false;
@@ -239,7 +244,7 @@ public class StageTemplateRunner {
             try {
                 att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
                         action.id(), action.timeoutMs(), invokerWritesRaw ? saveAs : "",
-                        save.overwrite() || actionOwnedArtifact);
+                        save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
                 if (save.configured() && !invokerWritesRaw) {
@@ -251,17 +256,32 @@ public class StageTemplateRunner {
                     actionOwnedArtifact = true;
                 }
                 attempts.add(invocation);
-                int exitCode = integer(invocation.get("exitCode"), 0);
-                boolean retryable = exitCode != 0 && retryOn.contains("EXIT_CODE") && (exitCodes.isEmpty() || exitCodes.contains(Integer.valueOf(exitCode)));
-                if (retryable && number < maxAttempts) continue;
                 output.put("result", result.output());
                 copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
-                output.put("winningAttempt", number);
                 Object saved = invocation.get("outputFile");
-                if (saved != null) targets.add(String.valueOf(saved));
+                if (saved != null && !targets.contains(String.valueOf(saved))) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
-                return result.executionSuccess();
+                if (!result.executionSuccess()) {
+                    output.put("finalAttempt", number);
+                    output.put("status", "ERROR"); output.put("success", false);
+                    return ResultStatus.ERROR;
+                }
+                context.setActionOutput(output);
+                boolean passed = evaluateAssertion(action, output, context, log);
+                if (output.get("assertion") != null) invocation.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) output.get("assertion")));
+                if (passed) {
+                    output.put("winningAttempt", number);
+                    output.put("status", "PASS"); output.put("success", true);
+                    return ResultStatus.PASS;
+                }
+                if (!retryOn.contains("ASSERTION") || number >= maxAttempts) {
+                    output.put("finalAttempt", number);
+                    output.put("status", "FAIL"); output.put("success", false);
+                    return ResultStatus.FAIL;
+                }
+                invocation.put("retryReason", "ASSERTION");
+                waitBeforeRetry(intervalMs);
             } catch (att.exec.ToolExecutionException e) {
                 Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
                 evidence.put("attempt", number);
@@ -269,9 +289,14 @@ public class StageTemplateRunner {
                 attempts.add(evidence);
                 copy(evidence, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 if (evidence.containsKey("output")) output.put("result", evidence.get("output"));
-                if (evidence.get("outputFile") != null) targets.add(String.valueOf(evidence.get("outputFile")));
+                if (evidence.get("outputFile") != null && !targets.contains(String.valueOf(evidence.get("outputFile")))) targets.add(String.valueOf(evidence.get("outputFile")));
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
+                if ("TIMEOUT".equals(e.category()) && retryOn.contains("TIMEOUT") && number < maxAttempts) {
+                    evidence.put("retryReason", "TIMEOUT");
+                    waitBeforeRetry(intervalMs);
+                    continue;
+                }
                 throw e;
             }
         }
@@ -313,6 +338,14 @@ public class StageTemplateRunner {
         if (action.assertion() == null || action.assertion().trim().isEmpty()) {
             output.put("status", "PASS"); output.put("success", true); return ResultStatus.PASS;
         }
+        boolean passed = evaluateAssertion(action, output, context, log);
+        output.put("status", passed ? "PASS" : "FAIL");
+        output.put("success", passed);
+        return passed ? ResultStatus.PASS : ResultStatus.FAIL;
+    }
+
+    private boolean evaluateAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        if (action.assertion() == null || action.assertion().trim().isEmpty()) return true;
         String afterCalls = templateEngine.renderCalls(action.assertion(), context, log);
         String rendered = templateEngine.renderValues(afterCalls, context);
         boolean passed = evaluator.evaluate(afterCalls, context);
@@ -321,9 +354,13 @@ public class StageTemplateRunner {
         assertion.put("rendered", rendered);
         assertion.put("passed", passed);
         output.put("assertion", assertion);
-        output.put("status", passed ? "PASS" : "FAIL");
-        output.put("success", passed);
-        return passed ? ResultStatus.PASS : ResultStatus.FAIL;
+        return passed;
+    }
+
+    private void waitBeforeRetry(int intervalMs) throws InterruptedException {
+        if (intervalMs <= 0) return;
+        try { Thread.sleep(intervalMs); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw interrupted; }
     }
 
     private Map<String, Object> outcome(List<String> targets) {

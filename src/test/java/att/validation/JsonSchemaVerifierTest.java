@@ -35,6 +35,22 @@ class JsonSchemaVerifierTest {
                 valid.replace("\"format\":\"text\"", "\"format\":\"raw\"")));
     }
 
+    @Test void v26TemplateSchemaUsesAssertionAndTimeoutRetryOnly() throws Exception {
+        Path schema = Paths.get("schemas/att-template-v2.6.schema.json");
+        String valid = "{\"schemaVersion\":\"att-template/v2.6\",\"description\":\"x\",\"actions\":{\"poll\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"assert\":\"${output.result} == 'done'\",\"expected\":\"done\",\"actual\":\"${output.result}\",\"retry\":{\"maxAttempts\":3,\"intervalMs\":0,\"retryOn\":[\"ASSERTION\",\"TIMEOUT\"]}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema, valid.replace("ASSERTION", "EXIT_CODE")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema, valid.replace(",\"intervalMs\":0", "")));
+    }
+
+    @Test void v22SidecarSchemaRejectsTimeoutOwnership() throws Exception {
+        Path schema = Paths.get("schemas/att-sidecar-v2.2.schema.json");
+        String valid = "{\"schemaVersion\":\"att-sidecar/v2.2\",\"id\":\"payments\",\"excel\":{\"sheet\":\"Cases\",\"caseId\":\"Case ID\",\"tags\":\"Tags\"},\"stages\":[{\"key\":\"invoke\",\"template\":\"Template\"}]}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
+                valid.replace("\"id\":\"payments\"", "\"id\":\"payments\",\"timeoutMs\":1000")));
+    }
+
     @Test void v23TemplateSchemaEnforcesCanonicalRenderAndAssertFields() throws Exception {
         Path schema=Paths.get("schemas/att-template-v2.3.schema.json");
         String render="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"render\":{\"type\":\"render\",\"payload\":\"data/*.json\",\"renderAs\":\"json\"}}}";

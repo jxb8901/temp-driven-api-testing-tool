@@ -36,6 +36,7 @@
         "call": {"type": "string", "minLength": 1, "pattern": "^#\\{[\\s\\S]*\\}$"},
         "cache": {"type": "object", "required": ["scope"], "properties": {"scope": {"enum": ["case", "db"]}}, "additionalProperties": false},
         "output": {"enum": ["txt", "yaml", "json", "xml"]},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
         "arguments": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "additionalProperties": {"$ref": "#/$defs/argument"}}
       },
       "oneOf": [

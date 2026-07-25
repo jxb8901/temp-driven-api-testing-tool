@@ -313,7 +313,7 @@ class DbHelperExecutorTest {
         Object query = engine.evaluate("#{orders.find(customerId=${CASE.customerId}, status='open')}", context, log);
         assertTrue(query instanceof Map);
         assertTrue(((Map<?, ?>) query).get("rows") instanceof List);
-        assertEquals(17, driver.states.get("jdbc:att-test:facade").lastQueryTimeout);
+        assertEquals(10, driver.states.get("jdbc:att-test:facade").lastQueryTimeout);
         assertEquals(java.util.Arrays.<Object>asList(42, "OPEN"), driver.states.get("jdbc:att-test:facade").boundValues);
         ToolInvocationResult cached = engine.executeToolAttempt(
                 "#{orders.find(status='open', customerId=${CASE.customerId})}", context, log,
@@ -323,6 +323,12 @@ class DbHelperExecutorTest {
         assertFalse(cached.invocation().containsKey("DB"));
         assertFalse(((Map<?, ?>) contextPath(cached.invocation(), "TOOL", "orders", "find")).containsKey("call"));
         assertEquals(java.util.Arrays.<Object>asList(42, "OPEN"), driver.states.get("jdbc:att-test:facade").boundValues);
+        int executionsBeforeRefresh = driver.states.get("jdbc:att-test:facade").executions;
+        ToolInvocationResult refreshed = engine.executeToolAttempt(
+                "#{orders.find(status='open', customerId=${CASE.customerId})}", context, log,
+                "refreshed", null, "", false, true);
+        assertTrue(refreshed.invocation().containsKey("DB"));
+        assertEquals(executionsBeforeRefresh + 1, driver.states.get("jdbc:att-test:facade").executions);
         assertThrows(IllegalArgumentException.class,
                 () -> engine.evaluate("#{orders.close(status='DONE')}", context, log));
 
@@ -446,7 +452,7 @@ class DbHelperExecutorTest {
     }
 
     private static final class FakeState {
-        int connections, commits, rollbacks, closes, lastQueryTimeout, rollbackFailuresRemaining;
+        int connections, commits, rollbacks, closes, lastQueryTimeout, rollbackFailuresRemaining, executions;
         boolean autoCommit, closed, commitFails;
         final List<Object> boundValues = new ArrayList<Object>();
     }
@@ -502,10 +508,12 @@ class DbHelperExecutorTest {
                     if ("setObject".equals(name)) { state.boundValues.add(args[1]); return null; }
                     if ("setMaxRows".equals(name) || "close".equals(name)) return null;
                     if ("executeQuery".equals(name)) {
+                        state.executions++;
                         if (sql.contains("FAIL")) throw new SQLException("expected failure", "42000", 99);
                         return rows(sql);
                     }
                     if ("executeUpdate".equals(name)) {
+                        state.executions++;
                         if (sql.contains("FAIL")) throw new SQLException("expected failure", "42000", 99);
                         return 2;
                     }

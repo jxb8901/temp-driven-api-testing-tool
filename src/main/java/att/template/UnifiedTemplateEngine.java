@@ -25,6 +25,14 @@ public class UnifiedTemplateEngine {
     private final DbHelperExecutor dbHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
     private final BuiltInProvider builtIns;
+    private static final java.util.concurrent.ExecutorService BUILTIN_EXECUTOR = java.util.concurrent.Executors.newCachedThreadPool(new java.util.concurrent.ThreadFactory() {
+        private final java.util.concurrent.atomic.AtomicInteger sequence = new java.util.concurrent.atomic.AtomicInteger();
+        @Override public Thread newThread(Runnable task) {
+            Thread thread = new Thread(task, "att-tool-builtin-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        }
+    });
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker) {
         this(toolInvoker, null, new DefaultBuiltInProvider());
@@ -205,15 +213,23 @@ public class UnifiedTemplateEngine {
     }
 
     public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs, boolean overwrite) throws Exception {
-        Object result = executeCall(call, context, log, invocationId, true, timeoutMs, saveAs, overwrite);
+        return executeToolAttempt(call, context, log, invocationId, timeoutMs, saveAs, overwrite, false);
+    }
+
+    public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
+        Object result = executeCall(call, context, log, invocationId, true, timeoutMs, saveAs, overwrite, bypassCache);
         return (att.exec.ToolInvocationResult) result;
     }
 
     private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt) throws Exception {
-        return executeCall(call, context, log, invocationId, attempt, null, "", false);
+        return executeCall(call, context, log, invocationId, attempt, null, "", false, false);
     }
 
     private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt, Long timeoutMs, String saveAs, boolean overwrite) throws Exception {
+        return executeCall(call, context, log, invocationId, attempt, timeoutMs, saveAs, overwrite, false);
+    }
+
+    private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt, Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
         String body = call.trim();
         if (body.startsWith("#{") && body.endsWith("}")) {
             body = body.substring(2, body.length() - 1);
@@ -226,14 +242,15 @@ public class UnifiedTemplateEngine {
         Map<String, Object> input = resolveArguments(parsed, context, log);
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) {
             long started = System.nanoTime();
-            Object output = builtIns.invoke(parsed.name(), input);
-            return attempt ? builtInAttempt(parsed.name(), invocationId, input, output, context, saveAs, overwrite, started) : output;
+            long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
+            Object output = attempt ? invokeBuiltInWithTimeout(parsed.name(), input, effectiveTimeout, invocationId, started) : builtIns.invoke(parsed.name(), input);
+            return attempt ? builtInAttempt(parsed.name(), invocationId, input, output, context, saveAs, overwrite, started, effectiveTimeout) : output;
         }
         if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + parsed.name());
         ToolConfig configured = toolInvoker.tool(parsed.name());
         if (configured != null && configured.callBacked()) {
-            if (timeoutMs != null) throw new IllegalArgumentException("timeoutMs is process-only and cannot be set on call-backed Tool " + configured.key());
-            return executeCallBackedTool(configured, input, context, log, invocationId, attempt);
+            long effectiveTimeout = toolInvoker.effectiveTimeoutMs(configured.key(), timeoutMs);
+            return executeCallBackedTool(configured, input, context, log, invocationId, attempt, effectiveTimeout, bypassCache);
         }
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for process Tool invocation");
@@ -246,7 +263,7 @@ public class UnifiedTemplateEngine {
 
     private Object executeCallBackedTool(ToolConfig tool, Map<String, Object> supplied,
                                          CaseRuntimeContext context, CaseExecutionLog log,
-                                         String requestedId, boolean attempt) throws Exception {
+                                         String requestedId, boolean attempt, long timeoutMs, boolean bypassCache) throws Exception {
         Map<String, Object> input = toolInvoker.prepareInput(tool.key(), supplied);
         ToolCallParser.ParsedCall target = callParser.parse(tool.call());
         boolean write = target.name().startsWith("db.") && target.name().endsWith(".update");
@@ -257,7 +274,7 @@ public class UnifiedTemplateEngine {
                 ? context.nextInvocationId(tool.key()) : requestedId;
         long started = System.nanoTime();
         String dbInstance = target.name().startsWith("db.") ? target.name().split("\\.", -1)[1] : "";
-        boolean cached = tool.caseCached() || tool.dbCached();
+        boolean cached = !bypassCache && (tool.caseCached() || tool.dbCached());
         String cacheKey = cached ? callToolCacheKey(tool.key(), input) : "";
         boolean cacheHit = tool.caseCached() ? context.hasCallToolCache(cacheKey)
                 : tool.dbCached() && dbHelperExecutor.hasCached(dbInstance, cacheKey);
@@ -268,14 +285,14 @@ public class UnifiedTemplateEngine {
             output = tool.caseCached() ? context.callToolCache(cacheKey)
                     : dbHelperExecutor.cached(dbInstance, cacheKey);
         } else if (target.name().startsWith("db.")) {
-            CallBackedDbResult result = executeCallBackedDb(target, input, context, log);
+            CallBackedDbResult result = executeCallBackedDb(target, input, context, log, Long.valueOf(timeoutMs));
             output = result.output;
             success = result.success;
             Map<String, Object> calls = new LinkedHashMap<String, Object>();
             calls.put(result.invocationId, result.evidence);
             dbEvidence.put(result.instance, calls);
         } else {
-            output = builtIns.invoke(target.name(), resolveDefinitionArguments(target, input));
+            output = invokeBuiltInWithTimeout(target.name(), resolveDefinitionArguments(target, input), timeoutMs, id, started);
         }
         if (success && !cacheHit) {
             if (tool.caseCached()) context.cacheCallTool(cacheKey, output);
@@ -289,6 +306,7 @@ public class UnifiedTemplateEngine {
         toolEvidence.put("output", output);
         toolEvidence.put("status", success ? "PASS" : "ERROR");
         toolEvidence.put("durationMs", java.time.Duration.ofNanos(System.nanoTime() - started).toMillis());
+        toolEvidence.put("timeoutMs", timeoutMs);
         if (tool.grouped()) {
             toolEvidence.put("groupId", tool.groupId());
             toolEvidence.put("toolKey", tool.localKey());
@@ -316,11 +334,15 @@ public class UnifiedTemplateEngine {
         invocation.put("implementation", "call");
         invocation.put("status", success ? "PASS" : "ERROR");
         invocation.put("durationMs", toolEvidence.get("durationMs"));
+        invocation.put("timeoutMs", timeoutMs);
         invocation.put("input", input);
         invocation.put("output", output);
         invocation.put("TOOL", toolNode);
         if (!dbEvidence.isEmpty()) invocation.put("DB", dbEvidence);
         att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult(tool.key(), id, output, invocation, success);
+        if (attempt && !success && dbTimeout(output)) {
+            throw new att.exec.ToolExecutionException("TIMEOUT", "Tool timed out: " + tool.key(), invocation, null, null);
+        }
         if (!attempt && !success) throw new IllegalStateException("DB call failed through Tool " + tool.key());
         return attempt ? result : output;
     }
@@ -367,7 +389,7 @@ public class UnifiedTemplateEngine {
     }
 
     private CallBackedDbResult executeCallBackedDb(ToolCallParser.ParsedCall call, Map<String, Object> input,
-                                                   CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+                                                   CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
         if (dbHelperExecutor == null) throw new IllegalStateException("DB invocation is unavailable: " + call.name());
         String[] parts = call.name().split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
@@ -394,7 +416,7 @@ public class UnifiedTemplateEngine {
         java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
         String invocationId = context.nextDbInvocationId(parts[1]);
         String operation = "update".equals(parts[2]) ? "update" : "query";
-        DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId);
+        DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs);
         context.recordDbInvocation(parts[1], invocationId, result.evidence());
         if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); } catch (Exception ignored) { }
         Object output = result.result();
@@ -559,7 +581,7 @@ public class UnifiedTemplateEngine {
 
     private att.exec.ToolInvocationResult builtInAttempt(String name, String invocationId, Map<String, Object> input,
                                                          Object output, CaseRuntimeContext context, String saveAs,
-                                                         boolean overwrite, long started) throws Exception {
+                                                         boolean overwrite, long started, long timeoutMs) throws Exception {
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
         String rawOutput = output == null ? "" : String.valueOf(output);
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
@@ -568,6 +590,7 @@ public class UnifiedTemplateEngine {
         invocation.put("name", name);
         invocation.put("status", "PASS");
         invocation.put("durationMs", java.time.Duration.ofNanos(System.nanoTime() - started).toMillis());
+        invocation.put("timeoutMs", timeoutMs);
         invocation.put("input", input);
         invocation.put("output", output);
         invocation.put("rawOutput", rawOutput);
@@ -584,6 +607,42 @@ public class UnifiedTemplateEngine {
             invocation.put("outputFile", outputFile.toString());
         }
         return new att.exec.ToolInvocationResult(name, id, output, invocation);
+    }
+
+    private Object invokeBuiltInWithTimeout(final String name, final Map<String, Object> input, long timeoutMs,
+                                            String invocationId, long started) throws Exception {
+        java.util.concurrent.Future<Object> future = BUILTIN_EXECUTOR.submit(new java.util.concurrent.Callable<Object>() {
+            @Override public Object call() throws Exception { return builtIns.invoke(name, input); }
+        });
+        try {
+            return future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException timeout) {
+            future.cancel(true);
+            Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+            evidence.put("id", invocationId == null ? name : invocationId);
+            evidence.put("type", "tool");
+            evidence.put("name", name);
+            evidence.put("implementation", "call");
+            evidence.put("status", "TIMEOUT");
+            evidence.put("durationMs", java.time.Duration.ofNanos(System.nanoTime() - started).toMillis());
+            evidence.put("timeoutMs", timeoutMs);
+            evidence.put("input", input);
+            throw new att.exec.ToolExecutionException("TIMEOUT", "Tool timed out: " + name, evidence, null, timeout);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            Throwable cause = failure.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new IllegalStateException("Built-in Tool failed: " + name, cause);
+        } catch (InterruptedException interrupted) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        }
+    }
+
+    private boolean dbTimeout(Object output) {
+        if (!(output instanceof Map)) return false;
+        Object error = ((Map<?, ?>) output).get("error");
+        return error instanceof Map && "TIMEOUT".equals(String.valueOf(((Map<?, ?>) error).get("type")));
     }
 
     private String renderTools(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {

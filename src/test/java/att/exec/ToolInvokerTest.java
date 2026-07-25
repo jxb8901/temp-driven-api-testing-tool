@@ -15,6 +15,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ToolInvokerTest {
     @TempDir Path tempDir;
+    @Test void resolvesActionThenToolThenGlobalTimeout() {
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("timed", new ToolConfig("timed", "timed", "", "Timed", "Timed",
+                Arrays.asList("echo"), "", "", Collections.<String>emptyList(), "txt",
+                Collections.<String,ToolArgumentConfig>emptyMap(), null, null, Long.valueOf(2500)));
+        ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null));
+        assertEquals(1000L, invoker.effectiveTimeoutMs("timed", Long.valueOf(1000)));
+        assertEquals(2500L, invoker.effectiveTimeoutMs("timed", null));
+        assertEquals(10000L, invoker.effectiveTimeoutMs("missing", null));
+    }
     @Test void safelyParsesYamlAndXmlOutputs() throws Exception {
         ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));
         assertEquals(Boolean.TRUE, ((Map<?,?>) invoker.parseOutput("enabled: true\ncount: 2", "yaml")).get("enabled"));

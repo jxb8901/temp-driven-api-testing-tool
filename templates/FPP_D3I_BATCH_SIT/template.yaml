@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.3
+schemaVersion: att-template/v2.6
 name: FPP_D3I_BATCH_SIT
 description: SIT D3I batch end-to-end flow covering D3I, RLT012, DVO, DRR, and DSR processing.
 
@@ -41,14 +41,11 @@ actions:
     timeoutMs: 10000
     retry: &dbRetry
       maxAttempts: 3
-      retryOn: [EXIT_CODE]
-
-  assertD3iTxn:
-    type: assert
-    description: D3 transaction record count and PCFM status match
-    assert: "${ACTIONS.queryD3iTxn.output.exitCode} == 0 and ${ACTIONS.queryD3iTxn.output.result.RowCount} == 1 and ${ACTIONS.queryD3iTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iTxnExpectedCount} and ${ACTIONS.queryD3iTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iTxnExpectedCount}"
+      intervalMs: 1000
+      retryOn: [ASSERTION]
+    assert: "${output.exitCode} == 0 and ${output.result.RowCount} == 1 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iTxnExpectedCount}"
     expected: "recordCount=${CASE.d3iTxnExpectedCount}, SR_STUS=PCFM"
-    actual: "${ACTIONS.queryD3iTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryD3iFileJnl:
     type: tool
@@ -56,13 +53,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-file-jnl.out', stderrPath='${CASE.artifactDirectory}/d3i-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertD3iFileJnl:
-    type: assert
-    description: FPSPD3I file journal count and P status match
-    assert: "${ACTIONS.queryD3iFileJnl.output.exitCode} == 0 and ${ACTIONS.queryD3iFileJnl.output.result.RowCount} == 1 and ${ACTIONS.queryD3iFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iFileExpectedCount} and ${ACTIONS.queryD3iFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.RowCount} == 1 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iFileExpectedCount}"
     expected: "recordCount=${CASE.d3iFileExpectedCount}, SR_FILE_STUS=P"
-    actual: "${ACTIONS.queryD3iFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectD3iDone:
     type: tool
@@ -118,13 +111,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iOutboundTxnSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-outbound-txn.out', stderrPath='${CASE.artifactDirectory}/d3i-outbound-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertD3iOutboundTxn:
-    type: assert
-    description: D3 outbound transaction count and OTWD status match
-    assert: "${ACTIONS.queryD3iOutboundTxn.output.exitCode} == 0 and ${ACTIONS.queryD3iOutboundTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iOutboundTxnExpectedCount} and ${ACTIONS.queryD3iOutboundTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iOutboundTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iOutboundTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iOutboundTxnExpectedCount}"
     expected: "recordCount=${CASE.d3iOutboundTxnExpectedCount}, SR_STUS=OTWD"
-    actual: "${ACTIONS.queryD3iOutboundTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryD3iOutboundFileJnl:
     type: tool
@@ -132,13 +121,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.d3iOutboundFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/d3i-outbound-file-jnl.out', stderrPath='${CASE.artifactDirectory}/d3i-outbound-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertD3iOutboundFileJnl:
-    type: assert
-    description: D3I outbound file journals have expected P and C statuses
-    assert: "${ACTIONS.queryD3iOutboundFileJnl.output.exitCode} == 0 and ${ACTIONS.queryD3iOutboundFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iOutboundFileExpectedCount} and ${ACTIONS.queryD3iOutboundFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iOutboundFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.d3iOutboundFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.d3iOutboundFileExpectedCount}"
     expected: "recordCount=${CASE.d3iOutboundFileExpectedCount}, SR_FILE_STUS=P and C"
-    actual: "${ACTIONS.queryD3iOutboundFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   convertD3Rlt:
     type: tool
@@ -182,13 +167,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.rltTxnSqlFile}, outputFile='${CASE.artifactDirectory}/rlt-txn.out', stderrPath='${CASE.artifactDirectory}/rlt-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertRltTxn:
-    type: assert
-    description: RLT012 transaction count and CFM status match
-    assert: "${ACTIONS.queryRltTxn.output.exitCode} == 0 and ${ACTIONS.queryRltTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.rltTxnExpectedCount} and ${ACTIONS.queryRltTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.rltTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.rltTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.rltTxnExpectedCount}"
     expected: "recordCount=${CASE.rltTxnExpectedCount}, SR_STUS=CFM"
-    actual: "${ACTIONS.queryRltTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryRltFileJnl:
     type: tool
@@ -196,13 +177,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.rltFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/rlt-file-jnl.out', stderrPath='${CASE.artifactDirectory}/rlt-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertRltFileJnl:
-    type: assert
-    description: RLT012 file journal count and C status match
-    assert: "${ACTIONS.queryRltFileJnl.output.exitCode} == 0 and ${ACTIONS.queryRltFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.rltFileExpectedCount} and ${ACTIONS.queryRltFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.rltFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.rltFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.rltFileExpectedCount}"
     expected: "recordCount=${CASE.rltFileExpectedCount}, SR_FILE_STUS=C"
-    actual: "${ACTIONS.queryRltFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectRltDone:
     type: tool
@@ -246,13 +223,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.dvoTxnSqlFile}, outputFile='${CASE.artifactDirectory}/dvo-txn.out', stderrPath='${CASE.artifactDirectory}/dvo-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDvoTxn:
-    type: assert
-    description: DVO transaction count and OTWD status match
-    assert: "${ACTIONS.queryDvoTxn.output.exitCode} == 0 and ${ACTIONS.queryDvoTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dvoTxnExpectedCount} and ${ACTIONS.queryDvoTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dvoTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.dvoTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.dvoTxnExpectedCount}"
     expected: "recordCount=${CASE.dvoTxnExpectedCount}, SR_STUS=OTWD"
-    actual: "${ACTIONS.queryDvoTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryDvoFileJnl:
     type: tool
@@ -260,13 +233,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.dvoFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/dvo-file-jnl.out', stderrPath='${CASE.artifactDirectory}/dvo-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDvoFileJnl:
-    type: assert
-    description: DVO file journal count and C status match
-    assert: "${ACTIONS.queryDvoFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDvoFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dvoFileExpectedCount} and ${ACTIONS.queryDvoFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dvoFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.dvoFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.dvoFileExpectedCount}"
     expected: "recordCount=${CASE.dvoFileExpectedCount}, SR_FILE_STUS=C"
-    actual: "${ACTIONS.queryDvoFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectDrrInput:
     type: tool
@@ -310,13 +279,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.drrTxnSqlFile}, outputFile='${CASE.artifactDirectory}/drr-txn.out', stderrPath='${CASE.artifactDirectory}/drr-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDrrTxn:
-    type: assert
-    description: DRR transaction count and CAPT or CRJT plus PCFM states match
-    assert: "${ACTIONS.queryDrrTxn.output.exitCode} == 0 and ${ACTIONS.queryDrrTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrTxnExpectedCount} and ${ACTIONS.queryDrrTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrTxnExpectedCount}"
     expected: "recordCount=${CASE.drrTxnExpectedCount}, SR_STUS=(CAPT or CRJT) and PCFM"
-    actual: "${ACTIONS.queryDrrTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryDrrFileJnl:
     type: tool
@@ -324,13 +289,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.drrFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/drr-file-jnl.out', stderrPath='${CASE.artifactDirectory}/drr-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDrrFileJnl:
-    type: assert
-    description: DRR file journal count and C status match
-    assert: "${ACTIONS.queryDrrFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDrrFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrFileExpectedCount} and ${ACTIONS.queryDrrFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrFileExpectedCount}"
     expected: "recordCount=${CASE.drrFileExpectedCount}, SR_FILE_STUS=C"
-    actual: "${ACTIONS.queryDrrFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectDrrDone:
     type: tool
@@ -362,13 +323,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.drrCapSentSqlFile}, outputFile='${CASE.artifactDirectory}/drr-cap-sent.out', stderrPath='${CASE.artifactDirectory}/drr-cap-sent.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDrrCapSent:
-    type: assert
-    description: DRR capture-sent record count and S flag match
-    assert: "${ACTIONS.queryDrrCapSent.output.exitCode} == 0 and ${ACTIONS.queryDrrCapSent.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrCapExpectedCount} and ${ACTIONS.queryDrrCapSent.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrCapExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrCapExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrCapExpectedCount}"
     expected: "recordCount=${CASE.drrCapExpectedCount}, SR_IS_CAP_SENT=S"
-    actual: "${ACTIONS.queryDrrCapSent.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryDrrCapFileJnl:
     type: tool
@@ -376,13 +333,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.drrCapFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/drr-cap-file-jnl.out', stderrPath='${CASE.artifactDirectory}/drr-cap-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDrrCapFileJnl:
-    type: assert
-    description: DRR capture file journal count and C status match
-    assert: "${ACTIONS.queryDrrCapFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDrrCapFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrCapFileExpectedCount} and ${ACTIONS.queryDrrCapFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrCapFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.drrCapFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.drrCapFileExpectedCount}"
     expected: "recordCount=${CASE.drrCapFileExpectedCount}, SR_FILE_STUS=C"
-    actual: "${ACTIONS.queryDrrCapFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectDrrAftOutput:
     type: tool
@@ -438,13 +391,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrTxnSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-txn.out', stderrPath='${CASE.artifactDirectory}/dsr-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDsrTxn:
-    type: assert
-    description: DSR transaction count and ACPT or UCPT plus SUCC or RJCT states match
-    assert: "${ACTIONS.queryDsrTxn.output.exitCode} == 0 and ${ACTIONS.queryDsrTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrTxnExpectedCount} and ${ACTIONS.queryDsrTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrTxnExpectedCount}"
     expected: "recordCount=${CASE.dsrTxnExpectedCount}, SR_STUS=(ACPT or UCPT) and (SUCC or RJCT)"
-    actual: "${ACTIONS.queryDsrTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryDsrFileJnl:
     type: tool
@@ -452,13 +401,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-file-jnl.out', stderrPath='${CASE.artifactDirectory}/dsr-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDsrFileJnl:
-    type: assert
-    description: DSR file journal count and C status match
-    assert: "${ACTIONS.queryDsrFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDsrFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFileExpectedCount} and ${ACTIONS.queryDsrFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFileExpectedCount}"
     expected: "recordCount=${CASE.dsrFileExpectedCount}, SR_FILE_STUS=C"
-    actual: "${ACTIONS.queryDsrFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectDsrOutbound:
     type: tool
@@ -490,13 +435,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrFinalTxnSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-final-txn.out', stderrPath='${CASE.artifactDirectory}/dsr-final-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDsrFinalTxn:
-    type: assert
-    description: Final DSR transaction count and SUCC or RJCT status match
-    assert: "${ACTIONS.queryDsrFinalTxn.output.exitCode} == 0 and ${ACTIONS.queryDsrFinalTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFinalTxnExpectedCount} and ${ACTIONS.queryDsrFinalTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFinalTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFinalTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFinalTxnExpectedCount}"
     expected: "recordCount=${CASE.dsrFinalTxnExpectedCount}, SR_STUS=SUCC or RJCT"
-    actual: "${ACTIONS.queryDsrFinalTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryDsrFinalFileJnl:
     type: tool
@@ -504,13 +445,9 @@ actions:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.dsrFinalFileJnlSqlFile}, outputFile='${CASE.artifactDirectory}/dsr-final-file-jnl.out', stderrPath='${CASE.artifactDirectory}/dsr-final-file-jnl.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertDsrFinalFileJnl:
-    type: assert
-    description: Final DSR file journal count and C status match
-    assert: "${ACTIONS.queryDsrFinalFileJnl.output.exitCode} == 0 and ${ACTIONS.queryDsrFinalFileJnl.output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFinalFileExpectedCount} and ${ACTIONS.queryDsrFinalFileJnl.output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFinalFileExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.dsrFinalFileExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.dsrFinalFileExpectedCount}"
     expected: "recordCount=${CASE.dsrFinalFileExpectedCount}, SR_FILE_STUS=C"
-    actual: "${ACTIONS.queryDsrFinalFileJnl.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   inspectDsrAftOutput:
     type: tool

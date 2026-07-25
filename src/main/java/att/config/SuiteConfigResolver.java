@@ -30,10 +30,14 @@ public final class SuiteConfigResolver {
         try {
             if (!Files.exists(sidecar)) throw new IllegalArgumentException("Mandatory sidecar does not exist: " + sidecar);
             Map<String, Object> map = load(sidecar);
-            Path schema = projectRoot.resolve("schemas/att-sidecar-v2.1.schema.json");
+            String schemaVersion = String.valueOf(map.get("schemaVersion"));
+            boolean current = Version.SIDECAR_SCHEMA.equals(schemaVersion);
+            boolean legacy = Version.LEGACY_SIDECAR_SCHEMA.equals(schemaVersion);
+            if (!(current || legacy)) throw new IllegalArgumentException("Unsupported sidecar schemaVersion: " + schemaVersion);
+            Path schema = projectRoot.resolve(current ? "schemas/att-sidecar-v2.2.schema.json" : "schemas/att-sidecar-v2.1.schema.json");
             if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
-            SchemaSupport.requireVersion(map, Version.SIDECAR_SCHEMA, "sidecar");
-            SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "id", "excel", "stages", "report", "timeoutMs");
+            SchemaSupport.requireVersion(map, schemaVersion, "sidecar");
+            SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "id", "excel", "stages", "report");
             String workbookId = required(map, "id");
             att.core.IdentifierValidator.workbookId(workbookId);
             Object excelValue = map.get("excel");
@@ -50,9 +54,8 @@ public final class SuiteConfigResolver {
             if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
             ReportConfig report = mergeReport(map.get("report"));
-            int timeoutMs = positiveInteger(map.get("timeoutMs"), global.timeoutMs(), "timeoutMs");
             return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
-                    global.environment(), timeoutMs, global.templatesRoot(), global.testcasesRoot(),
+                    global.environment(), global.timeoutMs(), global.templatesRoot(), global.testcasesRoot(),
                     global.tools(), global.dbHelpers(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput());
         } catch (att.validation.DiagnosticException e) {
             throw e;

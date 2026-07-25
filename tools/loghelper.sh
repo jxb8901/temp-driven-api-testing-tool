@@ -236,11 +236,11 @@ is_local_host() {
 }
 
 get_file_size() {
-    stat -c '%s' -- "$1"
+    stat -c '%s' -- "$1" 2>/dev/null || stat -f '%z' -- "$1"
 }
 
 get_file_mtime() {
-    stat -c '%Y' -- "$1"
+    stat -c '%Y' -- "$1" 2>/dev/null || stat -f '%m' -- "$1"
 }
 
 reverse_file() {

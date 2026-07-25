@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.3
+schemaVersion: att-template/v2.6
 name: CTO/RTI流程模板
 description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
 
@@ -87,14 +87,11 @@ x-staged:
     timeoutMs: 10000
     retry: &dbRetry
       maxAttempts: 3
-      retryOn: [EXIT_CODE]
-
-  assertCtoAfterConfirm:
-    type: assert
-    description: CTO ACSC and ACCC transaction states match within three attempts
-    assert: "${ACTIONS.queryCtoAfterConfirm.output.exitCode} == 0 and ${ACTIONS.queryCtoAfterConfirm.output.result.RowCount} == 1 and ${ACTIONS.queryCtoAfterConfirm.output.result.Rows.Row.RECORD_COUNT} == ${CASE.ctoAcscAcccExpectedCount} and ${ACTIONS.queryCtoAfterConfirm.output.result.Rows.Row.MATCH_COUNT} == ${CASE.ctoAcscAcccExpectedCount}"
+      intervalMs: 1000
+      retryOn: [ASSERTION]
+    assert: "${output.exitCode} == 0 and ${output.result.RowCount} == 1 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.ctoAcscAcccExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.ctoAcscAcccExpectedCount}"
     expected: "recordCount=${CASE.ctoAcscAcccExpectedCount}, ACSC and ACCC successful"
-    actual: "${ACTIONS.queryCtoAfterConfirm.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   searchPacs002Acsc:
     type: tool
@@ -138,13 +135,9 @@ x-staged:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.rtiTxnSqlFile}, outputFile='${CASE.artifactDirectory}/rti-txn.out', stderrPath='${CASE.artifactDirectory}/rti-txn.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertRtiTxn:
-    type: assert
-    description: RTI transaction succeeds and amount matches
-    assert: "${ACTIONS.queryRtiTxn.output.exitCode} == 0 and ${ACTIONS.queryRtiTxn.output.result.RowCount} == 1 and ${ACTIONS.queryRtiTxn.output.result.Rows.Row.RECORD_COUNT} == ${CASE.rtiTxnExpectedCount} and ${ACTIONS.queryRtiTxn.output.result.Rows.Row.MATCH_COUNT} == ${CASE.rtiTxnExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.RowCount} == 1 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.rtiTxnExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.rtiTxnExpectedCount}"
     expected: "recordCount=${CASE.rtiTxnExpectedCount}, RTI success, amount=${CASE.amount}"
-    actual: "${ACTIONS.queryRtiTxn.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   queryCtoRefund:
     type: tool
@@ -152,13 +145,9 @@ x-staged:
     call: "#{fpp.querySqlplus(sqlFile=${CASE.ctoRefundSqlFile}, outputFile='${CASE.artifactDirectory}/cto-refund.out', stderrPath='${CASE.artifactDirectory}/cto-refund.err')}"
     timeoutMs: 10000
     retry: *dbRetry
-
-  assertCtoRefund:
-    type: assert
-    description: CTO transaction is refunded
-    assert: "${ACTIONS.queryCtoRefund.output.exitCode} == 0 and ${ACTIONS.queryCtoRefund.output.result.RowCount} == 1 and ${ACTIONS.queryCtoRefund.output.result.Rows.Row.RECORD_COUNT} == ${CASE.ctoRefundExpectedCount} and ${ACTIONS.queryCtoRefund.output.result.Rows.Row.MATCH_COUNT} == ${CASE.ctoRefundExpectedCount}"
+    assert: "${output.exitCode} == 0 and ${output.result.RowCount} == 1 and ${output.result.Rows.Row.RECORD_COUNT} == ${CASE.ctoRefundExpectedCount} and ${output.result.Rows.Row.MATCH_COUNT} == ${CASE.ctoRefundExpectedCount}"
     expected: "recordCount=${CASE.ctoRefundExpectedCount}, specified OID is refunded"
-    actual: "${ACTIONS.queryCtoRefund.output.result.Rows.Row.RESULT_SUMMARY}"
+    actual: "${output.result.Rows.Row.RESULT_SUMMARY}"
 
   logCtoRtiSummary:
     type: log

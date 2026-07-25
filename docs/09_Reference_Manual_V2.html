@@ -365,9 +365,9 @@ code {
           : 'default'
     });
   </script>
-<h1 id="att-v261-user-manual-and-reference">ATT V2.6.1 User Manual and Reference</h1>
+<h1 id="att-v262-user-manual-and-reference">ATT V2.6.2 User Manual and Reference</h1>
 <p>Author: Jeffrey + ChatGPT
-Version: 2.6.1
+Version: 2.6.2
 Status: Normative end-user documentation</p>
 <p>This manual is designed to be read in two ways:</p>
 <ul>
@@ -526,7 +526,7 @@ Template → Ordered actions → Configured tool (for tool actions)
 </tbody>
 </table>
 <p>Create the adjacent <code>testcase/payment.yaml</code>:</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.1</span>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.2</span>
 <span class="hljs-attr">id:</span> <span class="hljs-string">payment</span>
 <span class="hljs-attr">excel:</span>
   <span class="hljs-attr">sheet:</span> <span class="hljs-string">payment=Payment</span> <span class="hljs-string">Cases</span>
@@ -542,7 +542,7 @@ Template → Ordered actions → Configured tool (for tool actions)
 <p>The full Case ID is <code>payment.payment.TC001</code>: the first <code>payment</code> is the mandatory package-unique workbook <code>id</code>, the second is the logical <code>groupId</code> on the left of the sheet mapping, and <code>TC001</code> comes from the row.</p>
 <h3 id="step-3-create-the-template">Step 3: create the template</h3>
 <p>Create <code>templates/payment/template.yaml</code>:</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.5</span>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.6</span>
 <span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_INVOKE</span>
 <span class="hljs-attr">description:</span> <span class="hljs-string">Render,</span> <span class="hljs-string">invoke,</span> <span class="hljs-string">and</span> <span class="hljs-string">verify</span> <span class="hljs-string">a</span> <span class="hljs-string">payment</span>
 <span class="hljs-attr">actions:</span>
@@ -614,8 +614,8 @@ environment=<span class="hljs-string">&quot;<span class="hljs-variable">${2:?mis
 testcase/payment_regression.yaml
 testcase/payment_regression.xml
 </div></code></pre>
-<p>The sidecar maps Excel structure into ATT concepts. It owns the sheet mapping, headers, case data, ordered stages, optional report-column labels, and an optional workbook timeout.</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.1</span>
+<p>The sidecar maps Excel structure into ATT concepts. It owns the sheet mapping, headers, case data, ordered stages, and optional report-column labels. Timeout and retry policy do not belong to the workbook.</p>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-sidecar/v2.2</span>
 <span class="hljs-attr">id:</span> <span class="hljs-string">paymentRegression</span>
 <span class="hljs-attr">excel:</span>
   <span class="hljs-attr">sheet:</span> <span class="hljs-string">payment=支付測試案例集,</span> <span class="hljs-string">batch=批量測試案例集</span>
@@ -782,7 +782,7 @@ Effective: Case ID, Case name, Template, Parameters
 <p>Use <code>onFailure</code> for rollback/diagnostics and <code>always</code> for cleanup or final evidence collection.</p>
 <h3 id="32-template">3.2 Template</h3>
 <p>A directory is a callable template only when it directly contains <code>template.yaml</code>. Category directories may contain other template directories but are not callable themselves.</p>
-<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.5</span>
+<pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v2.6</span>
 <span class="hljs-attr">name:</span> <span class="hljs-string">PAYMENT_INVOKE</span>
 <span class="hljs-attr">description:</span> <span class="hljs-string">Render</span> <span class="hljs-string">and</span> <span class="hljs-string">invoke</span> <span class="hljs-string">a</span> <span class="hljs-string">payment</span> <span class="hljs-string">request</span>
 <span class="hljs-attr">actions:</span>
@@ -1319,7 +1319,7 @@ A101  DONE         3
 <p>Cache is intentionally independent of JDBC lifecycle. DB update, commit, rollback, Case finalization, connection close, and automatic reconnect do <strong>not</strong> clear either cache. A DB-scope hit does not open or check the Connection. Consequently <code>db</code> scope can return stale data and should be enabled only when the package owner accepts that behavior. V2.6 has no TTL, size limit, persistence, or automatic coherence.</p>
 <p>Evidence records <code>cache.scope</code>, the SHA-256 <code>cache.key</code>, and <code>cache.hit</code>. A miss has nested DB evidence; a hit does not create a DB invocation because JDBC did not run.</p>
 <h5 id="timeout-retry-lifecycle-and-evidence">Timeout, retry, lifecycle, and evidence</h5>
-<p>Call-backed DB Tools use the target dbhelper's <code>statement.timeoutSeconds</code>, read-only policy, transaction configuration, result limits, one-connection-per-instance/thread lifecycle, and Case pre-rollback/reconnect behavior. Action <code>timeoutMs</code> and process EXIT_CODE <code>retry</code> are invalid because they cannot safely override JDBC semantics.</p>
+<p>Call-backed DB Tools retain the target dbhelper's read-only, transaction, result-limit, connection, and Case lifecycle rules. They now use the same Tool Action <code>timeoutMs</code> and ASSERTION/TIMEOUT retry contract as command-backed Tools. The effective JDBC query timeout is the shorter of the Tool attempt timeout and the dbhelper <code>statement.timeoutSeconds</code>; a retry-enabled Action bypasses call-backed cache so polling cannot reuse a stale value.</p>
 <p>The Action keeps a normal <code>TOOL</code> wrapper with <code>implementation: call</code>, input, typed output, status, duration, and cache details. A DB cache miss also produces the ordinary Action <code>DB</code> evidence. Fields that only exist for a process—<code>command</code>, <code>logicalArgv</code>, <code>argv</code>, <code>stdout</code>, <code>stderr</code>, <code>rawOutput</code>, and <code>exitCode</code>—are absent.</p>
 <p>Choose the lightest authoring form:</p>
 <table>
@@ -1347,7 +1347,7 @@ A101  DONE         3
 <td>call-backed Tool with explicit cache</td>
 </tr>
 <tr>
-<td>external executable, SSH, argv, stdout parser, or exit-code retry</td>
+<td>external executable, SSH, argv, or stdout parser</td>
 <td>command-backed Tool</td>
 </tr>
 </tbody>
@@ -1472,9 +1472,16 @@ Payment regression
 <p>ATT parses stdout according to the Tool configuration <code>output</code>, which may be <code>txt</code>, <code>yaml</code>, <code>json</code>, or <code>xml</code> and defaults to <code>txt</code>. A Tool action may use the common object-shaped <code>saveAs</code> to persist exact stdout bytes (<code>format: raw</code>) or its parsed typed result (<code>text|json|yaml|xml</code>) in the Case artifact directory. A primary built-in has no stdout, so it supports only <code>text|json|yaml|xml</code>. See <a href="#action-saveas">Action <code>saveAs</code></a> for formats, rendering, containment, overwrite, and retry behaviour. Without <code>saveAs</code>, ATT creates no dedicated Tool-output file, while input, argv, stdout, stderr, parsed result, exit code, and retry evidence remain in the persisted Case evidence.</p>
 <p>Timeout, launch/process I/O failure, or structured-output parse failure is ERROR and cannot be overridden by an assertion. Otherwise a tool action's <code>assert</code> decides PASS/FAIL. If no assertion is configured, operational completion is PASS even when the process exit code is non-zero. The exit code remains in <code>action.output.exitCode</code>, so templates that require zero must say so explicitly. Command, inputs, stdout, stderr, raw output, duration, exit code, parsed <code>output.result</code>, and assertion details are retained as evidence.</p>
 <p>Timeout precedence is:</p>
-<pre class="hljs"><code><div>tool action timeoutMs → workbook sidecar timeoutMs → global timeoutMs → 10000 ms
+<pre class="hljs"><code><div>tool action timeoutMs → Tool descriptor timeoutMs → global timeoutMs → 10000 ms
 </div></code></pre>
 <p>Every configured timeout is an integer from 1 to 3600000 milliseconds.</p>
+<p>Retry is valid only on <code>type: tool</code> Actions and has no global, Tool, Template, stage, or sidecar default:</p>
+<pre class="hljs"><code><div><span class="hljs-attr">retry:</span>
+  <span class="hljs-attr">maxAttempts:</span> <span class="hljs-number">3</span>
+  <span class="hljs-attr">intervalMs:</span> <span class="hljs-number">1000</span>
+  <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">ASSERTION</span>, <span class="hljs-string">TIMEOUT</span>]
+</div></code></pre>
+<p><code>maxAttempts</code> includes the first attempt and is 2–10; <code>intervalMs</code> is 0–3600000. <code>ASSERTION</code> requires an Action <code>assert</code>: ATT evaluates it after every normal result and retries only when it is false. <code>TIMEOUT</code> retries only an attempt timeout. Exit code has no retry category and remains available at <code>${output.exitCode}</code> for the assertion. Configuration, argument, I/O, parse, non-timeout DB, and assertion-evaluation errors are not retried.</p>
 <h3 id="34-running-tests">3.4 Running Tests</h3>
 <h4 id="validate-first">Validate first</h4>
 <pre class="hljs"><code><div>./att.sh validate --package
@@ -1743,18 +1750,19 @@ levels=()
 </div></code></pre>
 <p>Given <code>--levels ERROR WARN</code>, the array contains <code>ERROR</code> and <code>WARN</code>. If a <code>once</code> list is not last, the script needs an unambiguous boundary defined by its own protocol, such as a fixed item count or an explicit terminator argument. Do not infer the boundary merely from the next value beginning with <code>--</code>: ATT preserves leading dashes as data, so a legitimate list value may also begin with <code>--</code>. Use <code>repeat</code> when each option-value pair must be independently parseable.</p>
 <p>String items are normalized individually; blank markers become empty strings, while an explicitly empty array remains empty. A required empty List fails before expansion. Spaces, quotes, backslashes, leading dashes, and <code>|&gt;&lt;</code> inside an item remain literal data. Every List placeholder must occupy one complete static command token. Nested Lists and maps are rejected as argv items. An empty optional List emits neither its <code>argName</code> nor values. Current <code>att-config/v2.6</code> and <code>att-tool-group/v2.6</code> schemas reject <code>delimit</code>; legacy configuration schemas retain their historical split behavior only for read compatibility.</p>
-<h3 id="retry-selected-exit-codes">Retry selected exit codes</h3>
+<h3 id="retry-assertion-polling-or-timeout">Retry assertion polling or timeout</h3>
 <p>Retry belongs to a tool action, not to a workflow or arbitrary stage:</p>
 <pre class="hljs"><code><div><span class="hljs-attr">callApi:</span>
   <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
   <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span>
   <span class="hljs-attr">timeoutMs:</span> <span class="hljs-number">30000</span>
+  <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${output.result.status} == &#x27;COMPLETED&#x27;&quot;</span>
   <span class="hljs-attr">retry:</span>
     <span class="hljs-attr">maxAttempts:</span> <span class="hljs-number">3</span>
-    <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">EXIT_CODE</span>]
-    <span class="hljs-attr">exitCodes:</span> [<span class="hljs-number">1</span>, <span class="hljs-number">75</span>]
+    <span class="hljs-attr">intervalMs:</span> <span class="hljs-number">1000</span>
+    <span class="hljs-attr">retryOn:</span> [<span class="hljs-string">ASSERTION</span>, <span class="hljs-string">TIMEOUT</span>]
 </div></code></pre>
-<p><code>maxAttempts</code> includes the first attempt and defaults to 1. V2.3 supports only <code>EXIT_CODE</code>; if <code>exitCodes</code> is omitted, any non-zero exit code is eligible. Timeout, output parsing, I/O, configuration, assertion, render, and log failures are not retried. V2.3 has no delay/backoff fields, so eligible retries are immediate.</p>
+<p><code>maxAttempts</code> includes the first attempt. ATT evaluates the Tool Action assertion after every normal result; <code>ASSERTION</code> retries a false result, while <code>TIMEOUT</code> independently permits retry after the attempt timeout. Exit codes are ordinary evidence and can be included in the same assertion. The retry block has no defaults outside the Action.</p>
 <p>Each attempt is recorded directly in the case log/action record; no <code>attempt-001</code> directory is created. A later successful attempt makes the action PASS while retaining earlier evidence; exhausted attempts produce ERROR. Only retry operations that are safe to repeat.</p>
 <h2 id="05-cli-reference">05 CLI Reference</h2>
 <h3 id="commands">Commands</h3>
@@ -2009,7 +2017,7 @@ levels=()
 <tr>
 <td>Workbook</td>
 <td><code>&lt;workbook&gt;.yaml</code></td>
-<td>Excel mapping, stages, workbook labels, workbook timeout</td>
+<td>Excel mapping, stages, workbook labels</td>
 </tr>
 <tr>
 <td>Template</td>
@@ -2023,9 +2031,9 @@ levels=()
 </tr>
 </tbody>
 </table>
-<p>Tool Action timeout overrides sidecar timeout, which overrides global timeout. DB statement timeout comes only from the referenced dbhelper's <code>statement.timeoutSeconds</code>. CLI <code>--output-dir</code> and <code>--run-id</code> override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.</p>
+<p>Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI <code>--output-dir</code> and <code>--run-id</code> override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.</p>
 <h3 id="schema-catalog">Schema catalog</h3>
-<p>V2.6 changes the main and Tool-group schemas for call-backed Tools. The V2.5 dbhelper and template schemas remain current because their contracts did not change.</p>
+<p>V2.6.2 adds <code>att-template/v2.6</code> and <code>att-sidecar/v2.2</code> for the unified Tool Action policy. The dbhelper schema remains V2.5.</p>
 <table>
 <thead>
 <tr>
@@ -2062,18 +2070,23 @@ levels=()
 </tr>
 <tr>
 <td>Workbook sidecar</td>
+<td><code>att-sidecar/v2.2</code></td>
+<td><a href="../schemas/att-sidecar-v2.2.schema.json">att-sidecar-v2.2.schema.json</a></td>
+</tr>
+<tr>
+<td>Legacy workbook sidecar (without timeout)</td>
 <td><code>att-sidecar/v2.1</code></td>
 <td><a href="../schemas/att-sidecar-v2.1.schema.json">att-sidecar-v2.1.schema.json</a></td>
 </tr>
 <tr>
 <td>Template descriptor</td>
-<td><code>att-template/v2.5</code></td>
-<td><a href="../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
+<td><code>att-template/v2.6</code></td>
+<td><a href="../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a></td>
 </tr>
 <tr>
 <td>Legacy template descriptor (read compatibility)</td>
-<td><code>att-template/v2.3</code></td>
-<td><a href="../schemas/att-template-v2.3.schema.json">att-template-v2.3.schema.json</a></td>
+<td><code>att-template/v2.5</code>, <code>att-template/v2.3</code></td>
+<td><a href="../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
 </tr>
 <tr>
 <td>Run manifest</td>
@@ -2375,7 +2388,7 @@ levels=()
 <tbody>
 <tr>
 <td>root</td>
-<td><code>schemaVersion</code>, <code>id</code>, <code>excel</code>, <code>stages</code>, <code>report</code>, <code>timeoutMs</code>, <code>x-*</code></td>
+<td><code>schemaVersion</code>, <code>id</code>, <code>excel</code>, <code>stages</code>, <code>report</code>, <code>x-*</code></td>
 <td>schemaVersion, package-unique id, excel, non-empty stages required</td>
 </tr>
 <tr>
@@ -2395,7 +2408,7 @@ levels=()
 </tr>
 </tbody>
 </table>
-<p><code>timeoutMs</code> is 1–3600000. Only the sidecar root permits <code>x-*</code>; <code>excel</code>, stages, and sidecar <code>report</code> reject extensions and other unknown fields. The sidecar cannot override tools, dbhelpers, template root, environment, or output root.</p>
+<p>Only the sidecar root permits <code>x-*</code>; <code>excel</code>, stages, and sidecar <code>report</code> reject extensions and other unknown fields. The sidecar cannot override timeout, retry, tools, dbhelpers, template root, environment, or output root.</p>
 <h3 id="template-and-action">Template and action</h3>
 <table>
 <thead>
@@ -2419,7 +2432,7 @@ levels=()
 </tr>
 <tr>
 <td>tool</td>
-<td>requires <code>call</code>; optional object-shaped <code>saveAs</code> and <code>assert</code>; <code>timeoutMs</code>/<code>retry</code> are supported only when the primary configured Tool is command-backed; no action-level <code>overwrite</code> or render/assert-action/log-only fields</td>
+<td>requires <code>call</code>; optional object-shaped <code>saveAs</code>, <code>assert</code>, <code>expected</code>, <code>actual</code>, <code>timeoutMs</code>, and Action-only <code>retry</code>; command/call-backed Tools share this contract</td>
 </tr>
 <tr>
 <td>db</td>
@@ -2443,11 +2456,11 @@ levels=()
 </tr>
 <tr>
 <td>retry</td>
-<td><code>maxAttempts</code>, <code>retryOn</code>, <code>exitCodes</code>; retryOn required and contains only <code>EXIT_CODE</code></td>
+<td>required <code>maxAttempts</code>, <code>intervalMs</code>, <code>retryOn</code>; categories are <code>ASSERTION</code>, <code>TIMEOUT</code></td>
 </tr>
 </tbody>
 </table>
-<p><code>renderAs</code> is <code>file</code>, <code>text</code>, <code>json</code>, <code>yaml</code>, or <code>xml</code>. <code>maxAttempts</code> is 1–10; <code>exitCodes</code> values are 1–255. Log level is <code>TRACE</code>, <code>DEBUG</code>, <code>INFO</code>, <code>WARN</code>, or <code>ERROR</code>. The template root and action permit <code>x-*</code>; <code>fields</code> is an unconstrained log-field map. <code>output</code> is runtime evidence and is never an action configuration field.</p>
+<p><code>renderAs</code> is <code>file</code>, <code>text</code>, <code>json</code>, <code>yaml</code>, or <code>xml</code>. Retry <code>maxAttempts</code> is 2–10 and <code>intervalMs</code> is 0–3600000. <code>ASSERTION</code> requires a non-empty Tool Action <code>assert</code>. Log level is <code>TRACE</code>, <code>DEBUG</code>, <code>INFO</code>, <code>WARN</code>, or <code>ERROR</code>. The template root and action permit <code>x-*</code>; <code>fields</code> is an unconstrained log-field map. <code>output</code> is runtime evidence and is never an action configuration field.</p>
 <h4 id="assign-variable-uniqueness-and-lifetime">Assign variable uniqueness and lifetime</h4>
 <p>An <code>assign</code> action creates one immutable, Case-scoped entry below <code>CASE.VARS</code>; it is not a mutable-variable update operation. Every <code>name</code> must be unique for the entire Test Case, including across stages and templates:</p>
 <pre class="hljs"><code><div><span class="hljs-attr">firstAssign:</span>
@@ -2475,7 +2488,7 @@ levels=()
 <p>Later actions and stages read the transformed value as <code>${CASE.VARS.normalizedAmount}</code>. The same assign name may be used by different Test Cases because each Case owns an isolated <code>CASE.VARS</code>; uniqueness applies within one Case execution, not across the package globally.</p>
 <p>If an assign expression fails, ATT does not create its variable. This does not relax the authoring rule: a later assign in the same Case plan still cannot reuse that declared name. If the expression succeeds and the assign action's optional assertion subsequently returns FAIL or ERROR, the variable remains available; assertions do not roll back successful assignment. <code>CASE.VARS</code> survives stage/template transitions and is discarded only when that Test Case ends.</p>
 <h4 id="action-saveas">Action <code>saveAs</code></h4>
-<p><code>saveAs</code> is an optional property of <code>type: tool</code> and <code>type: db</code> actions. V2.5 uses one object shape:</p>
+<p><code>saveAs</code> is an optional property of <code>type: tool</code> and <code>type: db</code> actions. V2.6 uses one object shape:</p>
 <pre class="hljs"><code><div><span class="hljs-attr">callApi:</span>
   <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
   <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span>
@@ -2547,9 +2560,9 @@ levels=()
   <span class="hljs-attr">overwrite:</span> <span class="hljs-literal">false</span>
 </div></code></pre>
 <p><code>path</code> and <code>format</code> are required for DB; format is <code>text</code>, <code>json</code>, <code>yaml</code>, or <code>xml</code>. The written representation never replaces <code>${output.result}</code>'s typed Java object.</p>
-<p><code>att-template/v2.3</code> remains read-compatible: its legacy Tool form <code>saveAs: response.json</code> plus sibling <code>overwrite: false</code> keeps its original raw-stdout meaning and is normalized internally to <code>{path: response.json, format: raw, overwrite: false}</code>. Newly authored <code>att-template/v2.5</code> files must use the object form; scalar <code>saveAs</code> and Action-level sibling <code>overwrite</code> are invalid.</p>
+<p><code>att-template/v2.3</code> remains read-compatible: its legacy Tool form <code>saveAs: response.json</code> plus sibling <code>overwrite: false</code> keeps its original raw-stdout meaning and is normalized internally to <code>{path: response.json, format: raw, overwrite: false}</code>. Newly authored <code>att-template/v2.6</code> files must use the object form; scalar <code>saveAs</code> and Action-level sibling <code>overwrite</code> are invalid.</p>
 <h3 id="tool-contract">Tool contract</h3>
-<p>Each Tool requires <code>name</code>, <code>description</code>, and exactly one of <code>command</code> or <code>call</code>. A command is a non-blank scalar or non-empty string list; its <code>output</code> defaults to <code>txt</code> and accepts <code>txt|yaml|json|xml</code>. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only <code>output</code>, SSH/script, and argument argv fields. Optional call-backed <code>cache</code> contains exactly <code>scope: case|db</code>; updates cannot be cached and <code>db</code> scope requires a DB query/scalar target.</p>
+<p>Each Tool requires <code>name</code>, <code>description</code>, and exactly one of <code>command</code> or <code>call</code>. Optional descriptor <code>timeoutMs</code> supplies the Tool-level default. A command is a non-blank scalar or non-empty string list; its <code>output</code> defaults to <code>txt</code> and accepts <code>txt|yaml|json|xml</code>. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only <code>output</code>, SSH/script, and argument argv fields. Optional call-backed <code>cache</code> contains exactly <code>scope: case|db</code>; updates cannot be cached and <code>db</code> scope requires a DB query/scalar target.</p>
 <p>Every argument requires <code>name</code>, <code>description</code>, and a YAML boolean <code>required</code>. For command-backed Tools, <code>argName</code> is optional and must be empty or one whitespace-free argv token. A non-empty <code>argName</code> requires exactly one complete-token placeholder. <code>argNameMode</code> accepts <code>once|repeat</code> and defaults to <code>once</code>; it controls a typed List supplied at the call site. These two argv properties are invalid for call-backed arguments. V2.6 does not define <code>delimit</code>.</p>
 <p>Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor <code>name</code> is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.</p>
 <p>A tool-group root requires <code>schemaVersion</code>, package-unique <code>id</code>, <code>name</code>, <code>description</code>, and non-empty <code>tools</code>. It optionally accepts <code>script</code> in scalar/list command form and <code>ssh</code>. The group ID is the Tool package, so group calls use <code>group.tool</code>; inline global calls remain unqualified. Group/tool IDs match <code>[A-Za-z_][A-Za-z0-9_-]*</code> and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.</p>
@@ -2560,7 +2573,7 @@ levels=()
 <h3 id="validation-json-contract">Validation JSON contract</h3>
 <pre class="hljs"><code><div><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;schemaVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;att-validation/v2.1&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;attVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.6.1&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;attVersion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.6.2&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;valid&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">false</span></span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;mode&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;package&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;summary&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;errors&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;warnings&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">0</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;suites&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;cases&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">22</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;templates&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">7</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;tools&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">7</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
@@ -2785,7 +2798,7 @@ levels=()
 </tr>
 </tbody>
 </table>
-<p>For a <code>type: tool</code> action, the outer <code>call</code> may name either a configured Tool or an ATT built-in. A primary built-in runs in-process and publishes its value at <code>${output.result}</code>; it has <code>exitCode: 0</code>, supports the action's assertion and optional <code>saveAs</code>, and records <code>type: builtin</code> attempt evidence without a <code>TOOL</code> process node, argv, stdout, or stderr. <code>timeoutMs</code> cannot pre-empt an in-process built-in, and <code>EXIT_CODE</code> retry does not repeat its successful zero-exit result. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in <code>fileNamePattern</code>, Tool <code>command</code>, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.</p>
+<p>For a <code>type: tool</code> action, the outer <code>call</code> may name either a configured Tool or an ATT built-in. A primary built-in runs in a bounded daemon executor and publishes its value at <code>${output.result}</code>; it has <code>exitCode: 0</code>, supports timeout, Action assertion/retry, and optional <code>saveAs</code>, and records <code>type: builtin</code> attempt evidence without a <code>TOOL</code> process node, argv, stdout, or stderr. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in <code>fileNamePattern</code>, Tool <code>command</code>, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.</p>
 <pre class="hljs"><code><div><span class="hljs-attr">normalizeReference:</span>
   <span class="hljs-attr">type:</span> <span class="hljs-string">tool</span>
   <span class="hljs-attr">call:</span> <span class="hljs-string">&quot;#{upper(${CASE.reference})}&quot;</span>

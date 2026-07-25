@@ -37,9 +37,23 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** First-class V2.5 JDBC executor with one connection per dbhelper instance and execution thread. */
 public final class DbHelperExecutor implements AutoCloseable {
+    private static final ScheduledExecutorService TIMEOUTS = Executors.newSingleThreadScheduledExecutor(
+            new ThreadFactory() {
+                @Override public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "att-db-timeout");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
     private final Path projectRoot;
     private final Map<String, DbHelperConfig> helpers;
     private final ThreadLocal<Scope> scopes = new ThreadLocal<Scope>();
@@ -100,6 +114,11 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, String invocationId) {
+        return execute(instance, operation, sql, source, params, invocationId, null);
+    }
+
+    public DbInvocationResult execute(String instance, String operation, String sql, String source,
+                                      List<?> params, String invocationId, Long timeoutMs) {
         DbHelperConfig config = helper(instance);
         if (config == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + instance);
         if (!("query".equals(operation) || "update".equals(operation))) {
@@ -124,7 +143,7 @@ public final class DbHelperExecutor implements AutoCloseable {
                     "Transaction is rollback-only after an earlier database failure", null, managed);
         } else {
             try {
-                result = executeStatement(managed, operation, sql, values);
+                result = executeStatement(managed, operation, sql, values, timeoutMs);
             } catch (DbFailure failure) {
                 managed.failed();
                 result = failure(operation, failure.type, safeMessage(failure.cause, config),
@@ -136,7 +155,7 @@ public final class DbHelperExecutor implements AutoCloseable {
             }
         }
         Map<String, Object> evidence = evidence(config, invocationId, operation, source, sql, values,
-                result, Duration.between(started, Instant.now()).toMillis());
+                result, Duration.between(started, Instant.now()).toMillis(), timeoutMs);
         return new DbInvocationResult(result, evidence);
     }
 
@@ -185,17 +204,33 @@ public final class DbHelperExecutor implements AutoCloseable {
     }
 
     private Map<String, Object> executeStatement(ManagedConnection managed, String operation,
-                                                 String sql, List<?> params) throws DbFailure {
+                                                 String sql, List<?> params, Long timeoutMs) throws DbFailure {
         Connection connection;
         try { connection = managed.connection(); }
         catch (Exception error) { throw new DbFailure("CONNECTION_ERROR", error); }
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setQueryTimeout(managed.config.timeoutSeconds());
+            int effectiveTimeoutSeconds = managed.config.timeoutSeconds();
+            if (timeoutMs != null) {
+                int actionSeconds = (int) Math.max(1L, Math.min(Integer.MAX_VALUE, (timeoutMs.longValue() + 999L) / 1000L));
+                effectiveTimeoutSeconds = Math.min(effectiveTimeoutSeconds, actionSeconds);
+            }
+            statement.setQueryTimeout(effectiveTimeoutSeconds);
             if ("query".equals(operation)) statement.setMaxRows(managed.config.maxRows() + 1);
             try {
                 for (int index = 0; index < params.size(); index++) statement.setObject(index + 1, params.get(index));
             } catch (SQLException error) { throw new DbFailure("BIND_ERROR", error); }
             Map<String, Object> result;
+            final AtomicBoolean timeoutTriggered = new AtomicBoolean(false);
+            ScheduledFuture<?> cancellation = null;
+            if (timeoutMs != null) {
+                final PreparedStatement cancellable = statement;
+                cancellation = TIMEOUTS.schedule(new Runnable() {
+                    @Override public void run() {
+                        timeoutTriggered.set(true);
+                        try { cancellable.cancel(); } catch (SQLException ignored) { }
+                    }
+                }, timeoutMs.longValue(), TimeUnit.MILLISECONDS);
+            }
             try {
                 if ("query".equals(operation)) {
                     try (ResultSet rows = statement.executeQuery()) { result = queryResult(rows, managed); }
@@ -203,9 +238,15 @@ public final class DbHelperExecutor implements AutoCloseable {
                     int affected = statement.executeUpdate();
                     result = success("update", 0, Collections.emptyList(), Integer.valueOf(affected), managed);
                 }
+                if (timeoutTriggered.get()) throw new DbFailure("TIMEOUT",
+                        new SQLTimeoutException("Tool Action timeout exceeded " + timeoutMs + "ms"));
             } catch (SQLTimeoutException error) { throw new DbFailure("TIMEOUT", error); }
             catch (LimitException error) { throw new DbFailure("LIMIT_EXCEEDED", error); }
-            catch (SQLException error) { throw new DbFailure("SQL_ERROR", error); }
+            catch (SQLException error) {
+                throw new DbFailure(timeoutTriggered.get() ? "TIMEOUT" : "SQL_ERROR", error);
+            } finally {
+                if (cancellation != null) cancellation.cancel(false);
+            }
             try { managed.afterSuccess(); }
             catch (SQLException error) { throw new DbFailure("SQL_ERROR", error); }
             updateTransactionState(result, managed);
@@ -344,7 +385,7 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     private Map<String, Object> evidence(DbHelperConfig config, String invocationId, String operation,
                                          String source, String sql, List<?> params, Map<String, Object> result,
-                                         long durationMs) {
+                                         long durationMs, Long timeoutMs) {
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         evidence.put("id", invocationId);
         evidence.put("type", "db");
@@ -358,6 +399,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         evidence.put("parameters", parameterEvidence(params, config.evidenceParameters()));
         evidence.put("parameterEvidence", config.evidenceParameters());
         evidence.put("timeoutSeconds", config.timeoutSeconds());
+        if (timeoutMs != null) evidence.put("toolTimeoutMs", timeoutMs);
         evidence.put("result", result);
         return evidence;
     }

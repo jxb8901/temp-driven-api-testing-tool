@@ -1,8 +1,8 @@
-# ATT V2.6.1 新手入門
+# ATT V2.6.2 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V2.6.1 的 command/call-backed 工具、Java JDBC dbhelper、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V2.6.2 的 command/call-backed 工具、Java JDBC dbhelper、工具組、模板、案例、嚴格驗證、執行、報告、CI 輸出、性能分析、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.6.1 Reference Manual](09_Reference_Manual_V2.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V2.6.2 Reference Manual](09_Reference_Manual_V2.md)。
 
 ## 1. 核心關係
 
@@ -178,6 +178,7 @@ tools:
   find:
     name: Find orders
     description: 按客戶與狀態查詢
+    timeoutMs: 5000
     call: "#{db.orders.query(sql='select id, status from orders where customer_id = ? and status = ?', params=[${input.customerId}, ${input.status}])}"
     cache: {scope: case}
     arguments:
@@ -194,7 +195,7 @@ loadOrders:
   expression: "#{orders.find(customerId=${CASE.customerId}, status='OPEN')}"
 ```
 
-`cache.scope` 可為 `case` 或 `db`。`db` 可跨 Case 重用，但 DB update、commit、rollback 或 reconnect 都不會清除 cache，因此可能返回 stale data，只應用於穩定/reference 資料。DB update façade 不可 cache，且只能作為 `type: tool` 的主要 call。Call-backed Tool 使用 dbhelper 的 SQL timeout，不支持 process `timeoutMs`／retry／stdout `raw`。
+`cache.scope` 可為 `case` 或 `db`。`db` 可跨 Case 重用，但 DB update、commit、rollback 或 reconnect 都不會清除 cache，因此可能返回 stale data，只應用於穩定/reference 資料。DB update façade 不可 cache，且只能作為 `type: tool` 的主要 call。command-backed 與 call-backed Tool 均可用 descriptor `timeoutMs` 提供預設；帶 retry 的 Action 會繞過 call-backed cache，確保每次輪詢取得新結果。
 
 例如以下 process-backed Tool 可接收含單引號、雙引號及 Context interpolation 的完整 message：
 
@@ -287,12 +288,12 @@ printf '{"status":"SUCCESS","environment":"%s"}\n' "$environment"
 chmod +x tools/invoke_payment_api.sh
 ```
 
-## 5. 建立 V2.5 模板與 JSON 工具輸出
+## 5. 建立 V2.6 模板與 JSON 工具輸出
 
 `templates/payment/local/CT001/template.yaml`：
 
 ```yaml
-schemaVersion: att-template/v2.5
+schemaVersion: att-template/v2.6
 name: 本地付款
 description: 產生付款 XML 並調用 API
 actions:
@@ -311,11 +312,12 @@ actions:
       format: raw
       overwrite: false
     assert: "${output.result.status} == '${CASE.expected.status}'"
-    # 可覆蓋 config/sidecar 的 timeoutMs；單位為毫秒
+    # 可覆蓋 Tool descriptor／global timeoutMs；單位為毫秒
     timeoutMs: 30000
     retry:
       maxAttempts: 3
-      retryOn: [EXIT_CODE]
+      intervalMs: 1000
+      retryOn: [ASSERTION, TIMEOUT]
 ```
 
 `type: tool` 的主要 `call` 也可直接使用 ATT built-in。結果同樣位於 `${output.result}`，可使用 `assert` 和 `saveAs`；built-in 在 JVM 內執行，因此不會產生外部進程的 `TOOL`、argv、stdout 或 stderr 證據：
@@ -343,7 +345,7 @@ normalizeReference:
 Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `description`：validate 先替換案例等靜態值，保留 `${output...}` 之類的 runtime 值；執行完成後再解析剩餘表達式。
 
 - `render` 必須有 `payload` glob 及 `renderAs: file|text|json|yaml|xml`。`file` 把每個匹配文件 render 到 Case output 目錄的同名相對路徑，目標清單位於 `output.targetFiles`；其他類型把單一值或按相對路徑排序的多值 map 放在 `output.result`。render 不再使用 `saveAs`、`overwrite` 或配置 `output.mode`。
-- `tool` 必須有一個指向已配置 Tool 或 ATT built-in 的 `call`；V2.5 `saveAs` 使用 `{path, format, overwrite}`。process Tool 預設 `raw` 並可另選 text/json/yaml/xml；built-in 預設 text 且不支持 raw。`timeoutMs` 和 EXIT_CODE retry 只對外部 Tool 執行有實際控制作用。
+- `tool` 必須有一個指向已配置 Tool 或 ATT built-in 的 `call`；V2.6 `saveAs` 使用 `{path, format, overwrite}`。process Tool 預設 `raw` 並可另選 text/json/yaml/xml；built-in 預設 text 且不支持 raw。command-backed、call-backed 及主要 built-in 均使用相同的 timeout/retry Action 契約。
 - `db` 必須指定实例 `db`，并在 `query`／`update` 中选一个；DB `saveAs` 要求 format 为 text/json/yaml/xml。text 会输出 SQL*Plus 风格的查询表格或 update 行数摘要。DB timeout 来自实例的 `statement.timeoutSeconds`，不使用 Action `timeoutMs`，也不自动 retry SQL。
 - `assert` action 必須有非空 `assert`，不再使用 `expression`；可加 `expected`（validate 階段求值）和 `actual`（runtime 求值）。
 - 任何可寫 `${...}` 的使用者欄位也可寫 `#{...}`。`${...}` 用於 Context 引用及文字插值；`#{...}` 的參數也必須用 `${...}` 引用 Context，例如 `assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"`、`description: "#{upper(${CASE.caseId})}"` 和 `saveAs.path: "#{lower(${CASE.caseId})}.txt"`。裸 `CASE.*`、`ACTIONS.*`、`input.*` 等 path 會被拒絕。普通 Case-runtime expression 也可调用只读 `#{db.<instance>.query/scalar(...)}`。字面字串使用 ASCII 單／雙引號。
@@ -352,9 +354,9 @@ Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `
 
 所有 action 的結果統一位於 `ACTIONS.<id>.output`：`status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及有設定時的 `assertion`。不要再讀取 action 頂層 `status`、`outputFile` 或舊式 scalar `output`。
 
-全域 `timeoutMs` 的單位是毫秒；上例為 10 秒。sidecar 可用同名 `timeoutMs` 覆蓋全域值；個別 tool action 再以 `timeoutMs` 覆蓋已解析的全域／sidecar 值。`timeoutMs` 只可用於 tool action，範圍為 1–3600000。
+全域 `timeoutMs` 的單位是毫秒；上例為 10 秒。每次 Tool 調用依次使用 Action `timeoutMs`、Tool descriptor `timeoutMs`、全域 `timeoutMs`，最後才是框架 10000 ms fallback。sidecar、stage 和 Template 不可配置 timeout 預設；Action/Tool/global 值範圍均為 1–3600000。
 
-retry 只適用於 tool action 的 `EXIT_CODE`。超時、配置錯誤、參數錯誤、輸出解析錯誤和 assertion FAIL 都不會 retry；V2.2 沒有 retry delay 或 backoff 設定，符合條件的重試會立即進行。每次嘗試的證據直接寫入 case log/action record，不建立 `attempt-001/` 等目錄；有 `saveAs` 時，最後一次嘗試會覆蓋前一次嘗試的結果文件。
+retry 只適用於 tool action，且必須同時提供 `maxAttempts: 2..10`、`intervalMs: 0..3600000` 和非空 `retryOn`。`ASSERTION` 表示每次正常返回後立即執行同一 Action 的 `assert`，false 才等待並重調 Tool；`TIMEOUT` 表示單次 timeout 可重試。exit code 沒有專用 retry，需在 `assert` 中檢查 `${output.exitCode}`。配置、參數、I/O、輸出解析、DB 非 timeout 錯誤及 assertion 求值錯誤均不重試。每次 attempt 證據直接寫入 case log/action record，不建立額外目錄；`saveAs` 最終保留最後一次 attempt 的結果。
 
 ## 6. 中文 Excel 和 sidecar
 
@@ -367,7 +369,7 @@ Excel 表頭：
 相鄰的 `testcase/支付回歸.yaml`：
 
 ```yaml
-schemaVersion: att-sidecar/v2.1
+schemaVersion: att-sidecar/v2.2
 id: payment
 excel:
   sheet: 支付測試案例集
@@ -385,7 +387,6 @@ report:
   columns:
     result: 測試結果
     reportLink: 詳細報告
-timeoutMs: 60000
 ```
 
 `report.columns` 的 key 是 ATT 結果字段，value 是 Excel 實際表頭。若來源工作表已存在映射表頭（例如「測試結果」），ATT 會直接填充該欄；只有不存在的映射表頭才按配置順序追加到工作表末尾。
@@ -414,7 +415,7 @@ HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workboo
 有效欄名：案例編號、案例名稱、執行模板、執行參數
 ```
 
-`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.6.1：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
+`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V2.6.2：Workbook sidecar](09_Reference_Manual_V2.md#workbook-sidecar)。
 
 ## 7. 表達式
 
@@ -508,7 +509,7 @@ V2.6 canonical built-in 以 package 分組：`str.*`、`date.*`、`file.*`、`mi
 #{fpp.exehelper(command=${CASE.command}, stdoutPath=${CASE.stdoutPath}, stderrPath=${CASE.stderrPath})}
 ```
 
-V2.6.1 的 reference helper 另可明確展開 pathname wildcard：
+V2.6.2 的 reference helper 另可明確展開 pathname wildcard：
 
 ```yaml
 countRequests:
@@ -538,7 +539,7 @@ findTransactions:
 
 `loghelper` 的 SSH server list 每行格式為 `host|user|port|identity-file|remote-loghelper-path`，可包含 `localhost||||` 或當前 hostname；本機已在 local pass 搜索，不會再 SSH 自身。非本機 entry 仍需完整 SSH 資料。
 
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`exehelper` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.6.1](09_Reference_Manual_V2.md#built-in-functions)。
+`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`exehelper` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V2.6.2](09_Reference_Manual_V2.md#built-in-functions)。
 
 ## 8. 先驗證，再執行
 
@@ -597,7 +598,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.1",
+  "attVersion": "2.6.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -746,4 +747,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、報告、打包及診斷內容見 [ATT V2.6.1 Reference Manual](09_Reference_Manual_V2.md)。
+完整配置、Context、報告、打包及診斷內容見 [ATT V2.6.2 Reference Manual](09_Reference_Manual_V2.md)。
