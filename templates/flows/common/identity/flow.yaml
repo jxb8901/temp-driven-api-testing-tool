@@ -1,16 +1,8 @@
 schemaVersion: att-flow/v3.0
 id: common.identity.v1
 name: Identity
-description: Publish one string through an isolated Flow contract.
-inputs:
-  value:
-    type: string
-    required: true
+description: Read Case data through the same Context used by Template Actions.
 actions:
-  copy:
+  identityValue:
     type: tool
-    call: "#{misc.string(value=${input.value})}"
-outputs:
-  value:
-    type: string
-    from: "${actions.copy.output.result}"
+    call: "#{misc.string(value=${CASE.caseId})}"

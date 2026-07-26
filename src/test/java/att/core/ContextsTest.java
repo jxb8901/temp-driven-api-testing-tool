@@ -57,6 +57,24 @@ class ContextsTest {
         assertNull(context.resolve("CASE.items[9].status"));
     }
 
+    @Test void distinguishesDeferredValidationShapeFromMissingAndRealNull() {
+        Map<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("actualNull", null);
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),data,Collections.emptyMap(),null),
+                tempDir,"R",tempDir,tempDir.resolve("case.log"));
+        context.putValidationPlaceholder("CASE.VARS.response");
+
+        assertTrue(context.contains("CASE.VARS.response.status.code"));
+        assertTrue(context.isValidationDeferred("CASE.VARS.response.status.code"));
+        assertTrue(context.isValidationDeferred("response.status.code"));
+        assertNull(context.require("CASE.VARS.response.status.code"));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> context.require("CASE.VARS.unknown.status"));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> context.require("CASE.actualNull.status"));
+    }
+
     @Test void resolvesUppercaseToolScope() {
         CaseRuntimeContext context = new CaseRuntimeContext(
                 new TestCase(2, "payment", "支付測試案例集", "TC001", Collections.<String>emptyList(),

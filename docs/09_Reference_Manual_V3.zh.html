@@ -365,9 +365,9 @@ code {
           : 'default'
     });
   </script>
-<h1 id="att-v301-中文用户手册与参考手册">ATT V3.0.1 中文用户手册与参考手册</h1>
+<h1 id="att-v310-中文用户手册与参考手册">ATT V3.1.0 中文用户手册与参考手册</h1>
 <p>作者：Jeffrey + ChatGPT
-版本：3.0.1
+版本：3.1.0
 状态：规范性终端用户文档</p>
 <p>本手册设计为两种阅读方式：</p>
 <ul>
@@ -403,7 +403,7 @@ code {
 <pre class="hljs"><code><div>工作簿行 → 测试用例 → 有序阶段
 阶段 → 模板选择列 → 当前行的选择器单元格 → 模板
 模板 → 有序动作 → Flow 或配置好的 Tool
-Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
+Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool / DB / built-in / 嵌套 Flow
 </div></code></pre>
 <p>你首先需要掌握的四个概念是：</p>
 <table>
@@ -428,7 +428,7 @@ Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
 </tr>
 <tr>
 <td>Flow</td>
-<td>具类型、隔离、可复用的有序动作序列</td>
+<td>与调用者共用 Context 的可复用 Template Action 组</td>
 </tr>
 <tr>
 <td>工具</td>
@@ -441,14 +441,14 @@ Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
 </tbody>
 </table>
 <p>一个动作可以渲染负载、调用工具、查询／更新数据库、断言表达式、写入结构化日志、分配作用域运行值，或调用 Flow。ATT 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。</p>
-<h3 id="v30-的保证">V3.0 的保证</h3>
+<h3 id="v31-的保证">V3.1 的保证</h3>
 <ul>
 <li>配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML 键，以及无效动作形状都是错误。</li>
 <li>dbhelper 使用独立 <code>att-dbhelper/v2.5</code> 文件，并通过一級 <code>type: db</code> Action 或只读 <code>#{db.&lt;instance&gt;...}</code> 表达式调用；它不是 Tool 的特殊配置。</li>
 <li><code>CASE.DB</code> 是固定、区分大小写、由框架拥有的 Case 交易收尾节点，不能由 Excel 或侧车数据覆盖。</li>
 <li>每个工作簿都有一个同名的 YAML 侧车文件和生成的语义 XML 快照。</li>
 <li>每个模板都是包含 <code>template.yaml</code> 的目录。</li>
-<li>每个 Flow 位于 <code>templates/flows/**/flow.yaml</code>，使用静态 <code>.vN</code> ID、具类型的输入／输出，并且最大嵌套深度为 3。</li>
+<li>每个 Flow 位于 <code>templates/flows/**/flow.yaml</code>，使用静态 <code>.vN</code> ID、共用调用 Template 的 Context，并且最大嵌套深度为 3。</li>
 <li><code>validate --package</code> 会检查整个包；<code>validate --selected</code> 只检查所选依赖闭包。</li>
 <li>Run ID 和 Case ID 会先被校验，然后直接用作输出目录名。</li>
 <li>只有在运行完成后，最终运行目录才会发布。</li>
@@ -483,25 +483,20 @@ Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
 <p>你通常会编辑 <code>config/config.yaml</code>、工作簿、侧车、模板、负载和工具脚本。同名 testcase XML 通常由 <code>snapshot</code> 生成，并作为源码控制证据进行审查；仅在运行时使用的 <code>--update-snapshot</code> 是显式的刷新工作流。ATT 拥有配置输出目录及其文档化构建位置下的生成内容。</p>
 <p>全局 <code>testcase.root</code> 设置默认为 <code>testcase</code>。发现是递归进行的，且相邻的同名 XLSX/YAML/XML 三元组定义一个 testcase 集。</p>
 <h3 id="v3-flow-编写契约">V3 Flow 编写契约</h3>
-<p>Flow descriptor 的顶层字段只能是 <code>schemaVersion</code>、<code>id</code>、<code>name</code>、<code>description</code>、<code>inputs</code>、<code>actions</code> 和 <code>outputs</code>：</p>
+<p>Flow descriptor 的顶层字段只能是 <code>schemaVersion</code>、<code>id</code>、<code>name</code>、<code>description</code> 和 <code>actions</code>：</p>
 <pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-flow/v3.0</span>
 <span class="hljs-attr">id:</span> <span class="hljs-string">common.decorate.v1</span>
 <span class="hljs-attr">name:</span> <span class="hljs-string">Decorate</span>
 <span class="hljs-attr">description:</span> <span class="hljs-string">添加固定后缀。</span>
-<span class="hljs-attr">inputs:</span>
-  <span class="hljs-attr">value:</span> {<span class="hljs-attr">type:</span> <span class="hljs-string">string</span>, <span class="hljs-attr">required:</span> <span class="hljs-literal">true</span>}
-  <span class="hljs-attr">enabled:</span> {<span class="hljs-attr">type:</span> <span class="hljs-string">boolean</span>, <span class="hljs-attr">default:</span> <span class="hljs-literal">true</span>}
 <span class="hljs-attr">actions:</span>
   <span class="hljs-attr">decorate:</span>
     <span class="hljs-attr">type:</span> <span class="hljs-string">assign</span>
-    <span class="hljs-attr">name:</span> <span class="hljs-string">result</span>
-    <span class="hljs-attr">expression:</span> <span class="hljs-string">&quot;${input.value}-done&quot;</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">decoratedResult</span>
+    <span class="hljs-attr">expression:</span> <span class="hljs-string">&quot;${CASE.caseId}-done&quot;</span>
   <span class="hljs-attr">audit:</span>
     <span class="hljs-attr">type:</span> <span class="hljs-string">log</span>
-    <span class="hljs-attr">message:</span> <span class="hljs-string">&quot;Decorated ${runtime.result}&quot;</span>
-    <span class="hljs-attr">runWhen:</span> <span class="hljs-string">&quot;${input.enabled} == true&quot;</span>
-<span class="hljs-attr">outputs:</span>
-  <span class="hljs-attr">value:</span> {<span class="hljs-attr">type:</span> <span class="hljs-string">string</span>, <span class="hljs-attr">from:</span> <span class="hljs-string">&quot;${runtime.result}&quot;</span>}
+    <span class="hljs-attr">message:</span> <span class="hljs-string">&quot;Decorated ${CASE.VARS.decoratedResult}&quot;</span>
+    <span class="hljs-attr">runWhen:</span> <span class="hljs-string">&quot;${CASE.auditEnabled} == true&quot;</span>
 </div></code></pre>
 <p>V3 Template 使用固定 canonical ID 调用 Flow：</p>
 <pre class="hljs"><code><div><span class="hljs-attr">schemaVersion:</span> <span class="hljs-string">att-template/v3.0</span>
@@ -511,17 +506,14 @@ Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
   <span class="hljs-attr">prepare:</span>
     <span class="hljs-attr">type:</span> <span class="hljs-string">flow</span>
     <span class="hljs-attr">use:</span> <span class="hljs-string">common.decorate.v1</span>
-    <span class="hljs-attr">with:</span>
-      <span class="hljs-attr">value:</span> <span class="hljs-string">&quot;${CASE.caseId}&quot;</span>
   <span class="hljs-attr">verify:</span>
     <span class="hljs-attr">type:</span> <span class="hljs-string">assert</span>
-    <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${ACTIONS.prepare.output.outputs.value} == &#x27;${CASE.caseId}-done&#x27;&quot;</span>
+    <span class="hljs-attr">assert:</span> <span class="hljs-string">&quot;${ACTIONS.decorate.output.result} == &#x27;${CASE.caseId}-done&#x27;&quot;</span>
 </div></code></pre>
-<p>Flow 输入类型仅限 <code>string</code>、<code>integer</code>、<code>number</code>、<code>boolean</code>、<code>object</code> 和 <code>array</code>。required 输入不能同时有 default；省略的 optional 输入是 <code>null</code>；ATT 不做隐式类型转换。<code>with</code> 中的 map 与 array 会递归解析 <code>${...}</code>，但绑定阶段禁止执行 <code>#{...}</code>。</p>
-<p>验证会立即检查 literal 和已声明 Flow output 的类型。由前序有序 <code>assign</code> 产生的 <code>${CASE.VARS.&lt;name&gt;}</code> 在静态验证时只确认“已可用”，其类型仍属于运行时数据；进入 Flow 前仍会对解析后的实际值执行严格类型检查。</p>
-<p>Flow 内只可读取 <code>input</code>、<code>actions</code>、<code>runtime</code> 和 <code>flow</code>。<code>${...}</code> 读取 Context；<code>#{...}</code> 在 Action 允许的位置调用 Tool、DB facade 或 built-in。Flow 不能读取 <code>CASE</code>、<code>RUN</code>、父级／兄弟 Flow 或后续 Action。本地 <code>assign</code> 写入 <code>runtime.&lt;name&gt;</code>，而不是 <code>CASE.VARS</code>。</p>
-<p>Template 只能读取 <code>${ACTIONS.&lt;flowAction&gt;.output.outputs.&lt;name&gt;}</code>；嵌套 Flow 使用 <code>${actions.&lt;flowAction&gt;.output.outputs.&lt;name&gt;}</code>。只有 PASS Flow 才计算并导出 outputs。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 <code>runWhen</code> 为 false 时才是 SKIPPED。</p>
-<p>Flow <code>use</code> 不支持动态选择。<code>runAlways</code>、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.0.1 能力。聚合优先级保持 <code>ERROR &gt; INVALID &gt; FAIL &gt; PASS &gt; SKIPPED</code>。</p>
+<p>Flow 和内联 Template Action 使用相同的 <code>CASE</code>、<code>RUN</code>、<code>ACTIONS</code>、<code>TOOL</code>、<code>DB</code>、当前 <code>output</code> 及唯一后缀 Context 语义。<code>${...}</code> 读取 Context；<code>#{...}</code> 在 Action 允许的位置调用 Tool、DB facade 或 built-in。Action 只能读取展开后执行计划中已经完成的 Action。</p>
+<p>Flow <code>inputs</code>、<code>outputs</code>、调用端 <code>with</code> 以及专用的 <code>input</code>、小写 <code>actions</code>、<code>runtime</code> 和 <code>flow</code> root 均为非法。Flow 内的 <code>assign</code> 与内联 assign 一样写入 <code>CASE.VARS</code>。内部 Action 完成后可直接通过 <code>${ACTIONS.&lt;internalActionId&gt;.output...}</code> 读取；Flow 调用 Action 本身只提供标准状态结果，不会创建 <code>output.outputs</code>。</p>
+<p>Template 与所有嵌套 Flow 共用一个 Action ID namespace。Template／Flow 冲突、多个 Flow 冲突、间接嵌套冲突以及在同一 Template 中重复调用同一 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 <code>runWhen</code> 为 false 时才是 SKIPPED。</p>
+<p>Flow <code>use</code> 不支持动态选择。<code>runAlways</code>、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.1.0 能力。聚合优先级保持 <code>ERROR &gt; INVALID &gt; FAIL &gt; PASS &gt; SKIPPED</code>。</p>
 <h2 id="02-快速开始">02 快速开始</h2>
 <p>这个示例会创建一个支付测试：渲染 JSON、调用工具并验证返回状态。</p>
 <h3 id="第-1-步配置-att">第 1 步：配置 ATT</h3>

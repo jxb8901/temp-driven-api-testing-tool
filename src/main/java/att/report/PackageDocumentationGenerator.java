@@ -103,7 +103,7 @@ public final class PackageDocumentationGenerator {
             att.template.StageTemplate template = loader.load(stage.templateName());
             context.beginStage(stage, template.name(), template.directory());
             for (TemplateAction action : template.actions()) {
-                if ("assign".equalsIgnoreCase(action.type())) context.put("CASE.VARS." + action.name(), null);
+                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("CASE.VARS." + action.name());
                 if ("assert".equalsIgnoreCase(action.type())) {
                     appendLine(result, engine.renderValidationValues(action.description(), context));
                     appendLine(result, engine.renderValidationValues(action.expected(), context));
@@ -149,16 +149,12 @@ public final class PackageDocumentationGenerator {
     }
 
     private String flowPage(Path root, FrameworkConfig config) throws Exception {
-        StringBuilder body = new StringBuilder("<h1>Flows</h1><p>Static, typed, isolated reusable Action sequences.</p>");
+        StringBuilder body = new StringBuilder("<h1>Flows</h1><p>Static reusable Template Action groups using the calling Template Context.</p>");
         att.flow.FlowRegistry registry = new att.flow.FlowRegistry(root, config.templatesRoot());
         for (att.flow.FlowDefinition flow : registry.all()) {
             body.append("<section class=\"doc-item\" data-search=\"").append(escape((flow.id()+" "+flow.name()+" "+flow.description()).toLowerCase(java.util.Locale.ROOT))).append("\" id=\"").append(anchor(flow.id())).append("\"><h2>").append(escape(flow.id())).append("</h2><p>").append(escape(flow.description())).append("</p>");
-            body.append("<h3>Inputs</h3><table><tr><th>Name</th><th>Type</th><th>Required</th><th>Default</th></tr>");
-            for (Map.Entry<String, att.flow.FlowDefinition.Input> input : flow.inputs().entrySet()) body.append("<tr><td>").append(escape(input.getKey())).append("</td><td>").append(escape(input.getValue().type())).append("</td><td>").append(input.getValue().required()).append("</td><td>").append(escape(input.getValue().hasDefault() ? String.valueOf(input.getValue().defaultValue()) : "")).append("</td></tr>");
-            body.append("</table><h3>Actions</h3><table><tr><th>Action</th><th>Type</th><th>Target</th></tr>");
+            body.append("<h3>Actions</h3><table><tr><th>Action</th><th>Type</th><th>Target</th></tr>");
             for (TemplateAction action : flow.actions()) body.append("<tr><td>").append(escape(action.id())).append("</td><td>").append(escape(action.type())).append("</td><td>").append(escape("flow".equalsIgnoreCase(action.type()) ? action.use() : action.call())).append("</td></tr>");
-            body.append("</table><h3>Outputs</h3><table><tr><th>Name</th><th>Type</th><th>Source</th></tr>");
-            for (Map.Entry<String, att.flow.FlowDefinition.Output> output : flow.outputs().entrySet()) body.append("<tr><td>").append(escape(output.getKey())).append("</td><td>").append(escape(output.getValue().type())).append("</td><td><code>").append(escape(output.getValue().from())).append("</code></td></tr>");
             body.append("</table></section>");
         }
         return page("Flows", body.toString());

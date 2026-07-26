@@ -1,7 +1,7 @@
-# ATT V3.0.1 User Manual and Reference
+# ATT V3.1.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 3.0.1
+Version: 3.1.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -38,7 +38,7 @@ ATT is an offline, template-driven API test runner. Test data lives in Excel, co
 Workbook row → Test case → Ordered stages
 Stage → Template-selector column → Current row's selector cell → Template
 Template → Ordered actions → Flow or configured tool
-Flow → Isolated ordered actions → Tool / DB / built-in / nested Flow
+Flow → Reusable ordered actions in the calling Template Context → Tool / DB / built-in / nested Flow
 ```
 
 The four concepts you need first are:
@@ -48,18 +48,18 @@ The four concepts you need first are:
 | Test case | One workbook row, case-level data, tags, and ordered stages |
 | Stage | Template selection, stage-private data, execution condition, and failure handling |
 | Template | A complete scenario expressed as an ordered list of actions |
-| Flow | A typed, isolated, reusable ordered action sequence |
+| Flow | A reusable ordered group of Template Actions sharing the caller Context |
 | Tool | A globally configured external executable with named inputs and one declared output format |
 | Dbhelper | One independently configured database connection, timeout, transaction, limit, and evidence policy |
 
 An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, assign a scoped runtime value, or invoke a Flow. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.
 
-### What V3.0 guarantees
+### What V3.1 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
 - Every template is a directory containing `template.yaml`.
-- Every Flow is below `templates/flows/**/flow.yaml`, has a static `.vN` ID, typed inputs/outputs, and a maximum nesting depth of 3.
+- Every Flow is below `templates/flows/**/flow.yaml`, has a static `.vN` ID, shares the calling Template Context, and has a maximum nesting depth of 3.
 - `validate --package` checks the whole package; `validate --selected` checks only a selected dependency closure.
 - Run ID and Case ID are validated and then used directly as output directory names.
 - A final run directory is published only after the run is complete.
@@ -100,27 +100,22 @@ The global `testcase.root` setting defaults to `testcase`. Discovery is recursiv
 
 ### V3 Flow authoring contract
 
-A Flow descriptor has exactly the top-level fields `schemaVersion`, `id`, `name`, `description`, `inputs`, `actions`, and `outputs`:
+A Flow descriptor has exactly the top-level fields `schemaVersion`, `id`, `name`, `description`, and `actions`:
 
 ```yaml
 schemaVersion: att-flow/v3.0
 id: common.decorate.v1
 name: Decorate
 description: Append a stable suffix.
-inputs:
-  value: {type: string, required: true}
-  enabled: {type: boolean, default: true}
 actions:
   decorate:
     type: assign
-    name: result
-    expression: "${input.value}-done"
+    name: decoratedResult
+    expression: "${CASE.caseId}-done"
   audit:
     type: log
-    message: "Decorated ${runtime.result}"
-    runWhen: "${input.enabled} == true"
-outputs:
-  value: {type: string, from: "${runtime.result}"}
+    message: "Decorated ${CASE.VARS.decoratedResult}"
+    runWhen: "${CASE.auditEnabled} == true"
 ```
 
 A V3 Template invokes the Flow using a literal canonical ID:
@@ -133,22 +128,18 @@ actions:
   prepare:
     type: flow
     use: common.decorate.v1
-    with:
-      value: "${CASE.caseId}"
   verify:
     type: assert
-    assert: "${ACTIONS.prepare.output.outputs.value} == '${CASE.caseId}-done'"
+    assert: "${ACTIONS.decorate.output.result} == '${CASE.caseId}-done'"
 ```
 
-Flow input types are `string`, `integer`, `number`, `boolean`, `object`, and `array`. Required inputs cannot have a default; an omitted optional input is `null`; values are never coerced. Maps and arrays in `with` resolve `${...}` recursively, but `#{...}` calls are prohibited during binding.
+Flow and inline Template Actions use the same `CASE`, `RUN`, `ACTIONS`, `TOOL`, `DB`, current `output`, and unique-suffix Context semantics. `${...}` reads Context and `#{...}` invokes a Tool, DB facade, or built-in where the Action permits it. An Action may read only earlier completed Actions in the expanded Template plan.
 
-Validation type-checks literals and declared Flow outputs immediately. A `${CASE.VARS.<name>}` produced by an earlier ordered `assign` is known to be available but remains runtime-typed during static validation; its resolved value is still checked strictly immediately before Flow entry.
+Flow `inputs`, `outputs`, invocation `with`, and the dedicated `input`, lowercase `actions`, `runtime`, and `flow` roots are invalid. A Flow `assign` writes `CASE.VARS` exactly like an inline assign. Completed internal Actions remain directly readable after Flow completion through `${ACTIONS.<internalActionId>.output...}`; the Flow invocation Action itself exposes only its standard status outcome and never creates `output.outputs`.
 
-Inside a Flow, the only readable Context roots are `input`, `actions`, `runtime`, and `flow`. `${...}` reads Context and `#{...}` invokes a Tool, DB facade, or built-in where the Action permits it. A Flow cannot access `CASE`, `RUN`, a parent/sibling Flow, or a future Action. Local `assign` writes `runtime.<name>`, not `CASE.VARS`.
+The Template and all nested Flows share one Action-ID namespace. Template/Flow collisions, collisions between used Flows, indirect nested collisions, and repeated use of the same Flow in one Template fail validation. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own `runWhen` is false is SKIPPED.
 
-A Template reads only `${ACTIONS.<flowAction>.output.outputs.<name>}`. A nested Flow reads `${actions.<flowAction>.output.outputs.<name>}`. Outputs are evaluated and exported only after PASS. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own `runWhen` is false is SKIPPED.
-
-Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.0.1 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
+Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.1.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
 
 ## 02 Quick Start
 

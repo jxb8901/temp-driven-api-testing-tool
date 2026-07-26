@@ -480,13 +480,12 @@ class PackageValidatorTest {
         assertEquals("actions.buildTxnSeq.name", duplicateError.field());
     }
 
-    @Test void validateDefersAssignedCaseVariableFlowInputTypeUntilRuntime() throws Exception {
+    @Test void validateFlowReadsAssignedCaseVariableThroughOrdinaryContext() throws Exception {
         Path flowDirectory = tempDir.resolve("flows/copy");
         Files.createDirectories(flowDirectory);
         Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\n"
                 + "id: common.copy.v1\nname: Copy\ndescription: Copy\n"
-                + "inputs:\n  SrcRefNo: {type: string, required: true}\n"
-                + "actions:\n  note: {type: log, message: '${input.SrcRefNo}'}\noutputs: {}\n").getBytes("UTF-8"));
+                + "actions:\n  note: {type: log, message: '${CASE.VARS.SrcRefNo}'}\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
                 Collections.<String,ToolConfig>emptyMap(),null,null);
         PackageValidator validator = new PackageValidator(tempDir, config);
@@ -494,8 +493,7 @@ class PackageValidatorTest {
         registryField.setAccessible(true);
         registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir));
 
-        TemplateAction call = new TemplateAction("copy", map("type", "flow", "use", "common.copy.v1",
-                "with", Collections.<String,Object>singletonMap("SrcRefNo", "${CASE.VARS.SrcRefNo}")),
+        TemplateAction call = new TemplateAction("copy", map("type", "flow", "use", "common.copy.v1"),
                 "att-template/v3.0");
         StageTemplate template = new StageTemplate("COPY", tempDir, Collections.singletonList(call), "att-template/v3.0");
         att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "COPY", Collections.<String,Object>emptyMap());
@@ -511,6 +509,110 @@ class PackageValidatorTest {
             values.invoke(validator, template, testCase, stage, config, tempDir.resolve("payment.xlsx"), assigned);
         } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
         catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
+    @Test void validateDefersNestedShapeOfEarlierAssignButStillRejectsUnknownOrRealNullParents() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        Map<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("response", Collections.singletonMap("status", "SUCCESS"));
+        data.put("actualNull", null);
+        att.core.StageCaseData stage = new att.core.StageCaseData("verify", "VERIFY", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2,"payment","sheet","TC001",Collections.<String>emptyList(),
+                data,Collections.singletonMap("verify", stage),null);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+
+        TemplateAction assign = new TemplateAction("capture", map("type","assign","name","captured","expression","${CASE.response}"));
+        TemplateAction nested = new TemplateAction("use", map("type","log","message","${CASE.VARS.captured.status}"));
+        StageTemplate valid = new StageTemplate("VERIFY",tempDir,Arrays.asList(assign,nested));
+        assertDoesNotThrow(() -> { try {
+            values.invoke(validator,valid,testCase,stage,config,tempDir.resolve("payment.xlsx"),new LinkedHashSet<String>());
+        } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        catch (Exception e) { throw new RuntimeException(e); } });
+
+        TemplateAction unknown = new TemplateAction("unknown", map("type","log","message","${CASE.VARS.missing.status}"));
+        java.lang.reflect.InvocationTargetException unknownError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator,new StageTemplate("VERIFY",tempDir,Arrays.asList(assign,unknown)),testCase,stage,
+                        config,tempDir.resolve("payment.xlsx"),new LinkedHashSet<String>()));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(unknownError.getCause()).code());
+
+        TemplateAction realNull = new TemplateAction("realNull", map("type","log","message","${CASE.actualNull.status}"));
+        java.lang.reflect.InvocationTargetException nullError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator,new StageTemplate("VERIFY",tempDir,Collections.singletonList(realNull)),testCase,stage,
+                        config,tempDir.resolve("payment.xlsx"),new LinkedHashSet<String>()));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(nullError.getCause()).code());
+    }
+
+    @Test void validateRejectsEveryExpandedActionIdCollision() throws Exception {
+        Path flowA = tempDir.resolve("flows/a");
+        Path flowB = tempDir.resolve("flows/b");
+        Files.createDirectories(flowA); Files.createDirectories(flowB);
+        Files.write(flowA.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\nid: common.a.v1\nname: A\ndescription: A\nactions:\n"
+                + "  shared: {type: log, message: a}\n").getBytes("UTF-8"));
+        Files.write(flowB.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\nid: common.b.v1\nname: B\ndescription: B\nactions:\n"
+                + "  shared: {type: log, message: b}\n").getBytes("UTF-8"));
+        Path flowC = tempDir.resolve("flows/c"); Files.createDirectories(flowC);
+        Files.write(flowC.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\nid: common.c.v1\nname: C\ndescription: C\nactions:\n"
+                + "  nestedA: {type: flow, use: common.a.v1}\n").getBytes("UTF-8"));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Field registryField = PackageValidator.class.getDeclaredField("flows");
+        registryField.setAccessible(true);
+        registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir));
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate",StageTemplate.class,FrameworkConfig.class);
+        contract.setAccessible(true);
+
+        StageTemplate templateVsFlow = new StageTemplate("T", tempDir, Collections.singletonList(
+                new TemplateAction("shared", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0")), "att-template/v3.0");
+        assertExpandedCollision(contract, validator, templateVsFlow, config);
+
+        StageTemplate flowVsFlow = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("callA", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0"),
+                new TemplateAction("callB", map("type", "flow", "use", "common.b.v1"), "att-template/v3.0")), "att-template/v3.0");
+        assertExpandedCollision(contract, validator, flowVsFlow, config);
+
+        StageTemplate repeated = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("first", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0"),
+                new TemplateAction("second", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0")), "att-template/v3.0");
+        assertExpandedCollision(contract, validator, repeated, config);
+
+        StageTemplate nested = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("shared", map("type", "log", "message", "template"), "att-template/v3.0"),
+                new TemplateAction("callC", map("type", "flow", "use", "common.c.v1"), "att-template/v3.0")), "att-template/v3.0");
+        assertExpandedCollision(contract, validator, nested, config);
+    }
+
+    @Test void validateRejectsCaseVariableAssignmentCollisionInsideFlow() throws Exception {
+        Path flow = tempDir.resolve("flows/assignment"); Files.createDirectories(flow);
+        Files.write(flow.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\nid: common.assignment.v1\nname: Assignment\ndescription: Assignment\nactions:\n"
+                + "  innerAssign: {type: assign, name: sharedVariable, expression: flow}\n").getBytes("UTF-8"));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Field registryField = PackageValidator.class.getDeclaredField("flows");
+        registryField.setAccessible(true);
+        registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir));
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate",StageTemplate.class,FrameworkConfig.class);
+        contract.setAccessible(true);
+        StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("outerAssign", map("type", "assign", "name", "sharedVariable", "expression", "template"), "att-template/v3.0"),
+                new TemplateAction("callAssignment", map("type", "flow", "use", "common.assignment.v1"), "att-template/v3.0")), "att-template/v3.0");
+
+        java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, template, config));
+        assertTrue(String.valueOf(error.getCause().getMessage()).contains("Duplicate CASE.VARS assignment"));
+    }
+
+    private void assertExpandedCollision(java.lang.reflect.Method contract, PackageValidator validator,
+                                         StageTemplate template, FrameworkConfig config) throws Exception {
+        java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, template, config));
+        assertTrue(String.valueOf(error.getCause().getMessage()).contains("Duplicate Action ID"),
+                String.valueOf(error.getCause().getMessage()));
     }
 
     @Test void validateAssignExpressionUsesNormalInlineCallContracts() throws Exception {

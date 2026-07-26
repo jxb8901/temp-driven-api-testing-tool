@@ -36,6 +36,40 @@ class FrameworkEngineTest {
     @TempDir Path projectRoot;
 
     @Test
+    void runsNestedV31FlowThroughFullCaseLifecycle() throws Exception {
+        writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
+                "schemaVersion: att-template/v3.0\nname: PAYMENT_INVOKE\ndescription: V3.1 shared Context\nactions:\n"
+                        + "  compose: {type: flow, use: common.outer.v1}\n"
+                        + "  verify: {type: assert, assert: \"${ACTIONS.finish.output.result} == '${CASE.caseId}-done'\"}\n");
+        writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
+                "schemaVersion: att-flow/v3.0\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
+                        + "  seed: {type: assign, name: seedReference, expression: '${CASE.caseId}'}\n");
+        writeText(projectRoot.resolve("templates/flows/outer/flow.yaml"),
+                "schemaVersion: att-flow/v3.0\nid: common.outer.v1\nname: Outer\ndescription: Outer\nactions:\n"
+                        + "  innerFlow: {type: flow, use: common.inner.v1}\n"
+                        + "  finish: {type: assign, name: finalReference, expression: '${ACTIONS.seed.output.result}-done'}\n");
+        writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
+        writeText(projectRoot.resolve("testcase/payment.yaml"),
+                "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+        writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
+        writeRuntimeSchemas();
+
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite",
+                projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "V3-FLOW"});
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).run(options);
+
+        assertEquals(1, summary.passed());
+        Path caseYaml = projectRoot.resolve("output/V3-FLOW/payments.payment.TC001/case.yaml");
+        String evidence = new String(Files.readAllBytes(caseYaml), "UTF-8");
+        assertTrue(evidence.contains("id: compose"));
+        assertTrue(evidence.contains("id: common.outer.v1"));
+        assertTrue(evidence.contains("id: innerFlow"));
+        assertTrue(evidence.contains("id: seed"));
+        assertTrue(evidence.contains("id: finish"));
+        assertFalse(evidence.contains("output.outputs"));
+    }
+
+    @Test
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
                 "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    description: API status\n    assert: \"${ACTIONS.callApi.output.result.Status} == 'SUCCESS'\"\n    expected: SUCCESS\n    actual: \"${ACTIONS.callApi.output.result.Status}\"\n");
@@ -251,6 +285,11 @@ class FrameworkEngineTest {
     private void writeSnapshot(Path workbook) throws Exception {
         FrameworkConfig suite = new SuiteConfigResolver(projectRoot, globalConfig()).resolve(workbook);
         new TestcaseSnapshotService().write(workbook, suite, new ExcelTestSuiteLoader(suite).load(workbook));
+    }
+    private void writeRuntimeSchemas() throws Exception {
+        writeText(projectRoot.resolve("schemas/att-ci-summary-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"inputManifestHash\"]}");
+        writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
+        writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
     }
     private void writeTool(Path path, String body) throws Exception {
         writeText(path, "#!/usr/bin/env sh\nset -eu\n" + body);

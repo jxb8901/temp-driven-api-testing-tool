@@ -7,6 +7,8 @@ import java.util.Map;
 
 /** Authoritative V2 CASE tree plus transient ACTIONS, TOOL, and DB invocation views. */
 public final class CaseRuntimeContext {
+    /** Marker used only by validation/documentation contexts for values whose runtime shape is unknown. */
+    private static final Object DEFERRED_VALIDATION_VALUE = new Object();
     private final Map<String, Object> root = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> runNode = new LinkedHashMap<String, Object>();
@@ -94,6 +96,7 @@ public final class CaseRuntimeContext {
     public Object require(String path) {
         Resolution resolution = resolution(path);
         if (resolution.status == ResolutionStatus.FOUND) return resolution.value;
+        if (resolution.status == ResolutionStatus.DEFERRED) return null;
         java.util.List<String> paths = availablePaths();
         String nearest = nearest(path, paths);
         StringBuilder detail = new StringBuilder();
@@ -119,7 +122,15 @@ public final class CaseRuntimeContext {
                 null, null, suggestion, null);
     }
 
-    public boolean contains(String path) { return resolution(path).status == ResolutionStatus.FOUND; }
+    public boolean contains(String path) {
+        ResolutionStatus status = resolution(path).status;
+        return status == ResolutionStatus.FOUND || status == ResolutionStatus.DEFERRED;
+    }
+
+    /** True when validation knows the owning value exists but cannot know its runtime shape yet. */
+    public boolean isValidationDeferred(String path) {
+        return resolution(path).status == ResolutionStatus.DEFERRED;
+    }
 
     private Resolution resolution(String path) {
         java.util.List<Segment> requested;
@@ -136,24 +147,49 @@ public final class CaseRuntimeContext {
             if (endsWith(segments, requested)) matches.add(candidate);
         }
         java.util.Collections.sort(matches);
-        if (matches.size() == 1) return Resolution.found(candidates.get(matches.get(0)), matches.get(0));
+        if (matches.size() == 1) return candidateResolution(candidates.get(matches.get(0)), matches.get(0));
         if (matches.size() > 1) return Resolution.ambiguous(matches);
+        Resolution deferred = deferredSuffixResolution(requested, candidates);
+        if (deferred != null) return deferred;
         return partialResolution(requested, candidates);
     }
 
+    private Resolution candidateResolution(Object value, String canonicalPath) {
+        return value == DEFERRED_VALIDATION_VALUE
+                ? Resolution.deferred(canonicalPath) : Resolution.found(value, canonicalPath);
+    }
+
+    /** Resolves shorthand below a deferred value, for example value.id below CASE.VARS.value. */
+    private Resolution deferredSuffixResolution(java.util.List<Segment> requested, Map<String, Object> candidates) {
+        java.util.Set<String> matches = new java.util.LinkedHashSet<String>();
+        for (Map.Entry<String, Object> candidate : candidates.entrySet()) {
+            if (candidate.getValue() != DEFERRED_VALIDATION_VALUE) continue;
+            java.util.List<Segment> full = parsePath(candidate.getKey());
+            for (int start = 0; start < full.size(); start++) {
+                int suffixLength = full.size() - start;
+                if (suffixLength > requested.size()) continue;
+                boolean match = true;
+                for (int index = 0; index < suffixLength; index++) {
+                    if (!full.get(start + index).equals(requested.get(index))) { match = false; break; }
+                }
+                if (!match) continue;
+                String path = candidate.getKey();
+                for (int index = suffixLength; index < requested.size(); index++) path = appendPath(path, requested.get(index));
+                matches.add(path);
+            }
+        }
+        java.util.List<String> ordered = new java.util.ArrayList<String>(matches);
+        java.util.Collections.sort(ordered);
+        if (ordered.size() == 1) return Resolution.deferred(ordered.get(0));
+        if (ordered.size() > 1) return Resolution.ambiguous(ordered);
+        return null;
+    }
+
     private java.util.Set<String> explicitRoots() {
-        if (!flowScopes.isEmpty()) return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("input", "actions", "runtime", "flow", "output"));
         return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("CASE", "RUN", "ACTIONS", "TOOL", "DB", "output"));
     }
 
     private Map<String, Object> logicalRoot() {
-        if (!flowScopes.isEmpty()) {
-            FlowFrame frame = flowScopes.peek();
-            Map<String, Object> local = new LinkedHashMap<String, Object>();
-            local.put("input", frame.input); local.put("actions", frame.actionViews); local.put("runtime", frame.runtime); local.put("flow", frame.flow);
-            if (root.containsKey("output")) local.put("output", root.get("output"));
-            return local;
-        }
         Map<String, Object> logical = new LinkedHashMap<String, Object>();
         logical.put("CASE", caseNode);
         logical.put("RUN", runNode);
@@ -165,7 +201,6 @@ public final class CaseRuntimeContext {
     }
 
     private Map<String, Object> canonicalRoot() {
-        if (!flowScopes.isEmpty()) return logicalRoot();
         Map<String, Object> canonical = new LinkedHashMap<String, Object>();
         canonical.put("CASE", caseNode);
         canonical.put("RUN", runNode);
@@ -188,6 +223,9 @@ public final class CaseRuntimeContext {
         } else root.put(key, value);
     }
 
+    /** Declares a validation-only value whose existence is known but whose nested runtime shape is not. */
+    public void putValidationPlaceholder(String key) { put(key, DEFERRED_VALIDATION_VALUE); }
+
     @SuppressWarnings("unchecked")
     public void requireCaseVariableAvailable(String name) {
         if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
@@ -196,11 +234,11 @@ public final class CaseRuntimeContext {
                     null, "name", null, null, null, null, null,
                     "Use a simple case-sensitive identifier such as txnSeq.", null);
         }
-        Map<String, Object> variables = flowScopes.isEmpty() ? (Map<String, Object>) caseNode.get("VARS") : flowScopes.peek().runtime;
+        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
         if (variables.containsKey(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    flowScopes.isEmpty() ? "Duplicate CASE.VARS assignment '${CASE.VARS." + name + "}'" : "Duplicate Flow runtime assignment '${runtime." + name + "}'",
-                    flowScopes.isEmpty() ? "The variable was already assigned earlier in this Test Case." : "The variable was already assigned in this Flow invocation.", null, "name",
+                    "Duplicate CASE.VARS assignment '${CASE.VARS." + name + "}'",
+                    "The variable was already assigned earlier in this Test Case.", null, "name",
                     null, null, null, null, null,
                     "Use a unique name; assign does not overwrite scoped variables.", null);
         }
@@ -209,11 +247,11 @@ public final class CaseRuntimeContext {
     @SuppressWarnings("unchecked")
     public void assignCaseVariable(String name, Object value) {
         requireCaseVariableAvailable(name);
-        Map<String, Object> variables = flowScopes.isEmpty() ? (Map<String, Object>) caseNode.get("VARS") : flowScopes.peek().runtime;
+        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
         variables.put(name, value);
     }
 
-    public Map<String, Object> values() { return flowScopes.isEmpty() ? root : logicalRoot(); }
+    public Map<String, Object> values() { return root; }
     public Map<String, Object> caseTree() { return caseNode; }
     public Path caseOutputDirectory() { return caseOutputDir; }
 
@@ -249,13 +287,13 @@ public final class CaseRuntimeContext {
     public void addAction(String actionId, Map<String, Object> action) {
         if (!flowScopes.isEmpty()) {
             FlowFrame frame = flowScopes.peek();
-            if (frame.actions.containsKey(actionId)) throw new IllegalArgumentException("Duplicate Flow action id: " + actionId);
+            if (actionsView.containsKey(actionId)) throw new IllegalArgumentException("Duplicate expanded action id: " + actionId);
             frame.actions.put(actionId, action);
-            frame.actionViews.put(actionId, flowActionView(action));
+            actionsView.put(actionId, actionView(action));
             return;
         }
         if (currentActions == null) throw new IllegalStateException("No current stage for action: " + actionId);
-        if (currentActions.containsKey(actionId)) throw new IllegalArgumentException("Duplicate action id: " + actionId);
+        if (actionsView.containsKey(actionId)) throw new IllegalArgumentException("Duplicate expanded action id: " + actionId);
         currentActions.put(actionId, action);
         Map<String, Object> view = actionView(action);
         actionsView.put(actionId, view);
@@ -265,18 +303,12 @@ public final class CaseRuntimeContext {
         return new LinkedHashMap<String, Object>(action);
     }
 
-    private Map<String, Object> flowActionView(Map<String, Object> action) {
-        Map<String, Object> view = new LinkedHashMap<String, Object>();
-        for (String key : java.util.Arrays.asList("id", "type", "description", "output")) if (action.containsKey(key)) view.put(key, action.get(key));
-        return view;
-    }
-
     @SuppressWarnings("unchecked")
     public void updateAction(String actionId, Map<String, Object> action) {
         if (!flowScopes.isEmpty()) {
             FlowFrame frame = flowScopes.peek();
             if (!frame.actions.containsKey(actionId)) throw new IllegalArgumentException("Unknown Flow action id: " + actionId);
-            frame.actions.put(actionId, action); frame.actionViews.put(actionId, flowActionView(action)); return;
+            frame.actions.put(actionId, action); actionsView.put(actionId, actionView(action)); return;
         }
         if (currentActions == null || !currentActions.containsKey(actionId)) throw new IllegalArgumentException("Unknown action id: " + actionId);
         currentActions.put(actionId, action);
@@ -311,14 +343,14 @@ public final class CaseRuntimeContext {
         return root.relativize(target.toAbsolutePath().normalize()).toString().replace('\\', '/');
     }
 
-    public void beginFlow(String flowId, String invocationId, Map<String, Object> input) {
-        flowScopes.push(new FlowFrame(flowId, invocationId, input, flowScopes.size() + 1));
+    public void beginFlow(String flowId, String invocationId) {
+        flowScopes.push(new FlowFrame(flowId, invocationId, flowScopes.size() + 1));
     }
 
     public FlowEvidence finishFlow() {
         if (flowScopes.isEmpty()) throw new IllegalStateException("No active Flow scope");
         FlowFrame frame = flowScopes.pop();
-        return new FlowEvidence(frame.flow, frame.input, frame.runtime, frame.actions);
+        return new FlowEvidence(frame.flow, frame.actions);
     }
 
     public boolean inFlow() { return !flowScopes.isEmpty(); }
@@ -333,27 +365,20 @@ public final class CaseRuntimeContext {
     }
 
     public static final class FlowEvidence {
-        private final Map<String, Object> flow, input, runtime, actions;
-        private FlowEvidence(Map<String, Object> flow, Map<String, Object> input, Map<String, Object> runtime, Map<String, Object> actions) {
-            this.flow = new LinkedHashMap<String, Object>(flow); this.input = new LinkedHashMap<String, Object>(input);
-            this.runtime = new LinkedHashMap<String, Object>(runtime); this.actions = new LinkedHashMap<String, Object>(actions);
+        private final Map<String, Object> flow, actions;
+        private FlowEvidence(Map<String, Object> flow, Map<String, Object> actions) {
+            this.flow = new LinkedHashMap<String, Object>(flow); this.actions = new LinkedHashMap<String, Object>(actions);
         }
         public Map<String, Object> flow() { return flow; }
-        public Map<String, Object> input() { return input; }
-        public Map<String, Object> runtime() { return runtime; }
         public Map<String, Object> actions() { return actions; }
     }
 
     private static final class FlowFrame {
         private final String invocationId;
-        private final Map<String, Object> input = new LinkedHashMap<String, Object>();
-        private final Map<String, Object> actionViews = new LinkedHashMap<String, Object>();
         private final Map<String, Object> actions = new LinkedHashMap<String, Object>();
-        private final Map<String, Object> runtime = new LinkedHashMap<String, Object>();
         private final Map<String, Object> flow = new LinkedHashMap<String, Object>();
-        private FlowFrame(String flowId, String invocationId, Map<String, Object> input, int depth) {
+        private FlowFrame(String flowId, String invocationId, int depth) {
             this.invocationId = invocationId;
-            if (input != null) this.input.putAll(input);
             flow.put("id", flowId); flow.put("invocationId", invocationId); flow.put("depth", Integer.valueOf(depth));
         }
     }
@@ -443,6 +468,7 @@ public final class CaseRuntimeContext {
         Object current = tree;
         String currentPath = "<root>";
         for (Segment segment : segments) {
+            if (current == DEFERRED_VALIDATION_VALUE) return Resolution.deferred(currentPath);
             if (current instanceof Map && segment.key != null) {
                 @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) current;
                 if (!map.containsKey(segment.key)) return Resolution.missing(currentPath, segment.display());
@@ -454,7 +480,8 @@ public final class CaseRuntimeContext {
             } else return Resolution.missing(currentPath, segment.display());
             currentPath = appendPath("<root>".equals(currentPath) ? "" : currentPath, segment);
         }
-        return Resolution.found(current, currentPath);
+        return current == DEFERRED_VALIDATION_VALUE
+                ? Resolution.deferred(currentPath) : Resolution.found(current, currentPath);
     }
 
     private Resolution partialResolution(java.util.List<Segment> requested, Map<String, Object> candidates) {
@@ -524,7 +551,7 @@ public final class CaseRuntimeContext {
 
     private static boolean simpleKey(String key) { return key != null && key.matches("[A-Za-z_][A-Za-z0-9_-]*"); }
 
-    private enum ResolutionStatus { FOUND, MISSING, AMBIGUOUS }
+    private enum ResolutionStatus { FOUND, DEFERRED, MISSING, AMBIGUOUS }
 
     private static final class Resolution {
         private final ResolutionStatus status; private final Object value; private final String canonicalPath;
@@ -535,6 +562,7 @@ public final class CaseRuntimeContext {
             this.missingSegment = missingSegment; this.candidates = candidates;
         }
         private static Resolution found(Object value, String canonicalPath) { return new Resolution(ResolutionStatus.FOUND, value, canonicalPath, null, null, java.util.Collections.<String>emptyList()); }
+        private static Resolution deferred(String canonicalPath) { return new Resolution(ResolutionStatus.DEFERRED, null, canonicalPath, null, null, java.util.Collections.<String>emptyList()); }
         private static Resolution missing(String currentNode, String missingSegment) { return new Resolution(ResolutionStatus.MISSING, null, null, currentNode, missingSegment, java.util.Collections.<String>emptyList()); }
         private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, new java.util.ArrayList<String>(candidates)); }
     }

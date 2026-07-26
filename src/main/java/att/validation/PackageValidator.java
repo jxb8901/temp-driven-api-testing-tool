@@ -73,7 +73,7 @@ public final class PackageValidator {
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, projectRoot.resolve(global.templatesRoot()).resolve(reference).resolve("template.yaml"))); }
             for (att.flow.FlowDefinition flow : flows.all()) try {
                 StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA);
-                validateTemplate(body, global); validateReferencedTools(body, global);
+                validateReferencedTools(body, global);
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
             validatePackageTools(diagnostics);
         }
@@ -313,6 +313,12 @@ public final class PackageValidator {
         Set<String> actionIds = new LinkedHashSet<String>();
         Set<String> completedActions = new LinkedHashSet<String>();
         Set<String> assignmentNames = new LinkedHashSet<String>();
+        validateTemplateActions(template, config, actionIds, completedActions, assignmentNames);
+    }
+
+    private void validateTemplateActions(StageTemplate template, FrameworkConfig config,
+                                         Set<String> actionIds, Set<String> completedActions,
+                                         Set<String> assignmentNames) {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
           try {
@@ -373,7 +379,6 @@ public final class PackageValidator {
                 forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "call", "db", "query", "update", "expression", "assert", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 if (flows == null) throw new IllegalStateException("Flow registry is unavailable");
                 flows.validateInvocation(action);
-                validateBindingExpressions(action.with(), syntaxEngine, config);
             }
 
             Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
@@ -405,24 +410,16 @@ public final class PackageValidator {
                 validateStaticContextStructure(action.file(), syntaxEngine, completedActions, false);
                 for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false);
             }
-            if ("flow".equals(type)) validateBindingContext(action.with(), syntaxEngine, completedActions);
+            if ("flow".equals(type)) {
+                att.flow.FlowDefinition target = flows.get(action.use());
+                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA);
+                validateTemplateActions(body, config, actionIds, completedActions, assignmentNames);
+            }
           } catch (DiagnosticException e) { throw e.withLocation(null, "actions." + action.id(), null, null, null, template.name(), action.id()); }
           catch (LocatedValidationException e) { throw e; }
           catch (Exception e) { throw new LocatedValidationException(e.getMessage(), template.name(), action.id(), "actions." + action.id(), e); }
           completedActions.add(action.id());
         }
-    }
-
-    private void validateBindingExpressions(Object value, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
-        if (value instanceof Map) { for (Object nested : ((Map<?, ?>) value).values()) validateBindingExpressions(nested, engine, config); return; }
-        if (value instanceof Iterable) { for (Object nested : (Iterable<?>) value) validateBindingExpressions(nested, engine, config); return; }
-        if (value instanceof String) validateInlineExpressions((String) value, engine, config);
-    }
-
-    private void validateBindingContext(Object value, att.template.UnifiedTemplateEngine engine, Set<String> completedActions) {
-        if (value instanceof Map) { for (Object nested : ((Map<?, ?>) value).values()) validateBindingContext(nested, engine, completedActions); return; }
-        if (value instanceof Iterable) { for (Object nested : (Iterable<?>) value) validateBindingContext(nested, engine, completedActions); return; }
-        if (value instanceof String) validateStaticContextStructure((String) value, engine, completedActions, false);
     }
 
     private void validateDbAction(TemplateAction action, StageTemplate template,
@@ -530,9 +527,9 @@ public final class PackageValidator {
                             || remainder.equals(".actions") || remainder.startsWith(".actions.") || remainder.startsWith(".actions[")) {
                         throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                                 "Flow internals are not a stable Context contract '${" + path + "}'",
-                                "Callers may access only ACTIONS.<flowAction>.output.outputs.<name>.", null, path,
+                                "Flow evidence is diagnostic-only; completed internal Actions are published directly in ACTIONS.", null, path,
                                 null, null, null, null, null,
-                                "Declare and use a Flow output instead of an internal Action path.", null);
+                                "Use ACTIONS.<internalActionId>.output.<field> instead.", null);
                     }
                     continue;
                 }
@@ -606,14 +603,30 @@ public final class PackageValidator {
                                         FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables) {
         att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
         context.put("CASE.environment", config.environment());
-        for (String name : assignedCaseVariables) context.put("CASE.VARS." + name, null);
+        for (String name : assignedCaseVariables) context.putValidationPlaceholder("CASE.VARS." + name);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
         Set<String> completedActions = new LinkedHashSet<String>();
+        Set<String> actionIds = new LinkedHashSet<String>();
+        validateTemplateRuntimeActions(template, testCase, config, caseFile, assignedCaseVariables,
+                context, engine, actionIds, completedActions);
+    }
+
+    private void validateTemplateRuntimeActions(StageTemplate template, TestCase testCase, FrameworkConfig config,
+                                                Path caseFile, Set<String> assignedCaseVariables,
+                                                att.core.CaseRuntimeContext context,
+                                                att.template.UnifiedTemplateEngine engine,
+                                                Set<String> actionIds, Set<String> completedActions) {
         for (TemplateAction action : template.actions()) {
-            Path sourceFile = template.directory().resolve("template.yaml");
+            Path sourceFile = Files.isRegularFile(template.directory().resolve("flow.yaml"))
+                    ? template.directory().resolve("flow.yaml") : template.directory().resolve("template.yaml");
             String sourceField = "actions." + action.id();
             try {
+                if (!actionIds.add(action.id())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                        "Duplicate expanded Action ID '" + action.id() + "'",
+                        "Template and all nested Flows share one ACTIONS namespace.", null, sourceField,
+                        testCase.sheetName(), testCase.rowNumber(), null, template.name(), action.id(),
+                        "Use a unique Action ID across the complete expanded Template plan.", null);
                 Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
                 afterCurrentAction.add(action.id());
 
@@ -627,19 +640,6 @@ public final class PackageValidator {
                 engine.renderValidationValues(action.runWhen(), context);
                 validateCallArgumentsIn(action.runWhen(), context, engine);
 
-                if ("flow".equalsIgnoreCase(action.type())) {
-                    att.flow.FlowDefinition target = flows.get(action.use());
-                    for (Map.Entry<String, Object> binding : action.with().entrySet()) {
-                        sourceField = "actions." + action.id() + ".with." + binding.getKey();
-                        validateBindingRuntimeValue(binding.getValue(), engine, context, testCase, completedActions);
-                        Object known = knownBindingValue(binding.getValue(), engine, context);
-                        if (known != UnknownValue.INSTANCE) {
-                            att.flow.FlowDefinition.Input declared = target.inputs().get(binding.getKey());
-                            att.flow.FlowRegistry.requireType("Flow input " + target.id() + "." + binding.getKey(), declared.type(), known, !declared.required());
-                        }
-                    }
-                }
-
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
                     context.requireCaseVariableAvailable(action.name());
@@ -649,7 +649,7 @@ public final class PackageValidator {
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
-                    context.put("CASE.VARS." + action.name(), null);
+                    context.putValidationPlaceholder("CASE.VARS." + action.name());
                 }
 
                 sourceField = "actions." + action.id() + ".assert";
@@ -733,6 +733,12 @@ public final class PackageValidator {
                         if (!"file".equalsIgnoreCase(action.renderAs()) && !partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
                     }
                 }
+                if ("flow".equalsIgnoreCase(action.type())) {
+                    att.flow.FlowDefinition target = flows.get(action.use());
+                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA);
+                    validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
+                            context, engine, actionIds, completedActions);
+                }
             } catch (Exception e) {
                 DiagnosticException typed = DiagnosticException.find(e);
                 String caseSource = caseFile == null ? null : portable(caseFile) + "!" + testCase.sheetName() + ":" + testCase.rowNumber();
@@ -747,55 +753,6 @@ public final class PackageValidator {
             if ("assign".equalsIgnoreCase(action.type())) assignedCaseVariables.add(action.name());
         }
     }
-
-    private void validateBindingRuntimeValue(Object value, att.template.UnifiedTemplateEngine engine,
-                                             att.core.CaseRuntimeContext context, TestCase testCase,
-                                             Set<String> completedActions) {
-        if (value instanceof Map) { for (Object nested : ((Map<?, ?>) value).values()) validateBindingRuntimeValue(nested, engine, context, testCase, completedActions); return; }
-        if (value instanceof Iterable) { for (Object nested : (Iterable<?>) value) validateBindingRuntimeValue(nested, engine, context, testCase, completedActions); return; }
-        if (!(value instanceof String)) return;
-        validateContextStructure((String) value, engine, context, testCase, completedActions);
-        engine.renderValidationValues((String) value, context);
-        validateCallArgumentsIn((String) value, context, engine);
-    }
-
-    private Object knownBindingValue(Object value, att.template.UnifiedTemplateEngine engine,
-                                     att.core.CaseRuntimeContext context) {
-        if (value instanceof Map) {
-            Map<String, Object> result = new LinkedHashMap<String, Object>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                Object nested = knownBindingValue(entry.getValue(), engine, context);
-                if (nested == UnknownValue.INSTANCE) return nested;
-                result.put(String.valueOf(entry.getKey()), nested);
-            }
-            return result;
-        }
-        if (value instanceof Iterable) {
-            List<Object> result = new ArrayList<Object>();
-            for (Object nestedValue : (Iterable<?>) value) {
-                Object nested = knownBindingValue(nestedValue, engine, context);
-                if (nested == UnknownValue.INSTANCE) return nested;
-                result.add(nested);
-            }
-            return result;
-        }
-        if (!(value instanceof String)) return value;
-        String text = String.valueOf(value).trim();
-        java.util.List<String> paths = engine.parseContextPaths(text);
-        if (paths.size() == 1 && text.equals("${" + paths.get(0) + "}")) {
-            String path = paths.get(0);
-            // Validation tracks only that an ordered assign has made this
-            // Case variable available. Its value and type remain runtime
-            // data, so a null placeholder must not be mistaken for a known
-            // null Flow input.
-            if (path.startsWith("ACTIONS.") || path.startsWith("CASE.VARS.")) return UnknownValue.INSTANCE;
-            return context.require(path);
-        }
-        String rendered = engine.renderValidationValues(String.valueOf(value), context);
-        return rendered.contains("${") ? UnknownValue.INSTANCE : rendered;
-    }
-
-    private enum UnknownValue { INSTANCE }
 
     private DiagnosticException sourceDiagnostic(DiagnosticException error, Path sourceFile, String sourceField,
                                                  TestCase testCase, StageTemplate template, TemplateAction action,

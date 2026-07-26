@@ -1,259 +1,191 @@
-# ATT V3.0.1 Executable Flow System Design
+# ATT V3.1.0 Shared-Context Flow System Design
 
 **Document Status:** Implemented
-**Target Version:** ATT 3.0.1
-**Last Updated:** 2026-07-25
 
----
+**Target Version:** ATT 3.1.0
+**Last Updated:** 2026-07-26
 
 ## 1. Purpose
 
-ATT V3.0.1 provides a first-class, reusable Flow between Template Actions and Tools. A Flow is a statically selected, typed, isolated, linear Action sequence that may invoke another Flow.
-
-V3.0.1 tightens the V3.0.0 implementation in three places: an ordered `assign` makes `${CASE.VARS.<name>}` available without pretending its validation placeholder is a real null value; malformed Flow `use`/`with` shapes fail at validation/load time; and run evidence is written directly to `output/<RunID>` without `.in-progress` staging.
+ATT V3.1.0 defines a Flow as a reusable, ordered group of Template Actions. A Flow is called only from a Template and executes within that Template's existing Context.
 
 ```text
-Excel test case -> Stage -> Template -> Flow -> Action -> Tool / DB / built-in
+Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
 ```
 
-The existing Excel -> Stage -> Template contract is unchanged. V2 Templates and all V2 config, sidecar, Tool, run, report, and CI schemas remain readable with their existing semantics.
+V3.1 removes the isolated-function model introduced in V3.0. A Flow no longer declares inputs or outputs and no longer creates separate `input`, lowercase `actions`, `runtime`, or `flow` Context roots. This keeps Action expressions unchanged when Actions are moved between a Template and a Flow.
 
-V3.0.0 combines the original parsing and runtime phases. A schema-only Flow release is not useful because authors must be able to validate and execute the declared composition.
+The existing Excel, Stage, V2 Template, Tool, DB, run, report, and CI contracts remain unchanged.
 
-## 2. Goals and success criteria
+## 2. Goals and boundaries
 
-V3.0.0 succeeds when:
+V3.1 provides:
 
-1. only `att-template/v3.0` can invoke a Flow or use Action `runWhen`;
-2. `att-flow/v3.0` provides strict typed input and output contracts;
-3. Flow dependencies, cycles, depth, bindings, and local Context access are rejected before a run directory is created;
-4. Template -> Flow -> nested Flow -> Tool executes without exposing Flow internals to the caller;
-5. repeated Flow use cannot collide in Context or artifact paths;
-6. V2.6 Templates run without modification; and
-7. aggregate status remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
+- one Expression Engine and Context contract for Template and Flow Actions;
+- direct access to `CASE`, `RUN`, prior `ACTIONS`, `TOOL`, `DB`, and current `output`;
+- static Flow composition and nesting to depth 3;
+- validation of the complete expanded Action order before run output is created;
+- one Action-ID namespace for a Template and its nested Flow closure;
+- Case-scoped `assign` behavior through `CASE.VARS`; and
+- nested evidence and qualified artifact paths without a Flow-specific expression API.
 
-## 3. Scope
+V3.1 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
 
-### 3.1 Included
+## 3. Public configuration
 
-- strict `att-flow/v3.0` and `att-template/v3.0` schemas;
-- package Flow registry and selected dependency-closure loading;
-- static canonical Flow IDs ending in `.vN`;
-- static Flow calls through `type: flow`, `use`, and `with`;
-- input types `string`, `integer`, `number`, `boolean`, `object`, and `array`;
-- required, default, omitted optional input, and runtime type checks;
-- recursive `${...}` resolution in maps and arrays;
-- isolated `input`, `actions`, `runtime`, and `flow` Context roots;
-- nested Flows up to depth 3;
-- Action `runWhen`, existing `onFailure: stop|continue`, and deterministic aggregation;
-- declared outputs exported only after a PASS Flow;
-- hierarchical Case YAML/log evidence and qualified artifact paths; and
-- package-generated documentation for Flows.
+### 3.1 Flow descriptor
 
-### 3.2 Deferred to V3.1 or later
-
-- `runAlways` or finally-style cleanup;
-- `failureImpact: warning` or a WARNING result;
-- Flow deadlines, cancellation propagation, or whole-Flow retry;
-- `att flow list/show/validate/usages/graph` and `att explain`;
-- expanded hierarchical HTML reporting and dependency digests;
-- parallel branches, loops, dynamic dispatch, inheritance, remote registries, or version ranges.
-
-Flow Actions therefore do not accept `timeoutMs` or `retry`. Timeout and retry remain properties of eligible Tool Actions, including Tool Actions inside a Flow.
-
-## 4. Public schemas
-
-### 4.1 Flow descriptor
-
-Each Flow is stored at `<templatesRoot>/flows/**/flow.yaml`. A directory must not contain both `flow.yaml` and `template.yaml`.
+Flow descriptors remain below `<templatesRoot>/flows/**/flow.yaml` and retain the `att-flow/v3.0` schema name. The schema is deliberately redefined and is not compatible with the isolated V3.0 contract.
 
 ```yaml
 schemaVersion: att-flow/v3.0
-id: common.decorate.v1
-name: Decorate Value
-description: Append a stable suffix.
-inputs:
-  value:
-    type: string
-    required: true
-  enabled:
-    type: boolean
-    default: true
+id: payment.invoke.v1
+name: Invoke Payment
+description: Render and invoke a payment request.
+
 actions:
-  decorate:
-    type: assign
-    name: result
-    expression: "${input.value}-done"
-  audit:
-    type: log
-    message: "Decorated ${runtime.result}"
-    runWhen: "${input.enabled} == true"
-outputs:
-  value:
-    type: string
-    from: "${runtime.result}"
+  renderRequest:
+    type: render
+    payload: request.xml
+    renderAs: file
+
+  invokePayment:
+    type: tool
+    call: >-
+      #{payment.invoke(
+        request=${ACTIONS.renderRequest.output.result},
+        reference=${CASE.SrcRefNo}
+      )}
 ```
 
-The top-level fields are exactly `schemaVersion`, `id`, `name`, `description`, `inputs`, `actions`, and `outputs`. Unknown fields fail validation.
+The only top-level fields are `schemaVersion`, `id`, `name`, `description`, and `actions`. `inputs` and `outputs` are validation errors.
 
-### 4.2 V3 Template invocation
+### 3.2 Template invocation
+
+`att-template/v3.0` retains `type: flow` with one static canonical `use` value:
 
 ```yaml
-schemaVersion: att-template/v3.0
-name: PAYMENT_FLOW
-description: Compose a reusable payment Flow.
 actions:
-  prepare:
+  invokeFlow:
     type: flow
-    use: payment.prepare.v1
-    with:
-      requestId: "${CASE.requestId}"
-      options:
-        trace: true
+    use: payment.invoke.v1
+
   verify:
     type: assert
-    assert: "${ACTIONS.prepare.output.outputs.status} == 'READY'"
+    assert: "${ACTIONS.invokePayment.output.result.status} == 'SUCCESS'"
 ```
 
-`use` is a literal canonical ID. It cannot contain `${...}`, `#{...}`, a version range, or a runtime selector. A Template has no top-level `inputs`; it binds Flow inputs from literals or existing Case/Action Context.
+`with` is invalid. A Flow Action exposes only the normal Action outcome fields such as `status`, `success`, `durationMs`, and `exception`. Business results are read from the internal Action that produced them; ATT does not create `output.outputs` or forward the last Action result.
 
-### 4.3 Action contract
+## 4. Context and assignment semantics
 
-V3 inherits the V2.6 Actions `render`, `tool`, `db`, `assert`, `log`, and `assign`, and adds `flow`. Every V3 Action may declare `runWhen` as a boolean expression evaluated immediately before execution.
-
-If `runWhen` is false, the Action is recorded as SKIPPED and no child Tool, DB Action, or Flow is executed. This is new Action behavior; it is separate from the existing Stage-level `runWhen` contract.
-
-## 5. Type and binding contract
-
-Each Flow input declares one supported type. `required: true` and `default` are mutually exclusive. A default must match the declared type. An omitted optional input has the value `null`; ATT performs no implicit conversion.
-
-`with` accepts scalar literals, maps, arrays, and recursively embedded `${...}` references. Binding never executes `#{...}` calls.
-
-Validation is split by what can be known safely:
-
-- literals are type-checked while compiling the invocation;
-- an exact declared Flow input or Flow output reference is checked statically;
-- Case values and other runtime-dependent values are checked immediately before entering the Flow.
-
-`integer` may bind to `number`; other declared types must match exactly.
-
-Each output declares `type` and one exact `from: "${...}"`. ATT evaluates and type-checks outputs only when all effective Flow Actions aggregate to PASS. FAIL, ERROR, or INVALID Flows export no declared output.
-
-## 6. Context isolation
-
-Inside a Flow, only these local roots are readable:
+Flow Actions use exactly the same readable logical Context as inline Template Actions:
 
 | Root | Meaning |
 |---|---|
-| `input.*` | The invocation's validated inputs |
-| `actions.*` | Outputs from prior local Actions |
-| `runtime.*` | Values assigned locally by `assign` |
-| `flow.*` | Current Flow ID, invocation ID, and depth |
+| `CASE.*` | Current Case data, stages, DB finalization data, and `CASE.VARS` |
+| `RUN.*` | Current Run metadata |
+| `ACTIONS.*` | Earlier completed Actions in the expanded Template plan |
+| `TOOL.*` | Current Tool invocation data where available |
+| `DB.*` | Current DB invocation evidence where available |
+| `output.*` | Current Action outcome during supported post-execution fields |
 
-`${...}` reads Context values. `#{...}` invokes a Tool, DB facade, or built-in where that Action contract permits calls.
+Existing unique-suffix shorthand remains unchanged. Removed Flow-only roots are invalid rather than treated as aliases.
 
-A Flow cannot read `CASE`, `RUN`, a parent Flow, a sibling Flow, or a future Action. It may read a prior local Action only through `${actions.<id>.output...}`. A local `assign` writes `runtime.<name>` and never changes `CASE.VARS`.
+Visibility follows execution order:
 
-The caller sees only declared outputs:
+1. a Flow sees Actions completed before its invocation;
+2. each internal Action sees all earlier completed Actions in the same expanded plan;
+3. a nested Flow inherits the same visible Action sequence; and
+4. Actions after the Flow may read its completed internal Actions directly.
 
-- Template caller: `${ACTIONS.<flowAction>.output.outputs.<name>}`
-- nested Flow caller: `${actions.<flowAction>.output.outputs.<name>}`
+`assign` always publishes to `CASE.VARS`, including inside a Flow. Assignments never overwrite an existing name and persist across later Actions, Templates, and Stages in the same Case.
 
-Internal Actions remain in evidence but are not part of the caller's expression view.
+## 5. Static expansion and identity
 
-## 7. Registry and static compilation
+Every selected Template is validated as one statically expanded Action plan. Flow invocation Actions remain nodes in the plan, while their internal Actions execute before the invocation Action publishes its aggregate outcome.
 
-The package registry scans Flow descriptors once and indexes them by canonical ID. IDs are independent of directory paths, allowing internal directory reorganization without changing callers.
+All Action IDs in the expanded Template closure must be unique, including:
 
-`validate --package` parses and validates every Flow. Selected validation indexes descriptor headers but parses only the dependency closure reached from selected V3 Templates. An unrelated invalid Flow therefore does not invalidate a selected-only operation.
+- inline Template Actions;
+- Flow invocation Actions;
+- internal Actions;
+- nested Flow invocation Actions; and
+- nested internal Actions.
 
-Before output mutation, compilation checks:
+Consequently, two used Flows cannot contribute the same Action ID, and the same Flow cannot be called twice in one Template. Different Templates or Stages may reuse the same IDs because `ACTIONS` is reset at each Stage Template execution.
 
-- Flow and V3 Template schemas;
-- duplicate IDs and unresolved references;
-- required/unknown bindings and statically known type mismatches;
-- direct and indirect cycles;
-- maximum nesting depth 3;
-- illegal or forward Context references;
-- output source and type contracts;
-- `template.yaml`/`flow.yaml` directory conflicts; and
+Flow IDs remain path-independent canonical IDs ending in `.vN`. References are static. Direct and indirect cycles are invalid, and maximum nesting depth remains 3.
+
+## 6. Validation
+
+The registry performs package-level structural checks:
+
+- strict Flow and Template schemas;
+- canonical and duplicate Flow IDs;
+- missing dependencies;
+- cycles and nesting depth;
+- `template.yaml`/`flow.yaml` conflicts; and
 - symlink and package-root escapes.
 
-The compiled registry is carried by the execution plan. Runtime does not rescan the filesystem or dynamically choose a Flow.
+The execution-plan validator recursively validates each Flow at its actual Template call site. It carries the same completed-Action set and `CASE.VARS` assignment set through the complete closure, and applies the ordinary Action validation rules to Flow render payloads, Tool calls, DB blocks, assertions, logs, assignments, descriptions, and `runWhen` expressions.
 
-## 8. Runtime semantics
+An unused Flow receives structural validation. Context references that depend on a caller or a concrete Case are validated for every actual invocation. Invalid plans are rejected before a Run directory is created.
 
-For a Flow Action, the runner:
+## 7. Runtime and evidence
 
-1. evaluates the caller Action's `runWhen`;
-2. recursively resolves and type-checks inputs;
-3. pushes an isolated Flow frame;
-4. executes local Actions in declaration order;
-5. applies each local `runWhen` and existing `onFailure` policy;
-6. aggregates local results;
-7. exports declared outputs only on PASS; and
-8. records and pops the Flow frame.
+The runtime does not replace the logical Context when entering a Flow. Each completed internal Action is published to the shared `ACTIONS` view and remains readable after the Flow returns.
 
-An invoked Flow whose internal Actions are all SKIPPED is PASS. A Flow Action skipped by its caller is SKIPPED.
+A Flow frame is retained only for:
 
-Each internal invocation receives a qualified ID. Artifacts use hierarchical paths such as:
+- Flow ID, invocation ID, and nesting depth evidence;
+- hierarchical Case YAML/log evidence;
+- qualified Action IDs used internally; and
+- collision-free artifact directories.
+
+Artifacts retain paths such as:
 
 ```text
 <case>/<stage>/flows/<invocation>/actions/<action>/...
 ```
 
-Nested invocations add another `flows/<invocation>/actions` segment. Tool/DB executors, caches, logs, connection lifecycle, and sequence counters remain Case-level shared resources.
+Nested Flow evidence remains below the calling Flow Action. Evidence paths such as `ACTIONS.<flowCall>.flow.actions...` are diagnostic data and are not a supported expression contract; expressions use the directly published `ACTIONS.<internalActionId>` path.
 
-Case YAML and logs preserve nested Flow evidence. Existing workbook, HTML, JUnit, JSON, and CI consumers continue to use the top-level Flow Action result in V3.0.0.
+## 8. Control and result semantics
 
-## 9. Result aggregation
+Action `runWhen` and `onFailure: stop|continue` behave identically inside and outside a Flow. A Flow Action whose own `runWhen` is false is SKIPPED and does not execute its children. An invoked Flow whose executed children are all PASS or SKIPPED is PASS.
 
-ATT uses one status ordering everywhere:
+Flow aggregation retains the common priority:
 
 ```text
 ERROR > INVALID > FAIL > PASS > SKIPPED
 ```
 
-For Flow aggregation, any ERROR wins, then INVALID, then FAIL. Otherwise the Flow is PASS, including the all-internal-SKIPPED case. `onFailure: stop` stops remaining sibling Actions after a non-PASS result; `continue` records the result and continues.
+Existing Excel, HTML, JUnit, JSON, and CI consumers continue to consume the top-level Flow Action result. Internal hierarchy remains available in Case evidence.
 
-## 10. Delivery plan and acceptance
+## 9. Migration
 
-### 10.1 Design and schemas
+Earlier isolated V3 Flow packages must be migrated:
 
-- publish the V3 schemas and schema catalog entries;
-- provide three complete Flows and one composition Template; and
-- compile both schemas as external Draft 2020-12 documents.
+- remove Flow `inputs` and `outputs`;
+- remove invocation `with`;
+- replace `${input.x}` with the existing `${CASE...}` or `${ACTIONS...}` source;
+- replace `${actions.x...}` with `${ACTIONS.x...}`;
+- replace `${runtime.x}` with `${CASE.VARS.x}`; and
+- replace `${ACTIONS.<flowCall>.output.outputs.x}` with the internal Action that produces the value.
 
-### 10.2 Static Flow compiler
+This is intentionally a breaking reinterpretation of `att-flow/v3.0` and `att-template/v3.0`. No compatibility mode is provided. Non-Flow V2 Templates remain compatible.
 
-- load the package registry or selected dependency closure;
-- validate contracts, graphs, Context access, paths, and depth before output creation; and
-- store resolved definitions in the execution plan.
+## 10. Acceptance criteria
 
-### 10.3 Isolated runtime
+V3.1 is complete when:
 
-- execute nested Flow Actions with isolated frames;
-- preserve existing Tool/DB resources and failure semantics; and
-- write qualified hierarchical evidence and artifacts.
-
-### 10.4 Release acceptance
-
-Required coverage includes:
-
-- schema unknown fields, invalid types, required/default conflicts, dynamic `use`, and illegal Context;
-- duplicate IDs, missing references, direct/indirect cycles, depth four, and path/symlink rejection;
-- basic and nested calls, cross-Flow output, repeated reuse, same-named internal Actions, local assign, `runWhen`, stop/continue, and failed-output suppression;
-- nested evidence, artifact qualification, caller isolation, and unchanged top-level consumers;
-- unchanged V2.6 Template execution and V2 rejection of V3 fields; and
-- 200 Flows with 2,000 references compiling within 10 seconds, with each descriptor parsed at most once per package build.
-
-The release gate is:
-
-```text
-mvn test
-./att.sh validate --package
-./att.sh docs
-./build.sh
-unpack the V3 binary package and run ./att.sh validate --package
-git diff --check
-```
+- schema validation rejects `inputs`, `outputs`, and `with`;
+- the same Action configuration runs inline or in a Flow without expression changes;
+- Flow render payloads read Case data directly;
+- caller, internal, nested, and following Actions share one ordered `ACTIONS` view;
+- all expanded ID and `CASE.VARS` collisions fail before execution;
+- Flow Actions expose no `output.outputs`;
+- nested evidence and qualified artifacts remain intact;
+- all V2 compatibility tests pass; and
+- source, package, documentation, build, and unpacked-package validation gates pass.

@@ -36,6 +36,10 @@ public class StageTemplateRunner {
             Instant started = Instant.now();
             List<String> targets = new ArrayList<String>();
             Map<String, Object> output = outcome(targets);
+            if ("flow".equalsIgnoreCase(action.type())) {
+                output.remove("targetFiles");
+                output.remove("result");
+            }
             Map<String, Object> node = new LinkedHashMap<String, Object>();
             node.put("id", action.id());
             node.put("type", action.type());
@@ -132,61 +136,21 @@ public class StageTemplateRunner {
         if (flows == null) throw new IllegalStateException("Flow execution is unavailable");
         FlowDefinition flow = flows.get(action.use());
         if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
-        Map<String, Object> input = resolveFlowInputs(action, flow, context, log);
-        Map<String, Object> exported = new LinkedHashMap<String, Object>();
         List<ValidationResult> internal = new ArrayList<ValidationResult>();
         CaseRuntimeContext.FlowEvidence evidence = null;
-        context.beginFlow(flow.id(), action.id(), input);
+        context.beginFlow(flow.id(), action.id());
         try {
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA);
             internal.addAll(execute(stageName + "." + action.id(), body, context, log));
             ResultStatus status = aggregateFlow(internal);
-            if (status == ResultStatus.PASS) {
-                for (Map.Entry<String, FlowDefinition.Output> declared : flow.outputs().entrySet()) {
-                    Object value = templateEngine.evaluate(declared.getValue().from(), context, log);
-                    FlowRegistry.requireType("Flow output " + flow.id() + "." + declared.getKey(), declared.getValue().type(), value, false);
-                    exported.put(declared.getKey(), value);
-                }
-            }
-            output.put("outputs", exported); output.put("status", status.name()); output.put("success", status == ResultStatus.PASS);
+            output.put("status", status.name()); output.put("success", status == ResultStatus.PASS);
             return status;
         } finally {
             evidence = context.finishFlow();
             Map<String, Object> flowNode = new LinkedHashMap<String, Object>();
-            flowNode.putAll(evidence.flow()); flowNode.put("name", flow.name()); flowNode.put("input", evidence.input());
-            flowNode.put("runtime", evidence.runtime()); flowNode.put("actions", evidence.actions());
+            flowNode.putAll(evidence.flow()); flowNode.put("name", flow.name()); flowNode.put("actions", evidence.actions());
             node.put("flow", flowNode);
         }
-    }
-
-    private Map<String, Object> resolveFlowInputs(TemplateAction action, FlowDefinition flow,
-                                                   CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        flows.validateInvocation(action);
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        for (Map.Entry<String, FlowDefinition.Input> entry : flow.inputs().entrySet()) {
-            Object value;
-            if (action.with().containsKey(entry.getKey())) value = resolveFlowValue(action.with().get(entry.getKey()), context, log);
-            else if (entry.getValue().hasDefault()) value = entry.getValue().defaultValue();
-            else value = null;
-            FlowRegistry.requireType("Flow input " + flow.id() + "." + entry.getKey(), entry.getValue().type(), value, !entry.getValue().required());
-            result.put(entry.getKey(), value);
-        }
-        return result;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object resolveFlowValue(Object value, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        if (value instanceof Map) {
-            Map<String, Object> result = new LinkedHashMap<String, Object>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) result.put(String.valueOf(entry.getKey()), resolveFlowValue(entry.getValue(), context, log));
-            return result;
-        }
-        if (value instanceof List) {
-            List<Object> result = new ArrayList<Object>();
-            for (Object item : (List<?>) value) result.add(resolveFlowValue(item, context, log));
-            return result;
-        }
-        return value instanceof String ? templateEngine.evaluate((String) value, context, log) : value;
     }
 
     private ResultStatus aggregateFlow(List<ValidationResult> results) {

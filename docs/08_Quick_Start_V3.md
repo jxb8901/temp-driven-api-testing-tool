@@ -1,16 +1,17 @@
-# ATT V3.0.1 新手入門
+# ATT V3.1.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.0.1 的 Flow、command/call-backed 工具、Java JDBC dbhelper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V3.1.0 的 Flow、command/call-backed 工具、Java JDBC dbhelper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.0.1 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.1.0 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
 ```text
-test case --1:n stage--> template --1:n action--> flow --1:n action--> tool
+test case --1:n stage--> template --1:n action--> tool
+                                      └── flow --1:n action
 ```
 
-Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 封裝可重用、具型別且隔離的線性 Action 序列。
+Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
 
 ## 2. 先理解執行方式
 
@@ -26,7 +27,7 @@ validate + plan
 
 只有具有 `COMPLETE` manifest 的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 保留在 `output/<RunID>` 供除錯，但不會成為 latest；重試同一 Run ID 前需先移走或清理該未完成目錄。
 
-V3.0.1 沿用既有狀態及聚合契約，不可混淆：
+V3.1.0 沿用既有狀態及聚合契約，不可混淆：
 
 | 狀態 | 意義 | 例子 |
 |---|---|---|
@@ -66,26 +67,15 @@ schemaVersion: att-flow/v3.0
 id: common.decorate.v1
 name: Decorate
 description: 加上固定後綴並輸出結果。
-inputs:
-  value:
-    type: string
-    required: true
-  enabled:
-    type: boolean
-    default: true
 actions:
   decorate:
     type: assign
-    name: result
-    expression: "${input.value}-done"
+    name: decoratedResult
+    expression: "${CASE.caseId}-done"
   audit:
     type: log
-    message: "Decorated ${runtime.result}"
-    runWhen: "${input.enabled} == true"
-outputs:
-  value:
-    type: string
-    from: "${runtime.result}"
+    message: "Decorated ${CASE.VARS.decoratedResult}"
+    runWhen: "${CASE.auditEnabled} == true"
 ```
 
 再從 V3 Template 靜態調用：
@@ -98,23 +88,18 @@ actions:
   prepare:
     type: flow
     use: common.decorate.v1
-    with:
-      value: "${CASE.caseId}"
-      enabled: true
   verify:
     type: assert
-    assert: "${ACTIONS.prepare.output.outputs.value} == '${CASE.caseId}-done'"
+    assert: "${ACTIONS.decorate.output.result} == '${CASE.caseId}-done'"
 ```
 
-Flow ID 必須是以 `.vN` 結尾的固定 canonical ID；`use` 不接受 expression、版本範圍或動態選擇。Flow 內只可讀 `${input.*}`、`${actions.*}`、`${runtime.*}`、`${flow.*}`，不可直接讀 `CASE`、`RUN`、父級或兄弟 Flow。`assign` 寫入本地 `runtime`，不會改動 `CASE.VARS`。
+Flow ID 必須是以 `.vN` 結尾的固定 canonical ID；`use` 不接受 expression、版本範圍或動態選擇。Flow 與 Template Action 使用相同的 `${CASE...}`、`${ACTIONS...}`、`${RUN...}`、`${TOOL...}`、`${DB...}` 及目前 Action 的 `${output...}` Context；`${...}` 只讀 Context，`#{...}` 才調用 Tool、DB façade 或 built-in。
 
-`${...}` 只讀 Context；`#{...}` 才調用 Tool、DB façade 或 built-in。`with` 可包含 literal、map、array 和遞歸 `${...}`，但不能執行 `#{...}`。Template 調用者只讀 `${ACTIONS.<flowAction>.output.outputs.<name>}`；Flow 內調用者則讀 `${actions.<flowAction>.output.outputs.<name>}`。
+Flow 不再有 `inputs`、`outputs` 或調用端 `with`。內部 Action 完成後直接發布到共用 `ACTIONS`，所以後續 Action 使用 `${ACTIONS.decorate.output.result}`。Flow 中的 `assign` 與 Template 相同，寫入 `${CASE.VARS.<name>}`。
 
-literal 與已聲明 Flow output 會在 validate 時直接做型別檢查。前序 `assign` 產生的 `${CASE.VARS.<name>}` 在靜態階段只確認已可用，實際值仍會在進入 Flow 前嚴格檢查，因此不會把 validation 使用的空佔位誤判為真實 `null`。
+同一 Template 及其全部巢狀 Flow 共用一個 Action ID namespace；任何重名或同一 Flow 的重複調用都會在 validate 時失敗。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
 
-輸入可聲明 `string`、`integer`、`number`、`boolean`、`object` 或 `array`。`required: true` 不可同時設定 `default`；省略的 optional input 是 `null`，ATT 不做隱式類型轉換。Flow 只有 PASS 才導出 outputs。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
-
-V3.0.1 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
+V3.1.0 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
 
 ## 4. 建立嚴格的全域配置
 
@@ -806,4 +791,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.0.1 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.1.0 Reference Manual](09_Reference_Manual_V3.md)。

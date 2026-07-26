@@ -1,24 +1,13 @@
 schemaVersion: att-flow/v3.0
 id: common.decorate.v1
 name: Decorate Value
-description: Demonstrate local assignment and conditional skipping.
-inputs:
-  value:
-    type: string
-    required: true
-  decorate:
-    type: boolean
-    default: true
+description: Demonstrate CASE.VARS assignment and conditional skipping inside a Flow.
 actions:
-  decorated:
+  decoratedValue:
     type: assign
-    name: result
-    expression: "${input.value}-done"
-  audit:
+    name: decoratedResult
+    expression: "${ACTIONS.identityValue.output.result}-done"
+  auditDecoration:
     type: log
-    message: "Decorated ${runtime.result}"
-    runWhen: "${input.decorate} == false"
-outputs:
-  value:
-    type: string
-    from: "${runtime.result}"
+    message: "Decorated ${CASE.VARS.decoratedResult}"
+    runWhen: "false"

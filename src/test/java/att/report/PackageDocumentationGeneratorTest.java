@@ -22,9 +22,7 @@ class PackageDocumentationGeneratorTest {
         Files.write(tempDir.resolve("templates/flows/sample/flow.yaml"), (
                 "schemaVersion: att-flow/v3.0\n" +
                 "id: sample.echo.v1\nname: Sample Echo\ndescription: Documented Flow\n" +
-                "inputs:\n  value: {type: string, required: true}\n" +
-                "actions:\n  copy: {type: assign, name: value, expression: '${input.value}'}\n" +
-                "outputs:\n  value: {type: string, from: '${runtime.value}'}\n").getBytes("UTF-8"));
+                "actions:\n  copy: {type: assign, name: value, expression: '${CASE.caseId}'}\n").getBytes("UTF-8"));
         LinkedHashMap<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
         LinkedHashMap<String,ToolArgumentConfig> echoArguments = new LinkedHashMap<String,ToolArgumentConfig>();
         echoArguments.put("value", new ToolArgumentConfig("value", "Value", "Optional values", false, ",", "--value", "once"));

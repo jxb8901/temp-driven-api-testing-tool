@@ -76,8 +76,26 @@ class UnifiedTemplateEngineTest {
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
         assertEquals("Execute payments.payment.TC001; status=${output.status}", engine.renderValidationValues("Execute ${CASE.caseId}; status=${output.status}", context));
         assertEquals("Directory=${CASE.outputDirectory}", engine.renderValidationValues("Directory=${CASE.outputDirectory}", context));
+        assertEquals("${CASE.STAGES.invoke.TEMPLATE.ACTIONS.call.output.result.id}|${ACTIONS.call.output.result.id}|${TOOL.output.result.id}|${DB.orders.query.result.id}|${output.result.id}",
+                engine.renderValidationValues("${CASE.STAGES.invoke.TEMPLATE.ACTIONS.call.output.result.id}|${ACTIONS.call.output.result.id}|${TOOL.output.result.id}|${DB.orders.query.result.id}|${output.result.id}", context));
         assertEquals("Directory=" + tempDir.toAbsolutePath().normalize(), engine.renderValues("Directory=${CASE.outputDirectory}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.validateValueSyntax("broken ${CASE.caseId"));
+    }
+
+    @Test void validationRenderingPreservesNestedPathsBelowDeferredAssignmentsOnly() {
+        LinkedHashMap<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("actualNull", null);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payments","payment","sheet","TC001",
+                Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        context.putValidationPlaceholder("CASE.VARS.response");
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+
+        assertEquals("status=${CASE.VARS.response.status}; short=${response.status}",
+                engine.renderValidationValues("status=${CASE.VARS.response.status}; short=${response.status}", context));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> engine.renderValidationValues("${CASE.VARS.unknown.status}", context));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> engine.renderValidationValues("${CASE.actualNull.status}", context));
     }
 
     @Test void supportsV22BuiltInsAndRejectsInvalidInputs() throws Exception {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.0 - 2026-07-26
+
+- Redefined Flow as a reusable group of Template Actions executing in the calling Template Context; Flow and inline Actions now share `CASE`, `RUN`, `ACTIONS`, `TOOL`, `DB`, current `output`, and existing shorthand semantics.
+- Removed Flow `inputs`, `outputs`, invocation `with`, and the dedicated `input`, lowercase `actions`, `runtime`, `flow`, and `output.outputs` contracts from the still-named `att-flow/v3.0` and `att-template/v3.0` schemas.
+- Published completed internal Actions directly in the ordinary `ACTIONS` logical view while retaining nested Flow evidence and qualified artifact paths.
+- Added recursive preflight validation using the calling action order and Case context, including one expanded Action-ID namespace and Case-wide `CASE.VARS` assignment checks across nested Flows.
+- Distinguished validation-time deferred `CASE.VARS` values from real nulls, allowing nested paths below an earlier `assign` while retaining strict errors for unknown variables, early references, and invalid runtime shapes.
+- Migrated the Flow examples, generated documentation, Quick Start, English/Chinese manuals, and regression/performance coverage. Earlier isolated V3 Flow packages must be migrated; V2 Templates remain compatible.
+
 ## 3.0.1 - 2026-07-26
 
 - Fixed static validation of Flow bindings sourced from an ordered `assign`: `${CASE.VARS.<name>}` is treated as runtime-typed during validation, while the resolved value remains strictly checked immediately before Flow entry.

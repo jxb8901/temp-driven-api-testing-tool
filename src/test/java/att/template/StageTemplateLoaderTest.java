@@ -104,7 +104,7 @@ class StageTemplateLoaderTest {
         assertEquals("", action.message());
     }
 
-    @Test void rejectsMalformedV3FlowUseAndBindingsAtLoadBoundary() throws Exception {
+    @Test void rejectsDynamicV3FlowUseAndRemovedWithAtLoadBoundary() throws Exception {
         StageTemplateLoader.clearForTests();
         Path dynamic = tempDir.resolve("templates/dynamic");
         Path array = tempDir.resolve("templates/array");
@@ -119,6 +119,6 @@ class StageTemplateLoaderTest {
         IllegalArgumentException invalidUse = assertThrows(IllegalArgumentException.class, () -> loader.load("dynamic"));
         assertTrue(invalidUse.getMessage().contains("static canonical Flow ID"), invalidUse.getMessage());
         IllegalArgumentException invalidWith = assertThrows(IllegalArgumentException.class, () -> loader.load("array"));
-        assertTrue(invalidWith.getMessage().contains("with must be a map"), invalidWith.getMessage());
+        assertTrue(invalidWith.getMessage().contains("Unknown field") || invalidWith.getMessage().contains("with"), invalidWith.getMessage());
     }
 }

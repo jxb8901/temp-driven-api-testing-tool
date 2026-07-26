@@ -1,7 +1,7 @@
-# ATT V3.0.1 中文用户手册与参考手册
+# ATT V3.1.0 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.0.1
+版本：3.1.0
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -38,7 +38,7 @@ ATT 是一个离线的、基于模板驱动的 API 测试执行器。测试数�
 工作簿行 → 测试用例 → 有序阶段
 阶段 → 模板选择列 → 当前行的选择器单元格 → 模板
 模板 → 有序动作 → Flow 或配置好的 Tool
-Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
+Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool / DB / built-in / 嵌套 Flow
 ```
 
 你首先需要掌握的四个概念是：
@@ -48,20 +48,20 @@ Flow → 隔离的有序动作 → Tool / DB / built-in / 嵌套 Flow
 | 测试用例 | 一行工作簿数据、用例级数据、标签和有序阶段 |
 | 阶段 | 模板选择、阶段私有数据、执行条件和失败处理 |
 | 模板 | 由有序动作组成的完整测试场景 |
-| Flow | 具类型、隔离、可复用的有序动作序列 |
+| Flow | 与调用者共用 Context 的可复用 Template Action 组 |
 | 工具 | 一个具有命名输入的能力；可启动外部命令，也可通过 V2.6 `call` 包装 typed DB 操作或纯 built-in |
 | Dbhelper | 一个独立配置的 JDBC 连接、SQL timeout、transaction、结果限制与 evidence 策略 |
 
 一个动作可以渲染负载、调用工具、查询／更新数据库、断言表达式、写入结构化日志、分配作用域运行值，或调用 Flow。ATT 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。
 
-### V3.0 的保证
+### V3.1 的保证
 
 - 配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML 键，以及无效动作形状都是错误。
 - dbhelper 使用独立 `att-dbhelper/v2.5` 文件，并通过一級 `type: db` Action 或只读 `#{db.<instance>...}` 表达式调用；它不是 Tool 的特殊配置。
 - `CASE.DB` 是固定、区分大小写、由框架拥有的 Case 交易收尾节点，不能由 Excel 或侧车数据覆盖。
 - 每个工作簿都有一个同名的 YAML 侧车文件和生成的语义 XML 快照。
 - 每个模板都是包含 `template.yaml` 的目录。
-- 每个 Flow 位于 `templates/flows/**/flow.yaml`，使用静态 `.vN` ID、具类型的输入／输出，并且最大嵌套深度为 3。
+- 每个 Flow 位于 `templates/flows/**/flow.yaml`，使用静态 `.vN` ID、共用调用 Template 的 Context，并且最大嵌套深度为 3。
 - `validate --package` 会检查整个包；`validate --selected` 只检查所选依赖闭包。
 - Run ID 和 Case ID 会先被校验，然后直接用作输出目录名。
 - 只有在运行完成后，最终运行目录才会发布。
@@ -102,27 +102,22 @@ att-package/
 
 ### V3 Flow 编写契约
 
-Flow descriptor 的顶层字段只能是 `schemaVersion`、`id`、`name`、`description`、`inputs`、`actions` 和 `outputs`：
+Flow descriptor 的顶层字段只能是 `schemaVersion`、`id`、`name`、`description` 和 `actions`：
 
 ```yaml
 schemaVersion: att-flow/v3.0
 id: common.decorate.v1
 name: Decorate
 description: 添加固定后缀。
-inputs:
-  value: {type: string, required: true}
-  enabled: {type: boolean, default: true}
 actions:
   decorate:
     type: assign
-    name: result
-    expression: "${input.value}-done"
+    name: decoratedResult
+    expression: "${CASE.caseId}-done"
   audit:
     type: log
-    message: "Decorated ${runtime.result}"
-    runWhen: "${input.enabled} == true"
-outputs:
-  value: {type: string, from: "${runtime.result}"}
+    message: "Decorated ${CASE.VARS.decoratedResult}"
+    runWhen: "${CASE.auditEnabled} == true"
 ```
 
 V3 Template 使用固定 canonical ID 调用 Flow：
@@ -135,22 +130,18 @@ actions:
   prepare:
     type: flow
     use: common.decorate.v1
-    with:
-      value: "${CASE.caseId}"
   verify:
     type: assert
-    assert: "${ACTIONS.prepare.output.outputs.value} == '${CASE.caseId}-done'"
+    assert: "${ACTIONS.decorate.output.result} == '${CASE.caseId}-done'"
 ```
 
-Flow 输入类型仅限 `string`、`integer`、`number`、`boolean`、`object` 和 `array`。required 输入不能同时有 default；省略的 optional 输入是 `null`；ATT 不做隐式类型转换。`with` 中的 map 与 array 会递归解析 `${...}`，但绑定阶段禁止执行 `#{...}`。
+Flow 和内联 Template Action 使用相同的 `CASE`、`RUN`、`ACTIONS`、`TOOL`、`DB`、当前 `output` 及唯一后缀 Context 语义。`${...}` 读取 Context；`#{...}` 在 Action 允许的位置调用 Tool、DB facade 或 built-in。Action 只能读取展开后执行计划中已经完成的 Action。
 
-验证会立即检查 literal 和已声明 Flow output 的类型。由前序有序 `assign` 产生的 `${CASE.VARS.<name>}` 在静态验证时只确认“已可用”，其类型仍属于运行时数据；进入 Flow 前仍会对解析后的实际值执行严格类型检查。
+Flow `inputs`、`outputs`、调用端 `with` 以及专用的 `input`、小写 `actions`、`runtime` 和 `flow` root 均为非法。Flow 内的 `assign` 与内联 assign 一样写入 `CASE.VARS`。内部 Action 完成后可直接通过 `${ACTIONS.<internalActionId>.output...}` 读取；Flow 调用 Action 本身只提供标准状态结果，不会创建 `output.outputs`。
 
-Flow 内只可读取 `input`、`actions`、`runtime` 和 `flow`。`${...}` 读取 Context；`#{...}` 在 Action 允许的位置调用 Tool、DB facade 或 built-in。Flow 不能读取 `CASE`、`RUN`、父级／兄弟 Flow 或后续 Action。本地 `assign` 写入 `runtime.<name>`，而不是 `CASE.VARS`。
+Template 与所有嵌套 Flow 共用一个 Action ID namespace。Template／Flow 冲突、多个 Flow 冲突、间接嵌套冲突以及在同一 Template 中重复调用同一 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
 
-Template 只能读取 `${ACTIONS.<flowAction>.output.outputs.<name>}`；嵌套 Flow 使用 `${actions.<flowAction>.output.outputs.<name>}`。只有 PASS Flow 才计算并导出 outputs。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
-
-Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.0.1 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
+Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.1.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
 
 ## 02 快速开始
 
