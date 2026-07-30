@@ -1,7 +1,7 @@
-# ATT V3.1.0 User Manual and Reference
+# ATT V3.2.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 3.1.0
+Version: 3.2.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -54,7 +54,7 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, assign a scoped runtime value, or invoke a Flow. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.
 
-### What V3.1 guarantees
+### What V3.2 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
@@ -62,10 +62,12 @@ An action can render a payload, call a tool, query/update a database, assert an 
 - Every Flow is below `templates/flows/**/flow.yaml`, has a static `.vN` ID, shares the calling Template Context, and has a maximum nesting depth of 3.
 - `validate --package` checks the whole package; `validate --selected` checks only a selected dependency closure.
 - Run ID and Case ID are validated and then used directly as output directory names.
-- A final run directory is published only after the run is complete.
+- The final run directory is reserved before execution so live evidence is directly inspectable; only a completed manifest is published as latest.
 - FAIL, ERROR, INVALID, SKIPPED, and PASS have stable aggregation and exit-code meanings.
 - JSON, XML, JUnit XML, JUnit HTML, and CI JSON outputs have versioned contracts.
 - V2.6 Templates remain readable, but only `att-template/v3.0` may use Flow Actions or Action `runWhen`.
+- Multiline Log Action text and process output remain physical Case-log lines; ordinary runs create no persistent `process-output` artifact.
+- `#{...}` supports typed calls, arithmetic, comparisons, boolean logic, lists, and `in`, while `${...}` remains the Context-reference syntax.
 
 ### Package layout
 
@@ -139,7 +141,7 @@ Flow `inputs`, `outputs`, invocation `with`, and the dedicated `input`, lowercas
 
 The Template and all nested Flows share one Action-ID namespace. Template/Flow collisions, collisions between used Flows, indirect nested collisions, and repeated use of the same Flow in one Template fail validation. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own `runWhen` is false is SKIPPED.
 
-Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.1.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
+Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.2.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
 
 ## 02 Quick Start
 
@@ -500,7 +502,7 @@ logResponse:
     action: callApi
 ```
 
-Both `message` and `file` support the unified `${...}` / `#{...}` expression engine and are evaluated before the log action publishes its own output. A relative `file` path resolves below `${CASE.outputDirectory}`; an absolute path is accepted only when its resolved real path is still below that directory. The source must be an existing regular non-symlink UTF-8 file. Path/symlink escapes, malformed UTF-8, blank resolved paths, and attempts to read the current Case log are ERROR.
+Both `message` and `file` support the unified `${...}` / `#{...}` expression engine and are evaluated before the log action publishes its own output. Their combined content is written to the Case log as raw text with CRLF/CR normalized to LF, so multiline content remains physical lines rather than YAML-escaped `\\n`. A relative `file` path resolves below `${CASE.outputDirectory}`; an absolute path is accepted only when its resolved real path is still below that directory. The source must be an existing regular non-symlink UTF-8 file. Path/symlink escapes, malformed UTF-8, blank resolved paths, and attempts to read the current Case log are ERROR.
 
 To print a typed DB result using the same SQL*Plus-style text as DB Action `saveAs.format: text`, format it in the message with the pure `dbText(...)` built-in:
 
@@ -666,12 +668,14 @@ result:
 
 evidence:
   sql: full
-  parameters: masked
+  parameters: values
 ```
 
 `id` is package-global, case-insensitive for uniqueness, and matches `^[A-Za-z_][A-Za-z0-9_-]*$`. The file requires `schemaVersion`, `id`, `name`, `description`, and `connection.url`. `statement`, `transaction`, `result`, and `evidence` are optional. Unknown fields are rejected except `x-*`. Referenced paths must remain inside the package, exist, and be unique after normalization.
 
 `connection.username`, `password`, and property values may be literal strings or complete `${ENV:NAME}` references; a missing variable blocks execution during configuration loading. JDBC URLs, passwords, and password/secret/token property values are removed from evidence and redacted from driver messages. `connection.readOnly: true` rejects DB update Actions and also calls `Connection.setReadOnly`; database account permissions remain the real security boundary. Isolation accepts `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`.
+
+`evidence.parameters` defaults to `values`, so ordinary resolved SQL bindings are visible in DB and Case logs for testcase diagnosis. `types` records Java type names and `masked` records asterisks instead. Connection credentials are never SQL-parameter evidence. If business SQL parameters themselves contain secrets, select `masked` or `types` for that dbhelper; ATT cannot infer business sensitivity from an arbitrary positional value.
 
 `statement.timeoutSeconds` is configured per instance, defaults to 30, accepts 1–3600, and is passed to every `PreparedStatement.setQueryTimeout`. A DB Action cannot override it. Portable connection timeout is not exposed because JDBC provides no safe per-Connection setter; use driver-specific `connection.properties`.
 
@@ -722,11 +726,11 @@ closeOrder:
   assert: "${output.result.affectedRows} == 1"
 ```
 
-Exactly one of `query` or `update` is required. Its block requires exactly one of `sql` or `sqlFile`; `params` is optional and defaults to an empty list. It may be an inline YAML list or one exact Context reference whose typed value is a Java `List`. ATT binds list items in order with `PreparedStatement.setObject`; it does not stringify and reparse typed values. Named parameters, batches, generated keys, callable statements, and multiple JDBC results are outside V2.5.
+Exactly one of `query` or `update` is required. Its block requires exactly one of `sql` or `sqlFile`. Use either positional `params` with JDBC `?` placeholders, or named `parameters` with `:name` placeholders; the two forms cannot coexist. `params` may be an inline YAML list or one exact Context reference whose typed value is a Java `List`. `parameters` is a string-keyed map whose values may be typed literals or expressions. ATT compiles each named placeholder to `?`, binds repeated names in occurrence order with `PreparedStatement.setObject`, and never interpolates a value into SQL. Quoted text, line/block comments, and PostgreSQL `::` casts are not placeholders. Missing and unused names fail validation. Batches, generated keys, callable statements, and multiple JDBC results remain unsupported.
 
 `retry` and Action-level `timeoutMs` are invalid for `type: db`. Automatic SQL retry is unsafe for updates. A DB Action otherwise uses the normal `description`, `assert`, and `onFailure` contract. Assertions run only after successful DB execution. DB errors remain `ERROR` and cannot be downgraded by an assertion.
 
-DB `saveAs` uses the common Tool/DB object shape but serializes the typed result rather than stdout. It requires `path` and `format: text|json|yaml|xml`; `overwrite` defaults to false and `raw` is invalid. `text` produces the SQL*Plus-style representation described below. The path must stay under the Case artifact directory. Formatting, serialization, or writing failure is `ERROR`.
+DB `saveAs` uses the common Tool/DB object shape but serializes the typed result rather than stdout. It requires `path` and `format: text|json|yaml|xml`; `overwrite` defaults to false and `raw` is invalid. `path: console` writes the selected representation to the Case log and creates no target file. Other paths must stay under the Case artifact directory. Formatting, serialization, or writing failure is `ERROR`.
 
 For a query, text output uses JDBC column-label order, expands each column to its widest terminal display width (including wide Unicode characters), right-aligns columns whose non-null values are all numeric, prints `NULL` explicitly, and ends with `1 row selected.` or `<n> rows selected.`. Backslashes, control characters, and non-printing format characters inside a header/cell are escaped so one DB row remains one physical line. An empty query is `no rows selected.`. An update is `1 row updated.` or `<n> rows updated.`. Output is UTF-8 with LF line endings. This representation contains table/update content rather than transaction metadata; use JSON, YAML, or XML when the complete stable result object is required.
 
@@ -1648,7 +1652,7 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 | `statement` | defaults | `timeoutSeconds` defaults to 30, integer 1–3600 |
 | `transaction` | defaults | `scope: case|statement`, `onEnd: commit|rollback`; defaults `case`/`rollback` |
 | `result` | defaults | `maxRows` 1000, `maxCellBytes` 1048576, `maxBytes` 10485760; positive bounded integers |
-| `evidence` | defaults | `sql: full|hash` defaults full; `parameters: masked|types|values` defaults masked |
+| `evidence` | defaults | `sql: full|hash` defaults full; `parameters: values|types|masked` defaults values |
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [Database helpers](#database-helpers) for Action, expression, result, security, and lifecycle behaviour.
 
@@ -1675,7 +1679,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
 | render | requires `payload`, `renderAs`; optional `assert`; no saveAs/output/call/expression/message/file/level/fields/timeout/retry/DB fields |
 | tool | requires `call`; optional object-shaped `saveAs`, `assert`, `expected`, `actual`, `timeoutMs`, and Action-only `retry`; command/call-backed Tools share this contract |
-| db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and optional typed-list `params`; optional `assert` and object-shaped `saveAs`; no action-level `overwrite`, `call`, retry, or Action timeout |
+| db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and either typed-list `params` or named `parameters`; optional `assert` and object-shaped `saveAs`; no action-level `overwrite`, `call`, retry, or Action timeout |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
 | assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `CASE.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or saveAs |
@@ -1748,18 +1752,19 @@ For a configured Tool, `raw` writes stdout exactly as produced by the process, i
 
 ATT resolves the path below the current Case artifact directory, normally alongside `case.log` under `output/<RunID>/<CaseID>/`. Parent directories such as `responses/` are created. The saved path appears in the Action's `output.targetFiles`; configured Tool attempt evidence also records it as `outputFile`. Without `saveAs`, ATT creates no separate output file.
 
-`saveAs.path` may contain `${...}` references plus `#{...}` built-in, configured-Tool, or read-only DB calls evaluated before the primary Action starts. Canonical Context paths are preferred:
+`saveAs.path` may be the reserved case-insensitive value `console`, which writes the selected representation to the Case log, adds no `output.targetFiles` entry, and creates no file. Otherwise it may contain `${...}` references plus `#{...}` expressions evaluated before the primary Action starts. Canonical Context paths are preferred:
 
 ```yaml
 saveAs: {path: "${CASE.caseId}-response.json", format: raw}
 saveAs: {path: "responses/${CASE.VARS.txnSeq}.json", format: json}
 saveAs: {path: "responses/${ACTIONS.prepare.output.result}.txt", format: text}
 saveAs: {path: "responses/#{lower(${CASE.rowCaseId})}.json", format: raw}
+saveAs: {path: console, format: text}
 ```
 
 The current Action has not produced an outcome when `saveAs.path` is evaluated, so `${output...}`, the current Action through `${ACTIONS...}`, and future Action outputs are invalid. A configured Tool or DB call in the path is a real preceding invocation with normal Case-log evidence; built-ins are preferable for filename formatting.
 
-The rendered value must be a non-blank safe relative path using `/` separators. Absolute paths, backslashes, empty path segments, `.` segments, `..` segments, and any path that escapes the Case artifact directory are rejected. Examples:
+Except for the reserved `console` value, the rendered value must be a non-blank safe relative path using `/` separators. Absolute paths, backslashes, empty path segments, `.` segments, `..` segments, and any path that escapes the Case artifact directory are rejected. Examples:
 
 ```yaml
 saveAs: {path: "responses/TC001.json", format: raw}    # valid Tool artifact
@@ -1846,41 +1851,38 @@ Generated envelopes reject additional top-level fields according to their schema
 
 ### Unified expression engine
 
-V2.4.2 uses one parser and renderer for `${...}` value interpolation and `#{...}` expressions. Every user-facing location that accepts `${...}` also accepts `#{...}`; validation uses the same grammar without executing built-ins or external processes.
+V3.2 uses one engine with two deliberately separate roles:
 
-The two delimiters identify different expression roles rather than two separate engines:
+- `${path}` reads one Context value and interpolates it into surrounding text, for example `Reference=${CASE.VARS.SrcRefNo}`.
+- `#{expression}` evaluates one typed expression block. The block may contain Context operands, calls, list literals, parentheses, unary operators, arithmetic, comparisons, `like`, `in`, null tests, and boolean logic.
 
-- `${path}` inserts one Context value into surrounding text, for example `Reference=${CASE.VARS.SrcRefNo}`.
-- `#{name(arguments)}` evaluates a built-in or configured Tool call. Context arguments must retain the explicit `${...}` form, for example `#{length(${CASE.VARS.SrcRefNo})}`.
-- ASCII `'...'` or `"..."` always denotes a literal string inside a call, for example `#{length('CASE.VARS.SrcRefNo')}`.
-
-Context references remain explicit even when nested inside a call:
+Context references remain explicit inside a block; write `${CASE.amount}`, never bare `CASE.amount`. Exact blocks preserve their Java result type, while a block embedded in surrounding text is converted to text.
 
 ```yaml
-assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
+assert: >-
+  #{(${CASE.amount} * ${CASE.rate}) >= 100
+    and ${CASE.status} in ['PENDING', 'POSTED']}
 description: "Reference length: #{length(${CASE.VARS.SrcRefNo})}"
+expression: "#{${ACTIONS.query.output.result.rowCount} + 1}"
 ```
 
-#### Call-argument resolution rules
+Operator precedence from highest to lowest is:
 
-ATT resolves each complete call argument in this order:
+1. parentheses, literals, `${...}`, lists, and calls;
+2. unary `+`, unary `-`, and `not`;
+3. `*` and `/`;
+4. `+` and `-`;
+5. `== != > >= < <=`, `like`, `in`, and `is [not] null`;
+6. `and`;
+7. `or`.
 
-1. An exact `${...}` reference is resolved as its typed Context value.
-2. An exact nested `#{...}` call is evaluated and its typed result is passed to the outer call.
-3. ASCII single- or double-quoted text is an explicit string literal. Numeric and boolean literals retain their normal types.
-4. Other unquoted tokens are literal values. However, unquoted tokens that look like reserved Context or definition-input paths, such as `CASE.customerId`, `ACTIONS.query.output.result`, or `input.customerId`, are rejected with a migration error; write `${CASE.customerId}`, `${ACTIONS.query.output.result}`, or `${input.customerId}`.
+Arithmetic operands must be numeric and division by zero is an error. `in` requires a List, array, or Iterable right operand; a literal list such as `['A', 'B']` and a typed Context list such as `${CASE.allowedStatuses}` are valid. The legacy non-block assertion grammar also accepts literal-list `in`, but arithmetic and typed list membership should use `#{...}`.
 
-Context interpolation within surrounding text also uses `${...}`: write `prefix-${CASE.caseId}` or `#{concat('prefix-', ${CASE.caseId})}`. Unique-suffix lookup remains available only inside `${...}`, although canonical paths such as `${CASE.VARS.SrcRefNo}` are preferred.
+Call arguments may themselves be any expression. Calls can be nested directly, for example `#{upper(trim(${CASE.name}))}`; the older nested-block spelling `#{upper(#{trim(${CASE.name})})}` remains accepted. Single/double ASCII quotes and paired typographic quotes delimit strings. Numeric, boolean, and null literals retain their types. Other unquoted tokens are literal strings unless they look like reserved Context paths or a visible scoped variable, in which case ATT requires `${...}`.
 
-Quotation marks must be the ASCII characters `'` or `"`. Typographic quotes such as `“...”` and `‘...’` are ordinary Unicode characters and remain part of the literal token. For example:
+Context interpolation within surrounding text still uses `${...}`: write `prefix-${CASE.caseId}` or `#{concat('prefix-', ${CASE.caseId})}`. Unique-suffix lookup remains available only inside `${...}`, although canonical paths such as `${CASE.VARS.SrcRefNo}` are preferred.
 
-| Expression | Value passed to `length` | Result |
-|---|---|---:|
-| `#{length(value=${CASE.VARS.SrcRefNo})}` | Actual value of the canonical Context path | Length of the runtime value |
-| `#{length(value="CASE.VARS.SrcRefNo")}` | Literal `CASE.VARS.SrcRefNo` | `18` |
-| `#{length(value=“CASE.VARS.SrcRefNo”)}` | Literal including both typographic quote characters | `20` |
-
-Calls may be nested, for example `#{upper(#{trim(${CASE.name})})}`. Context references still require `${...}`; Context paths and exact nested calls retain typed values until the receiving built-in/Tool or surrounding template requires text.
+For backward compatibility, an unquoted Tool-call argument shaped like `${directory}/file.name` remains text interpolation rather than numeric division. New numeric division such as `${CASE.amount}/2` remains arithmetic; quote path-like values in new configuration when practical.
 
 The available values and callable capabilities still depend on the location's scope:
 
@@ -1913,13 +1915,14 @@ normalizeReference:
   assert: "${output.result} == 'PAY-001'"
 ```
 
-`#{...}` is not restricted to text replacement. An exact nested call argument retains its typed result, and assertion calls are evaluated before comparison parsing. Therefore this is valid:
+`#{...}` is not restricted to text replacement. An exact block retains its typed result and is evaluated before the Action consumes it. Therefore both of these are valid:
 
 ```yaml
 assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
+assert: "#{${CASE.status} in ${CASE.allowedStatuses}}"
 ```
 
-ATT first evaluates `length`, producing an expression such as `28 <= 35`, then applies the assertion operators documented below. A configured Tool or DB query called from a Case-runtime field is a real external invocation and produces evidence; do not use either merely for formatting when a built-in or existing Context value is sufficient.
+The first block returns a Boolean directly; ATT does not stringify and reparse it. A configured Tool or DB query called from a Case-runtime field is a real external invocation and produces evidence; do not use either merely for formatting when a built-in or existing Context value is sufficient.
 
 ### Runtime Context
 
@@ -2279,6 +2282,7 @@ Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`,
 | `misc.iif` | Select one of two values from a boolean | `#{misc.iif(${CASE.enabled}, 'Y', 'N')}` |
 | `misc.randomChoice` | Return one of 1–1000 input values | `#{misc.randomChoice('A', 'B', 'C')}` |
 | `misc.dbText` | Format one stable typed DB result as SQL*Plus-style text | `#{misc.dbText(${ACTIONS.queryOrders.output.result})}` |
+| `prettyPrint` / `format.pretty` | Deterministically format a Map/List/array tree | `#{prettyPrint(${ACTIONS.queryOrders.output.result})}` |
 
 The single-value `str.upper/lower/trim/ltrim/rtrim/length` and `misc.string/number/boolean` functions accept either `value=...` or one unnamed value. Other built-ins accept either their documented names or a complete positional list; do not mix named and positional arguments in one call. Case conversion is locale-independent. `misc.number` rejects non-numeric input and removes unnecessary trailing zeroes. `misc.boolean` accepts true/false, yes/no, and 1/0. `str.concat` treats null as empty; `misc.coalesce` skips null and whitespace-only values and returns empty when none qualifies. `misc.nvl` tests null/empty without trimming. `misc.iif` accepts the same boolean text forms and resolves all three arguments eagerly. `str.repeat` requires an integer count from 0 through 10000 and repeats the complete value.
 
@@ -2291,6 +2295,8 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
 `dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as direct DB Action `saveAs.format: text` and has no JDBC, transaction, connection, or cache side effects.
+
+`prettyPrint` accepts exactly one positional argument or named `value`. It formats Maps, Lists, Iterables, arrays, scalars, and null with two-space indentation. Linked and sorted Maps retain their iteration order; other Map keys are sorted by text. Strings are quoted and escaped, cycles and excessive depth are marked, output is bounded, and the source object is not modified.
 
 Use built-ins for in-process transformations, time values, DB-result formatting, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins occupy reserved framework packages. V2.6 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
@@ -2516,7 +2522,7 @@ Evidence is written there and can be inspected while Actions execute. After all 
 
 ### Process safety
 
-ATT constructs argv directly and uses no implicit shell. Local stdout and stderr are drained concurrently, retained in memory only as bounded head/tail previews, and streamed to `process-output/*.stdout|stderr` artifacts up to `execution.processOutput.artifactLimitBytes`. Evidence records original byte counts and truncation flags. Timeout termination stops the managed process according to platform support and retains the same bounded evidence. Structured parsers reject malformed/ambiguous input and XML external-resource features.
+ATT constructs argv directly and uses no implicit shell. Local stdout and stderr are drained concurrently, retained in memory only as bounded head/tail previews, and streamed through bounded temporary spools into the Case log. The spools are removed after logging or explicit `saveAs`; ordinary runs create no `process-output` file or directory. Evidence records original byte counts and truncation flags. Timeout termination stops the managed process according to platform support and retains the same bounded evidence. Structured parsers reject malformed/ambiguous input and XML external-resource features.
 
 `run --profile` writes `performance.json` beside `run.yaml`. It records configuration load, validation, plan, Case execution, result-workbook, HTML/CI report, and input-hash timings; selected/completed Case counts; schema/Template/payload cache loads and hits; process-output bytes/truncations; and a completion-time heap snapshot. It is diagnostic evidence, not a stable CI schema contract.
 

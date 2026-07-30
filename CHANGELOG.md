@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.2.0 - 2026-07-30
+
+- Preserved Log Action, process stdout/stderr, and ordinary multiline Excel values as physical Case-log lines; Log Action results remain available in structured evidence without escaped-text duplication.
+- Removed persistent `process-output` artifacts. Process output is spooled only in bounded temporary files while it is streamed to the Case log; explicit Action file `saveAs` remains supported.
+- Added reserved `saveAs.path: console` for Tool and DB Actions, writing the selected text/JSON/YAML/XML representation to the Case log without creating an Action artifact.
+- Expanded `#{...}` into a typed expression block with precedence-aware arithmetic, parentheses, boolean/comparison operators, `in`, lists, Context operands, and nested calls. Legacy assertion syntax also accepts literal-list `in`; `${...}` remains the only Context-reference syntax.
+- Added deterministic `prettyPrint(...)` / `format.pretty(...)` formatting for nested maps, lists, arrays, scalars, nulls, cycles, depth limits, and bounded output.
+- Added named direct-DB Action parameters using safe `:name` to JDBC `?` binding with duplicate-name ordering, quote/comment/cast awareness, and validation of missing or unused names. DB parameter evidence now defaults to resolved values; credentials remain excluded and `masked`/`types` remain available.
+- Updated V3.2 design, Quick Start, English/Chinese manuals, examples, generated documentation, schema coverage, and regressions while retaining the V3.1 shared-Context Flow contract and all readable V2 Template contracts.
+
 ## 3.1.0 - 2026-07-26
 
 - Redefined Flow as a reusable group of Template Actions executing in the calling Template Context; Flow and inline Actions now share `CASE`, `RUN`, `ACTIONS`, `TOOL`, `DB`, current `output`, and existing shorthand semantics.

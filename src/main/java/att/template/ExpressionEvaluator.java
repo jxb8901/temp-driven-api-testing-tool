@@ -157,6 +157,17 @@ public class ExpressionEvaluator {
                 boolean isNull = left.length() == 0 || "null".equalsIgnoreCase(left);
                 return negate ? !isNull : isNull;
             }
+            if (matchIgnoreCase("in")) {
+                String right = readOperand().trim();
+                if (!(right.startsWith("[") && right.endsWith("]"))) {
+                    throw new IllegalArgumentException("Right operand of in must be a list literal");
+                }
+                String expected = strip(left);
+                for (String item : new ToolCallParser().listItems(right)) {
+                    if (compare(expected, strip(item), "==")) return true;
+                }
+                return false;
+            }
             String op = next();
             if ("like".equalsIgnoreCase(op)) {
                 return strip(left).matches(strip(readOperand()).replace("%", ".*").replace("_", "."));
@@ -177,6 +188,7 @@ public class ExpressionEvaluator {
         private boolean isBoundary(String token) {
             return ")".equals(token) || "and".equalsIgnoreCase(token) || "or".equalsIgnoreCase(token)
                     || "is".equalsIgnoreCase(token) || "like".equalsIgnoreCase(token)
+                    || "in".equalsIgnoreCase(token)
                     || ">=".equals(token) || "<=".equals(token) || "==".equals(token) || "!=".equals(token)
                     || ">".equals(token) || "<".equals(token);
         }

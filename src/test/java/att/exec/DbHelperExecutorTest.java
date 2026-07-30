@@ -98,6 +98,24 @@ class DbHelperExecutorTest {
         assertEquals(1, audit.closes);
     }
 
+    @Test void namedParameterEvidenceCanShowValuesWithoutMaskingCredentials() throws Exception {
+        DbHelperConfig visible = new DbHelperConfig("visible", "visible", "Visible DB", "jdbc:att-test:visible",
+                "user", "secret", "", Collections.<String,String>emptyMap(), false, "driverDefault", 5,
+                "statement", "commit", 10, 1024, 8192, "full", "values", null);
+        DbHelperExecutor executor = executor(Collections.singletonMap("visible", visible));
+        executor.beginCase();
+
+        DbInvocationResult result = executor.execute("visible", "query", "select ONE where id=?", "inline",
+                Collections.<Object>singletonList("A100"), Collections.singletonList("id"), "named-1");
+
+        assertTrue(result.success());
+        assertEquals(Collections.singletonList(Collections.singletonMap("name", "id")),
+                parameterNamesOnly((List<?>) result.evidence().get("parameters")));
+        assertEquals("A100", ((Map<?, ?>) ((List<?>) result.evidence().get("parameters")).get(0)).get("value"));
+        assertFalse(String.valueOf(result.evidence()).contains("secret"));
+        executor.close();
+    }
+
     @Test void keepsRowsAsAListAndReportsLimitsAndDuplicateLabels() throws Exception {
         Map<String, DbHelperConfig> helpers = new LinkedHashMap<String, DbHelperConfig>();
         helpers.put("limited", db("limited", "jdbc:att-test:limits", "statement", "commit", 5, 1));
@@ -447,6 +465,16 @@ class DbHelperExecutorTest {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (int index = 0; index < values.length; index += 2) {
             result.put(String.valueOf(values[index]), values[index + 1]);
+        }
+        return result;
+    }
+
+    private static List<Map<String,Object>> parameterNamesOnly(List<?> values) {
+        List<Map<String,Object>> result = new ArrayList<Map<String,Object>>();
+        for (Object value : values) {
+            Map<String,Object> name = new LinkedHashMap<String,Object>();
+            name.put("name", String.valueOf(((Map<?, ?>) value).get("name")));
+            result.add(name);
         }
         return result;
     }

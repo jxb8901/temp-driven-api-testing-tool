@@ -114,11 +114,21 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, String invocationId) {
-        return execute(instance, operation, sql, source, params, invocationId, null);
+        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, null);
     }
 
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, String invocationId, Long timeoutMs) {
+        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, timeoutMs);
+    }
+
+    public DbInvocationResult execute(String instance, String operation, String sql, String source,
+                                      List<?> params, List<String> parameterNames, String invocationId) {
+        return execute(instance, operation, sql, source, params, parameterNames, invocationId, null);
+    }
+
+    private DbInvocationResult execute(String instance, String operation, String sql, String source,
+                                      List<?> params, List<String> parameterNames, String invocationId, Long timeoutMs) {
         DbHelperConfig config = helper(instance);
         if (config == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + instance);
         if (!("query".equals(operation) || "update".equals(operation))) {
@@ -155,6 +165,7 @@ public final class DbHelperExecutor implements AutoCloseable {
             }
         }
         Map<String, Object> evidence = evidence(config, invocationId, operation, source, sql, values,
+                parameterNames == null ? Collections.<String>emptyList() : parameterNames,
                 result, Duration.between(started, Instant.now()).toMillis(), timeoutMs);
         return new DbInvocationResult(result, evidence);
     }
@@ -384,7 +395,7 @@ public final class DbHelperExecutor implements AutoCloseable {
     }
 
     private Map<String, Object> evidence(DbHelperConfig config, String invocationId, String operation,
-                                         String source, String sql, List<?> params, Map<String, Object> result,
+                                         String source, String sql, List<?> params, List<String> parameterNames, Map<String, Object> result,
                                          long durationMs, Long timeoutMs) {
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         evidence.put("id", invocationId);
@@ -396,7 +407,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         evidence.put("source", source == null ? "inline" : source);
         evidence.put("sql", "hash".equals(config.evidenceSql()) ? sha256(sql) : sql);
         evidence.put("sqlEvidence", config.evidenceSql());
-        evidence.put("parameters", parameterEvidence(params, config.evidenceParameters()));
+        evidence.put("parameters", parameterEvidence(params, parameterNames, config.evidenceParameters()));
         evidence.put("parameterEvidence", config.evidenceParameters());
         evidence.put("timeoutSeconds", config.timeoutSeconds());
         if (timeoutMs != null) evidence.put("toolTimeoutMs", timeoutMs);
@@ -404,12 +415,18 @@ public final class DbHelperExecutor implements AutoCloseable {
         return evidence;
     }
 
-    private Object parameterEvidence(List<?> params, String mode) {
+    private Object parameterEvidence(List<?> params, List<String> parameterNames, String mode) {
         List<Object> evidence = new ArrayList<Object>();
-        for (Object value : params) {
-            if ("values".equals(mode)) evidence.add(value);
-            else if ("types".equals(mode)) evidence.add(value == null ? "null" : value.getClass().getName());
-            else evidence.add("***");
+        for (int index = 0; index < params.size(); index++) {
+            Object value = params.get(index);
+            Object visible = "values".equals(mode) ? value
+                    : ("types".equals(mode) ? (value == null ? "null" : value.getClass().getName()) : "***");
+            if (parameterNames != null && index < parameterNames.size()) {
+                Map<String, Object> named = new LinkedHashMap<String, Object>();
+                named.put("name", parameterNames.get(index));
+                named.put("value", visible);
+                evidence.add(named);
+            } else evidence.add(visible);
         }
         return evidence;
     }

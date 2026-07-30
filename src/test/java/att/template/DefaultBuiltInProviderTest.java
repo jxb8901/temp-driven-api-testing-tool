@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,6 +77,18 @@ class DefaultBuiltInProviderTest {
                 provider.invoke("dbText", args("value", result)));
         assertThrows(IllegalArgumentException.class,
                 () -> provider.invoke("dbText", args("value", "not-a-db-result")));
+    }
+
+    @Test void prettyPrintFormatsNestedValuesDeterministicallyWithoutMutation() {
+        DefaultBuiltInProvider provider = new DefaultBuiltInProvider(Clock.systemUTC(), new LastChoiceRandom());
+        Map<String, Object> nested = new LinkedHashMap<String, Object>();
+        nested.put("status", "SUCCESS");
+        nested.put("items", Arrays.asList(1, args("name", "A\nB")));
+
+        provider.validateInvocation("prettyPrint", args("value", nested));
+        assertEquals("{\n  \"status\": \"SUCCESS\",\n  \"items\": [\n    1,\n    {\n      \"name\": \"A\\nB\"\n    }\n  ]\n}",
+                provider.invoke("format.pretty", args("value", nested)));
+        assertEquals("SUCCESS", nested.get("status"));
     }
 
     @Test void fileOperationsDoNotFollowFinalSymbolicLinks() throws Exception {

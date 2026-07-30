@@ -168,6 +168,8 @@ public class CommandRunner {
             if (memoryLimitBytes < 1 || artifactLimitBytes < memoryLimitBytes) throw new IllegalArgumentException("Invalid process output capture limits");
             this.memoryLimitBytes = memoryLimitBytes; this.artifactLimitBytes = artifactLimitBytes; this.stdoutArtifact = stdoutArtifact; this.stderrArtifact = stderrArtifact;
         }
+        public java.nio.file.Path stdoutArtifact() { return stdoutArtifact; }
+        public java.nio.file.Path stderrArtifact() { return stderrArtifact; }
         static CapturePolicy previewOnly(int memoryLimitBytes) { return new CapturePolicy(memoryLimitBytes, memoryLimitBytes, null, null); }
     }
 }

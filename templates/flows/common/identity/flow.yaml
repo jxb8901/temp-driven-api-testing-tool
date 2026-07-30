@@ -1,7 +1,7 @@
 schemaVersion: att-flow/v3.0
 id: common.identity.v1
 name: Identity
-description: Read Case data through the same Context used by Template Actions.
+description: V3.2 Flow reading Case data through the same Context used by Template Actions.
 actions:
   identityValue:
     type: tool

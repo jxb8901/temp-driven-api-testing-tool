@@ -2,6 +2,7 @@
 package att.template;
 
 import java.io.IOException;
+import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.nio.file.CopyOption;
 import java.nio.file.Files;
@@ -24,6 +25,8 @@ import java.time.temporal.Temporal;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,6 +78,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("dbtext".equals(function)) {
             return new DbTextResultFormatter().format(singleValue(input, "dbText"));
         }
+        if ("prettyprint".equals(function)) return prettyPrint(singleValue(input, "prettyPrint"));
         if (isSingleValueFunction(function)) return invokeSingleValue(function, singleValue(input, function));
         if ("concat".equals(function)) {
             rejectMixedArgumentStyles(input, "concat");
@@ -137,6 +141,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         String function = resolve(name);
         if ("sysdate".equals(function) || "systimestamp".equals(function)) { require(input, function, 0, 1, "format"); return; }
         if ("dbtext".equals(function)) { singleValue(input, "dbText"); return; }
+        if ("prettyprint".equals(function)) { singleValue(input, "prettyPrint"); return; }
         if (isSingleValueFunction(function)) { singleValue(input, function); return; }
         if ("concat".equals(function) || "coalesce".equals(function)) { rejectMixedArgumentStyles(input, function); return; }
         if ("randomchoice".equals(function)) {
@@ -174,7 +179,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
                 "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
                 "endswith", "replace", "padleft", "padright", "sysdate", "systimestamp", "formatdate",
                 "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories", "copyfile",
-                "movefile", "deletefile", "randomchoice", "dbtext"};
+                "movefile", "deletefile", "randomchoice", "dbtext", "prettyprint"};
         for (String name : legacy) result.put(name, name);
 
         alias(result, "str.upper", "upper"); alias(result, "str.lower", "lower");
@@ -198,7 +203,85 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         alias(result, "misc.boolean", "boolean"); alias(result, "misc.coalesce", "coalesce");
         alias(result, "misc.nvl", "nvl"); alias(result, "misc.iif", "iif");
         alias(result, "misc.randomchoice", "randomchoice"); alias(result, "misc.dbtext", "dbtext");
+        alias(result, "misc.prettyprint", "prettyprint"); alias(result, "format.pretty", "prettyprint");
         return Collections.unmodifiableMap(result);
+    }
+
+    private String prettyPrint(Object value) {
+        StringBuilder output = new StringBuilder();
+        appendPretty(value, output, 0, new IdentityHashMap<Object, Boolean>());
+        if (output.length() > MAX_TEXT_LENGTH) {
+            return output.substring(0, MAX_TEXT_LENGTH) + "\n... [truncated]";
+        }
+        return output.toString();
+    }
+
+    private void appendPretty(Object value, StringBuilder output, int depth,
+                              IdentityHashMap<Object, Boolean> active) {
+        if (output.length() > MAX_TEXT_LENGTH) return;
+        if (value == null) { output.append("null"); return; }
+        if (depth > 32) { output.append("<maximum depth exceeded>"); return; }
+        if (value instanceof Map) {
+            if (active.put(value, Boolean.TRUE) != null) { output.append("<cycle>"); return; }
+            try {
+                List<Map.Entry<?, ?>> entries = new ArrayList<Map.Entry<?, ?>>(((Map<?, ?>) value).entrySet());
+                if (!(value instanceof LinkedHashMap) && !(value instanceof java.util.SortedMap)) {
+                    Collections.sort(entries, new Comparator<Map.Entry<?, ?>>() {
+                        @Override public int compare(Map.Entry<?, ?> left, Map.Entry<?, ?> right) {
+                            return String.valueOf(left.getKey()).compareTo(String.valueOf(right.getKey()));
+                        }
+                    });
+                }
+                output.append('{');
+                for (int index = 0; index < entries.size(); index++) {
+                    Map.Entry<?, ?> entry = entries.get(index);
+                    output.append(index == 0 ? '\n' : ",\n");
+                    indent(output, depth + 1);
+                    appendQuoted(String.valueOf(entry.getKey()), output);
+                    output.append(": ");
+                    appendPretty(entry.getValue(), output, depth + 1, active);
+                }
+                if (!entries.isEmpty()) { output.append('\n'); indent(output, depth); }
+                output.append('}');
+            } finally { active.remove(value); }
+            return;
+        }
+        if (value instanceof Iterable || value.getClass().isArray()) {
+            if (active.put(value, Boolean.TRUE) != null) { output.append("<cycle>"); return; }
+            try {
+                List<Object> values = new ArrayList<Object>();
+                if (value instanceof Iterable) for (Object item : (Iterable<?>) value) values.add(item);
+                else for (int index = 0; index < Array.getLength(value); index++) values.add(Array.get(value, index));
+                output.append('[');
+                for (int index = 0; index < values.size(); index++) {
+                    output.append(index == 0 ? '\n' : ",\n");
+                    indent(output, depth + 1);
+                    appendPretty(values.get(index), output, depth + 1, active);
+                }
+                if (!values.isEmpty()) { output.append('\n'); indent(output, depth); }
+                output.append(']');
+            } finally { active.remove(value); }
+            return;
+        }
+        if (value instanceof CharSequence || value instanceof Character) appendQuoted(String.valueOf(value), output);
+        else output.append(String.valueOf(value));
+    }
+
+    private static void indent(StringBuilder output, int depth) {
+        for (int index = 0; index < depth * 2; index++) output.append(' ');
+    }
+
+    private static void appendQuoted(String value, StringBuilder output) {
+        output.append('"');
+        for (int index = 0; index < value.length(); index++) {
+            char item = value.charAt(index);
+            if (item == '\\' || item == '"') output.append('\\').append(item);
+            else if (item == '\n') output.append("\\n");
+            else if (item == '\r') output.append("\\r");
+            else if (item == '\t') output.append("\\t");
+            else output.append(item);
+        }
+        output.append('"');
     }
 
     private static void alias(Map<String, String> aliases, String name, String function) {
@@ -537,6 +620,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("deletefile".equals(function)) return "deleteFile";
         if ("randomchoice".equals(function)) return "randomChoice";
         if ("dbtext".equals(function)) return "dbText";
+        if ("prettyprint".equals(function)) return "prettyPrint";
         return function;
     }
 

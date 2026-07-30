@@ -136,6 +136,21 @@ class ExcelTestSuiteLoaderTest {
         } finally { java.util.Locale.setDefault(previous); }
     }
 
+    @Test void preservesLineBreaksInOrdinaryNonYamlColumns() throws Exception {
+        Path workbook = tempDir.resolve("multiline.xlsx");
+        try (Workbook value = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = value.createSheet("支付測試案例集"); Row header = sheet.createRow(0);
+            String[] columns = {"案例編號", "案例名稱", "標籤", "備註", "執行模板", "執行參數"};
+            for (int i = 0; i < columns.length; i++) header.createCell(i).setCellValue(columns[i]);
+            Row row = sheet.createRow(1); row.createCell(0).setCellValue("TC001");
+            row.createCell(1).setCellValue("first\nsecond\r\nthird"); row.createCell(2).setCellValue("smoke");
+            row.createCell(4).setCellValue("PAYMENT_INVOKE"); row.createCell(5).setCellValue("timeout: 30");
+            value.write(output);
+        }
+        Object value = new ExcelTestSuiteLoader(config(1, false)).load(workbook).get(0).caseData().get("caseName");
+        assertEquals("first\nsecond\r\nthird", value);
+    }
+
     private FrameworkConfig config() {
         return config(1, true);
     }

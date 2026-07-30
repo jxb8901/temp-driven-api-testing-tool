@@ -1,7 +1,7 @@
 schemaVersion: att-flow/v3.0
 id: common.decorate.v1
 name: Decorate Value
-description: Demonstrate CASE.VARS assignment and conditional skipping inside a Flow.
+description: V3.2 CASE.VARS assignment and conditional skipping inside a Flow.
 actions:
   decoratedValue:
     type: assign

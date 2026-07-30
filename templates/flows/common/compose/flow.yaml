@@ -1,7 +1,7 @@
 schemaVersion: att-flow/v3.0
 id: common.compose.v1
 name: Compose Value
-description: Demonstrate statically nested Flow composition with one shared ACTIONS Context.
+description: V3.2 statically nested Flow composition with one shared ACTIONS Context.
 actions:
   identityFlow:
     type: flow

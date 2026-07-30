@@ -1,7 +1,7 @@
-# ATT V3.1.0 中文用户手册与参考手册
+# ATT V3.2.0 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.1.0
+版本：3.2.0
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -54,7 +54,7 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 
 一个动作可以渲染负载、调用工具、查询／更新数据库、断言表达式、写入结构化日志、分配作用域运行值，或调用 Flow。ATT 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。
 
-### V3.1 的保证
+### V3.2 的保证
 
 - 配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML 键，以及无效动作形状都是错误。
 - dbhelper 使用独立 `att-dbhelper/v2.5` 文件，并通过一級 `type: db` Action 或只读 `#{db.<instance>...}` 表达式调用；它不是 Tool 的特殊配置。
@@ -64,7 +64,10 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 - 每个 Flow 位于 `templates/flows/**/flow.yaml`，使用静态 `.vN` ID、共用调用 Template 的 Context，并且最大嵌套深度为 3。
 - `validate --package` 会检查整个包；`validate --selected` 只检查所选依赖闭包。
 - Run ID 和 Case ID 会先被校验，然后直接用作输出目录名。
-- 只有在运行完成后，最终运行目录才会发布。
+- 运行在执行前直接保留最终 Run ID 目录，执行期间即可查看 Case 日志和证据；只有完成 manifest 与 `latest-run.yaml` 会在成功最终化后发布。
+- Log Action 与 process stdout/stderr 会以原始物理行写入 Case 日志；普通 run 不创建持久 `process-output` artifact。
+- `${...}` 继续负责 Context 引用和文字插值；`#{...}` 是支持调用、算术、比较、布尔逻辑、list 与 `in` 的 typed expression block。
+- 直接 DB Action 支持位置 `params` 或具名 `parameters`；dbhelper parameter evidence 默认记录解析后的值，但不会记录 connection credentials。
 - FAIL、ERROR、INVALID、SKIPPED、PASS 具有稳定的聚合与退出码含义。
 - JSON、XML、JUnit XML、JUnit HTML 和 CI JSON 输出都有版本化契约。
 - V2.6 Template 保持可读，但只有 `att-template/v3.0` 可使用 Flow Action 或 Action `runWhen`。
@@ -141,7 +144,7 @@ Flow `inputs`、`outputs`、调用端 `with` 以及专用的 `input`、小写 `a
 
 Template 与所有嵌套 Flow 共用一个 Action ID namespace。Template／Flow 冲突、多个 Flow 冲突、间接嵌套冲突以及在同一 Template 中重复调用同一 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
 
-Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.1.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
+Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.2.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
 
 ## 02 快速开始
 
@@ -502,7 +505,7 @@ logResponse:
     action: callApi
 ```
 
-`message` 与 `file` 都支持统一的 `${...}` / `#{...}` 表达式引擎，并在 log 动作发布自身输出前进行求值。相对 `file` 路径会解析到 `${CASE.outputDirectory}` 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前 Case 日志，都会报 ERROR。
+`message` 与 `file` 都支持统一的 `${...}` / `#{...}` 表达式引擎，并在 log 动作发布自身输出前进行求值。两者合并后的内容会以原始文本写入 Case 日志，并将 CRLF/CR 统一为 LF，因此多行内容会保留为物理行，而不是显示为 YAML escape 后的 `\\n`。相对 `file` 路径会解析到 `${CASE.outputDirectory}` 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前 Case 日志，都会报 ERROR。
 
 若要用与 DB Action `saveAs.format: text` 相同的 SQL*Plus 风格输出打印类型化 DB 结果，可在 message 中使用纯内建函数 `dbText(...)`：
 
@@ -654,12 +657,14 @@ result:
   maxBytes: 10485760
 evidence:
   sql: full
-  parameters: masked
+  parameters: values
 ```
 
 `connection.url` 必填；username、password 和 properties 中的值可写成完整的 `${ENV:NAME}` 环境变量引用。`driverClass` 可选，优先使用 JDBC service discovery。`readOnly` 是 ATT 的 update 拒绝边界，也会传给 JDBC Connection；它不能防止 vendor side effect。`isolation` 可为 `driverDefault`、`readUncommitted`、`readCommitted`、`repeatableRead` 或 `serializable`。
 
 `statement.timeoutSeconds` 是实例级 SQL timeout，默认 30，范围 1–3600。ATT 对该实例创建的每个 `PreparedStatement` 调用 `setQueryTimeout`；DB Action 不接受 Action 级 `timeoutMs`。
+
+`evidence.parameters` 可为 `masked`、`types` 或 `values`，V3.2 默认是 `values`。`values` 会记录实际 SQL binding 值和 `null`，方便调试；connection URL、username、password 和 connection properties 不会进入 parameter evidence。若 SQL 参数本身含敏感业务数据，套件作者应明确改为 `masked` 或 `types`。
 
 交易设置组合如下：
 
@@ -684,10 +689,10 @@ queryOrder:
     sql: >-
       select id, status
       from orders
-      where customer_id = ? and status = ?
-    params:
-      - "${CASE.customerId}"
-      - OPEN
+      where customer_id = :customerId and status = :status
+    parameters:
+      customerId: "${CASE.customerId}"
+      status: OPEN
   assert: "${output.result.rowCount} > 0"
   saveAs:
     path: order-result.json
@@ -707,7 +712,7 @@ closeOrder:
   assert: "${output.result.affectedRows} == 1"
 ```
 
-`query` 与 `update` 必须且只能出现一个。block 内的 `sql` 与 `sqlFile` 也必须且只能出现一个。`params` 可省略（默认为空 list），也可使用 YAML list，或一个精确 Context 引用，其类型化值必须是 Java `List`。ATT 按顺序调用 `PreparedStatement.setObject`，不会把值转成字符串后重新解析。V2.5 不支持 named parameters、batch、generated keys、callable statements 或多个 JDBC result。
+`query` 与 `update` 必须且只能出现一个。block 内的 `sql` 与 `sqlFile` 也必须且只能出现一个。位置参数使用 `params`：可省略（默认为空 list）、使用 YAML list，或使用一个精确 Context 引用，其类型化值必须是 Java `List`。具名参数使用 `parameters` map，SQL 中以 `:name` 引用；ATT 会按 SQL 出现顺序安全编译为 JDBC `?` binding，同名 placeholder 可重复使用。每个具名 placeholder 必须有值，且 map 中不能有未使用的 key。`params` 与 `parameters` 不能同时存在。两种形式的动态值都使用正常 `${...}`／`#{...}` 求值，最终都通过 `PreparedStatement.setObject` 绑定，不会拼接回 SQL。batch、generated keys、callable statements 和多个 JDBC result 仍不支持。
 
 `type: db` 不支持 `retry` 或 Action 级 `timeoutMs`。自动重试 update 并不安全。DB 执行成功后可使用普通 `description`、`assert` 和 `onFailure`；执行失败时不运行断言，状态保持 ERROR。
 
@@ -1497,7 +1502,7 @@ tools: {}
 | `result.maxCellBytes` | `1048576` | 整数 1–1073741824 |
 | `result.maxBytes` | `10485760` | 整数 1–1073741824，且不小于 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
-| `evidence.parameters` | `masked` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感数据 |
+| `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感业务数据 |
 
 validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 会在执行前校验。
 
@@ -1520,7 +1525,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | 动作 common | `type`、`description`、`onFailure`，以及其选定类型所属字段；动作 ID 不能含点号 |
 | render | 需要 `payload`、`renderAs`；可选 `assert`; 不允许 saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry |
 | tool | 需要 `call`；可选 object `saveAs`、`assert`、`expected`、`actual`、`timeoutMs` 与 Action-only `retry`；command/call-backed 共用契约 |
-| db | 需要 `db` 与恰好一个 `query`／`update`；block 内恰好一个 `sql`／`sqlFile`；可选 params、object `saveAs`、`assert`；不允许 retry 或 Action timeout |
+| db | 需要 `db` 与恰好一个 `query`／`update`；block 内恰好一个 `sql`／`sqlFile`；可选位置 `params` 或具名 `parameters`、object `saveAs`、`assert`；不允许同时使用两种 parameter 形式，也不允许 retry 或 Action timeout |
 | assert | 需要 `assert`；可选 `expected`、`actual`；不允许 expression/render/tool/log-only 字段、timeout 或 retry |
 | log | 至少需要 `message` 或 `file`；可选 `level`、`fields`、`assert`；不允许 render/tool/assert-action-only 字段、timeout 或 retry |
 | assign | 需要 `name`、`expression`；可选 `assert`；`name` 在整个 Case 的 `CASE.VARS` 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry、saveAs 或 overwrite |
@@ -1556,7 +1561,7 @@ saveAs:
 
 Tool／built-in 的 `text` 使用 `String.valueOf(output.result)`；直接 DB Action 的 `text` 使用上述 SQL*Plus 风格 formatter。任何写入表示都不会替换 Context 中的 typed `${output.result}`。
 
-`saveAs.path` 使用 Action 前的正常 expression scope 渲染，必须得到非空安全相对路径并保持在当前 Case artifact 目录内。绝对路径、反斜线、空／`.`／`..` segment 与 containment escape 都非法。父目录按需创建。
+`saveAs.path` 可以是大小写不敏感的保留值 `console`。此时 ATT 把所选表示写入 Case 日志，不添加 `output.targetFiles`，也不创建文件。其他 path 使用 Action 前的正常 expression scope 渲染，必须得到非空安全相对路径并保持在当前 Case artifact 目录内。绝对路径、反斜线、空／`.`／`..` segment 与 containment escape 都非法。父目录按需创建。
 
 写入发生在可选 Action assertion 之前。process Tool 的 raw 即使遇到 parse error、exit-code retry 或最终 Action 不成功，也保存已捕获 stdout；非 raw Tool artifact 要求 parse 成功，built-in artifact 要求调用成功，DB artifact 要求 JDBC 成功。codec、路径、collision 或写入失败都是 ERROR。retry 共用同一路径，后续 attempt 只能覆盖同一 Action 先前 attempt 写入的 artifact。最终路径加入 `output.targetFiles`。
 
@@ -1618,33 +1623,40 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 
 ### 统一表达式引擎
 
-V2.4.2 使用同一个解析和渲染器来处理 `${...}` 值插值和 `#{...}` 表达式。所有接受 `${...}` 的用户可见位置也都接受 `#{...}`；校验使用相同语法，但不会执行内建函数或外部进程。
+V3.2 使用一个表达式引擎，但保留两种刻意分开的角色：
 
-两种分隔符指示不同角色，而不是两套不同引擎：
+- `${path}` 读取一个 Context 值并插入周围文字，例如 `Reference=${CASE.VARS.SrcRefNo}`。
+- `#{expression}` 计算一个 typed expression block。block 可包含 Context operand、调用、list literal、括号、unary operator、算术、比较、`like`、`in`、null 判断与布尔逻辑。
 
-- `${path}` 将一个 Context 值插入周围文本，例如 `Reference=${CASE.VARS.SrcRefNo}`。
-- `#{name(arguments)}` 评估内建函数或已配置 Tool 调用。Context 参数必须保留明确的 `${...}` 形式，例如 `#{length(${CASE.VARS.SrcRefNo})}`。
-- ASCII `'...'` 或 `"..."` 总是在调用内表示字面字符串，例如 `#{length('CASE.VARS.SrcRefNo')}`。
-
-即使 Context 引用位于调用内部，也必须明确写出 `${...}`：
+Context 引用在 block 内仍必须明确使用 `${...}`；应写 `${CASE.amount}`，不可写裸 `CASE.amount`。精确 block 保留 Java 结果类型；嵌入周围文字的 block 才会转换为文字。
 
 ```yaml
-assert: "#{length(value=${CASE.VARS.SrcRefNo})} <= 35"
+assert: >-
+  #{(${CASE.amount} * ${CASE.rate}) >= 100
+    and ${CASE.status} in ['PENDING', 'POSTED']}
 description: "Reference length: #{length(${CASE.VARS.SrcRefNo})}"
+expression: "#{${ACTIONS.query.output.result.rowCount} + 1}"
 ```
 
-#### 调用参数解析规则
+运算优先级由高至低：
 
-ATT 按以下顺序解析每个完整调用参数：
+1. 括号、literal、`${...}`、list 和调用；
+2. unary `+`、unary `-` 与 `not`；
+3. `*` 与 `/`；
+4. `+` 与 `-`；
+5. `== != > >= < <=`、`like`、`in` 与 `is [not] null`；
+6. `and`；
+7. `or`。
 
-1. 精确 `${...}` 引用会被解析为其类型化 Context 值。
-2. 精确嵌套 `#{...}` 调用会被求值，并把其类型化结果传给外层调用。
-3. ASCII 单/双引号包裹的文本是显式字符串字面量。数字和布尔字面量保留正常类型。
-4. 其他未引用 token 是 literal；但类似 `CASE.customerId`、`ACTIONS.query.output.result` 或 `input.customerId` 的保留 Context／definition-input path 会直接报迁移错误，必须分别写成 `${CASE.customerId}`、`${ACTIONS.query.output.result}`、`${input.customerId}`。
+算术 operand 必须为数值，除以零是错误。`in` 的右 operand 必须是 List、array 或 Iterable；`['A', 'B']` 这样的 literal list 与 `${CASE.allowedStatuses}` 这样的 typed Context list 都合法。旧的非 block assertion grammar 也接受 literal-list `in`，但算术与 typed list membership 应使用 `#{...}`。
 
-周围文字中的 Context interpolation 同样使用 `${...}`，例如 `prefix-${CASE.caseId}` 或 `#{concat('prefix-', ${CASE.caseId})}`。ASCII 引号才是语法，弯引号 `“...”`／`‘...’` 会保留为普通 Unicode 字符。
+调用参数本身可以是任何 expression。可直接嵌套调用，例如 `#{upper(trim(${CASE.name}))}`；旧写法 `#{upper(#{trim(${CASE.name})})}` 继续兼容。ASCII 单／双引号及成对弯引号可界定字符串；数字、布尔和 null literal 保留其类型。其他无引号 token 是 literal string，除非它看起来像保留 Context path 或当前可见变量，此时 ATT 会要求使用 `${...}`。
 
-可用值与可调用能力取决于表达式所在位置。普通 Case-runtime 字段可使用 built-in、配置 Tool 与只读 DB query；`report.fileNamePattern`、Tool `command` 与 DB SQL source 是受限 scope，不允许隐藏或递归 external execution。Tool/DB `saveAs.path`、DB params 在主调用前求值；DB SQL 内容只允许 Context 和 pure built-in。
+周围文字中的 Context interpolation 仍使用 `${...}`，例如 `prefix-${CASE.caseId}` 或 `#{concat('prefix-', ${CASE.caseId})}`。唯一后缀查找只在 `${...}` 中使用，建议优先写 canonical path，例如 `${CASE.VARS.SrcRefNo}`。
+
+为保持兼容，`${directory}/file.name` 这种无引号 Tool-call 参数继续按文字插值处理，不会误判为数字除法；`${CASE.amount}/2` 仍是算术。新配置中的路径值建议在可行时明确加引号。
+
+可用值与可调用能力取决于表达式所在位置。普通 Case-runtime 字段可使用 built-in、配置 Tool 与只读 DB query；`report.fileNamePattern`、Tool `command` 与 DB SQL source 是受限 scope，不允许隐藏或递归 external execution。Tool/DB `saveAs.path`、DB `params`／`parameters` 在主调用前求值；DB SQL 内容只允许 Context 和 pure built-in。
 
 `type: tool` 的主 `call` 可指向配置 Tool 或 ATT built-in。主 built-in 在 JVM 内执行，结果在 `${output.result}`，记录 `type: builtin` attempt evidence，但没有 process `TOOL` 节点、argv、stdout 或 stderr。
 
@@ -1836,6 +1848,7 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 - `<`
 - `<=`
 - `like`
+- `in`
 - `is null`
 - `is not null`
 - `not`
@@ -1874,8 +1887,11 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 | `misc.iif` | 从布尔值选择两个值之一 | `#{misc.iif(${CASE.enabled}, 'Y', 'N')}` |
 | `misc.randomChoice` | 从输入中随机选择 | `#{misc.randomChoice('A', 'B', 'C')}` |
 | `misc.dbText` | 将稳定 typed DB result 格式化为 SQL*Plus 风格文字 | `#{misc.dbText(${ACTIONS.queryOrders.output.result})}` |
+| `misc.prettyPrint` | 将 Map/List/array/tree 确定性格式化为缩进文字 | `#{misc.prettyPrint(${ACTIONS.queryOrders.output.result})}` |
 
 `misc.dbText` 只接受一个位置参数或具名 `value`。参数必须是直接 DB Action、DB expression 或 DB-backed Tool 返回的稳定 query／update result。它与直接 DB Action 的 `saveAs.format: text` 共用同一个确定性 formatter，并且没有 JDBC、transaction、connection 或 cache side effect。
+
+`misc.prettyPrint`（alias：`prettyPrint`、`format.pretty`）接受一个位置参数或具名 `value`，递归格式化 Map、List、Iterable、array、scalar 与 null。Linked Map 保留插入顺序，其他 Map 按 key 排序；输出使用两个空格缩进，并带有循环和深度保护。它不会修改输入值。
 
 ## 08 报表参考
 
@@ -2082,7 +2098,7 @@ else: SKIPPED
 
 ### 进程安全
 
-ATT 直接构造 argv，不使用隐式 shell。超时终止必须依据平台支持停止受管进程并保留进程证据。结构化解析器会拒绝格式错误/歧义输入以及 XML 外部资源特性。
+ATT 直接构造 argv，不使用隐式 shell。stdout 与 stderr 会并发读取，在内存中只保留有界 head/tail preview，并通过有界临时 spool 写入 Case 日志。临时 spool 会在日志写入或显式 `saveAs` 后删除；普通 run 不创建 `process-output` 文件或目录。证据仍记录原始 byte count 与 truncation flag。超时终止必须依据平台支持停止受管进程并保留相同的有界证据。结构化解析器会拒绝格式错误/歧义输入以及 XML 外部资源特性。
 
 工作簿导入使用 Apache POI `DataFormatter` 处理普通单元格，刻意不创建 `FormulaEvaluator`；公式表达式而不是缓存结果进入 Context。
 

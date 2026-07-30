@@ -61,7 +61,7 @@ class UnifiedTemplateEngineTest {
 
         assertEquals("ABC", engine.render("#{upper(#{trim(${CASE.reference})})}", context));
         assertEquals("7", engine.render("#{length(${CASE.reference})}", context));
-        assertEquals("18|20", engine.render("#{length('CASE.VARS.SrcRefNo')}|#{length(“CASE.VARS.SrcRefNo”)}", context));
+        assertEquals("18|18", engine.render("#{length('CASE.VARS.SrcRefNo')}|#{length(“CASE.VARS.SrcRefNo”)}", context));
         IllegalArgumentException bare = assertThrows(IllegalArgumentException.class,
                 () -> engine.render("#{length(CASE.reference)}", context));
         assertTrue(bare.getMessage().contains("${CASE.reference}"));
@@ -69,6 +69,26 @@ class UnifiedTemplateEngineTest {
         assertEquals("PAYMENT.result.xlsx", engine.renderScoped("#{upper(${suiteName})}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
         assertThrows(IllegalArgumentException.class, () -> engine.renderScoped("#{upper(suiteName)}.result.xlsx", Collections.<String,Object>singletonMap("suiteName", "payment")));
         assertThrows(IllegalArgumentException.class, () -> engine.renderScoped("#{external()}", Collections.<String,Object>emptyMap()));
+    }
+
+    @Test void expressionBlocksSupportArithmeticPrecedenceMembershipAndTypedCalls() throws Exception {
+        LinkedHashMap<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("amount", 12); data.put("status", "POSTED");
+        data.put("allowed", Arrays.asList("PENDING", "POSTED"));
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",
+                Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+
+        assertEquals(new java.math.BigDecimal("18"), engine.evaluate("#{${CASE.amount} + 2 * 3}", context, null));
+        assertEquals(new java.math.BigDecimal("42"), engine.evaluate("#{(${CASE.amount} + 2) * 3}", context, null));
+        assertEquals(Boolean.TRUE, engine.evaluate("#{${CASE.status} in ['PENDING', 'POSTED']}", context, null));
+        assertEquals(Boolean.TRUE, engine.evaluate("#{${CASE.status} in ${CASE.allowed}}", context, null));
+        assertEquals(Boolean.TRUE, engine.evaluate("#{'a.b' like 'a.b'}", context, null));
+        assertEquals(Boolean.FALSE, engine.evaluate("#{'axb' like 'a.b'}", context, null));
+        assertEquals(new java.math.BigDecimal("15"), engine.evaluate("#{length(${CASE.status}) + 9}", context, null));
+        assertThrows(IllegalArgumentException.class, () -> engine.evaluate("#{1 / 0}", context, null));
+        assertThrows(IllegalArgumentException.class, () -> engine.evaluate("#{${CASE.status} in 'POSTED'}", context, null));
+        engine.validateExpressionBlockSyntax("#{(${CASE.amount} + 2) * 3 >= 42 and ${CASE.status} in ${CASE.allowed}}");
     }
 
     @Test void validationRenderingResolvesStaticCaseValuesAndPreservesRuntimeValues() {
@@ -205,6 +225,19 @@ class UnifiedTemplateEngineTest {
                 new CaseExecutionLog(tempDir.resolve("array.log")), "array");
 
         assertEquals(Arrays.asList("PAYMENT", "POSTED", new java.math.BigDecimal("7"), Boolean.TRUE), invoker.input.get("values"));
+    }
+
+    @Test void legacyUnquotedContextPathArgumentIsNotParsedAsDivision() throws Exception {
+        CaseRuntimeContext context=new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",
+                Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),
+                tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        CapturingInvoker invoker=new CapturingInvoker(tempDir);
+
+        new UnifiedTemplateEngine(invoker).executeCall(
+                "#{capture(path=${CASE.outputDirectory}/invoke.log)}", context,
+                new CaseExecutionLog(tempDir.resolve("path.log")), "path");
+
+        assertEquals(tempDir.toAbsolutePath().normalize() + "/invoke.log", invoker.input.get("path"));
     }
 
     @Test void executesGlobalAndQualifiedGroupedCallsThroughTheSameTemplatePath() throws Exception {

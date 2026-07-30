@@ -56,6 +56,14 @@ class JsonSchemaVerifierTest {
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema, valid.replace(",\"intervalMs\":0", "")));
     }
 
+    @Test void v3TemplateSchemaAcceptsNamedDbParametersAndRejectsMixedBindingStyles() throws Exception {
+        Path schema = Paths.get("schemas/att-template-v3.0.schema.json");
+        String named = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"db\",\"db\":\"orders\",\"query\":{\"sql\":\"select * from t where id=:id\",\"parameters\":{\"id\":\"${CASE.id}\"}}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, named));
+        String mixed = named.replace("\"parameters\":", "\"params\":[\"${CASE.id}\"],\"parameters\":");
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema, mixed));
+    }
+
     @Test void v22SidecarSchemaRejectsTimeoutOwnership() throws Exception {
         Path schema = Paths.get("schemas/att-sidecar-v2.2.schema.json");
         String valid = "{\"schemaVersion\":\"att-sidecar/v2.2\",\"id\":\"payments\",\"excel\":{\"sheet\":\"Cases\",\"caseId\":\"Case ID\",\"tags\":\"Tags\"},\"stages\":[{\"key\":\"invoke\",\"template\":\"Template\"}]}";

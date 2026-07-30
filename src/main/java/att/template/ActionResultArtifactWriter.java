@@ -25,6 +25,9 @@ final class ActionResultArtifactWriter {
         return write(context, actionId, configuredPath, format, value, overwrite, true);
     }
 
+    String render(String format, Object value) throws Exception { return render(format, value, false); }
+    String renderDb(String format, Object value) throws Exception { return render(format, value, true); }
+
     private Path write(CaseRuntimeContext context, String actionId, String configuredPath, String format, Object value,
                        boolean overwrite, boolean dbResult) throws Exception {
         Path root = (context.inFlow() ? context.actionOutputDir(actionId) : context.caseOutputDirectory()).toAbsolutePath().normalize();
@@ -37,15 +40,17 @@ final class ActionResultArtifactWriter {
         if (Files.exists(target) && !overwrite) {
             throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + configuredPath);
         }
-        byte[] bytes;
-        if ("text".equalsIgnoreCase(format)) {
-            String text = dbResult ? dbText.format(value) : (value == null ? "" : String.valueOf(value));
-            bytes = text.getBytes(StandardCharsets.UTF_8);
-        } else {
-            bytes = codec.encode(value, format).getBytes(StandardCharsets.UTF_8);
-        }
+        byte[] bytes = render(format, value, dbResult).getBytes(StandardCharsets.UTF_8);
         if (overwrite) Files.write(target, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         else Files.write(target, bytes, StandardOpenOption.CREATE_NEW);
         return target;
+    }
+
+
+    private String render(String format, Object value, boolean dbResult) throws Exception {
+        if ("raw".equalsIgnoreCase(format) || "text".equalsIgnoreCase(format)) {
+            return dbResult ? dbText.format(value) : (value == null ? "" : String.valueOf(value));
+        }
+        return codec.encode(value, format);
     }
 }

@@ -52,7 +52,7 @@ public class StageTemplateRunner {
             String expected = "", actual = "";
             try {
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
-                if (!action.runWhen().trim().isEmpty() && !evaluator.evaluate(action.runWhen(), context)) {
+                if (!action.runWhen().trim().isEmpty() && !evaluateCondition(action.runWhen(), context, log)) {
                     output.put("status", "SKIPPED"); output.put("success", true);
                     output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
                     context.addAction(action.id(), node); recorded = true;
@@ -208,6 +208,7 @@ public class StageTemplateRunner {
         output.put("result", joinLogContent(message, content));
         output.put("level", action.level());
         output.put("fields", renderFields(action.fields(), context, log));
+        log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result")));
     }
 
     private Path logSource(String value, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
@@ -255,7 +256,10 @@ public class StageTemplateRunner {
         } else sql = String.valueOf(operation.get("sql"));
         sql = templateEngine.renderDbSql(sql, context);
         Object configuredParams = operation.get("params");
+        Object configuredNamed = operation.get("parameters");
+        if (configuredParams != null && configuredNamed != null) throw new IllegalArgumentException("DB action cannot use both params and parameters");
         List<Object> params = new ArrayList<Object>();
+        List<String> parameterNames = new ArrayList<String>();
         if (configuredParams instanceof List) {
             for (Object value : (List<?>) configuredParams) {
                 params.add(value instanceof String ? templateEngine.evaluate((String) value, context, log) : value);
@@ -265,17 +269,32 @@ public class StageTemplateRunner {
             if (!(value instanceof List)) throw new IllegalArgumentException("DB action params must resolve to a List");
             params.addAll((List<?>) value);
         }
+        if (configuredNamed != null) {
+            if (!(configuredNamed instanceof Map)) throw new IllegalArgumentException("DB action parameters must be a map");
+            Map<String, Object> resolved = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) configuredNamed).entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                Object value = entry.getValue();
+                resolved.put(name, value instanceof String ? templateEngine.evaluate((String) value, context, log) : value);
+            }
+            NamedSqlParameters.Binding binding = NamedSqlParameters.bind(sql, resolved);
+            sql = binding.sql(); params.addAll(binding.values()); parameterNames.addAll(binding.names());
+        }
         String invocationId = context.nextDbInvocationId(action.db());
-        att.exec.DbInvocationResult result = executor.execute(action.db(), query ? "query" : "update",
-                sql, source, params, invocationId);
+        att.exec.DbInvocationResult result = parameterNames.isEmpty()
+                ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
+                : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
         context.recordDbInvocation(action.db(), invocationId, result.evidence());
         try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); } catch (Exception ignored) { }
         output.put("result", result.result());
         if (result.success() && action.saveConfig().configured()) {
             String path = templateEngine.render(action.saveConfig().path(), context, log);
             String format = requiredFormat(action.saveConfig(), "DB", "");
-            Path saved = artifactWriter.writeDb(context, action.id(), path, format, result.result(), action.saveConfig().overwrite());
-            targets.add(saved.toString());
+            if (console(path)) log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result.result()));
+            else {
+                Path saved = artifactWriter.writeDb(context, action.id(), path, format, result.result(), action.saveConfig().overwrite());
+                targets.add(saved.toString());
+            }
         }
         return result.success();
     }
@@ -290,9 +309,10 @@ public class StageTemplateRunner {
         output.put("attempts", attempts);
         ActionSaveConfig save = action.saveConfig();
         String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
+        boolean console = console(saveAs);
         String kind = templateEngine.callKind(action.call());
         String format = save.configured() ? toolFormat(save, kind) : "";
-        boolean invokerWritesRaw = save.configured() && "tool".equals(kind) && "raw".equals(format);
+        boolean invokerWritesRaw = save.configured() && !console && "tool".equals(kind) && "raw".equals(format);
         boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             try {
@@ -303,10 +323,16 @@ public class StageTemplateRunner {
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
                 if (save.configured() && !invokerWritesRaw) {
-                    Path saved = artifactWriter.write(context, action.id(), saveAs, format, result.output(),
-                            save.overwrite() || actionOwnedArtifact);
-                    actionOwnedArtifact = true;
-                    invocation.put("outputFile", saved.toString());
+                    if (console) {
+                        if (!("tool".equals(kind) && "raw".equals(format))) {
+                            log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.render(format, result.output()));
+                        }
+                    } else {
+                        Path saved = artifactWriter.write(context, action.id(), saveAs, format, result.output(),
+                                save.overwrite() || actionOwnedArtifact);
+                        actionOwnedArtifact = true;
+                        invocation.put("outputFile", saved.toString());
+                    }
                 } else if (invocation.get("outputFile") != null) {
                     actionOwnedArtifact = true;
                 }
@@ -385,6 +411,8 @@ public class StageTemplateRunner {
         return format;
     }
 
+    private boolean console(String path) { return "console".equalsIgnoreCase(path == null ? "" : path.trim()); }
+
     private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log,
                                         boolean invocationSucceeded) throws Exception {
         if (!invocationSucceeded) {
@@ -401,15 +429,22 @@ public class StageTemplateRunner {
 
     private boolean evaluateAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         if (action.assertion() == null || action.assertion().trim().isEmpty()) return true;
-        String afterCalls = templateEngine.renderCalls(action.assertion(), context, log);
-        String rendered = templateEngine.renderValues(afterCalls, context);
-        boolean passed = evaluator.evaluate(afterCalls, context);
+        Object evaluated = templateEngine.evaluate(action.assertion(), context, log);
+        String rendered = String.valueOf(evaluated);
+        boolean passed = evaluated instanceof Boolean ? ((Boolean) evaluated).booleanValue()
+                : evaluator.evaluate(String.valueOf(evaluated));
         Map<String, Object> assertion = new LinkedHashMap<String, Object>();
         assertion.put("expression", action.assertion());
         assertion.put("rendered", rendered);
         assertion.put("passed", passed);
         output.put("assertion", assertion);
         return passed;
+    }
+
+    private boolean evaluateCondition(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        Object evaluated = templateEngine.evaluate(expression, context, log);
+        return evaluated instanceof Boolean ? ((Boolean) evaluated).booleanValue()
+                : evaluator.evaluate(String.valueOf(evaluated));
     }
 
     private void waitBeforeRetry(int intervalMs) throws InterruptedException {

@@ -1,25 +1,25 @@
-# ATT V3.1.0 Shared-Context Flow System Design
+# ATT V3.2.0 System Design
 
 **Document Status:** Implemented
 
-**Target Version:** ATT 3.1.0
-**Last Updated:** 2026-07-26
+**Target Version:** ATT 3.2.0
+**Last Updated:** 2026-07-30
 
 ## 1. Purpose
 
-ATT V3.1.0 defines a Flow as a reusable, ordered group of Template Actions. A Flow is called only from a Template and executes within that Template's existing Context.
+ATT V3.2.0 retains the reusable, shared-Context Flow model and improves expression, database, and Case-log authoring without adding another Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
 ```
 
-V3.1 removes the isolated-function model introduced in V3.0. A Flow no longer declares inputs or outputs and no longer creates separate `input`, lowercase `actions`, `runtime`, or `flow` Context roots. This keeps Action expressions unchanged when Actions are moved between a Template and a Flow.
+The V3.1 removal of the isolated-function model remains normative. A Flow does not declare inputs or outputs and does not create separate `input`, lowercase `actions`, `runtime`, or `flow` Context roots. This keeps Action expressions unchanged when Actions are moved between a Template and a Flow.
 
 The existing Excel, Stage, V2 Template, Tool, DB, run, report, and CI contracts remain unchanged.
 
 ## 2. Goals and boundaries
 
-V3.1 provides:
+V3.2 provides:
 
 - one Expression Engine and Context contract for Template and Flow Actions;
 - direct access to `CASE`, `RUN`, prior `ACTIONS`, `TOOL`, `DB`, and current `output`;
@@ -29,7 +29,16 @@ V3.1 provides:
 - Case-scoped `assign` behavior through `CASE.VARS`; and
 - nested evidence and qualified artifact paths without a Flow-specific expression API.
 
-V3.1 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
+V3.2 additionally provides:
+
+- typed `#{...}` expression blocks with arithmetic, `in`, lists, comparisons, boolean operators, Context operands, and calls;
+- direct DB Action named parameters compiled safely to JDBC positional bindings;
+- deterministic `prettyPrint` formatting for nested runtime values;
+- raw multiline Log Action and process output in the Case log;
+- `saveAs.path: console`; and
+- no persistent `process-output` artifacts.
+
+V3.2 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
 
 ## 3. Public configuration
 
@@ -176,9 +185,19 @@ Earlier isolated V3 Flow packages must be migrated:
 
 This is intentionally a breaking reinterpretation of `att-flow/v3.0` and `att-template/v3.0`. No compatibility mode is provided. Non-Flow V2 Templates remain compatible.
 
-## 10. Acceptance criteria
+## 10. Expression, DB, and logging extensions
 
-V3.1 is complete when:
+`${...}` remains the only Context-reference and text-interpolation syntax. `#{...}` is a complete typed expression block. It supports nested calls, list literals, parentheses, unary `+`, unary `-`, `not`, arithmetic `+ - * /`, comparisons, `like`, `in`, `is [not] null`, `and`, and `or`. Arithmetic is numeric, division by zero is an error, and `in` requires a list, array, or Iterable right operand. Bare Context-looking identifiers remain invalid.
+
+Direct DB Actions may use either positional `params` with JDBC `?` placeholders or named `parameters` with `:name` placeholders, never both. Named placeholders are replaced by `?` before preparing the statement; values are never interpolated into SQL. The scanner ignores placeholders in quoted strings and comments and preserves PostgreSQL-style `::` casts. Missing and unused names fail validation. Parameter evidence defaults to resolved values; connection credentials are never included, and package owners may explicitly select `masked` or `types`.
+
+Log Action messages and process stdout/stderr are written as raw UTF-8 Case-log text with CRLF/CR normalized to LF. Structured `case.yaml` evidence remains available, but the human log does not repeat escaped multiline result content. Process capture uses bounded temporary spools that are removed after logging or explicit artifact creation. A Run does not create `process-output`. Tool and DB `saveAs.path: console` writes the requested representation to the Case log and produces no target file.
+
+`prettyPrint(value)` and `format.pretty(value)` format maps, lists, arrays, scalars, and null deterministically with two-space indentation, cycle/depth protection, and the existing built-in output bound. They do not mutate the supplied value.
+
+## 11. Acceptance criteria
+
+V3.2 is complete when:
 
 - schema validation rejects `inputs`, `outputs`, and `with`;
 - the same Action configuration runs inline or in a Flow without expression changes;
@@ -188,4 +207,7 @@ V3.1 is complete when:
 - Flow Actions expose no `output.outputs`;
 - nested evidence and qualified artifacts remain intact;
 - all V2 compatibility tests pass; and
+- multiline Excel and Action values remain physical Case-log lines;
+- no default process-output artifact exists and console `saveAs` produces no file;
+- arithmetic, `in`, named DB binding, visible parameter evidence, and `prettyPrint` pass validation and runtime tests; and
 - source, package, documentation, build, and unpacked-package validation gates pass.

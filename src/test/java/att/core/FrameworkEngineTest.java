@@ -38,7 +38,7 @@ class FrameworkEngineTest {
     @Test
     void runsNestedV31FlowThroughFullCaseLifecycle() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v3.0\nname: PAYMENT_INVOKE\ndescription: V3.1 shared Context\nactions:\n"
+                "schemaVersion: att-template/v3.0\nname: PAYMENT_INVOKE\ndescription: V3.2 shared Context\nactions:\n"
                         + "  compose: {type: flow, use: common.outer.v1}\n"
                         + "  verify: {type: assert, assert: \"${ACTIONS.finish.output.result} == '${CASE.caseId}-done'\"}\n");
         writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
@@ -142,7 +142,13 @@ class FrameworkEngineTest {
         String performance = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/performance.json")), "UTF-8");
         assertTrue(performance.contains("\"schemaVersion\":\"att-performance/v2.4.3\""));
         assertTrue(performance.contains("\"caseExecutionMs\""));
-        assertTrue(Files.exists(caseDirectory.resolve("process-output/callApi.stdout")));
+        assertFalse(Files.exists(caseDirectory.resolve("process-output")));
+        Path caseLogPath;
+        try (java.util.stream.Stream<Path> paths = Files.list(caseDirectory)) {
+            caseLogPath = paths.filter(path -> path.getFileName().toString().endsWith(".log")).findFirst().orElseThrow(AssertionError::new);
+        }
+        String caseLog = new String(Files.readAllBytes(caseLogPath), "UTF-8");
+        assertTrue(caseLog.contains("[TOOL callApi STDOUT]"));
         assertFalse(Files.exists(projectRoot.resolve("output/TEST-V2/ci/junit.html")));
         String manifest = new String(Files.readAllBytes(projectRoot.resolve("output/TEST-V2/run.yaml")), "UTF-8");
         assertTrue(manifest.contains("schemaVersion: att-run/v2.1"));

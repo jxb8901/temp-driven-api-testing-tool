@@ -24,6 +24,7 @@ public class UnifiedTemplateEngine {
     private final ToolInvoker toolInvoker;
     private final DbHelperExecutor dbHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
+    private final ExpressionBlockEvaluator expressionBlocks = new ExpressionBlockEvaluator();
     private final BuiltInProvider builtIns;
     private static final java.util.concurrent.ExecutorService BUILTIN_EXECUTOR = java.util.concurrent.Executors.newCachedThreadPool(new java.util.concurrent.ThreadFactory() {
         private final java.util.concurrent.atomic.AtomicInteger sequence = new java.util.concurrent.atomic.AtomicInteger();
@@ -149,10 +150,23 @@ public class UnifiedTemplateEngine {
         Matcher exact = VALUE.matcher(value);
         if (exact.matches()) return context.require(exact.group(1));
         if (value.startsWith("#{") && findToolEnd(value, 2) == value.length() - 1) {
-            return executeCall(value, context, log, null);
+            return evaluateBlock(value, context, log);
         }
         return render(expression, context, log);
     }
+
+    public Object evaluateBlock(String expression, final CaseRuntimeContext context, final CaseExecutionLog log) throws Exception {
+        return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
+            @Override public Object context(String path) { return context.require(path); }
+            @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
+            }
+            @Override public String interpolate(String value) { return renderValues(value, context); }
+            @Override public boolean hasContext(String path) { return context.contains(path); }
+        });
+    }
+
+    public void validateExpressionBlockSyntax(String expression) { expressionBlocks.validateSyntax(expression); }
 
     /** SQL-source scope: Context values and pure built-ins only; no Tool or nested DB execution. */
     public String renderDbSql(String sql, CaseRuntimeContext context) throws Exception {
@@ -190,7 +204,18 @@ public class UnifiedTemplateEngine {
 
     /** Returns Context paths written with the mandatory ${...} reference syntax. */
     public java.util.List<String> parseContextPaths(String text) {
-        return parseValuePaths(text);
+        java.util.List<String> paths = parseValuePaths(text);
+        if (text == null || text.isEmpty()) return paths;
+        int index = 0;
+        while (index < text.length()) {
+            int start = text.indexOf("#{", index);
+            if (start < 0) break;
+            int end = findToolEnd(text, start + 2);
+            if (end < 0) throw new IllegalArgumentException("Unclosed expression block: " + text.substring(start));
+            paths.addAll(expressionBlocks.contextPaths(text.substring(start, end + 1)));
+            index = end + 1;
+        }
+        return paths;
     }
 
     /** Detects the removed bare canonical-path spelling so callers can report a migration error. */
@@ -236,19 +261,25 @@ public class UnifiedTemplateEngine {
             body = body.substring(2, body.length() - 1);
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
-        if (parsed.name().startsWith("db.")) {
-            if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
-            return executeDbCall(parsed, context, log, invocationId);
-        }
         Map<String, Object> input = resolveArguments(parsed, context, log);
-        if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) {
+        return executeResolvedCall(parsed.name(), input, context, log, invocationId, attempt, timeoutMs, saveAs, overwrite, bypassCache);
+    }
+
+    private Object executeResolvedCall(String name, Map<String, Object> input, CaseRuntimeContext context,
+                                       CaseExecutionLog log, String invocationId, boolean attempt,
+                                       Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
+        if (name.startsWith("db.")) {
+            if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
+            return executeDbResolvedCall(name, input, context, log, invocationId);
+        }
+        if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             long started = System.nanoTime();
             long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
-            Object output = attempt ? invokeBuiltInWithTimeout(parsed.name(), input, effectiveTimeout, invocationId, started) : builtIns.invoke(parsed.name(), input);
-            return attempt ? builtInAttempt(parsed.name(), invocationId, input, output, context, saveAs, overwrite, started, effectiveTimeout) : output;
+            Object output = attempt ? invokeBuiltInWithTimeout(name, input, effectiveTimeout, invocationId, started) : builtIns.invoke(name, input);
+            return attempt ? builtInAttempt(name, invocationId, input, output, context, saveAs, overwrite, started, effectiveTimeout) : output;
         }
-        if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + parsed.name());
-        ToolConfig configured = toolInvoker.tool(parsed.name());
+        if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + name);
+        ToolConfig configured = toolInvoker.tool(name);
         if (configured != null && configured.callBacked()) {
             long effectiveTimeout = toolInvoker.effectiveTimeoutMs(configured.key(), timeoutMs);
             return executeCallBackedTool(configured, input, context, log, invocationId, attempt, effectiveTimeout, bypassCache);
@@ -257,8 +288,8 @@ public class UnifiedTemplateEngine {
             throw new IllegalStateException("Case execution log is required for process Tool invocation");
         }
         att.exec.ToolInvocationResult result = attempt
-                ? toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, timeoutMs, saveAs, overwrite)
-                : toolInvoker.invokeAttempt(invocationId, parsed.name(), input, context, log, null, "", false);
+                ? toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite)
+                : toolInvoker.invokeAttempt(invocationId, name, input, context, log, null, "", false);
         return attempt ? result : result.output();
     }
 
@@ -471,21 +502,8 @@ public class UnifiedTemplateEngine {
 
     private Object resolveDefinitionValue(String expression, Map<String, Object> input) throws Exception {
         expression = expression == null ? "" : expression.trim();
-        if (expression.startsWith("[") && expression.endsWith("]")) {
-            java.util.List<Object> values = new java.util.ArrayList<Object>();
-            for (String item : callParser.listItems(expression)) values.add(resolveDefinitionValue(item, input));
-            return values;
-        }
         Map<String, Object> scope = definitionScope(input);
-        Matcher exact = VALUE.matcher(expression);
-        if (exact.matches()) return requireScoped(scope, exact.group(1), false);
-        if (hasScopedPath(scope, expression) || explicitScopedRoot(expression) || isExplicitContextPath(expression)) {
-            throw bareContextReference(expression);
-        }
-        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
-            return executeScopedCall(expression, scope, false);
-        }
-        return callParser.literal(renderScoped(expression, scope, false));
+        return resolveScopedArgumentValue(expression, scope, false);
     }
 
     private Map<String, Object> definitionScope(Map<String, Object> input) {
@@ -511,16 +529,20 @@ public class UnifiedTemplateEngine {
 
     private Object executeDbCall(ToolCallParser.ParsedCall call, CaseRuntimeContext context,
                                  CaseExecutionLog log, String requestedId) throws Exception {
-        if (dbHelperExecutor == null) throw new IllegalStateException("DB expression invocation is unavailable: " + call.name());
-        String[] parts = call.name().split("\\.", -1);
+        return executeDbResolvedCall(call.name(), resolveDbArguments(call, context, log), context, log, requestedId);
+    }
+
+    private Object executeDbResolvedCall(String callName, Map<String, Object> input, CaseRuntimeContext context,
+                                         CaseExecutionLog log, String requestedId) throws Exception {
+        if (dbHelperExecutor == null) throw new IllegalStateException("DB expression invocation is unavailable: " + callName);
+        String[] parts = callName.split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]))) {
-            throw new IllegalArgumentException("DB expression must be db.<instance>.query(...) or db.<instance>.scalar(...): " + call.name());
+            throw new IllegalArgumentException("DB expression must be db.<instance>.query(...) or db.<instance>.scalar(...): " + callName);
         }
-        Map<String, Object> input = resolveDbArguments(call, context, log);
         boolean hasSql = input.containsKey("sql");
         boolean hasFile = input.containsKey("sqlFile");
-        if (hasSql == hasFile) throw new IllegalArgumentException(call.name() + " requires exactly one of sql or sqlFile");
+        if (hasSql == hasFile) throw new IllegalArgumentException(callName + " requires exactly one of sql or sqlFile");
         String source = "inline";
         String sql;
         if (hasFile) {
@@ -532,7 +554,7 @@ public class UnifiedTemplateEngine {
         sql = renderDbSql(sql, context);
         Object paramsValue = input.get("params");
         if (paramsValue != null && !(paramsValue instanceof java.util.List)) {
-            throw new IllegalArgumentException(call.name() + ".params must resolve to a List");
+            throw new IllegalArgumentException(callName + ".params must resolve to a List");
         }
         java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
         String id = requestedId == null || requestedId.trim().isEmpty()
@@ -661,9 +683,8 @@ public class UnifiedTemplateEngine {
                 throw new IllegalArgumentException("Unclosed tool call: " + text.substring(start));
             }
             String expression = text.substring(start, end + 1);
-            Object value = executeCall(expression, context, log, null);
-            ToolCallParser.ParsedCall parsed = callParser.parse(expression);
-            if (parsed.name().startsWith("db.") && parsed.name().endsWith(".query") && value instanceof Map) {
+            Object value = evaluateBlock(expression, context, log);
+            if (value instanceof Map) {
                 throw new IllegalArgumentException("A typed DB query result cannot be interpolated into text; use an exact assign expression or type: db Action");
             }
             output.append(value == null ? "" : String.valueOf(value));
@@ -682,9 +703,7 @@ public class UnifiedTemplateEngine {
             if (start < 0) break;
             int end = findToolEnd(text, start + 2);
             if (end < 0) throw new IllegalArgumentException("Unclosed tool/function call: " + text.substring(start));
-            ToolCallParser.ParsedCall call = callParser.parse(text.substring(start, end + 1));
-            calls.add(call);
-            for (ToolCallParser.Argument argument : call.arguments()) calls.addAll(parseCalls(argument.expression()));
+            calls.addAll(expressionBlocks.calls(text.substring(start, end + 1)));
             index = end + 1;
         }
         return calls;
@@ -713,7 +732,7 @@ public class UnifiedTemplateEngine {
             output.append(text.substring(index, start));
             int end = findToolEnd(text, start + 2);
             if (end < 0) throw new IllegalArgumentException("Unclosed tool/function call: " + text.substring(start));
-            callParser.parse(text.substring(start, end + 1));
+            expressionBlocks.validateSyntax(text.substring(start, end + 1));
             output.append('0');
             index = end + 1;
         }
@@ -749,16 +768,15 @@ public class UnifiedTemplateEngine {
     }
 
     private Object resolveArgumentValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        if (expression.startsWith("[") && expression.endsWith("]")) {
-            java.util.List<Object> values = new java.util.ArrayList<Object>();
-            for (String item : callParser.listItems(expression)) values.add(resolveArgumentValue(item.trim(), context, log));
-            return values;
-        }
-        Matcher exact = VALUE.matcher(expression);
-        if (exact.matches()) return context.require(exact.group(1));
-        if (isExplicitContextPath(expression)) throw bareContextReference(expression);
-        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) return executeCall(expression, context, log, null);
-        return callParser.literal(render(expression, context, log));
+        if (legacyInterpolatedPath(expression)) return render(expression, context, log);
+        return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
+            @Override public Object context(String path) { return context.require(path); }
+            @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
+            }
+            @Override public String interpolate(String value) { return renderValues(value, context); }
+            @Override public boolean hasContext(String path) { return context.contains(path); }
+        });
     }
 
     private String renderScopedCalls(String text, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
@@ -771,7 +789,17 @@ public class UnifiedTemplateEngine {
             output.append(text.substring(index, start));
             int end = findToolEnd(text, start + 2);
             if (end < 0) throw new IllegalArgumentException("Unclosed function call: " + text.substring(start));
-            Object value = executeScopedCall(text.substring(start, end + 1), values, missingAsEmpty);
+            Object value = expressionBlocks.evaluate(text.substring(start, end + 1), new ExpressionBlockEvaluator.Resolver() {
+                @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
+                @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                    if (!builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
+                        throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + name);
+                    }
+                    return builtIns.invoke(name, arguments);
+                }
+                @Override public String interpolate(String value) { return renderScopedValues(value, values, missingAsEmpty); }
+                @Override public boolean hasContext(String path) { return hasScopedPath(values, path); }
+            });
             output.append(value == null ? "" : String.valueOf(value));
             index = end + 1;
         }
@@ -788,20 +816,30 @@ public class UnifiedTemplateEngine {
     }
 
     private Object resolveScopedArgumentValue(String expression, Map<String, ?> values, boolean missingAsEmpty) throws Exception {
-        if (expression.startsWith("[") && expression.endsWith("]")) {
-            java.util.List<Object> result = new java.util.ArrayList<Object>();
-            for (String item : callParser.listItems(expression)) result.add(resolveScopedArgumentValue(item.trim(), values, missingAsEmpty));
-            return result;
-        }
-        Matcher exact = VALUE.matcher(expression);
-        if (exact.matches()) return requireScoped(values, exact.group(1), missingAsEmpty);
-        if (hasScopedPath(values, expression) || explicitScopedRoot(expression) || isExplicitContextPath(expression)) {
-            throw bareContextReference(expression);
-        }
-        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
-            return executeScopedCall(expression, values, missingAsEmpty);
-        }
-        return callParser.literal(renderScoped(expression, values, missingAsEmpty));
+        if (legacyInterpolatedPath(expression)) return renderScoped(expression, values, missingAsEmpty);
+        return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
+            @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
+            @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                if (!builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
+                    throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + name);
+                }
+                return builtIns.invoke(name, arguments);
+            }
+            @Override public String interpolate(String value) { return renderScopedValues(value, values, missingAsEmpty); }
+            @Override public boolean hasContext(String path) { return hasScopedPath(values, path); }
+        });
+    }
+
+    /** Keeps the pre-V3.2 unquoted ${dir}/file call-argument spelling distinct from numeric division. */
+    private boolean legacyInterpolatedPath(String expression) {
+        if (expression == null) return false;
+        Matcher matcher = VALUE.matcher(expression.trim());
+        if (!matcher.lookingAt() || matcher.end() >= expression.trim().length()) return false;
+        String value = expression.trim();
+        char separator = value.charAt(matcher.end());
+        if (separator != '/' && separator != '\\') return false;
+        String tail = value.substring(matcher.end() + 1);
+        return !tail.isEmpty() && tail.matches(".*[A-Za-z_.$/{\\\\}].*");
     }
 
     private Object executeScopedCall(String expression, Map<String, ?> values, boolean missingAsEmpty) throws Exception {

@@ -24,6 +24,9 @@ class ExpressionEvaluatorTest {
         assertFalse(evaluator.evaluate("true != true"));
         assertTrue(evaluator.evaluate("1.0 == 1.00"));
         assertTrue(evaluator.evaluate("12345678901234567890.0001 > 12345678901234567890.0000"));
+        assertTrue(evaluator.evaluate("'POSTED' in ['PENDING', 'POSTED']"));
+        assertFalse(evaluator.evaluate("'FAILED' in ['PENDING', 'POSTED']"));
+        assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate("'POSTED' in 'POSTED'"));
     }
 
     @Test void consumesBothSidesOfLogicalOperators() {

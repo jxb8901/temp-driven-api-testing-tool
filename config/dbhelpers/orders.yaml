@@ -26,4 +26,4 @@ result:
 
 evidence:
   sql: full
-  parameters: masked
+  parameters: values

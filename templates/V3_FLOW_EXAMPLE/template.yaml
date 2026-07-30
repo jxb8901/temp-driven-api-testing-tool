@@ -1,6 +1,6 @@
 schemaVersion: att-template/v3.0
 name: V3_FLOW_EXAMPLE
-description: Minimal V3.1 Template composing reusable Actions in one shared Context.
+description: V3.2 Template composing reusable Actions in one shared Context.
 actions:
   compose:
     type: flow
@@ -8,7 +8,10 @@ actions:
     use: common.compose.v1
   verify:
     type: assert
-    description: Verify the internal Action result through the ordinary ACTIONS Context.
-    assert: "${ACTIONS.decoratedValue.output.result} == '${CASE.caseId}-done'"
+    description: Verify Flow output with the ordinary ACTIONS Context and a typed expression block.
+    assert: >-
+      #{${CASE.caseId} in [${CASE.caseId}]
+        and ${ACTIONS.decoratedValue.output.result} == #{concat(${CASE.caseId}, '-done')}
+        and (1 + 2 * 3) == 7}
     expected: "${CASE.caseId}-done"
     actual: "${ACTIONS.decoratedValue.output.result}"

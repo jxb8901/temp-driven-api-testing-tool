@@ -57,6 +57,7 @@ class FrameworkConfigLoaderTest {
         assertTrue(loaded.tool("today").callBacked());
         assertEquals(Long.valueOf(3210), loaded.tool("today").timeoutMs());
         assertTrue(loaded.tool("today").commandArgv().isEmpty());
+        assertEquals("values", loaded.dbHelpers().get("orders").evidenceParameters());
 
         Path legacy = tempDir.resolve("legacy-v25-call.yaml");
         Files.write(legacy, ("schemaVersion: att-config/v2.5\ntools:\n  bad:\n" +

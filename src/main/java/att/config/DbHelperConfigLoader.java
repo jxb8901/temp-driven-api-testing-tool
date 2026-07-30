@@ -108,7 +108,7 @@ public final class DbHelperConfigLoader {
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "dbhelper.evidence");
         SchemaSupport.rejectUnknown(evidence, "dbhelper.evidence", "sql", "parameters");
         String evidenceSql = choice(evidence.get("sql"), "full", "dbhelper.evidence.sql", "full", "hash");
-        String evidenceParameters = choice(evidence.get("parameters"), "masked", "dbhelper.evidence.parameters", "masked", "types", "values");
+        String evidenceParameters = choice(evidence.get("parameters"), "values", "dbhelper.evidence.parameters", "masked", "types", "values");
 
         return new DbHelperConfig(id, name, description, url, username, password, driverClass,
                 properties, readOnly, isolation, timeout, scope, onEnd, maxRows, maxCellBytes, maxBytes,

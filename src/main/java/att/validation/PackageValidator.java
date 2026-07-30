@@ -154,6 +154,10 @@ public final class PackageValidator {
             if (params instanceof Iterable) {
                 for (Object value : (Iterable<?>) params) if (value instanceof String) expressions.add((String) value);
             } else if (params instanceof String) expressions.add((String) params);
+            Object parameters = operation.get("parameters");
+            if (parameters instanceof Map) for (Object value : ((Map<?, ?>) parameters).values()) {
+                if (value instanceof String) expressions.add((String) value);
+            }
         }
         for (Object value : action.fields().values()) expressions.add(String.valueOf(value));
         return expressions;
@@ -404,6 +408,10 @@ public final class PackageValidator {
                 } else if (params instanceof String) {
                     validateStaticContextStructure((String) params, syntaxEngine, completedActions, false);
                 }
+                Object parameters = operation.get("parameters");
+                if (parameters instanceof Map) for (Object value : ((Map<?, ?>) parameters).values()) {
+                    if (value instanceof String) validateStaticContextStructure((String) value, syntaxEngine, completedActions, false);
+                }
             }
             if ("log".equals(type)) {
                 validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false);
@@ -436,18 +444,23 @@ public final class PackageValidator {
                 "message", "file", "level", "fields", "retry", "timeoutMs", "overwrite");
         Map<String, Object> operation = query ? action.query() : action.update();
         att.config.SchemaSupport.rejectUnknown(operation, "actions." + action.id() + "." + (query ? "query" : "update"),
-                "sql", "sqlFile", "params");
+                "sql", "sqlFile", "params", "parameters");
         boolean hasSql = operation.get("sql") != null;
         boolean hasFile = operation.get("sqlFile") != null;
         if (hasSql == hasFile) throw new IllegalArgumentException("DB action SQL block requires exactly one sql or sqlFile: " + action.id());
-        if (hasSql) validateDbSql(String.valueOf(operation.get("sql")), engine, config);
-        else {
+        String sqlText;
+        if (hasSql) {
+            sqlText = String.valueOf(operation.get("sql"));
+            validateDbSql(sqlText, engine, config);
+        } else {
             att.exec.DbHelperExecutor executor = new att.exec.DbHelperExecutor(projectRoot, config);
             Path sqlFile = executor.resolveSqlFile(String.valueOf(operation.get("sqlFile")));
-            String content = new String(Files.readAllBytes(sqlFile), java.nio.charset.StandardCharsets.UTF_8);
-            validateDbSql(content, engine, config);
+            sqlText = new String(Files.readAllBytes(sqlFile), java.nio.charset.StandardCharsets.UTF_8);
+            validateDbSql(sqlText, engine, config);
         }
         Object params = operation.get("params");
+        Object parameters = operation.get("parameters");
+        if (params != null && parameters != null) throw new IllegalArgumentException("DB action cannot use both params and parameters: " + action.id());
         if (params != null && !(params instanceof Iterable) && !(params instanceof String)) {
             throw new IllegalArgumentException("DB action params must be a list or exact List expression: " + action.id());
         }
@@ -455,6 +468,17 @@ public final class PackageValidator {
             if (value instanceof String) validateInlineExpressions((String) value, engine, config);
         }
         else if (params instanceof String) validateInlineExpressions((String) params, engine, config);
+        if (parameters != null) {
+            if (!(parameters instanceof Map)) throw new IllegalArgumentException("DB action parameters must be a map: " + action.id());
+            Map<String, Object> shape = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) parameters).entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                if (!name.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Invalid named SQL parameter: " + name);
+                shape.put(name, null);
+                if (entry.getValue() instanceof String) validateInlineExpressions((String) entry.getValue(), engine, config);
+            }
+            att.template.NamedSqlParameters.bind(sqlText, shape);
+        }
         validateInlineExpressions(action.saveAs(), engine, config);
         if (action.saveConfig().configured()) {
             String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
@@ -721,6 +745,16 @@ public final class PackageValidator {
                         engine.renderValidationValues((String) params, context);
                         validateCallArgumentsIn((String) params, context, engine);
                     }
+                    Object parameters = operation.get("parameters");
+                    if (parameters instanceof Map) for (Map.Entry<?, ?> entry : ((Map<?, ?>) parameters).entrySet()) {
+                        Object value = entry.getValue();
+                        if (value instanceof String) {
+                            sourceField = "actions." + action.id() + ".parameters." + entry.getKey();
+                            validateContextStructure((String) value, engine, context, testCase, completedActions);
+                            engine.renderValidationValues((String) value, context);
+                            validateCallArgumentsIn((String) value, context, engine);
+                        }
+                    }
                 }
                 if ("render".equalsIgnoreCase(action.type())) {
                     for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
@@ -859,7 +893,9 @@ public final class PackageValidator {
 
     private void validateAssertionExpression(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         validateInlineExpressions(text, engine, config);
-        expressionEvaluator.validateSyntax(engine.maskCalls(text));
+        String value = text == null ? "" : text.trim();
+        if (value.startsWith("#{") && value.endsWith("}")) engine.validateExpressionBlockSyntax(value);
+        else expressionEvaluator.validateSyntax(engine.maskCalls(text));
     }
 
     private static final class LocatedValidationException extends IllegalArgumentException {

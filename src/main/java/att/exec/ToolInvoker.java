@@ -132,6 +132,7 @@ public class ToolInvoker {
             }
         }
         catch (java.io.IOException e) {
+            cleanupCapture(capture);
             Map<String, Object> evidence = new LinkedHashMap<String, Object>();
             evidence.put("id", id); evidence.put("type", "tool"); evidence.put("name", toolName);
             evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage());
@@ -140,6 +141,7 @@ public class ToolInvoker {
             if (tool.ssh() != null) { evidence.put("sshDestination", tool.ssh().destination()); evidence.put("sshPort", tool.ssh().port()); evidence.put("sshTransport", sshTransport); }
             throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e);
         }
+        try {
         String command = printableCommand(argv);
         String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
@@ -220,6 +222,7 @@ public class ToolInvoker {
             toolNode.put(tool.groupId(), groupNode);
         } else toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
+        appendProcessOutput(log, id, commandResult);
         if (recordAction) {
             context.addAction(id, invocation);
             log.appendToolInvocation("ACTION " + id, invocation);
@@ -230,11 +233,13 @@ public class ToolInvoker {
         }
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation);
+        } finally {
+            cleanupCapture(commandResult);
+        }
     }
 
     private CommandRunner.CapturePolicy capturePolicy(CaseRuntimeContext context, String invocationId) throws Exception {
-        Path directory = context.caseOutputDirectory().resolve("process-output");
-        Files.createDirectories(directory);
+        Path directory = Files.createTempDirectory("att-process-spool-");
         String base = invocationId.replaceAll("[^A-Za-z0-9._-]", "_");
         Path stdout = available(directory, base, ".stdout");
         Path stderr = stdout.resolveSibling(stdout.getFileName().toString().replaceFirst("\\.stdout$", ".stderr"));
@@ -251,8 +256,35 @@ public class ToolInvoker {
         evidence.put("stdoutBytes", result.stdoutBytes()); evidence.put("stderrBytes", result.stderrBytes());
         evidence.put("stdoutTruncated", result.stdoutTruncated()); evidence.put("stderrTruncated", result.stderrTruncated());
         evidence.put("stdoutArtifactTruncated", result.stdoutArtifactTruncated()); evidence.put("stderrArtifactTruncated", result.stderrArtifactTruncated());
-        if (result.stdoutArtifact() != null) evidence.put("stdoutArtifact", result.stdoutArtifact().toString());
-        if (result.stderrArtifact() != null) evidence.put("stderrArtifact", result.stderrArtifact().toString());
+    }
+
+    private void appendProcessOutput(CaseExecutionLog log, String invocationId, CommandResult result) throws java.io.IOException {
+        if (log == null || result == null) return;
+        if (result.stdoutBytes() > 0) {
+            if (result.stdoutArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDOUT",
+                    result.stdoutArtifact(), result.stdoutArtifactTruncated(), result.stdoutBytes());
+            else log.appendRaw("TOOL " + invocationId + " STDOUT", result.stdout());
+        }
+        if (result.stderrBytes() > 0) {
+            if (result.stderrArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDERR",
+                    result.stderrArtifact(), result.stderrArtifactTruncated(), result.stderrBytes());
+            else log.appendRaw("TOOL " + invocationId + " STDERR", result.stderr());
+        }
+    }
+
+    private void cleanupCapture(CommandRunner.CapturePolicy policy) {
+        if (policy != null) cleanup(policy.stdoutArtifact(), policy.stderrArtifact());
+    }
+
+    private void cleanupCapture(CommandResult result) {
+        if (result != null) cleanup(result.stdoutArtifact(), result.stderrArtifact());
+    }
+
+    private void cleanup(Path stdout, Path stderr) {
+        Path directory = stdout == null ? (stderr == null ? null : stderr.getParent()) : stdout.getParent();
+        try { if (stdout != null) Files.deleteIfExists(stdout); } catch (Exception ignored) { }
+        try { if (stderr != null) Files.deleteIfExists(stderr); } catch (Exception ignored) { }
+        try { if (directory != null) Files.deleteIfExists(directory); } catch (Exception ignored) { }
     }
 
     @SuppressWarnings("unchecked")

@@ -24,8 +24,9 @@
     },
     "sqlBlock": {
       "type": "object",
-      "properties": {"sql": {"type": "string", "minLength": 1}, "sqlFile": {"type": "string", "minLength": 1}, "params": {"oneOf": [{"type": "array"}, {"type": "string", "minLength": 1}]}},
+      "properties": {"sql": {"type": "string", "minLength": 1}, "sqlFile": {"type": "string", "minLength": 1}, "params": {"oneOf": [{"type": "array"}, {"type": "string", "minLength": 1}]}, "parameters": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}}},
       "oneOf": [{"required": ["sql"], "not": {"required": ["sqlFile"]}}, {"required": ["sqlFile"], "not": {"required": ["sql"]}}],
+      "allOf": [{"not": {"required": ["params", "parameters"]}}],
       "additionalProperties": false
     },
     "retry": {

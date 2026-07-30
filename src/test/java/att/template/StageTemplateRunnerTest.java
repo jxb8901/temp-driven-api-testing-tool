@@ -87,6 +87,48 @@ class StageTemplateRunnerTest {
         List<ValidationResult> results=new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("verify",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(tempDir.resolve("case.log")));
         assertEquals(2,results.size()); assertEquals(ResultStatus.PASS,results.get(1).status());
     }
+
+    @Test void logActionPreservesMultilineContextAsRawCaseLogText() throws Exception {
+        Path caseDir = tempDir.resolve("multiline-log"); Files.createDirectories(caseDir);
+        Map<String,Object> data = new LinkedHashMap<String,Object>(); data.put("message", "first\nsecond\r\nthird");
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),data,Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("verify","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        TemplateAction action = new TemplateAction("note", map("type","log","message","${CASE.message}"));
+        CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("verify",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,log);
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        String text = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+        assertTrue(text.contains("[LOG note INFO]\nfirst\nsecond\nthird\n\n"));
+        assertFalse(text.contains("first\\nsecond"));
+    }
+
+    @Test void consoleSaveAsWritesBuiltInAndProcessOutputOnlyToCaseLog() throws Exception {
+        Path caseDir = tempDir.resolve("console-save"); Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("builtin", map("type","tool","call","#{upper('abc')}","saveAs",map("path","console","format","text"))),
+                new TemplateAction("process", map("type","tool","call","#{sample()}","saveAs",map("path","console","format","raw"))));
+        CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new FixedRunner(0,"line1\nline2\n"))))
+                .execute("invoke",new StageTemplate("T",tempDir,actions),context,log);
+
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS), Arrays.asList(results.get(0).status(), results.get(1).status()));
+        String text = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+        assertTrue(text.contains("[ACTION builtin SAVE]\nABC\n"));
+        assertTrue(text.contains("[TOOL process STDOUT]\nline1\nline2\n"));
+        assertFalse(Files.exists(caseDir.resolve("console")));
+        assertFalse(Files.exists(caseDir.resolve("process-output")));
+        assertTrue(((List<?>) context.resolve("ACTIONS.builtin.output.targetFiles")).isEmpty());
+        assertTrue(((List<?>) context.resolve("ACTIONS.process.output.targetFiles")).isEmpty());
+    }
     @Test void retriesFailedAssertionAndRetriesTimeoutOnlyWhenConfigured() throws Exception {
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null);
         CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("case1"),"R",tempDir,tempDir.resolve("case1.log"));

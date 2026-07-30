@@ -56,7 +56,10 @@ class CaseExecutionLogTest {
         output.put("attempts",java.util.Collections.singletonList(attempt));
         Map<String,Object> action=new LinkedHashMap<String,Object>(); action.put("id","call"); action.put("type","tool");
         action.put("output",output); action.put("TOOL",nestedStatus("FAIL"));
-        Path file=tempDir.resolve("compact.log"); new CaseExecutionLog(file).appendAction("ACTION call",action);
+        Path file=tempDir.resolve("compact.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.appendRaw("TOOL call STDOUT", "PAYLOAD\n");
+        log.appendAction("ACTION call",action);
 
         String text=new String(Files.readAllBytes(file),"UTF-8");
         assertEquals(1,occurrences(text,"[ACTION call]"));
@@ -64,6 +67,14 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("TOOL:"));
         assertFalse(text.contains("rawOutput:"));
         assertFalse(text.contains("command:"));
+    }
+
+    @Test void rawContentPreservesPhysicalLinesAndNormalizesLineEndings() throws Exception {
+        Path file = tempDir.resolve("raw.log");
+        new CaseExecutionLog(file).appendRaw("LOG note INFO", "first\r\nsecond\rthird");
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("[LOG note INFO]\nfirst\nsecond\nthird\n\n"));
+        assertFalse(text.contains("\\n"));
     }
 
     private Map<String,Object> status(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("status",value);return result;}

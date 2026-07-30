@@ -11,6 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.io.BufferedWriter;
+import java.io.Reader;
+import java.io.InputStreamReader;
+import java.nio.charset.CodingErrorAction;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -59,9 +62,61 @@ public class CaseExecutionLog implements AutoCloseable {
             Object serializable = yamlAnchors ? data : detached(data, new IdentityHashMap<Object, Boolean>());
             text.append(yaml.dump(serializable)).append("\n");
         }
-        writer.write(text.toString());
+        write(text.toString());
+    }
+
+    /** Writes resolved user/process content as text instead of YAML-escaping line breaks. */
+    public synchronized void appendRaw(String section, String content) throws IOException {
+        String normalized = normalizeLines(content == null ? "" : content);
+        StringBuilder text = new StringBuilder();
+        text.append("[").append(section).append("]\n");
+        text.append(normalized);
+        if (!normalized.endsWith("\n")) text.append('\n');
+        text.append('\n');
+        write(text.toString());
+    }
+
+    /** Streams a bounded temporary process spool into the Case log, then leaves cleanup to the caller. */
+    public synchronized void appendRawFile(String section, Path source, boolean truncated, long totalBytes) throws IOException {
+        if (source == null || !Files.isRegularFile(source)) return;
+        write("[" + section + "]\n");
+        boolean previousCarriageReturn = false;
+        boolean endedWithNewline = false;
+        char[] buffer = new char[8192];
+        try (Reader reader = new InputStreamReader(Files.newInputStream(source), StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE))) {
+            int count;
+            while ((count = reader.read(buffer)) >= 0) {
+                StringBuilder chunk = new StringBuilder(count + 1);
+                for (int index = 0; index < count; index++) {
+                    char value = buffer[index];
+                    if (previousCarriageReturn) {
+                        if (value != '\n') chunk.append('\n');
+                        previousCarriageReturn = false;
+                    }
+                    if (value == '\r') previousCarriageReturn = true;
+                    else chunk.append(value);
+                }
+                if (chunk.length() > 0) {
+                    write(chunk.toString());
+                    endedWithNewline = chunk.charAt(chunk.length() - 1) == '\n';
+                }
+            }
+        }
+        if (previousCarriageReturn) { write("\n"); endedWithNewline = true; }
+        if (!endedWithNewline) write("\n");
+        if (truncated) write("... ATT process output truncated; totalBytes=" + totalBytes + " ...\n");
+        write("\n");
+    }
+
+    private void write(String text) throws IOException {
+        writer.write(text);
         writer.flush();
-        if (mirror != null) mirror.accept(text.toString());
+        if (mirror != null) mirror.accept(text);
+    }
+
+    private String normalizeLines(String value) {
+        return value.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     @Override public synchronized void close() throws IOException { writer.close(); }
@@ -96,6 +151,8 @@ public class CaseExecutionLog implements AutoCloseable {
                 if (!compactAttempts.isEmpty()) compact.put("attempts", compactAttempts);
             }
             copyIfPresent(output, compact, "winningAttempt", "assertion");
+        } else if ("log".equalsIgnoreCase(String.valueOf(action.get("type")))) {
+            copyIfPresent(output, compact, "level", "sourceFile", "fields", "assertion");
         } else {
             copyResultUnlessTargetDuplicate(output, compact);
             copyIfPresent(output, compact, "renderAs", "sources", "level", "sourceFile", "fields", "name", "assertion", "expected", "actual");
@@ -115,8 +172,6 @@ public class CaseExecutionLog implements AutoCloseable {
         if (!(parsed instanceof String) || stdout == null || !String.valueOf(parsed).equals(String.valueOf(stdout).trim())) {
             if (attempt.containsKey("output")) result.put("output", parsed);
         }
-        if (stdout != null && !String.valueOf(stdout).isEmpty()) result.put("stdout", stdout);
-        copyNonEmpty(attempt, result, "stderr");
         copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated", "stdoutArtifactTruncated", "stderrArtifactTruncated", "stdoutArtifact", "stderrArtifact", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport");
         return result;
     }
