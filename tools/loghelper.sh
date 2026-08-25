@@ -3,7 +3,7 @@
 # 提取特定交易應用日誌的工具：在給定的多個日誌文件中搜索包括全部 keywords 的交易日誌，
 # 每筆交易日誌保存為獨立文件，最多保存給定個數。具體要求如下：
 #    1. 配置：交易日誌目錄、交易開始 pattern、交易結束 pattern、其它模式匹配所用的正則表達式
-#    2. Usage: $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]，log_file 是無序的
+#    2. Usage: $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]，log_file 是無序的；不帶參數、--help 或 --usage 顯示用法
 #    3. 應用日誌由 log4j 生成，日誌格式為：[DEBUG] [2026/07/15 13:25:32.589] [JavaClass.method] [TID123456] ...
 #       Messages…\n multiple line \n …，每條日誌的第 4 個欄位 TID 為一筆交易的唯一 ID
 #    4. 一筆交易的第一／最後一條日誌可能匹配，也可能不匹配可配置的交易開始／結束 pattern；
@@ -100,7 +100,30 @@ function extract_tid(line,    header_part, tags, tag_count, tid) {
 '
 
 usage() {
-    echo "Usage: $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]" >&2
+    cat >&2 <<EOF
+Usage:
+  $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] \\
+     --keyword <text> [<text> ...] [options]
+  $0 --help
+  $0 --usage
+
+Required arguments:
+  --output-prefix <path>       Prefix for each extracted transaction log.
+  --log-file <path-or-glob>   One or more log paths or pathname patterns.
+  --keyword <text>            One or more literal keywords; all must match.
+
+Options:
+  --max-tid-files <n>         Maximum result files (default: 10).
+  --min-tid-files <n>         Minimum result files (default: 1).
+  --recent-log-count <n>      Search the newest n logs by mtime (default: 2;
+                              0 searches all logs).
+  --ssh                       Continue on configured remote servers when the
+                              local result count is below --min-tid-files.
+  --help, --usage             Show this help and exit successfully.
+
+With no arguments, this help is displayed. Help is written to stderr so stdout
+remains reserved for the ATT YAML result contract.
+EOF
 }
 
 yaml_escape() {
@@ -621,6 +644,22 @@ SEEN_LOG_FILES=false
 SEEN_KEYWORDS=false
 SSH_ENABLED=false
 SEEN_SSH=false
+
+# Help is a global action. Check it before normal parsing so it remains
+# available even after an option whose value would otherwise consume it.
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 0
+fi
+for option in "$@"; do
+    case "$option" in
+        --help|--usage)
+            usage
+            exit 0
+            ;;
+    esac
+done
+unset option
 
 while [ "$#" -gt 0 ]; do
     option=$1

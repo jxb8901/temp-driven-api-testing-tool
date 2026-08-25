@@ -611,6 +611,8 @@ findTransactions:
 
 `fpp.loghelper.logFiles` and `keywords` are ordered typed arrays; each path or pathname pattern is expanded independently on the host being searched. Only regular files are accepted, duplicate canonical paths are searched once, and unmatched patterns are skipped with a diagnostic. The call fails when no local pattern resolves to a regular file. Remote hosts receive the original patterns so that expansion uses the remote filesystem.
 
+Running `tools/loghelper.sh` without arguments displays its usage and exits successfully. `--help` and `--usage` provide the same behavior. Help is written to stderr so stdout remains reserved for the ATT YAML result contract.
+
 When `--ssh` is enabled, configure `tools/loghelper.sh` with `SSH_SERVERS`, or provide `LOGHELPER_SSH_SERVERS` as newline-separated records:
 
 ```text

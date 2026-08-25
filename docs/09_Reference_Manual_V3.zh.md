@@ -608,6 +608,8 @@ findTransactions:
 
 `fpp.loghelper.logFiles` 与 `keywords` 是有序 typed array；每个 path／pathname pattern 会在被搜索的 host 上独立展开。只接受 regular file；相同 canonical path 只搜索一次；无匹配 pattern 会跳过并输出诊断。如果本地没有任何 pattern 匹配 regular file，调用失败。远程 host 收到的是原始 pattern，因此会按远程 filesystem 展开。
 
+直接运行 `tools/loghelper.sh` 而不带参数时，会显示用法并成功退出；`--help` 与 `--usage` 行为相同。Help 写入 stderr，确保 stdout 继续只用于 ATT YAML result contract。
+
 启用 `--ssh` 时，可在 `tools/loghelper.sh` 配置 `SSH_SERVERS`，或通过 `LOGHELPER_SSH_SERVERS` 提供多行记录：
 
 ```text

@@ -119,6 +119,24 @@ class FppReferenceToolsTest {
                 new String(Files.readAllBytes(stdout), StandardCharsets.UTF_8));
     }
 
+    @Test void logHelperDisplaysUsageByDefaultAndForBothHelpAliases() throws Exception {
+        requirePosix();
+
+        CommandResult noArguments = run("./tools/loghelper.sh");
+        CommandResult help = run("./tools/loghelper.sh", "--help");
+        CommandResult usage = run("./tools/loghelper.sh", "--usage");
+
+        for (CommandResult result : Arrays.asList(noArguments, help, usage)) {
+            String normalizedHelp = result.stderr().replaceAll("\\s+", " ");
+            assertEquals(0, result.exitCode(), result.stderr());
+            assertEquals("", result.stdout());
+            assertTrue(result.stderr().contains("Usage:"));
+            assertTrue(result.stderr().contains("--output-prefix <path>"));
+            assertTrue(result.stderr().contains("--help, --usage"));
+            assertTrue(normalizedHelp.contains("stdout remains reserved for the ATT YAML result contract"));
+        }
+    }
+
     @Test void logHelperExpandsFileGlobsAndAcceptsStatusOneOnlyForIntentionalEarlyStop() throws Exception {
         requirePosix();
         Path fakeBin = tempDir.resolve("fake-bin");
