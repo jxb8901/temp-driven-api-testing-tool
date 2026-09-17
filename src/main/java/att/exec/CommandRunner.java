@@ -62,12 +62,12 @@ public class CommandRunner {
             join(outThread, process.getInputStream());
             join(errThread, process.getErrorStream());
             stdoutCapture.close(); stderrCapture.close();
-            return result(-1, stdoutCapture, stderrCapture, true);
+            return result(-1, stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), true);
         }
         join(outThread, process.getInputStream());
         join(errThread, process.getErrorStream());
         stdoutCapture.close(); stderrCapture.close();
-        return result(process.exitValue(), stdoutCapture, stderrCapture, false);
+        return result(process.exitValue(), stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), false);
     }
 
     public CommandResult runWithCapture(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory,
@@ -78,14 +78,17 @@ public class CommandRunner {
         finally { if (previous == null) capture.remove(); else capture.set(previous); }
     }
 
-    private CommandResult result(int exitCode, BoundedStreamCapture stdout, BoundedStreamCapture stderr, boolean timedOut) {
+    private CommandResult result(int exitCode, BoundedStreamCapture stdout, BoundedStreamCapture stderr,
+                                 IOException stdoutFailure, IOException stderrFailure, boolean timedOut) {
         STDOUT_BYTES.addAndGet(stdout.bytes()); STDERR_BYTES.addAndGet(stderr.bytes());
         if (stdout.memoryTruncated() || stdout.artifactTruncated()) TRUNCATED_STREAMS.incrementAndGet();
         if (stderr.memoryTruncated() || stderr.artifactTruncated()) TRUNCATED_STREAMS.incrementAndGet();
         return new CommandResult(exitCode, stdout.preview(), stderr.preview(), timedOut,
                 stdout.bytes(), stderr.bytes(), stdout.memoryTruncated(), stderr.memoryTruncated(), stdout.artifactTruncated(), stderr.artifactTruncated(),
-                stdout.artifact(), stderr.artifact());
+                stdout.artifact(), stderr.artifact(), message(stdoutFailure), message(stderrFailure));
     }
+
+    private static String message(IOException error) { return error == null ? null : error.getMessage(); }
 
     public static Stats stats() { return new Stats(STDOUT_BYTES.get(), STDERR_BYTES.get(), TRUNCATED_STREAMS.get()); }
     public static final class Stats {
@@ -147,6 +150,8 @@ public class CommandRunner {
             this.output = output;
         }
 
+        IOException failure() { return output.failure(); }
+
         @Override
         public void run() {
             byte[] buffer = new byte[4096];
@@ -155,8 +160,10 @@ public class CommandRunner {
                 while ((read = input.read(buffer)) >= 0) {
                     output.write(buffer, 0, read);
                 }
-            } catch (IOException ignored) {
-                // Best effort log capture.
+            } catch (IOException error) {
+                // Preserve capture failures for evidence. The process result still
+                // remains authoritative (especially when cancellation closes a pipe).
+                output.recordFailure(error);
             }
         }
 

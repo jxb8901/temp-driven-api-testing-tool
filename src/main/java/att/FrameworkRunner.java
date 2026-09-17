@@ -124,14 +124,16 @@ public final class FrameworkRunner {
             if (options != null && "json".equals(options.format()) && "validate".equals(options.command())) {
                 java.util.List<att.validation.Diagnostic> diagnostics = java.util.Collections.singletonList(typed.toDiagnostic()); System.out.println(new PackageValidator.ValidationSummary(options.validationScope(), 0, 0, 0, 0, diagnostics).toJson());
             } else if (options != null && "json".equals(options.format())) {
-                java.util.Map<String,Object> error = new java.util.LinkedHashMap<String,Object>(); error.put("valid", false); error.put("code", typed.code()); error.put("message", typed.summary()); error.put("detail", typed.detail()); error.put("suggestion", typed.suggestion()); System.err.println(att.validation.JsonSupport.write(error));
+                System.err.println(att.validation.DiagnosticRenderer.jsonError(typed.toDiagnostic()));
             } else System.err.println(typed.format());
             System.exit(2);
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.wrap(DiagnosticCodes.RUN_FAILED,
                     "Unexpected ATT runtime failure", e, null, null,
                     "Inspect the cause, Case log, and run evidence; rerun with --verbose when safe.");
-            System.err.println(typed.format());
+            if (options != null && "json".equals(options.format()))
+                System.err.println(att.validation.DiagnosticRenderer.jsonError(typed.toDiagnostic()));
+            else System.err.println(typed.format());
             System.exit(3);
         }
     }
@@ -159,14 +161,7 @@ public final class FrameworkRunner {
         for (int index = 0; index < visible.size(); index++) {
             att.validation.Diagnostic diagnostic = visible.get(index);
             if (index > 0) output.println();
-            StringBuilder location = new StringBuilder();
-            append(location, "file", diagnostic.file()); append(location, "field", diagnostic.field()); append(location, "sheet", diagnostic.sheet());
-            append(location, "row", diagnostic.row()); append(location, "column", diagnostic.column()); append(location, "template", diagnostic.template()); append(location, "action", diagnostic.action());
-            String[] message = String.valueOf(diagnostic.message()).split("\\r?\\n", -1);
-            output.println("  [" + diagnostic.severity() + "] " + diagnostic.code() + ": " + message[0]);
-            for (int line = 1; line < message.length; line++) output.println("    " + message[line]);
-            if (location.length() > 0) output.println("    location: " + location);
-            if (diagnostic.suggestion() != null) output.println("    suggestion: " + diagnostic.suggestion());
+            output.println(att.validation.DiagnosticRenderer.validation(diagnostic));
         }
     }
     private static void append(StringBuilder out, String key, Object value) { if (value != null && !String.valueOf(value).isEmpty()) { if (out.length() > 0) out.append(", "); out.append(key).append('=').append(value); } }

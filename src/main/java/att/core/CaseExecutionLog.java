@@ -172,13 +172,25 @@ public class CaseExecutionLog implements AutoCloseable {
         if (!(parsed instanceof String) || stdout == null || !String.valueOf(parsed).equals(String.valueOf(stdout).trim())) {
             if (attempt.containsKey("output")) result.put("output", parsed);
         }
-        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated", "stdoutArtifactTruncated", "stderrArtifactTruncated", "stdoutArtifact", "stderrArtifact", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport");
+        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated", "stdoutArtifactTruncated", "stderrArtifactTruncated", "stdoutArtifact", "stderrArtifact", "stdoutCaptureError", "stderrCaptureError", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport", "cleanupWarning", "evidenceError");
         return result;
     }
 
     private Map<String, Object> compactException(Map<String, Object> exception) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        copyIfPresent(exception, result, "type", "code", "summary", "detail", "location", "suggestion");
+        // summary/detail are the canonical diagnostic text.  The rendered
+        // message normally repeats detail (and can therefore duplicate the
+        // original failure in the human-readable case log), so retain it
+        // only when it adds information that is not already present.
+        copyIfPresent(exception, result, "type", "code", "summary", "detail", "location", "suggestion", "context", "cause");
+        Object message = exception.get("message");
+        if (message != null) {
+            String rendered = String.valueOf(message);
+            String summary = exception.get("summary") == null ? "" : String.valueOf(exception.get("summary"));
+            String detail = exception.get("detail") == null ? "" : String.valueOf(exception.get("detail"));
+            if (!rendered.equals(summary) && !rendered.equals(detail)
+                    && !detail.contains(rendered) && !rendered.contains(detail)) result.put("message", message);
+        }
         return result;
     }
 

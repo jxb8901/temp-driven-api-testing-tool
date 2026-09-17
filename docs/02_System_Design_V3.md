@@ -1,13 +1,13 @@
-# ATT V3.2.0 System Design
+# ATT V3.3.0 System Design
 
 **Document Status:** Implemented
 
-**Target Version:** ATT 3.2.0
+**Target Version:** ATT 3.3.0
 **Last Updated:** 2026-07-30
 
 ## 1. Purpose
 
-ATT V3.2.0 retains the reusable, shared-Context Flow model and improves expression, database, and Case-log authoring without adding another Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context.
+ATT V3.3.0 retains the reusable, shared-Context Flow model and improves expression, database, and Case-log authoring without adding another Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
@@ -19,7 +19,7 @@ The existing Excel, Stage, V2 Template, Tool, DB, run, report, and CI contracts 
 
 ## 2. Goals and boundaries
 
-V3.2 provides:
+V3.3 provides:
 
 - one Expression Engine and Context contract for Template and Flow Actions;
 - direct access to `CASE`, `RUN`, prior `ACTIONS`, `TOOL`, `DB`, and current `output`;
@@ -29,7 +29,7 @@ V3.2 provides:
 - Case-scoped `assign` behavior through `CASE.VARS`; and
 - nested evidence and qualified artifact paths without a Flow-specific expression API.
 
-V3.2 additionally provides:
+V3.3 additionally provides:
 
 - typed `#{...}` expression blocks with arithmetic, `in`, lists, comparisons, boolean operators, Context operands, and calls;
 - direct DB Action named parameters compiled safely to JDBC positional bindings;
@@ -38,7 +38,7 @@ V3.2 additionally provides:
 - `saveAs.path: console`; and
 - no persistent `process-output` artifacts.
 
-V3.2 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
+V3.3 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
 
 ## 3. Public configuration
 
@@ -197,7 +197,7 @@ Log Action messages and process stdout/stderr are written as raw UTF-8 Case-log 
 
 ## 11. Acceptance criteria
 
-V3.2 is complete when:
+V3.3 is complete when:
 
 - schema validation rejects `inputs`, `outputs`, and `with`;
 - the same Action configuration runs inline or in a Flow without expression changes;

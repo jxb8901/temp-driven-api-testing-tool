@@ -23,8 +23,8 @@ public final class FrameworkConfigLoader {
     }
 
     public FrameworkConfig load(Path path, Path projectRoot) throws IOException {
-        try (Reader reader = Files.newBufferedReader(path)) {
-            Object loaded = YamlSupport.parser().load(reader);
+        try {
+            Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> map = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(map.get("schemaVersion"));
@@ -60,17 +60,19 @@ public final class FrameworkConfigLoader {
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
                     templatesRoot(map), testcasesRoot(map), tools, dbHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
         } catch (att.validation.DiagnosticException e) {
-            throw e;
+            throw YamlSupport.locate(e, path, e.field());
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
             String field = schema == null ? "config" : schema.field();
             boolean toolField = field != null && (field.contains("tools") || field.contains("toolGroups") || field.contains("ssh"));
-            throw new att.validation.DiagnosticException(toolField ? att.validation.DiagnosticCodes.TOOL_INVALID : att.validation.DiagnosticCodes.CONFIG_INVALID,
+            att.validation.DiagnosticException diagnostic = new att.validation.DiagnosticException(toolField ? att.validation.DiagnosticCodes.TOOL_INVALID : att.validation.DiagnosticCodes.CONFIG_INVALID,
                     toolField ? "Invalid tool configuration" : "Invalid global configuration",
                     e.getMessage(), path.toString(), field, null, null, null, null, null,
                     toolField
                             ? "Check the qualified tool/group name, descriptor fields, argument declarations, and command argv contract."
                             : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
+            throw schema == null ? YamlSupport.locate(diagnostic, path, field)
+                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations());
         }
     }
 
@@ -138,9 +140,11 @@ public final class FrameworkConfigLoader {
                                  boolean allowCall, boolean allowLegacyDelimit) {
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            String localKey = String.valueOf(entry.getKey());
+            String sourceField = "tools." + localKey;
+            try {
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Tool keys must be strings");
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Tool must be a map: " + entry.getKey());
-            String localKey = String.valueOf(entry.getKey());
             if (!localKey.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Tool key must match [A-Za-z_][A-Za-z0-9_-]*: " + localKey);
             String key = groupId.isEmpty() ? localKey : groupId + "." + localKey;
             att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
@@ -156,6 +160,7 @@ public final class FrameworkConfigLoader {
             if (hasCall && !allowCall) throw new IllegalArgumentException("Tool call requires att-config/v2.6 or att-tool-group/v2.6: " + key);
             String cache = "";
             if (tool.get("cache") != null) {
+                sourceField = "tools." + localKey + ".cache";
                 if (!hasCall) throw new IllegalArgumentException("Tool cache is supported only on call-backed Tools: " + key);
                 Map<?, ?> cacheMap = SchemaSupport.map(tool.get("cache"), owner + "." + localKey + ".cache");
                 SchemaSupport.rejectUnknown(cacheMap, owner + "." + localKey + ".cache", "scope");
@@ -164,23 +169,37 @@ public final class FrameworkConfigLoader {
                     throw new IllegalArgumentException("Tool cache.scope must be case or db: " + key);
                 }
             }
+            sourceField = "tools." + localKey + ".output";
             String output = tool.get("output") == null ? (hasCommand ? "txt" : "") : SchemaSupport.string(tool.get("output"), owner + "." + localKey + ".output", true);
+            sourceField = "tools." + localKey + ".timeoutMs";
             Long timeoutMs = tool.get("timeoutMs") == null ? null : Long.valueOf(boundedInteger(tool.get("timeoutMs"), 10000, 1, 3600000, owner + "." + localKey + ".timeoutMs"));
+            sourceField = "tools." + localKey + ".output";
             if (hasCall && !output.isEmpty()) throw new IllegalArgumentException("call-backed Tool does not support process-only output: " + key);
             if (hasCommand && !("txt".equals(output) || "yaml".equals(output) || "json".equals(output) || "xml".equals(output))) {
                 throw new IllegalArgumentException("Tool output must be txt, yaml, json, or xml: " + key);
             }
+            sourceField = "tools." + localKey + ".arguments";
             Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"), allowLegacyDelimit);
+            sourceField = "tools." + localKey + (hasCommand ? ".command" : ".call");
             List<String> command = hasCommand ? command(tool.get("command"), "tool " + key + ".command") : Collections.<String>emptyList();
             String call = hasCall ? SchemaSupport.string(tool.get("call"), "tool " + key + ".call", true) : "";
             if (hasCommand) validateCommandArguments(key, command, arguments, script.isEmpty());
             else validateCallDefinition(key, call, cache, arguments, script, ssh);
-            ToolConfig configuredTool = new ToolConfig(key, localKey, groupId,
-                    required(tool, "name", "tool " + key), required(tool, "description", "tool " + key),
+            sourceField = "tools." + localKey + ".name";
+            String name = required(tool, "name", "tool " + key);
+            sourceField = "tools." + localKey + ".description";
+            String description = required(tool, "description", "tool " + key);
+            ToolConfig configuredTool = new ToolConfig(key, localKey, groupId, name, description,
                     command, call, cache, hasCommand ? script : Collections.<String>emptyList(), output, arguments,
                     hasCommand ? ssh : null, sourceFile, timeoutMs);
             ToolConfig previous = result.put(key, configuredTool);
+            sourceField = "tools." + localKey;
             if (previous != null) throw new IllegalArgumentException("Duplicate qualified tool name: " + key);
+            } catch (Exception error) {
+                throw YamlSupport.locate(att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
+                        "Invalid tool configuration for '" + localKey + "'", error, sourceFile.toString(), sourceField,
+                        "Correct the indicated Tool field. For call strings, check argument separators and matching quotes."), sourceFile, sourceField);
+            }
         }
     }
 
@@ -388,19 +407,21 @@ public final class FrameworkConfigLoader {
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
             addTools(group.get("tools"), tools, id, script, ssh, "tool group " + id + ".tools", file, v26, !v26);
         } catch (att.validation.DiagnosticException e) {
-            throw e;
+            throw YamlSupport.locate(e, file, e.field());
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
-            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
+            att.validation.DiagnosticException diagnostic = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
                     "Invalid tool group configuration", e.getMessage(), file.toString(),
                     schema == null ? "toolGroup" : schema.field(), null, null, null, null, null,
                     "Correct the reported group metadata, script/SSH settings, tool descriptor, arguments, or command argv.", e);
+            throw schema == null ? YamlSupport.locate(diagnostic, file, "toolGroup")
+                    : YamlSupport.locateSchema(diagnostic, file, schema.structuredViolations());
         }
     }
 
     private static Map<?, ?> yaml(Path file, String owner) throws IOException {
-        try (Reader reader = Files.newBufferedReader(file)) {
-            Object loaded = YamlSupport.parser().load(reader);
+        {
+            Object loaded = YamlSupport.load(file);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException(owner + " must be a YAML map: " + file);
             return (Map<?, ?>) loaded;
         }

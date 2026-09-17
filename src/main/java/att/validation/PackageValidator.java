@@ -72,7 +72,7 @@ public final class PackageValidator {
             for (String reference : loader.paths()) try { templates.add(reference); StageTemplate template = loader.load(reference); validateTemplate(template, global); }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, projectRoot.resolve(global.templatesRoot()).resolve(reference).resolve("template.yaml"))); }
             for (att.flow.FlowDefinition flow : flows.all()) try {
-                StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA);
+                StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
                 validateReferencedTools(body, global);
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
             validatePackageTools(diagnostics);
@@ -130,17 +130,85 @@ public final class PackageValidator {
     private void validateReferencedTools(StageTemplate template, FrameworkConfig config) {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
-            if ("tool".equalsIgnoreCase(action.type())) validateReferencedCall(callParser.parse(action.call()), config);
-            for (String expression : actionExpressions(action)) for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
+            String prefix = "actions." + action.id();
+            if ("tool".equalsIgnoreCase(action.type())) {
+                try {
+                    validateToolCall(action.call(), config);
+                    // validateToolCall checks the invocation shape and supplied arguments;
+                    // every referenced definition still needs the same package-level
+                    // checks as a tool used from an expression (including nested calls).
+                    for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.call()))
+                        validateReferencedCall(call, config);
+                }
+                catch (Exception error) { throw locateReferencedError(error, template, action, prefix + ".call", template.sourceFile()); }
+            }
+            validateReferencedExpression(action.description(), prefix + ".description", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.expected(), prefix + ".expected", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.actual(), prefix + ".actual", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.assertion(), prefix + ".assert", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.runWhen(), prefix + ".runWhen", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.expression(), prefix + ".expression", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.message(), prefix + ".message", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.file(), prefix + ".file", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.saveAs(), prefix + ".saveAs", template, action, template.sourceFile(), syntaxEngine, config);
+            for (Map.Entry<String, Object> field : action.fields().entrySet())
+                validateReferencedExpression(String.valueOf(field.getValue()), prefix + ".fields." + field.getKey(), template, action, template.sourceFile(), syntaxEngine, config);
+            if ("db".equalsIgnoreCase(action.type())) {
+                Map<String, Object> operation = action.query().isEmpty() ? action.update() : action.query();
+                String operationName = action.query().isEmpty() ? "update" : "query";
+                if (operation.get("sql") != null)
+                    validateReferencedExpression(String.valueOf(operation.get("sql")), prefix + "." + operationName + ".sql", template, action, template.sourceFile(), syntaxEngine, config);
+                Object params = operation.get("params");
+                if (params instanceof Iterable) {
+                    int index = 0;
+                    for (Object value : (Iterable<?>) params) {
+                        if (value instanceof String) validateReferencedExpression((String) value, prefix + "." + operationName + ".params[" + index + "]", template, action, template.sourceFile(), syntaxEngine, config);
+                        index++;
+                    }
+                } else if (params instanceof String) {
+                    validateReferencedExpression((String) params, prefix + "." + operationName + ".params", template, action, template.sourceFile(), syntaxEngine, config);
+                }
+                Object parameters = operation.get("parameters");
+                if (parameters instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) parameters).entrySet()) {
+                    if (field.getValue() instanceof String) validateReferencedExpression(String.valueOf(field.getValue()), prefix + "." + operationName + ".parameters." + field.getKey(), template, action, template.sourceFile(), syntaxEngine, config);
+                }
+            }
             if ("render".equalsIgnoreCase(action.type())) try {
                 for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
                     String content = att.template.PayloadCache.readUtf8(payload);
-                    for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateReferencedCall(call, config);
+                    validateReferencedExpression(content, prefix + ".payload", template, action, payload, syntaxEngine, config);
                 }
             } catch (Exception e) {
+                DiagnosticException typed = DiagnosticException.find(e);
+                if (typed != null) throw typed;
                 throw new IllegalArgumentException("Unable to inspect render payload calls for action " + action.id() + ": " + e.getMessage(), e);
             }
         }
+    }
+
+    private void validateReferencedExpression(String expression, String field, StageTemplate template,
+                                               TemplateAction action, Path sourceFile,
+                                               att.template.UnifiedTemplateEngine syntaxEngine,
+                                               FrameworkConfig config) {
+        if (expression == null || expression.trim().isEmpty()) return;
+        try {
+            for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
+        } catch (Exception error) {
+            throw locateReferencedError(error, template, action, field, sourceFile);
+        }
+    }
+
+    private DiagnosticException locateReferencedError(Exception error, StageTemplate template,
+                                                      TemplateAction action, String field, Path sourceFile) {
+        DiagnosticException typed = DiagnosticException.find(error);
+        DiagnosticException diagnostic = typed == null
+                ? DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID, "Invalid Action expression", error,
+                        null, null, "Correct the expression at the reported source location.")
+                : typed;
+        DiagnosticException located = sourceFile.equals(template.sourceFile())
+                ? att.config.YamlSupport.locate(diagnostic, sourceFile, field)
+                : att.config.YamlSupport.locateText(diagnostic, sourceFile, field);
+        return located.withLocation(null, null, null, null, null, template.name(), action.id());
     }
 
     private List<String> actionExpressions(TemplateAction action) {
@@ -290,7 +358,8 @@ public final class PackageValidator {
             String locatedFile = typed.file() == null ? portable(file) : portable(java.nio.file.Paths.get(typed.file()));
             String message = typed.detail() == null ? typed.summary() : typed.summary() + ": " + typed.detail();
             return new Diagnostic(typed.code(), Diagnostic.Severity.ERROR, message, locatedFile, typed.field(),
-                    typed.sheet(), typed.row(), typed.column(), typed.template(), typed.action(), typed.suggestion());
+                    typed.sheet(), typed.row(), typed.column(), typed.template(), typed.action(), typed.suggestion(),
+                    typed.summary(), typed.detail(), typed.source(), typed.context(), typed.schemaViolations());
         }
         String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
         LocatedValidationException located = exception instanceof LocatedValidationException ? (LocatedValidationException) exception : null;
@@ -326,6 +395,7 @@ public final class PackageValidator {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
           try {
+            validateActionSyntax(action, template, syntaxEngine, config);
             if (action.id().contains(".")) throw new IllegalArgumentException("Action ID must not contain '.': " + action.id());
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
@@ -347,8 +417,11 @@ public final class PackageValidator {
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false);
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
                         if (!"file".equalsIgnoreCase(action.renderAs()) && !content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
-                    } catch (DiagnosticException e) {
-                        throw e.withLocation(payload.toString(), "actions." + action.id() + ".payload", null, null, null, template.name(), action.id());
+                    } catch (Exception e) {
+                        throw att.config.YamlSupport.locateText(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
+                                "Invalid render payload", e, null, null, "Check the payload expression and output format."),
+                                payload, "actions." + action.id() + ".payload")
+                                .withLocation(null, null, null, null, null, template.name(), action.id());
                     }
                 }
             }
@@ -420,13 +493,35 @@ public final class PackageValidator {
             }
             if ("flow".equals(type)) {
                 att.flow.FlowDefinition target = flows.get(action.use());
-                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA);
+                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
                 validateTemplateActions(body, config, actionIds, completedActions, assignmentNames);
             }
-          } catch (DiagnosticException e) { throw e.withLocation(null, "actions." + action.id(), null, null, null, template.name(), action.id()); }
+          } catch (DiagnosticException e) { throw att.config.YamlSupport.locate(e, template.sourceFile(), "actions." + action.id())
+                  .withLocation(null, null, null, null, null, template.name(), action.id()); }
           catch (LocatedValidationException e) { throw e; }
-          catch (Exception e) { throw new LocatedValidationException(e.getMessage(), template.name(), action.id(), "actions." + action.id(), e); }
+          catch (Exception e) { throw att.config.YamlSupport.locate(DiagnosticException.wrap(
+                  DiagnosticCodes.TEMPLATE_INVALID, "Invalid template action", e, null, null,
+                  "Check the reported Action field and expression syntax."), template.sourceFile(), "actions." + action.id())
+                  .withLocation(null, null, null, null, null, template.name(), action.id()); }
           completedActions.add(action.id());
+        }
+    }
+
+    private void validateActionSyntax(TemplateAction action, StageTemplate template,
+                                      att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
+        String[] fields = {"description", "expected", "actual", "assert", "runWhen", "call", "expression", "message", "file", "saveAs"};
+        String[] values = {action.description(), action.expected(), action.actual(), action.assertion(), action.runWhen(),
+                action.call(), action.expression(), action.message(), action.file(), action.saveAs()};
+        for (int index = 0; index < fields.length; index++) {
+            try {
+                if (("assert".equals(fields[index]) || "runWhen".equals(fields[index])) && !values[index].trim().isEmpty())
+                    validateAssertionExpression(values[index], engine, config);
+                else { engine.validateValueSyntax(values[index]); engine.parseCalls(values[index]); }
+            } catch (Exception error) {
+                throw att.config.YamlSupport.locate(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
+                        "Invalid Action expression", error, null, null, "Correct the expression at the reported source location."),
+                        template.sourceFile(), "actions." + action.id() + "." + fields[index]);
+            }
         }
     }
 
@@ -642,8 +737,7 @@ public final class PackageValidator {
                                                 att.template.UnifiedTemplateEngine engine,
                                                 Set<String> actionIds, Set<String> completedActions) {
         for (TemplateAction action : template.actions()) {
-            Path sourceFile = Files.isRegularFile(template.directory().resolve("flow.yaml"))
-                    ? template.directory().resolve("flow.yaml") : template.directory().resolve("template.yaml");
+            Path sourceFile = template.sourceFile();
             String sourceField = "actions." + action.id();
             try {
                 if (!actionIds.add(action.id())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
@@ -769,7 +863,7 @@ public final class PackageValidator {
                 }
                 if ("flow".equalsIgnoreCase(action.type())) {
                     att.flow.FlowDefinition target = flows.get(action.use());
-                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA);
+                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
                     validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
                             context, engine, actionIds, completedActions);
                 }
@@ -777,10 +871,11 @@ public final class PackageValidator {
                 DiagnosticException typed = DiagnosticException.find(e);
                 String caseSource = caseFile == null ? null : portable(caseFile) + "!" + testCase.sheetName() + ":" + testCase.rowNumber();
                 if (typed != null) throw sourceDiagnostic(typed, sourceFile, sourceField, testCase, template, action, caseSource);
-                throw new DiagnosticException(DiagnosticCodes.TEMPLATE_INVALID,
+                throw sourceDiagnostic(new DiagnosticException(DiagnosticCodes.TEMPLATE_INVALID,
                         "Invalid runtime-rendered value in template action", appendCaseSource(e.getMessage(), caseSource), sourceFile.toString(),
                         sourceField, testCase.sheetName(), testCase.rowNumber(), null, template.name(), action.id(),
-                        "Check every Context path, inline call, action field, and render payload used by this action.", e);
+                        "Check every Context path, inline call, action field, and render payload used by this action.", e),
+                        sourceFile, sourceField, testCase, template, action, caseSource);
             } finally {
                 completedActions.add(action.id());
             }
@@ -791,9 +886,12 @@ public final class PackageValidator {
     private DiagnosticException sourceDiagnostic(DiagnosticException error, Path sourceFile, String sourceField,
                                                  TestCase testCase, StageTemplate template, TemplateAction action,
                                                  String caseSource) {
-        return new DiagnosticException(error.code(), error.summary(), appendCaseSource(error.detail(), caseSource),
-                sourceFile.toString(), sourceField, testCase.sheetName(), testCase.rowNumber(), null,
-                template.name(), action.id(), error.suggestion(), error);
+        DiagnosticException located = sourceFile.equals(template.sourceFile())
+                ? att.config.YamlSupport.locate(error, sourceFile, sourceField)
+                : att.config.YamlSupport.locateText(error, sourceFile, sourceField);
+        return located.withLocation(null, null, testCase.sheetName(), testCase.rowNumber(), null,
+                template.name(), action.id()).withContext(new DiagnosticContext(caseSource, testCase.caseId(),
+                null, null, java.util.Collections.<String>emptyList()));
     }
 
     private String appendCaseSource(String detail, String caseSource) {
@@ -823,9 +921,10 @@ public final class PackageValidator {
                     || "TOOL".equals(root) || "DB".equals(root) || "output".equals(root))) {
                 try { context.require(path); }
                 catch (DiagnosticException e) {
-                    // Dynamic action/tool result shapes are unavailable during validation. A shorthand
-                    // that cannot yet be proven is preserved, then resolved strictly at runtime.
-                    if (!availableActions.isEmpty() && DiagnosticCodes.CONTEXT_INVALID.equals(e.code())) continue;
+                    // Only an explicitly deferred value may be unresolved at validation time. Do not
+                    // turn arbitrary unknown shorthand paths into deferred values: that masks typos
+                    // and causes failures to surface only when a run has already started.
+                    if (context.isValidationDeferred(path)) continue;
                     throw e;
                 }
             }
@@ -1128,14 +1227,23 @@ public final class PackageValidator {
         public final int suites, cases, templates, tools;
         public final String mode;
         public final List<Diagnostic> diagnostics;
-        public ValidationSummary(String mode, int suites, int cases, int templates, int tools, List<Diagnostic> diagnostics) { this.mode = mode; this.suites = suites; this.cases = cases; this.templates = templates; this.tools = tools; this.diagnostics = Collections.unmodifiableList(new ArrayList<Diagnostic>(diagnostics)); }
+        public ValidationSummary(String mode, int suites, int cases, int templates, int tools, List<Diagnostic> diagnostics) {
+            this.mode = mode; this.suites = suites; this.cases = cases; this.templates = templates; this.tools = tools;
+            this.diagnostics = Collections.unmodifiableList(new ArrayList<Diagnostic>(DiagnosticAggregator.aggregate(diagnostics)));
+        }
         public boolean valid() { for (Diagnostic diagnostic : diagnostics) if (diagnostic.severity() == Diagnostic.Severity.ERROR) return false; return true; }
         public long errors() { return count(Diagnostic.Severity.ERROR); }
         public long warnings() { return count(Diagnostic.Severity.WARNING); }
+        public long errorOccurrences() { return occurrences(Diagnostic.Severity.ERROR); }
+        public long warningOccurrences() { return occurrences(Diagnostic.Severity.WARNING); }
         private long count(Diagnostic.Severity severity) { long count = 0; for (Diagnostic diagnostic : diagnostics) if (diagnostic.severity() == severity) count++; return count; }
+        private long occurrences(Diagnostic.Severity severity) { long count = 0; for (Diagnostic diagnostic : diagnostics) if (diagnostic.severity() == severity) count += diagnostic.occurrences(); return count; }
         public String toJson() {
             Map<String,Object> root = new java.util.LinkedHashMap<String,Object>(); root.put("schemaVersion", "att-validation/v2.1"); root.put("attVersion", att.Version.PRODUCT); root.put("valid", valid()); root.put("mode", mode);
-            Map<String,Object> summary = new java.util.LinkedHashMap<String,Object>(); summary.put("errors", errors()); summary.put("warnings", warnings()); summary.put("suites", suites); summary.put("cases", cases); summary.put("templates", templates); summary.put("tools", tools); root.put("summary", summary);
+            Map<String,Object> summary = new java.util.LinkedHashMap<String,Object>(); summary.put("errors", errors()); summary.put("warnings", warnings());
+            if (errorOccurrences() != errors()) summary.put("errorOccurrences", errorOccurrences());
+            if (warningOccurrences() != warnings()) summary.put("warningOccurrences", warningOccurrences());
+            summary.put("suites", suites); summary.put("cases", cases); summary.put("templates", templates); summary.put("tools", tools); root.put("summary", summary);
             List<Map<String,Object>> items = new java.util.ArrayList<Map<String,Object>>(); for (Diagnostic diagnostic : diagnostics) items.add(diagnostic.toMap()); root.put("diagnostics", items);
             return JsonSupport.write(root);
         }

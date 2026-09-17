@@ -1,8 +1,8 @@
-# ATT V3.2.0 新手入門
+# ATT V3.3.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.2.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V3.3.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.2.0 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.3.0 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
@@ -27,7 +27,7 @@ validate + plan
 
 只有具有 `COMPLETE` manifest 的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 保留在 `output/<RunID>` 供除錯，但不會成為 latest；重試同一 Run ID 前需先移走或清理該未完成目錄。
 
-V3.2.0 沿用既有狀態及聚合契約，不可混淆：
+V3.3.0 沿用既有狀態及聚合契約，不可混淆：
 
 | 狀態 | 意義 | 例子 |
 |---|---|---|
@@ -99,9 +99,9 @@ Flow 不再有 `inputs`、`outputs` 或調用端 `with`。內部 Action 完成�
 
 同一 Template 及其全部巢狀 Flow 共用一個 Action ID namespace；任何重名或同一 Flow 的重複調用都會在 validate 時失敗。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
 
-V3.2.0 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
+V3.3.0 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
 
-### 3.2 使用 V3.2 expression、console 及命名 SQL
+### 3.2 使用 V3.3 expression、console 及命名 SQL
 
 `${...}` 只負責 Context 取值及文字插值；需要計算時使用完整的 `#{...}` expression block：
 
@@ -681,7 +681,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.2",
+  "attVersion": "3.3.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -830,4 +830,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.2.0 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.3.0 Reference Manual](09_Reference_Manual_V3.md)。

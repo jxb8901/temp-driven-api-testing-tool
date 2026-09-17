@@ -239,12 +239,21 @@ public class FrameworkEngine {
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             String errorMessage = typed == null ? message(e) : typed.format();
-            caseLog.append("ERROR", errorMessage);
+            try { caseLog.append("ERROR", errorMessage); }
+            catch (Exception logError) { errorMessage += "; Case-log write failed: " + message(logError); }
             context.put("CASE.status", ResultStatus.ERROR.name());
             context.put("CASE.error", errorMessage);
+            if (typed != null) context.put("CASE.errorDiagnostic", typed.toDiagnostic().toMap());
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
-            writeCaseTree(caseOutputDir, context);
-            return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()));
+            try { writeCaseTree(caseOutputDir, context); }
+            catch (Exception treeError) {
+                errorMessage += "; Case evidence write failed: " + message(treeError);
+                // Keep the persisted CASE.error in sync with the final error text
+                // even when the first evidence write itself failed.
+                context.put("CASE.error", errorMessage);
+            }
+            return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()),
+                    typed == null ? null : typed.toDiagnostic());
         } finally {
             if (!dbFinalized) dbHelperExecutor.abortCase();
             caseLog.close();
@@ -417,8 +426,13 @@ public class FrameworkEngine {
             item.put("expected", result.expected());
             item.put("actual", result.actual());
             List<Map<String,Object>> actionResults = new ArrayList<Map<String,Object>>();
-            for (ValidationResult action : result.validations()) { Map<String,Object> detail = new LinkedHashMap<String,Object>(); detail.put("stage", action.source()); detail.put("action", action.name()); detail.put("description", action.description()); detail.put("status", action.status().name()); detail.put("expected", action.expected()); detail.put("actual", action.actual()); detail.put("message", action.message()); actionResults.add(detail); }
+            for (ValidationResult action : result.validations()) {
+                Map<String,Object> detail = new LinkedHashMap<String,Object>(); detail.put("stage", action.source()); detail.put("action", action.name()); detail.put("description", action.description()); detail.put("status", action.status().name()); detail.put("expected", action.expected()); detail.put("actual", action.actual()); detail.put("message", action.message());
+                if (action.diagnostic() != null) detail.put("diagnostic", action.diagnostic().toMap());
+                actionResults.add(detail);
+            }
             item.put("actions", actionResults);
+            if (result.diagnostic() != null) item.put("diagnostic", result.diagnostic().toMap());
             item.put("caseLog", result.caseLogPath() == null ? "" : runDirectory.relativize(result.caseLogPath()).toString().replace('\\', '/'));
             cases.add(item);
         }
@@ -497,14 +511,22 @@ public class FrameworkEngine {
     }
 
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration) {
-        return result(testCase, ResultStatus.ERROR, duration, "", message, outputXml);
+        return error(testCase, message, outputXml, duration, null);
+    }
+    private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
+                                    att.validation.Diagnostic diagnostic) {
+        return result(testCase, ResultStatus.ERROR, duration, "", message, outputXml, diagnostic);
     }
     private static TestResult invalid(TestCase testCase, String message) {
         return result(testCase, ResultStatus.INVALID, Duration.ZERO, "", message, null);
     }
     private static TestResult result(TestCase testCase, ResultStatus status, Duration duration, String expected, String actual, Path log) {
+        return result(testCase, status, duration, expected, actual, log, null);
+    }
+    private static TestResult result(TestCase testCase, ResultStatus status, Duration duration, String expected, String actual, Path log,
+                                     att.validation.Diagnostic diagnostic) {
         return new TestResult(testCase.caseId(), testCase.caseName(), status, duration, expected, actual, log,
-                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags());
+                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(), diagnostic);
     }
 
     private static String joinExpected(List<ValidationResult> validations) {

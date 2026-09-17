@@ -67,6 +67,26 @@ class FrameworkEngineTest {
         assertTrue(evidence.contains("id: seed"));
         assertTrue(evidence.contains("id: finish"));
         assertFalse(evidence.contains("output.outputs"));
+
+        // Exercise the same package through the complete error/report path.
+        writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
+                "schemaVersion: att-flow/v3.0\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
+                        + "  seed: {type: assign, name: seedReference, expression: '#{1 / 0}'}\n");
+        RunSummary failed = new FrameworkEngine(projectRoot, globalConfig()).run(ExecutionOptions.parse(new String[]{
+                "run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "V3-FLOW-ERROR"}));
+        assertEquals(1, failed.error());
+        Path failedRun = projectRoot.resolve("output/V3-FLOW-ERROR");
+        String failedCase = new String(Files.readAllBytes(failedRun.resolve("payments.payment.TC001/case.yaml")), "UTF-8");
+        assertTrue(failedCase.contains("common.inner.v1"));
+        assertTrue(failedCase.contains("diagnostic:"));
+        assertTrue(failedCase.contains("callChain:"));
+        String manifest = new String(Files.readAllBytes(failedRun.resolve("run.yaml")), "UTF-8");
+        assertTrue(manifest.contains("diagnostic:"));
+        assertTrue(manifest.contains("flow.yaml"));
+        String ci = new String(Files.readAllBytes(failedRun.resolve("ci/summary.json")), "UTF-8");
+        assertTrue(ci.contains("\"callChain\""));
+        Path regenerated = new att.report.ReportRegenerator().regenerate(projectRoot.resolve("output"), "V3-FLOW-ERROR");
+        assertTrue(new String(Files.readAllBytes(regenerated), "UTF-8").contains("common.inner.v1"));
     }
 
     @Test

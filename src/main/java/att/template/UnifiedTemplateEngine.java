@@ -185,9 +185,9 @@ public class UnifiedTemplateEngine {
             if (start < 0) return;
             Matcher matcher = VALUE.matcher(text);
             matcher.region(start, text.length());
-            if (!matcher.lookingAt()) throw new IllegalArgumentException("Unclosed or invalid context reference in template value");
+            if (!matcher.lookingAt()) throw new ExpressionSyntaxException(start, text.length(), "'}' to close Context expression", "end of text");
             String path = matcher.group(1);
-            if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid context reference in template value: ${" + path + "}");
+            if (path.trim().isEmpty() || !path.equals(path.trim())) throw new ExpressionSyntaxException(start, matcher.end(), "a non-blank Context path", "invalid Context path");
             position = matcher.end();
         }
     }
@@ -211,8 +211,9 @@ public class UnifiedTemplateEngine {
             int start = text.indexOf("#{", index);
             if (start < 0) break;
             int end = findToolEnd(text, start + 2);
-            if (end < 0) throw new IllegalArgumentException("Unclosed expression block: " + text.substring(start));
-            paths.addAll(expressionBlocks.contextPaths(text.substring(start, end + 1)));
+            if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close expression block", "end of text");
+            try { paths.addAll(expressionBlocks.contextPaths(text.substring(start, end + 1))); }
+            catch (ExpressionSyntaxException error) { throw error.shifted(start); }
             index = end + 1;
         }
         return paths;
@@ -450,7 +451,8 @@ public class UnifiedTemplateEngine {
         String operation = "update".equals(parts[2]) ? "update" : "query";
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs);
         context.recordDbInvocation(parts[1], invocationId, result.evidence());
-        if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); } catch (Exception ignored) { }
+        if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
+        catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         Object output = result.result();
         if (result.success() && "scalar".equals(parts[2])) output = scalar(parts[1], result.result());
         return new CallBackedDbResult(parts[1], invocationId, output, result.evidence(), result.success());
@@ -460,11 +462,13 @@ public class UnifiedTemplateEngine {
         Map<?, ?> query = (Map<?, ?>) result;
         Object rowsValue = query.get("rows");
         if (!(rowsValue instanceof java.util.List) || ((java.util.List<?>) rowsValue).size() != 1) {
-            throw new IllegalStateException("db." + instance + ".scalar requires exactly one row");
+            int count = rowsValue instanceof java.util.List ? ((java.util.List<?>) rowsValue).size() : 0;
+            throw new IllegalStateException("db." + instance + ".scalar requires exactly one row but received " + count);
         }
         Object rowValue = ((java.util.List<?>) rowsValue).get(0);
         if (!(rowValue instanceof Map) || ((Map<?, ?>) rowValue).size() != 1) {
-            throw new IllegalStateException("db." + instance + ".scalar requires exactly one column");
+            int count = rowValue instanceof Map ? ((Map<?, ?>) rowValue).size() : 0;
+            throw new IllegalStateException("db." + instance + ".scalar requires exactly one column but received " + count);
         }
         return ((Map<?, ?>) rowValue).values().iterator().next();
     }
@@ -495,7 +499,9 @@ public class UnifiedTemplateEngine {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
             Object value = resolveDefinitionValue(argument.expression().trim(), input);
-            putNested(result, argument.key(), value == null ? "" : value);
+            // Preserve a typed null for the downstream contract validator. Text
+            // interpolation is the only place where null is intentionally empty.
+            putNested(result, argument.key(), value);
         }
         return result;
     }
@@ -561,7 +567,8 @@ public class UnifiedTemplateEngine {
                 ? context.nextDbInvocationId(parts[1]) : requestedId;
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id);
         context.recordDbInvocation(parts[1], id, result.evidence());
-        if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); } catch (Exception ignored) { }
+        if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); }
+        catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         if (!result.success()) {
             Object error = result.result() instanceof Map ? ((Map<?, ?>) result.result()).get("error") : null;
             throw new IllegalStateException("DB query failed for " + parts[1] + ": " + String.valueOf(error));
@@ -702,8 +709,9 @@ public class UnifiedTemplateEngine {
             int start = text.indexOf("#{", index);
             if (start < 0) break;
             int end = findToolEnd(text, start + 2);
-            if (end < 0) throw new IllegalArgumentException("Unclosed tool/function call: " + text.substring(start));
-            calls.addAll(expressionBlocks.calls(text.substring(start, end + 1)));
+            if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close expression block", "end of text");
+            try { calls.addAll(expressionBlocks.calls(text.substring(start, end + 1))); }
+            catch (ExpressionSyntaxException error) { throw error.shifted(start); }
             index = end + 1;
         }
         return calls;
@@ -762,7 +770,7 @@ public class UnifiedTemplateEngine {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
             Object value = resolveArgumentValue(argument.expression().trim(), context, log);
-            putNested(input, argument.key(), value == null ? "" : value);
+            putNested(input, argument.key(), value);
         }
         return input;
     }
@@ -788,7 +796,7 @@ public class UnifiedTemplateEngine {
             if (start < 0) { output.append(text.substring(index)); break; }
             output.append(text.substring(index, start));
             int end = findToolEnd(text, start + 2);
-            if (end < 0) throw new IllegalArgumentException("Unclosed function call: " + text.substring(start));
+            if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close function call", "end of text");
             Object value = expressionBlocks.evaluate(text.substring(start, end + 1), new ExpressionBlockEvaluator.Resolver() {
                 @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
                 @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
@@ -810,7 +818,7 @@ public class UnifiedTemplateEngine {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
             Object value = resolveScopedArgumentValue(argument.expression().trim(), values, missingAsEmpty);
-            putNested(input, argument.key(), value == null ? "" : value);
+            putNested(input, argument.key(), value);
         }
         return input;
     }
@@ -895,6 +903,11 @@ public class UnifiedTemplateEngine {
 
     private IllegalArgumentException bareContextReference(String expression) {
         return new IllegalArgumentException("Context references in calls must use ${...}: ${" + expression + "}");
+    }
+
+    private String safeMessage(Exception error) {
+        return error == null || error.getMessage() == null || error.getMessage().trim().isEmpty()
+                ? (error == null ? "unknown error" : error.getClass().getSimpleName()) : error.getMessage();
     }
 
     private boolean quoted(String expression) {

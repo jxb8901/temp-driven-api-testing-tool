@@ -24,15 +24,17 @@ public final class JsonSchemaVerifier {
         Set<com.networknt.schema.ValidationMessage> errors = validator.validate(value);
         if (!errors.isEmpty()) {
             java.util.List<String> messages = new java.util.ArrayList<String>();
+            java.util.List<SchemaViolation> details = new java.util.ArrayList<SchemaViolation>();
             String firstField = null;
             for (com.networknt.schema.ValidationMessage error : errors) {
                 String field = String.valueOf(error.getInstanceLocation());
                 if (field == null || "null".equals(field) || field.isEmpty()) field = "$";
                 if (firstField == null || field.compareTo(firstField) < 0) firstField = field;
                 messages.add(field + ": " + error.getMessage() + " (keyword=" + error.getCode() + ")");
+                details.add(new SchemaViolation(field, error.getMessage(), error.getCode()));
             }
             java.util.Collections.sort(messages);
-            throw new SchemaValidationException(firstField, messages);
+            throw new SchemaValidationException(firstField, messages, details);
         }
     }
     private static com.networknt.schema.JsonSchema schema(JsonNode schema) { com.networknt.schema.SchemaValidatorsConfig config = new com.networknt.schema.SchemaValidatorsConfig(); config.setFailFast(false); config.setTypeLoose(false); return com.networknt.schema.JsonSchemaFactory.getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schema, config); }
@@ -76,17 +78,40 @@ public final class JsonSchemaVerifier {
     public static final class SchemaValidationException extends IllegalArgumentException {
         private final String field;
         private final java.util.List<String> violations;
-        private SchemaValidationException(String field, java.util.List<String> violations) {
+        private final java.util.List<SchemaViolation> structuredViolations;
+        private SchemaValidationException(String field, java.util.List<String> violations, java.util.List<SchemaViolation> structuredViolations) {
             super("Schema validation failed with " + violations.size() + " violation(s): " + String.join("; ", violations));
             this.field = field;
             this.violations = java.util.Collections.unmodifiableList(new java.util.ArrayList<String>(violations));
+            this.structuredViolations = java.util.Collections.unmodifiableList(new java.util.ArrayList<SchemaViolation>(structuredViolations));
         }
         public String field() { return field; }
         public java.util.List<String> violations() { return violations; }
+        public java.util.List<SchemaViolation> structuredViolations() { return structuredViolations; }
         public static SchemaValidationException find(Throwable value) {
             Throwable current = value;
             while (current != null) { if (current instanceof SchemaValidationException) return (SchemaValidationException) current; current = current.getCause(); }
             return null;
+        }
+    }
+
+    /** One schema violation retains the validator path and keyword separately from display text. */
+    public static final class SchemaViolation {
+        private final String path, message, keyword;
+        private final SourceLocation source;
+        private SchemaViolation(String path, String message, String keyword) { this(path, message, keyword, null); }
+        private SchemaViolation(String path, String message, String keyword, SourceLocation source) {
+            this.path = path; this.message = message; this.keyword = keyword; this.source = source;
+        }
+        public SchemaViolation withSource(SourceLocation source) { return new SchemaViolation(path, message, keyword, source); }
+        public String path() { return path; }
+        public String message() { return message; }
+        public String keyword() { return keyword; }
+        public java.util.Map<String, Object> toMap() {
+            java.util.Map<String, Object> map = new java.util.LinkedHashMap<String, Object>();
+            map.put("path", path); map.put("message", message); map.put("keyword", keyword);
+            if (source != null) map.put("source", source.toMap());
+            return map;
         }
     }
 }

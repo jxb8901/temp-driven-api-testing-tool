@@ -1,6 +1,6 @@
-# ATT 3.2.0 - Automated Testing Tool
+# ATT 3.3.0 - Automated Testing Tool
 
-ATT V3.2.0 keeps the shared-Context Flow model and improves everyday authoring and diagnostics: raw multiline Case logs, console-only `saveAs`, no persistent `process-output`, named DB parameters, visible DB parameter evidence, `in` and arithmetic expressions, and the `prettyPrint` built-in.
+ATT V3.3.0 keeps the shared-Context Flow model and improves everyday authoring and diagnostics: raw multiline Case logs, console-only `saveAs`, no persistent `process-output`, named DB parameters, visible DB parameter evidence, `in` and arithmetic expressions, and the `prettyPrint` built-in.
 
 V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternative to Tool `command`. A call-backed Tool can wrap a DB query/scalar/update or pure built-in while direct DB Actions and expressions remain available.
 
@@ -63,14 +63,14 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 
 `./att.sh docs` always produces one self-contained page at `build/docs/index.html`; Testcases are grouped by workbook and Sheet, and each table includes the validation-time Expected Result assembled from assert actions. Tool, DB helper, and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, Tool, or DB helper. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, dbhelper, configuration, and documentation source files.
 
-## V3.2 essentials
+## V3.3 essentials
 
 - Authoring schemas remain named `att-template/v3.0` and `att-flow/v3.0`; the shared-Context Flow contract introduced by V3.1 is unchanged. V2.6, V2.5 and V2.3 Templates remain readable without semantic changes.
 - Flow descriptors live below `templates/flows/**/flow.yaml`, use a path-independent ID ending in `.vN`, and contain only metadata plus ordered `actions`; `inputs` and `outputs` are invalid.
 - A V3 Template invokes a Flow with `type: flow` and static `use`; `with` is invalid. Flow Actions expose only their standard status outcome.
 - Flow internals use the ordinary uppercase Context. Completed internal Actions are read directly as `${ACTIONS.<internalActionId>.output...}`; `input.*`, lowercase `actions.*`, `runtime.*`, `flow.*`, and `output.outputs` are invalid.
 - The Template and its complete nested Flow closure share one Action-ID namespace. Any collision, including repeated use of the same Flow in one Template, fails validation before execution.
-- V3 Action `runWhen` skips one statically known Action. `runAlways`, warning impact, Flow timeout/retry, dynamic dispatch, loops and parallel branches are not V3.2.0 features.
+- V3 Action `runWhen` skips one statically known Action. `runAlways`, warning impact, Flow timeout/retry, dynamic dispatch, loops and parallel branches are not V3.3.0 features.
 - `validate --package` checks every Flow; `validate --selected` loads and validates only the selected Template dependency closure. Runtime uses the precompiled registry and never discovers Flow files dynamically.
 
 - Current configuration uses `att-config/v2.6`; call-backed groups use `att-tool-group/v2.6`. Existing V2.1/V2.2/V2.5 configuration and V2.2 command-backed groups remain readable.
@@ -105,7 +105,7 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - Validation parses the same Context references and inline `#{...}` calls used at runtime. A Context path may use any case-sensitive segment suffix that uniquely identifies one currently readable logical path; ambiguity is `ATT-CTX-002`. Unknown references report the requested path, deepest reached node, and missing segment; ambiguous references list their canonical candidates without dumping the full Context tree.
 - `type: assign` evaluates a text `expression` and publishes it under a unique Case-scoped `name`, for example `${CASE.VARS.txnSeq}`, while retaining the same value at `${ACTIONS.<id>.output.result}`. `CASE.VARS` persists across stages/templates but is isolated per Test Case; an optional assertion does not roll back a successfully evaluated assignment.
 - Every expression-bearing surface uses one engine. `${...}` remains Context interpolation; `#{...}` is a typed expression block supporting calls, parentheses, `+ - * /`, comparisons, boolean operators, `is null`, `like`, and `in`. Context operands still use `${...}`; bare Context paths are rejected. Use `#{prettyPrint(${ACTIONS.query.output.result})}` for deterministic nested Map/List/array text.
-- V2.4.3 caches compiled schemas, Templates, and render payloads, bounds process-output previews, limits HTML log embedding, supports `report.mode: none`, and exposes phase/counter evidence through `--profile`; V3.2 routes the bounded stream to the Case log instead of retaining default artifacts.
+- V2.4.3 caches compiled schemas, Templates, and render payloads, bounds process-output previews, limits HTML log embedding, supports `report.mode: none`, and exposes phase/counter evidence through `--profile`; V3.3 routes the bounded stream to the Case log instead of retaining default artifacts.
 - A normal human run prints only the final summary and report path. `--verbose` adds lifecycle progress and mirrors every complete Case-log block, including template/tool input, argv, stdout, stderr, and payload evidence; use it only where sensitive Case data may be displayed safely. `--quiet` suppresses normal output.
 - `sysdate([format])` and `systimestamp([format])` retain their ISO defaults and accept one positional or named Java `DateTimeFormatter` pattern, for example `#{sysdate('yyyyMMdd')}`.
 - Every Tool attempt has a 1–3,600,000 ms timeout. Resolution is tool-action `timeoutMs`, Tool descriptor `timeoutMs`, global `timeoutMs`, then 10,000 ms; sidecars, stages, and Templates cannot define timeout defaults. Command-backed and call-backed Tools use the same public contract.
@@ -132,4 +132,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See the [V3 System Design](docs/02_System_Design_V3.md), [V2.6.2 Tool System Design](docs/02_System_Design_V2.6.2.md), and [V2.5 Database Helper System Design](docs/history/02_System_Design_V2.5.md) for normative specifications.
-See the [ATT V3.2.0 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.2.0 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.
+See the [ATT V3.3.0 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.3.0 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.

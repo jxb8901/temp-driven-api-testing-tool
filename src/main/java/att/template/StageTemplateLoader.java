@@ -50,11 +50,14 @@ public final class StageTemplateLoader {
             throw e;
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
-            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+            att.validation.DiagnosticException error = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
                     "Invalid template '" + reference + "'", e.getMessage(),
                     directory == null ? root.toString() : directory.resolve("template.yaml").toString(),
                     schema == null ? "template" : schema.field(), null, null, null, reference, null,
                     "Correct the template name/path, descriptor field, action contract, payload, or referenced call.", e);
+            if (directory == null) throw error;
+            if (schema == null) throw YamlSupport.locate(error, directory.resolve("template.yaml"), error.field());
+            throw YamlSupport.locateSchema(error, directory.resolve("template.yaml"), schema.structuredViolations());
         }
     }
 
@@ -62,7 +65,9 @@ public final class StageTemplateLoader {
         List<String> paths = new ArrayList<String>(byPath.keySet());
         java.util.Collections.sort(paths);
         List<StageTemplate> templates = new ArrayList<StageTemplate>();
-        for (String path : paths) templates.add(loadDirectory(path, byPath.get(path)));
+        // Route through the public loader so schema/YAML failures retain the
+        // descriptor path and structured violation details.
+        for (String path : paths) templates.add(load(path));
         return templates;
     }
     public List<String> paths() {
@@ -81,7 +86,20 @@ public final class StageTemplateLoader {
                 if (!Files.isRegularFile(descriptor) || Files.isSymbolicLink(descriptor)) continue;
                 String relative = root.relativize(directory).toString().replace('\\', '/');
                 byPath.put(relative, directory);
-                Map<String, Object> yaml = yaml(descriptor);
+                Map<String, Object> yaml;
+                try {
+                    yaml = yaml(descriptor);
+                } catch (Exception error) {
+                    att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(error);
+                    att.validation.DiagnosticException diagnostic = new att.validation.DiagnosticException(
+                            att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                            "Invalid template descriptor",
+                            error.getMessage(), descriptor.toString(), schema == null ? "template" : schema.field(),
+                            null, null, null, null, null,
+                            "Correct the YAML syntax and template descriptor fields at the reported location.", error);
+                    if (schema == null) throw YamlSupport.locate(diagnostic, descriptor, diagnostic.field());
+                    throw YamlSupport.locateSchema(diagnostic, descriptor, schema.structuredViolations());
+                }
                 Object name = yaml.get("name");
                 if (name != null && !String.valueOf(name).trim().isEmpty()) {
                     String symbolic = String.valueOf(name).trim();
@@ -143,7 +161,9 @@ public final class StageTemplateLoader {
             actions.add(new TemplateAction(actionKey, objectMap(actionMap), schemaVersion));
         }
         if (actions.isEmpty()) throw new IllegalArgumentException("Template must contain at least one action: " + directory);
-        StageTemplate loaded = new StageTemplate(text(map.get("name"), reference), directory, actions, schemaVersion);
+        // Keep the descriptor path on the loaded model. Runtime/validation failures
+        // must point at the physical template.yaml that declared the action.
+        StageTemplate loaded = new StageTemplate(text(map.get("name"), reference), directory, actions, schemaVersion, descriptor);
         synchronized (TEMPLATES) {
             removeOlder(TEMPLATES, key.path);
             StageTemplate previous = TEMPLATES.put(key, loaded);
@@ -159,9 +179,8 @@ public final class StageTemplateLoader {
             Map<String, Object> cached = DESCRIPTORS.get(key);
             if (cached != null) return cached;
         }
-        try (Reader reader = Files.newBufferedReader(file)) {
-            Object loaded;
-            synchronized (YamlSupport.parser()) { loaded = YamlSupport.parser().load(reader); }
+        {
+            Object loaded = YamlSupport.load(file);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Template must be a YAML map: " + file);
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> e : ((Map<?, ?>) loaded).entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());

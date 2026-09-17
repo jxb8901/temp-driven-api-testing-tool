@@ -430,7 +430,8 @@ class PackageValidatorTest {
         assertEquals("actions.invokePrecheck.call", error.field());
         assertEquals("CT", error.sheet());
         assertEquals(Integer.valueOf(3), error.row());
-        assertTrue(error.detail().contains("Case source: testcase/payment2.xlsx!CT:3"));
+        assertEquals("testcase/payment2.xlsx!CT:3", error.context().toMap().get("caseFile"));
+        assertTrue(error.format().contains("testcase/payment2.xlsx!CT:3"));
     }
 
     @Test void validateTracksCaseVariablesAcrossOrderedStagesAndRejectsEarlyOrDuplicateUse() throws Exception {

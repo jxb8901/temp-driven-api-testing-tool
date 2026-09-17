@@ -40,9 +40,20 @@ public final class DbHelperConfigLoader {
                 throw new IllegalArgumentException("Missing/unsafe dbhelper file: " + text);
             }
             if (!files.add(file)) throw new IllegalArgumentException("Duplicate dbhelper path: " + text);
-            Map<?, ?> map = yaml(file);
-            if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
-            DbHelperConfig helper = parse(map, file);
+            DbHelperConfig helper;
+            try {
+                Map<?, ?> map = yaml(file);
+                if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+                helper = parse(map, file);
+            } catch (Exception error) {
+                JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
+                String field = invalid == null ? "dbhelper" : invalid.field();
+                att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.CONFIG_INVALID,
+                        "Invalid DB helper configuration", error, file.toString(), field,
+                        "Correct this DB helper field; connection credentials must not be included in diagnostic excerpts.");
+                if (invalid == null) throw YamlSupport.locate(diagnostic, file, field);
+                throw YamlSupport.locateSchema(diagnostic, file, invalid.structuredViolations());
+            }
             String normalizedId = helper.id().toLowerCase(Locale.ROOT);
             if (!ids.add(normalizedId)) throw new IllegalArgumentException("Duplicate dbhelper id ignoring case: " + helper.id());
             result.put(helper.id(), helper);
@@ -51,9 +62,8 @@ public final class DbHelperConfigLoader {
     }
 
     private Map<?, ?> yaml(Path file) throws Exception {
-        try (Reader reader = Files.newBufferedReader(file)) {
-            Object loaded;
-            synchronized (YamlSupport.parser()) { loaded = YamlSupport.parser().load(reader); }
+        {
+            Object loaded = YamlSupport.load(file);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Dbhelper file must be a YAML map: " + file);
             return (Map<?, ?>) loaded;
         }

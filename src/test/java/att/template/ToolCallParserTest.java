@@ -29,4 +29,10 @@ class ToolCallParserTest {
         assertFalse(call.arguments().get(1).positional());
         assertEquals(3, parser.listItems(call.arguments().get(1).expression()).size());
     }
+
+    @Test void locatesMalformedPathListArgumentWithoutParsingTheWholeCall() {
+        String expression = "#{fpp.loghelper(logFiles=[/fpp/log/FPPCommon.log, /fpp/log/FPPCommon.log.*])}";
+        int offset = expression.indexOf("/fpp/log");
+        assertEquals("logFiles", new ToolCallParser().argumentAt(expression, offset));
+    }
 }

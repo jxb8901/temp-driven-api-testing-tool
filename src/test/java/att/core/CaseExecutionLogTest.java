@@ -77,6 +77,23 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("\\n"));
     }
 
+    @Test void compactToolInvocationKeepsCaptureAndCleanupFailuresVisible() throws Exception {
+        Map<String,Object> attempt = new LinkedHashMap<String,Object>();
+        attempt.put("id", "invoke");
+        attempt.put("status", "ERROR");
+        attempt.put("stdoutCaptureError", "capture failed");
+        attempt.put("stderrCaptureError", "stderr failed");
+        attempt.put("cleanupWarning", "spool cleanup failed");
+        attempt.put("evidenceError", "case log append failed");
+        Path file = tempDir.resolve("tool.log");
+        new CaseExecutionLog(file).appendToolInvocation("ACTION invoke", attempt);
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("stdoutCaptureError"));
+        assertTrue(text.contains("stderrCaptureError"));
+        assertTrue(text.contains("cleanupWarning"));
+        assertTrue(text.contains("evidenceError"));
+    }
+
     private Map<String,Object> status(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("status",value);return result;}
     private Map<String,Object> nestedStatus(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("TOOL",status(value));return result;}
 

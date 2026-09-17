@@ -42,7 +42,13 @@ public final class FlowRegistry {
             if (Files.isSymbolicLink(root) || !Files.isDirectory(root)) throw new IllegalArgumentException("Flow root must be a non-symlink directory: " + root);
             indexDescriptors();
             if (validateAll) {
-                if (!descriptorsWithoutId.isEmpty()) throw new IllegalArgumentException("Flow descriptor has no static canonical id: " + descriptorsWithoutId.get(0));
+                if (!descriptorsWithoutId.isEmpty()) {
+                    Path descriptor = descriptorsWithoutId.get(0);
+                    throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                            "Flow descriptor has no static canonical id", descriptor.toString(),
+                            "Add an id ending in .vN; dynamic Flow ids are not supported.")
+                            .withLocation(descriptor.toString(), "id", null, null, null, null, null);
+                }
                 for (String id : new ArrayList<String>(descriptors.keySet())) loadId(id);
                 validateGraph();
             }
@@ -79,16 +85,28 @@ public final class FlowRegistry {
         }
         Collections.sort(files);
         for (Path descriptor : files) {
-            if (Files.isSymbolicLink(descriptor) || !Files.isRegularFile(descriptor, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("Flow descriptor must be a regular non-symlink file: " + descriptor);
+            if (Files.isSymbolicLink(descriptor) || !Files.isRegularFile(descriptor, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.PATH_INVALID,
+                        "Unsafe Flow descriptor", "Flow descriptor must be a regular non-symlink file: " + descriptor,
+                        "Use a regular flow.yaml below the package templates/flows directory.").withLocation(descriptor.toString(), "flow", null, null, null, null, null);
             Path real = descriptor.toRealPath();
-            if (!real.startsWith(root.toRealPath())) throw new IllegalArgumentException("Flow descriptor escapes flow root: " + descriptor);
-            if (Files.isRegularFile(descriptor.getParent().resolve("template.yaml"))) throw new IllegalArgumentException("A directory cannot contain both template.yaml and flow.yaml: " + descriptor.getParent());
+            if (!real.startsWith(root.toRealPath()))
+                throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.PATH_INVALID,
+                        "Flow descriptor escapes Flow root", "resolvedPath=" + real + ", allowedRoot=" + root,
+                        "Keep Flow descriptors below templates/flows.").withLocation(descriptor.toString(), "flow", null, null, null, null, null);
+            if (Files.isRegularFile(descriptor.getParent().resolve("template.yaml")))
+                throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                        "Directory contains both template.yaml and flow.yaml", descriptor.getParent().toString(),
+                        "Split the directory so it contains either a Template or a Flow descriptor.")
+                        .withLocation(descriptor.toString(), "flow", null, null, null, null, null);
             String text = new String(Files.readAllBytes(descriptor), java.nio.charset.StandardCharsets.UTF_8);
             Matcher header = Pattern.compile("(?m)^id:[ \\t]*([A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*)[ \\t]*(?:#.*)?$").matcher(text);
             if (!header.find()) { descriptorsWithoutId.add(descriptor); continue; }
             String id = header.group(1);
             Path previous = descriptors.put(id, descriptor);
-            if (previous != null) throw new IllegalArgumentException("Duplicate Flow ID '" + id + "': " + previous.getParent() + ", " + descriptor.getParent());
+            if (previous != null) throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                    "Duplicate Flow ID '" + id + "'", previous.getParent() + ", " + descriptor.getParent(),
+                    "Give each Flow a unique canonical id.").withLocation(descriptor.toString(), "id", null, null, null, null, null);
         }
     }
 
@@ -96,7 +114,17 @@ public final class FlowRegistry {
         if (byId.containsKey(id)) return byId.get(id);
         Path descriptor = descriptors.get(id);
         if (descriptor == null) return null;
-        FlowDefinition flow = load(descriptor);
+        FlowDefinition flow;
+        try { flow = load(descriptor); }
+        catch (Exception error) {
+            att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(error);
+            String field = schema == null ? "flow" : schema.field();
+            att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                    "Invalid Flow '" + id + "'", error, descriptor.toString(), field,
+                    "Correct the indicated Flow descriptor field.");
+            if (schema == null) throw YamlSupport.locate(diagnostic, descriptor, field);
+            throw YamlSupport.locateSchema(diagnostic, descriptor, schema.structuredViolations());
+        }
         parsedCount++;
         if (!id.equals(flow.id())) throw new IllegalArgumentException("Flow descriptor id changed while compiling: expected " + id + " but found " + flow.id());
         byId.put(id, flow);
@@ -105,9 +133,8 @@ public final class FlowRegistry {
 
     private FlowDefinition load(Path descriptor) throws Exception {
         Map<String, Object> map;
-        try (Reader reader = Files.newBufferedReader(descriptor)) {
-            Object loaded;
-            synchronized (YamlSupport.parser()) { loaded = YamlSupport.parser().load(reader); }
+        {
+            Object loaded = YamlSupport.load(descriptor);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Flow must be a YAML map: " + descriptor);
             map = objectMap((Map<?, ?>) loaded);
         }

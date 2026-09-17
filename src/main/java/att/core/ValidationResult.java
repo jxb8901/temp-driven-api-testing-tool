@@ -15,13 +15,21 @@ public class ValidationResult {
     private final String expected;
     private final String actual;
     private final String message;
+    /** Optional structured diagnostic for failures; legacy callers may leave it null. */
+    private final att.validation.Diagnostic diagnostic;
 
     public ValidationResult(String source, String name, ResultStatus status, String expected, String actual, String message) {
-        this(source, name, "", status, expected, actual, message);
+        this(source, name, "", status, expected, actual, message, null);
     }
 
     public ValidationResult(String source, String name, String description, ResultStatus status,
                             String expected, String actual, String message) {
+        this(source, name, description, status, expected, actual, message, null);
+    }
+
+    public ValidationResult(String source, String name, String description, ResultStatus status,
+                            String expected, String actual, String message,
+                            att.validation.Diagnostic diagnostic) {
         this.source = source;
         this.name = name;
         this.description = description == null ? "" : description;
@@ -29,6 +37,7 @@ public class ValidationResult {
         this.expected = expected;
         this.actual = actual;
         this.message = message;
+        this.diagnostic = diagnostic;
     }
 
     public String source() { return source; }
@@ -38,4 +47,5 @@ public class ValidationResult {
     public String expected() { return expected; }
     public String actual() { return actual; }
     public String message() { return message; }
+    public att.validation.Diagnostic diagnostic() { return diagnostic; }
 }

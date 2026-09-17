@@ -10,6 +10,7 @@ import att.config.ToolArgumentConfig;
 import att.config.YamlSupport;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
+import att.core.PathSafety;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -120,6 +121,7 @@ public class ToolInvoker {
         CommandResult commandResult;
         long timeoutMs = effectiveTimeoutMs(toolName, actionTimeoutMs);
         CommandRunner.CapturePolicy capture = capturePolicy(context, id);
+        Map<String, Object> invocation = null;
         try {
             if (tool.ssh() == null) {
                 Files.createDirectories(context.caseOutputDirectory());
@@ -132,8 +134,9 @@ public class ToolInvoker {
             }
         }
         catch (java.io.IOException e) {
-            cleanupCapture(capture);
             Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+            String cleanupWarning = cleanupCapture(capture);
+            if (cleanupWarning != null) evidence.put("cleanupWarning", cleanupWarning);
             evidence.put("id", id); evidence.put("type", "tool"); evidence.put("name", toolName);
             evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage());
             evidence.put("logicalArgv", logicalArgv); evidence.put("argv", argv);
@@ -179,7 +182,7 @@ public class ToolInvoker {
         if (parseFailure != null) toolInvocation.put("parserDiagnostic", parseFailure.getMessage());
         toolInvocation.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         toolInvocation.put("exitCode", commandResult.exitCode());
-        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation = new LinkedHashMap<String, Object>();
         invocation.put("id", id);
         invocation.put("type", "tool");
         invocation.put("status", toolInvocation.get("status"));
@@ -198,9 +201,32 @@ public class ToolInvoker {
         if (saveAs != null && !saveAs.trim().isEmpty()) {
             Path directory = context.caseLogDirectory();
             Files.createDirectories(directory);
-            Path outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
-            if (!outputFile.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool saveAs must stay under case log directory: " + saveAs);
-            Files.createDirectories(outputFile.getParent());
+            Path outputFile;
+            try {
+                outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
+            } catch (RuntimeException invalidPath) {
+                throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                        "Invalid Tool saveAs path", "configuredPath=" + saveAs + ", reason=" + invalidPath.getMessage(),
+                        null, "saveAs.path", null, null, null, null, id,
+                        "Use a safe relative path below the Case artifact directory.", invalidPath);
+            }
+            if (!outputFile.startsWith(directory.normalize())) throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                    "Tool saveAs path escapes the Case artifact directory",
+                    "configuredPath=" + saveAs + ", resolvedPath=" + outputFile + ", allowedRoot=" + directory,
+                    null, "saveAs.path", null, null, null, null, id,
+                    "Use a safe relative path below the Case artifact directory.", null);
+            try {
+                PathSafety.ensureContained(directory, outputFile, "Tool saveAs path");
+                Files.createDirectories(outputFile.getParent());
+                PathSafety.ensureContained(directory, outputFile, "Tool saveAs path");
+            } catch (java.io.IOException unsafePath) {
+                throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                        "Tool saveAs path is not safe",
+                        "configuredPath=" + saveAs + ", resolvedPath=" + outputFile + ", allowedRoot=" + directory
+                                + ", reason=" + unsafePath.getMessage(),
+                        null, "saveAs.path", null, null, null, null, id,
+                        "Use a safe relative path below the Case artifact directory and avoid symbolic links.", unsafePath);
+            }
             boolean captureIsTarget = commandResult.stdoutArtifact() != null && commandResult.stdoutArtifact().normalize().equals(outputFile);
             if (Files.exists(outputFile) && !overwrite && !captureIsTarget) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + saveAs);
             if (captureIsTarget) {
@@ -222,10 +248,11 @@ public class ToolInvoker {
             toolNode.put(tool.groupId(), groupNode);
         } else toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
-        appendProcessOutput(log, id, commandResult);
+        appendProcessOutput(log, id, commandResult, invocation);
         if (recordAction) {
             context.addAction(id, invocation);
-            log.appendToolInvocation("ACTION " + id, invocation);
+            try { if (log != null) log.appendToolInvocation("ACTION " + id, invocation); }
+            catch (Exception error) { invocation.put("evidenceError", "tool action log append failed: " + error.getMessage()); }
         }
 
         if (commandResult.timedOut()) {
@@ -234,7 +261,21 @@ public class ToolInvoker {
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation);
         } finally {
-            cleanupCapture(commandResult);
+            String cleanupWarning = cleanupCapture(commandResult);
+            if (cleanupWarning != null && invocation != null) {
+                invocation.put("cleanupWarning", cleanupWarning);
+                try { if (log != null) log.appendRaw("ACTION " + id + " cleanup warning", cleanupWarning); }
+                catch (Exception evidenceFailure) {
+                    invocation.put("evidenceError", "tool cleanup warning log append failed: " + evidenceFailure.getMessage());
+                }
+                if (recordAction) {
+                    try { context.updateAction(id, invocation); }
+                    catch (Exception evidenceFailure) {
+                        String earlier = invocation.containsKey("evidenceError") ? invocation.get("evidenceError") + "; " : "";
+                        invocation.put("evidenceError", earlier + "tool cleanup evidence update failed: " + evidenceFailure.getMessage());
+                    }
+                }
+            }
         }
     }
 
@@ -256,35 +297,48 @@ public class ToolInvoker {
         evidence.put("stdoutBytes", result.stdoutBytes()); evidence.put("stderrBytes", result.stderrBytes());
         evidence.put("stdoutTruncated", result.stdoutTruncated()); evidence.put("stderrTruncated", result.stderrTruncated());
         evidence.put("stdoutArtifactTruncated", result.stdoutArtifactTruncated()); evidence.put("stderrArtifactTruncated", result.stderrArtifactTruncated());
+        if (result.stdoutCaptureError() != null) evidence.put("stdoutCaptureError", result.stdoutCaptureError());
+        if (result.stderrCaptureError() != null) evidence.put("stderrCaptureError", result.stderrCaptureError());
     }
 
-    private void appendProcessOutput(CaseExecutionLog log, String invocationId, CommandResult result) throws java.io.IOException {
+    private void appendProcessOutput(CaseExecutionLog log, String invocationId, CommandResult result, Map<String, Object> evidence) {
         if (log == null || result == null) return;
         if (result.stdoutBytes() > 0) {
-            if (result.stdoutArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDOUT",
-                    result.stdoutArtifact(), result.stdoutArtifactTruncated(), result.stdoutBytes());
-            else log.appendRaw("TOOL " + invocationId + " STDOUT", result.stdout());
+            try {
+                if (result.stdoutArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDOUT",
+                        result.stdoutArtifact(), result.stdoutArtifactTruncated(), result.stdoutBytes());
+                else log.appendRaw("TOOL " + invocationId + " STDOUT", result.stdout());
+            } catch (Exception error) { appendEvidenceError(evidence, "stdout log append failed: " + error.getMessage()); }
         }
         if (result.stderrBytes() > 0) {
-            if (result.stderrArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDERR",
-                    result.stderrArtifact(), result.stderrArtifactTruncated(), result.stderrBytes());
-            else log.appendRaw("TOOL " + invocationId + " STDERR", result.stderr());
+            try {
+                if (result.stderrArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDERR",
+                        result.stderrArtifact(), result.stderrArtifactTruncated(), result.stderrBytes());
+                else log.appendRaw("TOOL " + invocationId + " STDERR", result.stderr());
+            } catch (Exception error) { appendEvidenceError(evidence, "stderr log append failed: " + error.getMessage()); }
         }
     }
 
-    private void cleanupCapture(CommandRunner.CapturePolicy policy) {
-        if (policy != null) cleanup(policy.stdoutArtifact(), policy.stderrArtifact());
+    private void appendEvidenceError(Map<String, Object> evidence, String message) {
+        Object earlier = evidence.get("evidenceError");
+        evidence.put("evidenceError", earlier == null ? message : earlier + "; " + message);
     }
 
-    private void cleanupCapture(CommandResult result) {
-        if (result != null) cleanup(result.stdoutArtifact(), result.stderrArtifact());
+    private String cleanupCapture(CommandRunner.CapturePolicy policy) {
+        return policy == null ? null : cleanup(policy.stdoutArtifact(), policy.stderrArtifact());
     }
 
-    private void cleanup(Path stdout, Path stderr) {
+    private String cleanupCapture(CommandResult result) {
+        return result == null ? null : cleanup(result.stdoutArtifact(), result.stderrArtifact());
+    }
+
+    private String cleanup(Path stdout, Path stderr) {
         Path directory = stdout == null ? (stderr == null ? null : stderr.getParent()) : stdout.getParent();
-        try { if (stdout != null) Files.deleteIfExists(stdout); } catch (Exception ignored) { }
-        try { if (stderr != null) Files.deleteIfExists(stderr); } catch (Exception ignored) { }
-        try { if (directory != null) Files.deleteIfExists(directory); } catch (Exception ignored) { }
+        List<String> failures = new ArrayList<String>();
+        try { if (stdout != null) Files.deleteIfExists(stdout); } catch (Exception error) { failures.add("stdout=" + error.getMessage()); }
+        try { if (stderr != null) Files.deleteIfExists(stderr); } catch (Exception error) { failures.add("stderr=" + error.getMessage()); }
+        try { if (directory != null) Files.deleteIfExists(directory); } catch (Exception error) { failures.add("directory=" + error.getMessage()); }
+        return failures.isEmpty() ? null : "process capture cleanup failed: " + String.join(", ", failures);
     }
 
     @SuppressWarnings("unchecked")

@@ -1,7 +1,7 @@
-# ATT V3.2.0 User Manual and Reference
+# ATT V3.3.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 3.2.0
+Version: 3.3.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -54,7 +54,7 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, assign a scoped runtime value, or invoke a Flow. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.
 
-### What V3.2 guarantees
+### What V3.3 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
@@ -141,7 +141,7 @@ Flow `inputs`, `outputs`, invocation `with`, and the dedicated `input`, lowercas
 
 The Template and all nested Flows share one Action-ID namespace. Template/Flow collisions, collisions between used Flows, indirect nested collisions, and repeated use of the same Flow in one Template fail validation. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own `runWhen` is false is SKIPPED.
 
-Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.2.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
+Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.3.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
 
 ## 02 Quick Start
 
@@ -1816,7 +1816,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.2",
+  "attVersion": "3.3.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1836,7 +1836,11 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 }
 ```
 
-Every diagnostic always contains `code`, `severity`, `message`, `file`, `field`, `sheet`, `row`, `column`, `template`, `action`, and `suggestion`. Inapplicable fields are `null`. Codes are stable; automation must not parse human messages.
+Every diagnostic always contains `code`, `severity`, `message`, `file`, `field`, `sheet`, `row`, `column`, `template`, `action`, and `suggestion`. Inapplicable fields are `null`. When package and case validation discover the same root failure, ATT emits one diagnostic with `occurrences` and, when applicable, an `affectedCases` list; `summary.errors` counts unique diagnostics while `summary.errorOccurrences` preserves the raw occurrence count. Codes are stable; automation must not parse human messages.
+
+ATT 3.3.0 may also include `summary`, `detail`, `source`, `context`, and `schemaViolations`. `source` holds physical YAML or payload `line`, `column`, `endLine`, and `endColumn`; the top-level `row` and `column` continue to identify an Excel cell. For single-line plain or directly quoted YAML scalars, an expression syntax error points to its character. Folded, multiline, or escaped scalars use the YAML scalar range when an exact mapping is unavailable. Every schema violation retains its own path, keyword, message, and physical source. `context` may contain the Case, Stage, Flow ID, and nested call chain. Expression syntax details identify the containing tool-call argument (for example, `logFiles`), the unexpected token, and a bounded caret excerpt when it is safe to show; source excerpts are omitted when the field or line may contain credentials or secrets.
+
+Runtime Action failures preserve the same structure in Case YAML, `run.yaml`, regenerated reports, CI JSON, and JUnit failure detail. A nested Flow failure identifies the inner `flow.yaml` and Action while the call chain identifies how the Template reached it. Tool and DB evidence adds attempts, timeout, parse/capture, parameter binding, and cancellation details where available. File save failures include the configured path and allowed artifact root.
 
 ### Generated-output schema summary
 
@@ -1853,7 +1857,7 @@ Generated envelopes reject additional top-level fields according to their schema
 
 ### Unified expression engine
 
-V3.2 uses one engine with two deliberately separate roles:
+V3.3 uses one engine with two deliberately separate roles:
 
 - `${path}` reads one Context value and interpolates it into surrounding text, for example `Reference=${CASE.VARS.SrcRefNo}`.
 - `#{expression}` evaluates one typed expression block. The block may contain Context operands, calls, list literals, parentheses, unary operators, arithmetic, comparisons, `like`, `in`, null tests, and boolean logic.

@@ -21,7 +21,7 @@ public class ExpressionEvaluator {
 
     /** Parses assertion syntax without requiring runtime context values to exist. */
     public void validateSyntax(String expression) {
-        if (expression == null || expression.trim().isEmpty()) throw new IllegalArgumentException("Assertion expression must not be blank");
+        if (expression == null || expression.trim().isEmpty()) throw new ExpressionSyntaxException(0, 0, "a non-blank assertion expression", "blank expression");
         UnifiedTemplateEngine expressions = new UnifiedTemplateEngine(null);
         expressions.validateValueSyntax(expression);
         for (ToolCallParser.ParsedCall call : expressions.parseCalls(expression)) {
@@ -37,10 +37,10 @@ public class ExpressionEvaluator {
             normalized.append(expression.substring(index, start));
             Matcher matcher = CONTEXT.matcher(expression);
             matcher.region(start, expression.length());
-            if (!matcher.lookingAt()) throw new IllegalArgumentException("Unclosed context reference in expression");
+            if (!matcher.lookingAt()) throw new ExpressionSyntaxException(start, expression.length(), "'}' to close Context expression", "end of expression");
             int end = matcher.end() - 1;
             String path = matcher.group(1);
-            if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid context reference in expression: ${" + path + "}");
+            if (path.trim().isEmpty() || !path.equals(path.trim())) throw new ExpressionSyntaxException(start, matcher.end(), "a non-blank Context path", "invalid Context path");
             normalized.append('0'); index = end + 1;
         }
         evaluate(normalized.toString());

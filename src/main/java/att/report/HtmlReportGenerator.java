@@ -96,8 +96,9 @@ public final class HtmlReportGenerator {
             }
             html.append("</dd>");
         }
-        html.append("</dl><h3>Action results</h3><table><tr><th>Stage</th><th>Action</th><th>Description</th><th>Status</th><th>Message</th></tr>");
-        for (att.core.ValidationResult action : result.validations()) html.append("<tr><td>").append(escape(action.source())).append("</td><td>").append(escape(action.name())).append("</td><td>").append(escape(action.description())).append("</td><td><span class=\"badge ").append(action.status()).append("\">").append(action.status()).append("</span></td><td>").append(escape(action.message())).append("</td></tr>");
+        if (result.diagnostic() != null) html.append("<dt>Diagnostic</dt><dd><pre>").append(escape(result.diagnostic().toJson())).append("</pre></dd>");
+        html.append("</dl><h3>Action results</h3><table><tr><th>Stage</th><th>Action</th><th>Description</th><th>Status</th><th>Message</th><th>Diagnostic</th></tr>");
+        for (att.core.ValidationResult action : result.validations()) html.append("<tr><td>").append(escape(action.source())).append("</td><td>").append(escape(action.name())).append("</td><td>").append(escape(action.description())).append("</td><td><span class=\"badge ").append(action.status()).append("\">").append(action.status()).append("</span></td><td>").append(escape(action.message())).append("</td><td>").append(action.diagnostic() == null ? "" : "<pre>" + escape(action.diagnostic().toJson()) + "</pre>").append("</td></tr>");
         html.append("</table><h3>Detailed execution log</h3><pre>").append(escape(logPreview.text)).append("</pre>");
         if (logPreview.truncated) html.append("<p class=\"muted\">Inline log limited to ").append(caseLogInlineLimitBytes).append(" bytes; open the artifact for complete evidence.</p>");
         html.append("</div></details>");

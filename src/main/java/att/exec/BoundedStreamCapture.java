@@ -20,6 +20,7 @@ final class BoundedStreamCapture extends OutputStream {
     private long artifactBytes;
     private int tailCount;
     private int tailPosition;
+    private volatile IOException failure;
 
     BoundedStreamCapture(int memoryLimit, long artifactLimit, Path artifact) throws IOException {
         this.headLimit = Math.max(1, memoryLimit / 2);
@@ -70,5 +71,7 @@ final class BoundedStreamCapture extends OutputStream {
     synchronized long bytes() { return bytes; }
     synchronized boolean memoryTruncated() { return bytes > headLimit + tail.length; }
     synchronized boolean artifactTruncated() { return artifactOutput != null && bytes > artifactLimit; }
+    synchronized void recordFailure(IOException error) { if (failure == null) failure = error; }
+    synchronized IOException failure() { return failure; }
     Path artifact() { return artifact; }
 }

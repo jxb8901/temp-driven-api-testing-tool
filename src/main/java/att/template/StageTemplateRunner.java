@@ -49,7 +49,9 @@ public class StageTemplateRunner {
             boolean recorded = false;
             boolean invocationSucceeded = true;
             ResultStatus toolStatus = null;
+            att.validation.Diagnostic actionDiagnostic = null;
             String expected = "", actual = "";
+            String executionField = "runWhen";
             try {
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
                 if (!action.runWhen().trim().isEmpty() && !evaluateCondition(action.runWhen(), context, log)) {
@@ -57,26 +59,35 @@ public class StageTemplateRunner {
                     output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
                     context.addAction(action.id(), node); recorded = true;
                     context.setActionOutput(output);
+                    executionField = "description";
                     node.put("description", normalizeLines(templateEngine.render(description, context, log)));
-                    context.updateAction(action.id(), node); log.appendAction("ACTION " + action.id() + " SKIPPED", node);
+                    context.updateAction(action.id(), node); appendActionLog(log, "ACTION " + action.id() + " SKIPPED", node);
                     results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")), ResultStatus.SKIPPED, "", "", ""));
                     continue;
                 }
+                executionField = "render".equals(type) ? "payload" : "tool".equals(type) ? "call" : "db".equals(type) ? (action.query().isEmpty() ? "update" : "query")
+                        : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : "assign".equals(type) ? "expression" : "use";
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
                 else if ("tool".equals(type)) toolStatus = executeTool(action, context, log, output, targets, node);
                 else if ("db".equals(type)) invocationSucceeded = executeDb(action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
-                else if ("flow".equals(type)) toolStatus = executeFlow(stageName, action, context, log, output, node);
+                else if ("flow".equals(type)) {
+                    FlowExecutionResult flowResult = executeFlow(stageName, action, context, log, output, node);
+                    toolStatus = flowResult.status;
+                    actionDiagnostic = flowResult.diagnostic;
+                }
                 else throw new IllegalArgumentException("Unsupported action type: " + action.type());
 
                 context.addAction(action.id(), node);
                 recorded = true;
                 context.setActionOutput(output);
+                executionField = "assert";
                 ResultStatus status = toolStatus == null ? applyAssertion(action, output, context, log, invocationSucceeded) : toolStatus;
                 if ("assert".equals(type)) {
                     output.put("result", Boolean.valueOf(status == ResultStatus.PASS));
+                    executionField = "actual";
                     actual = normalizeLines(templateEngine.render(action.actual(), context, log));
                     expected = normalizeLines(expected);
                     output.put("expected", expected);
@@ -84,22 +95,26 @@ public class StageTemplateRunner {
                 }
                 boolean assertionReport = "assert".equals(type) || ("tool".equals(type) && !action.assertion().trim().isEmpty());
                 if ("tool".equals(type) && assertionReport) {
+                    executionField = "expected";
                     expected = normalizeLines(templateEngine.render(action.expected(), context, log));
+                    executionField = "actual";
                     actual = normalizeLines(templateEngine.render(action.actual(), context, log));
                     output.put("expected", expected);
                     output.put("actual", actual);
                 }
                 output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
+                executionField = "description";
                 node.put("description", normalizeLines(templateEngine.render(description, context, log)));
-                mergeDbEvidence(node, context.drainDbInvocations());
+                try { mergeDbEvidence(node, context.drainDbInvocations()); }
+                catch (Exception evidenceError) { recordEvidenceError(node, evidenceError); }
                 context.updateAction(action.id(), node);
-                log.appendAction("ACTION " + action.id(), node);
+                appendActionLog(log, "ACTION " + action.id(), node);
                 String reportExpected = assertionReport ? joinLines(String.valueOf(node.get("description")), expected) : "";
                 results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")), status,
-                        reportExpected, assertionReport ? actual : "", assertionMessage(output)));
+                        reportExpected, assertionReport ? actual : "", assertionMessage(output), actionDiagnostic));
                 if (status != ResultStatus.PASS && stopOnFailure(action)) break;
             } catch (Exception e) {
-                att.validation.DiagnosticException typed = detailed(e, template, action);
+                att.validation.DiagnosticException typed = detailed(e, template, action, executionField).withContext(context.diagnosticContext());
                 String message = typed.format();
                 output.put("status", "ERROR");
                 output.put("success", false);
@@ -112,17 +127,19 @@ public class StageTemplateRunner {
                 exception.put("location", diagnosticLocation(typed));
                 exception.put("suggestion", typed.suggestion());
                 exception.put("message", message);
+                node.put("diagnostic", typed.toDiagnostic().toMap());
+                exception.put("context", typed.context().toMap());
                 output.put("exception", exception);
                 context.setActionOutput(output);
                 node.put("description", normalizeLines(templateEngine.renderValuesPreserving(description, context)));
                 try {
                     mergeDbEvidence(node, context.drainDbInvocations());
                     if (recorded) context.updateAction(action.id(), node); else context.addAction(action.id(), node);
-                    log.appendAction("ACTION " + action.id() + " ERROR", node);
-                } catch (Exception ignored) { }
+                    appendActionLog(log, "ACTION " + action.id() + " ERROR", node);
+                } catch (Exception evidenceError) { recordEvidenceError(node, evidenceError); }
                 String reportExpected = "assert".equalsIgnoreCase(action.type()) ? joinLines(String.valueOf(node.get("description")), expected) : "";
                 results.add(new ValidationResult(stageName, action.id(), String.valueOf(node.get("description")),
-                        ResultStatus.ERROR, reportExpected, actual, message));
+                        ResultStatus.ERROR, reportExpected, actual, message, typed.toDiagnostic()));
                 if (stopOnFailure(action)) break;
             } finally {
                 context.clearActionOutput();
@@ -131,8 +148,8 @@ public class StageTemplateRunner {
         return results;
     }
 
-    private ResultStatus executeFlow(String stageName, TemplateAction action, CaseRuntimeContext context,
-                                     CaseExecutionLog log, Map<String, Object> output, Map<String, Object> node) throws Exception {
+    private FlowExecutionResult executeFlow(String stageName, TemplateAction action, CaseRuntimeContext context,
+                                             CaseExecutionLog log, Map<String, Object> output, Map<String, Object> node) throws Exception {
         if (flows == null) throw new IllegalStateException("Flow execution is unavailable");
         FlowDefinition flow = flows.get(action.use());
         if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
@@ -140,16 +157,35 @@ public class StageTemplateRunner {
         CaseRuntimeContext.FlowEvidence evidence = null;
         context.beginFlow(flow.id(), action.id());
         try {
-            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA);
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
             internal.addAll(execute(stageName + "." + action.id(), body, context, log));
             ResultStatus status = aggregateFlow(internal);
             output.put("status", status.name()); output.put("success", status == ResultStatus.PASS);
-            return status;
+            att.validation.Diagnostic diagnostic = null;
+            for (ValidationResult result : internal) {
+                if ((result.status() == ResultStatus.ERROR || result.status() == ResultStatus.INVALID)
+                        && result.diagnostic() != null) {
+                    diagnostic = result.diagnostic();
+                    node.put("diagnostic", diagnostic.toMap());
+                    output.put("exception", diagnostic.toMap());
+                    break;
+                }
+            }
+            return new FlowExecutionResult(status, diagnostic);
         } finally {
             evidence = context.finishFlow();
             Map<String, Object> flowNode = new LinkedHashMap<String, Object>();
             flowNode.putAll(evidence.flow()); flowNode.put("name", flow.name()); flowNode.put("actions", evidence.actions());
             node.put("flow", flowNode);
+        }
+    }
+
+    private static final class FlowExecutionResult {
+        private final ResultStatus status;
+        private final att.validation.Diagnostic diagnostic;
+        private FlowExecutionResult(ResultStatus status, att.validation.Diagnostic diagnostic) {
+            this.status = status;
+            this.diagnostic = diagnostic;
         }
     }
 
@@ -174,7 +210,13 @@ public class StageTemplateRunner {
         for (Path source : matches) {
             String relative = RenderPayloadResolver.portable(templateRoot.relativize(source));
             String content = PayloadCache.readUtf8(source);
-            String rendered = templateEngine.render(content, context, log);
+            String rendered;
+            try { rendered = templateEngine.render(content, context, log); }
+            catch (Exception error) {
+                throw att.config.YamlSupport.locateText(att.validation.DiagnosticException.wrap(
+                        att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
+                        "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
+            }
             Object value;
             if ("file".equalsIgnoreCase(action.renderAs())) {
                 Path renderRoot = context.inFlow() ? context.actionOutputDir(action.id()) : context.caseOutputDirectory();
@@ -208,20 +250,36 @@ public class StageTemplateRunner {
         output.put("result", joinLogContent(message, content));
         output.put("level", action.level());
         output.put("fields", renderFields(action.fields(), context, log));
-        log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result")));
+        try { log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result"))); }
+        catch (Exception error) { recordEvidenceError(output, error); }
     }
 
     private Path logSource(String value, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException("Log file expression resolved to a blank path");
+        if (value == null || value.trim().isEmpty()) throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                "Log action file path is blank", "configuredPath=" + value,
+                null, "file", null, null, null, null, null,
+                "Resolve file to an existing Case-contained log file.", null);
         Path configured = java.nio.file.Paths.get(value);
         Path source = configured.isAbsolute() ? configured.normalize() : context.caseOutputDirectory().resolve(configured).normalize();
         Path root = context.caseOutputDirectory().toRealPath();
         if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Log file must be an existing regular non-symlink file: " + value);
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                    "Log action file does not exist or is unsafe",
+                    "configuredPath=" + value + ", resolvedPath=" + source + ", allowedRoot=" + context.caseOutputDirectory(),
+                    null, "file", null, null, null, null, null,
+                    "Use an existing regular non-symlink file under the current Case output directory.", null);
         }
         Path real = source.toRealPath();
-        if (!real.startsWith(root)) throw new IllegalArgumentException("Log file must stay under the current Case output directory: " + value);
-        if (real.equals(log.path().toRealPath())) throw new IllegalArgumentException("A log action cannot read the current Case log file");
+        if (!real.startsWith(root)) throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                "Log action file escapes the Case output directory",
+                "configuredPath=" + value + ", resolvedPath=" + real + ", allowedRoot=" + root,
+                null, "file", null, null, null, null, null,
+                "Use a Case-contained relative path.", null);
+        if (real.equals(log.path().toRealPath())) throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                "A log action cannot read the current Case log file",
+                "configuredPath=" + value + ", resolvedPath=" + real,
+                null, "file", null, null, null, null, null,
+                "Select a different input log file.", null);
         return real;
     }
 
@@ -285,12 +343,14 @@ public class StageTemplateRunner {
                 ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
                 : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
         context.recordDbInvocation(action.db(), invocationId, result.evidence());
-        try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); } catch (Exception ignored) { }
+        try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
+        catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
         output.put("result", result.result());
         if (result.success() && action.saveConfig().configured()) {
             String path = templateEngine.render(action.saveConfig().path(), context, log);
             String format = requiredFormat(action.saveConfig(), "DB", "");
-            if (console(path)) log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result.result()));
+            if (console(path)) try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result.result())); }
+            catch (Exception error) { recordEvidenceError(output, error); }
             else {
                 Path saved = artifactWriter.writeDb(context, action.id(), path, format, result.result(), action.saveConfig().overwrite());
                 targets.add(saved.toString());
@@ -325,7 +385,8 @@ public class StageTemplateRunner {
                 if (save.configured() && !invokerWritesRaw) {
                     if (console) {
                         if (!("tool".equals(kind) && "raw".equals(format))) {
-                            log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.render(format, result.output()));
+                            try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.render(format, result.output())); }
+                            catch (Exception error) { recordEvidenceError(output, error); }
                         }
                     } else {
                         Path saved = artifactWriter.write(context, action.id(), saveAs, format, result.output(),
@@ -497,22 +558,23 @@ public class StageTemplateRunner {
     private boolean stopOnFailure(TemplateAction action) { return !"continue".equals(action.onFailure()); }
     private String assertionMessage(Map<String, Object> output) { Object value = output.get("assertion"); return value == null ? "" : String.valueOf(value); }
     private Map<String, Object> diagnosticLocation(att.validation.DiagnosticException diagnostic) {
-        Map<String, Object> location = new LinkedHashMap<String, Object>();
-        if (diagnostic.file() != null) location.put("file", diagnostic.file());
-        if (diagnostic.field() != null) location.put("field", diagnostic.field());
-        if (diagnostic.sheet() != null) location.put("sheet", diagnostic.sheet());
-        if (diagnostic.row() != null) location.put("row", diagnostic.row());
-        if (diagnostic.column() != null) location.put("column", diagnostic.column());
-        if (diagnostic.template() != null) location.put("template", diagnostic.template());
-        if (diagnostic.action() != null) location.put("action", diagnostic.action());
-        return location;
+        return att.validation.DiagnosticRenderer.location(diagnostic.toDiagnostic());
     }
-    private att.validation.DiagnosticException detailed(Exception error, StageTemplate template, TemplateAction action) {
+    private void appendActionLog(CaseExecutionLog log, String section, Map<String, Object> node) {
+        try { log.appendAction(section, node); }
+        catch (Exception error) { recordEvidenceError(node, error); }
+    }
+    private void recordEvidenceError(Map<String, Object> node, Exception error) {
+        Object existing = node.get("evidenceError");
+        String message = safeMessage(error);
+        node.put("evidenceError", existing == null ? message : String.valueOf(existing) + "; " + message);
+    }
+    private att.validation.DiagnosticException detailed(Exception error, StageTemplate template, TemplateAction action, String executionField) {
         att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
         if (typed == null && error instanceof att.exec.ToolExecutionException) {
             att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
             typed = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_EXECUTION,
-                    "Tool action '" + action.id() + "' failed", "category=" + tool.category() + ", cause=" + safeMessage(error),
+                    "Tool action '" + action.id() + "' failed", toolDetail(tool, error),
                     null, "actions." + action.id() + ".call", null, null, null, template.name(), action.id(),
                     "Inspect logical argv, executed argv, exitCode, stdout, stderr, rawOutput, and parser diagnostics in this action's evidence.", error);
         }
@@ -522,8 +584,20 @@ public class StageTemplateRunner {
                     safeMessage(error), null, "actions." + action.id(), null, null, null, template.name(), action.id(),
                     "Check the action fields, Context references, input files, call arguments, and detailed Case-log evidence.", error);
         }
-        return typed.withLocation(template.directory().resolve("template.yaml").toString(),
-                "actions." + action.id(), null, null, null, template.name(), action.id());
+        String sourceField = "actions." + action.id() + "." + executionField;
+        if (typed.file() == null && typed.field() != null && (typed.field().startsWith("saveAs") || typed.field().equals("sqlFile")))
+            sourceField = "actions." + action.id() + "." + typed.field();
+        return att.config.YamlSupport.locate(typed, template.sourceFile(), sourceField)
+                .withLocation(null, null, null, null, null, template.name(), action.id());
+    }
+    private String toolDetail(att.exec.ToolExecutionException tool, Exception error) {
+        StringBuilder detail = new StringBuilder("category=").append(tool.category()).append(", cause=").append(safeMessage(error));
+        Map<String, Object> evidence = tool.evidence();
+        appendEvidence(detail, evidence, "attempt", "durationMs", "timeoutMs", "exitCode", "outputFile", "parserDiagnostic");
+        return detail.toString();
+    }
+    private void appendEvidence(StringBuilder detail, Map<String, Object> evidence, String... keys) {
+        for (String key : keys) if (evidence.get(key) != null) detail.append(", ").append(key).append('=').append(evidence.get(key));
     }
     private String safeMessage(Exception e) { return e.getMessage() == null || e.getMessage().trim().isEmpty() ? e.getClass().getSimpleName() : e.getMessage(); }
     private String normalizeLines(String value) { return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n'); }

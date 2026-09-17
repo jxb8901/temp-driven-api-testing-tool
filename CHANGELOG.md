@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.3.0 - 2026-09-17
+
+- Added structured diagnostics with physical YAML source ranges and execution provenance.
+- Preserved innermost Template/Flow failure locations through validation, runtime wrapping, and CLI JSON output.
+- Added expression token offsets, per-violation schema locations, nested Flow call chains, Tool/DB execution evidence, and diagnostic propagation through Case, run and report artifacts.
+- Guarded Action and Tool save targets against symlink path escapes; DB SQL path failures now retain the configured path and filesystem cause.
+
 ## 3.2.0 - 2026-07-30
 
 - Preserved Log Action, process stdout/stderr, and ordinary multiline Excel values as physical Case-log lines; Log Action results remain available in structured evidence without escaped-text duplication.

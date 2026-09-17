@@ -22,15 +22,25 @@ public class CommandResult {
     private final boolean stderrArtifactTruncated;
     private final Path stdoutArtifact;
     private final Path stderrArtifact;
+    private final String stdoutCaptureError;
+    private final String stderrCaptureError;
 
     public CommandResult(int exitCode, String stdout, String stderr, boolean timedOut) {
-        this(exitCode, stdout, stderr, timedOut, utf8(stdout), utf8(stderr), false, false, false, false, null, null);
+        this(exitCode, stdout, stderr, timedOut, utf8(stdout), utf8(stderr), false, false, false, false, null, null, null, null);
     }
 
     public CommandResult(int exitCode, String stdout, String stderr, boolean timedOut,
                          long stdoutBytes, long stderrBytes, boolean stdoutTruncated, boolean stderrTruncated,
                          boolean stdoutArtifactTruncated, boolean stderrArtifactTruncated,
                          Path stdoutArtifact, Path stderrArtifact) {
+        this(exitCode, stdout, stderr, timedOut, stdoutBytes, stderrBytes, stdoutTruncated, stderrTruncated,
+                stdoutArtifactTruncated, stderrArtifactTruncated, stdoutArtifact, stderrArtifact, null, null);
+    }
+
+    public CommandResult(int exitCode, String stdout, String stderr, boolean timedOut,
+                         long stdoutBytes, long stderrBytes, boolean stdoutTruncated, boolean stderrTruncated,
+                         boolean stdoutArtifactTruncated, boolean stderrArtifactTruncated,
+                         Path stdoutArtifact, Path stderrArtifact, String stdoutCaptureError, String stderrCaptureError) {
         this.exitCode = exitCode;
         this.stdout = stdout;
         this.stderr = stderr;
@@ -43,6 +53,8 @@ public class CommandResult {
         this.stderrArtifactTruncated = stderrArtifactTruncated;
         this.stdoutArtifact = stdoutArtifact;
         this.stderrArtifact = stderrArtifact;
+        this.stdoutCaptureError = stdoutCaptureError;
+        this.stderrCaptureError = stderrCaptureError;
     }
 
     public int exitCode() { return exitCode; }
@@ -57,5 +69,7 @@ public class CommandResult {
     public boolean stderrArtifactTruncated() { return stderrArtifactTruncated; }
     public Path stdoutArtifact() { return stdoutArtifact; }
     public Path stderrArtifact() { return stderrArtifact; }
+    public String stdoutCaptureError() { return stdoutCaptureError; }
+    public String stderrCaptureError() { return stderrCaptureError; }
     private static long utf8(String value) { return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length; }
 }

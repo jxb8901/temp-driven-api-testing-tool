@@ -96,14 +96,22 @@ public final class DbHelperExecutor implements AutoCloseable {
     }
 
     public Path resolveSqlFile(String configured) throws Exception {
-        Path relative = att.core.IdentifierValidator.relativePath(configured, "DB sqlFile");
-        Path logical = projectRoot.resolve(relative).normalize();
-        Path canonicalRoot = projectRoot.toRealPath();
-        Path file = logical.toRealPath();
-        if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) {
-            throw new IllegalArgumentException("DB sqlFile must be a package-contained regular non-symlink file: " + configured);
+        try {
+            Path relative = att.core.IdentifierValidator.relativePath(configured, "DB sqlFile");
+            Path logical = projectRoot.resolve(relative).normalize();
+            Path canonicalRoot = projectRoot.toRealPath();
+            Path file = logical.toRealPath();
+            if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) {
+                throw new IllegalArgumentException("not a package-contained regular non-symlink file");
+            }
+            return file;
+        } catch (Exception error) {
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
+                    "Invalid DB sqlFile path",
+                    "configuredPath=" + configured + ", projectRoot=" + projectRoot + ", reason=" + error.getMessage(),
+                    null, "sqlFile", null, null, null, null, null,
+                    "Use an existing regular file below the package root; symlinks and parent traversal are not allowed.", error);
         }
-        return file;
     }
 
     /** Isolates a new Case from every non-auto-commit connection previously used on this thread. */
@@ -153,10 +161,10 @@ public final class DbHelperExecutor implements AutoCloseable {
                     "Transaction is rollback-only after an earlier database failure", null, managed);
         } else {
             try {
-                result = executeStatement(managed, operation, sql, values, timeoutMs);
+                result = executeStatement(managed, operation, sql, values, parameterNames, timeoutMs);
             } catch (DbFailure failure) {
                 managed.failed();
-                result = failure(operation, failure.type, safeMessage(failure.cause, config),
+                result = failure(operation, failure.type, failure.detail == null ? safeMessage(failure.cause, config) : failure.detail,
                         failure.cause instanceof SQLException ? (SQLException) failure.cause : null, managed);
             } catch (Exception error) {
                 managed.failed();
@@ -188,7 +196,8 @@ public final class DbHelperExecutor implements AutoCloseable {
             }
             context.put("CASE.DB", outcomes);
             if (!outcomes.isEmpty()) {
-                try { log.append("DB FINALIZE", outcomes); } catch (Exception ignored) { }
+                try { log.append("DB FINALIZE", outcomes); }
+                catch (Exception error) { context.put("CASE.DB.evidenceError", "DB finalization log append failed: " + safeMessage(error, null)); }
             }
             return failures;
         } finally {
@@ -215,7 +224,7 @@ public final class DbHelperExecutor implements AutoCloseable {
     }
 
     private Map<String, Object> executeStatement(ManagedConnection managed, String operation,
-                                                 String sql, List<?> params, Long timeoutMs) throws DbFailure {
+                                                 String sql, List<?> params, List<String> parameterNames, Long timeoutMs) throws DbFailure {
         Connection connection;
         try { connection = managed.connection(); }
         catch (Exception error) { throw new DbFailure("CONNECTION_ERROR", error); }
@@ -228,17 +237,27 @@ public final class DbHelperExecutor implements AutoCloseable {
             statement.setQueryTimeout(effectiveTimeoutSeconds);
             if ("query".equals(operation)) statement.setMaxRows(managed.config.maxRows() + 1);
             try {
-                for (int index = 0; index < params.size(); index++) statement.setObject(index + 1, params.get(index));
-            } catch (SQLException error) { throw new DbFailure("BIND_ERROR", error); }
+                for (int index = 0; index < params.size(); index++) {
+                    try { statement.setObject(index + 1, params.get(index)); }
+                    catch (SQLException error) {
+                        String name = parameterNames != null && index < parameterNames.size() ? parameterNames.get(index) : null;
+                        throw new DbFailure("BIND_ERROR", error, "Unable to bind DB parameter index " + (index + 1)
+                                + (name == null ? "" : " (name='" + name + "')") + ": " + safeMessage(error, managed.config));
+                    }
+                }
+            } catch (DbFailure error) { throw error; }
             Map<String, Object> result;
             final AtomicBoolean timeoutTriggered = new AtomicBoolean(false);
+            final AtomicBoolean cancellationConfirmed = new AtomicBoolean(false);
+            final java.util.concurrent.atomic.AtomicReference<String> cancellationError = new java.util.concurrent.atomic.AtomicReference<String>();
             ScheduledFuture<?> cancellation = null;
             if (timeoutMs != null) {
                 final PreparedStatement cancellable = statement;
                 cancellation = TIMEOUTS.schedule(new Runnable() {
                     @Override public void run() {
                         timeoutTriggered.set(true);
-                        try { cancellable.cancel(); } catch (SQLException ignored) { }
+                        try { cancellable.cancel(); cancellationConfirmed.set(true); }
+                        catch (SQLException error) { cancellationError.set(safeMessage(error, managed.config)); }
                     }
                 }, timeoutMs.longValue(), TimeUnit.MILLISECONDS);
             }
@@ -250,11 +269,13 @@ public final class DbHelperExecutor implements AutoCloseable {
                     result = success("update", 0, Collections.emptyList(), Integer.valueOf(affected), managed);
                 }
                 if (timeoutTriggered.get()) throw new DbFailure("TIMEOUT",
-                        new SQLTimeoutException("Tool Action timeout exceeded " + timeoutMs + "ms"));
-            } catch (SQLTimeoutException error) { throw new DbFailure("TIMEOUT", error); }
+                        new SQLTimeoutException("Tool Action timeout exceeded " + timeoutMs + "ms"),
+                        timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get()));
+            } catch (SQLTimeoutException error) { throw new DbFailure("TIMEOUT", error, timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get())); }
             catch (LimitException error) { throw new DbFailure("LIMIT_EXCEEDED", error); }
             catch (SQLException error) {
-                throw new DbFailure(timeoutTriggered.get() ? "TIMEOUT" : "SQL_ERROR", error);
+                throw new DbFailure(timeoutTriggered.get() ? "TIMEOUT" : "SQL_ERROR", error,
+                        timeoutTriggered.get() ? timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get()) : null);
             } finally {
                 if (cancellation != null) cancellation.cancel(false);
             }
@@ -373,8 +394,22 @@ public final class DbHelperExecutor implements AutoCloseable {
         error.put("message", message);
         error.put("sqlState", sql == null ? null : sql.getSQLState());
         error.put("vendorCode", sql == null ? 0 : sql.getErrorCode());
+        if ("TIMEOUT".equals(type)) {
+            Map<String, Object> cancellation = new LinkedHashMap<String, Object>();
+            cancellation.put("requested", true);
+            cancellation.put("mechanism", "JDBC_STATEMENT_CANCEL");
+            cancellation.put("confirmed", message != null && message.contains("confirmed=true"));
+            error.put("cancellation", cancellation);
+        }
         result.put("error", error);
         return result;
+    }
+
+    private String timeoutDetail(Long timeoutMs, boolean confirmed, String cancellationError) {
+        StringBuilder detail = new StringBuilder("Tool Action timeout exceeded ").append(timeoutMs).append("ms")
+                .append("; cancellation requested=true, mechanism=JDBC_STATEMENT_CANCEL, confirmed=").append(confirmed);
+        if (cancellationError != null && !cancellationError.trim().isEmpty()) detail.append(", cancellationError=").append(cancellationError);
+        return detail.toString();
     }
 
     private Map<String, Object> base(boolean success, String operation, ManagedConnection managed) {
@@ -410,7 +445,11 @@ public final class DbHelperExecutor implements AutoCloseable {
         evidence.put("parameters", parameterEvidence(params, parameterNames, config.evidenceParameters()));
         evidence.put("parameterEvidence", config.evidenceParameters());
         evidence.put("timeoutSeconds", config.timeoutSeconds());
-        if (timeoutMs != null) evidence.put("toolTimeoutMs", timeoutMs);
+        if (timeoutMs != null) {
+            evidence.put("toolTimeoutMs", timeoutMs);
+            long actionSeconds = Math.max(1L, (timeoutMs.longValue() + 999L) / 1000L);
+            evidence.put("effectiveTimeoutSeconds", Math.min((long) config.timeoutSeconds(), actionSeconds));
+        } else evidence.put("effectiveTimeoutSeconds", config.timeoutSeconds());
         evidence.put("result", result);
         return evidence;
     }
@@ -582,7 +621,9 @@ public final class DbHelperExecutor implements AutoCloseable {
     private static final class DbFailure extends Exception {
         final String type;
         final Throwable cause;
-        DbFailure(String type, Throwable cause) { super(cause); this.type = type; this.cause = cause; }
+        final String detail;
+        DbFailure(String type, Throwable cause) { this(type, cause, null); }
+        DbFailure(String type, Throwable cause, String detail) { super(cause); this.type = type; this.cause = cause; this.detail = detail; }
     }
 
     private static final class LimitException extends RuntimeException {

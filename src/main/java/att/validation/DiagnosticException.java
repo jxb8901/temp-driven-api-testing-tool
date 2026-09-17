@@ -17,10 +17,21 @@ public class DiagnosticException extends IllegalArgumentException {
     private final String template;
     private final String action;
     private final String suggestion;
+    private final SourceLocation source;
+    private final DiagnosticContext context;
+    private final java.util.List<java.util.Map<String, Object>> schemaViolations;
 
     public DiagnosticException(String code, String summary, String detail, String file, String field,
                                String sheet, Integer row, Integer column, String template, String action,
                                String suggestion, Throwable cause) {
+        this(code, summary, detail, file, field, sheet, row, column, template, action, suggestion, cause, null, DiagnosticContext.EMPTY,
+                java.util.Collections.<java.util.Map<String, Object>>emptyList());
+    }
+
+    private DiagnosticException(String code, String summary, String detail, String file, String field,
+                                String sheet, Integer row, Integer column, String template, String action,
+                                String suggestion, Throwable cause, SourceLocation source, DiagnosticContext context,
+                                java.util.List<java.util.Map<String, Object>> schemaViolations) {
         super(summary, cause);
         this.code = required(code, "diagnostic code");
         this.summary = required(summary, "diagnostic summary");
@@ -33,6 +44,12 @@ public class DiagnosticException extends IllegalArgumentException {
         this.template = blankToNull(template);
         this.action = blankToNull(action);
         this.suggestion = blankToNull(suggestion);
+        this.source = source;
+        this.context = context;
+        java.util.List<java.util.Map<String, Object>> copied = new java.util.ArrayList<java.util.Map<String, Object>>();
+        if (schemaViolations != null) for (java.util.Map<String, Object> violation : schemaViolations)
+            copied.add(java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<String, Object>(violation)));
+        this.schemaViolations = java.util.Collections.unmodifiableList(copied);
     }
 
     public static DiagnosticException of(String code, String summary, String detail, String suggestion) {
@@ -52,7 +69,42 @@ public class DiagnosticException extends IllegalArgumentException {
         return new DiagnosticException(code, summary, detail,
                 first(this.file, file), first(this.field, field), first(this.sheet, sheet),
                 this.row == null ? row : this.row, this.column == null ? column : this.column,
-                first(this.template, template), first(this.action, action), suggestion, this);
+                first(this.template, template), first(this.action, action), suggestion, this, source, context, schemaViolations);
+    }
+
+    /** Attach fallback provenance without overwriting the innermost error location. */
+    public DiagnosticException withSource(SourceLocation fallback) {
+        return new DiagnosticException(code, summary, detail, first(file, fallback == null ? null : fallback.file()),
+                field, sheet, row, column, template, action, suggestion, this, source == null ? fallback : source, context, schemaViolations);
+    }
+
+    public DiagnosticException withContext(DiagnosticContext fallback) {
+        return new DiagnosticException(code, summary, detail, file, field, sheet, row, column, template, action,
+                suggestion, this, source, context.withFallback(fallback), schemaViolations);
+    }
+
+    /** Add a stable detail line without changing the error's identity or source. */
+    public DiagnosticException withDetail(String extra) {
+        if (extra == null || extra.trim().isEmpty()) return this;
+        String combined = detail == null || detail.trim().isEmpty() ? extra : detail + "\n" + extra;
+        return new DiagnosticException(code, summary, combined, file, field, sheet, row, column, template, action,
+                suggestion, this, source, context, schemaViolations);
+    }
+
+    /** Bind a semantic error to its source field once; outer callers must not relocate it. */
+    public DiagnosticException atSource(String file, String field) {
+        if (this.file != null) return this;
+        return new DiagnosticException(code, summary, detail, file, field, sheet, row, column, template, action,
+                suggestion, this, source, context, schemaViolations);
+    }
+
+    /** Preserve validator-native paths for JSON and CI consumers instead of flattening them into text. */
+    public DiagnosticException withSchemaViolations(java.util.List<JsonSchemaVerifier.SchemaViolation> violations) {
+        if (violations == null || violations.isEmpty()) return this;
+        java.util.List<java.util.Map<String, Object>> maps = new java.util.ArrayList<java.util.Map<String, Object>>();
+        for (JsonSchemaVerifier.SchemaViolation violation : violations) maps.add(violation.toMap());
+        return new DiagnosticException(code, summary, detail, file, field, sheet, row, column, template, action,
+                suggestion, this, source, context, maps);
     }
 
     public static DiagnosticException find(Throwable value) {
@@ -76,26 +128,18 @@ public class DiagnosticException extends IllegalArgumentException {
     public String template() { return template; }
     public String action() { return action; }
     public String suggestion() { return suggestion; }
+    public SourceLocation source() { return source; }
+    public DiagnosticContext context() { return context; }
+    public java.util.List<java.util.Map<String, Object>> schemaViolations() { return schemaViolations; }
 
     public Diagnostic toDiagnostic() {
         String message = detail == null ? summary : summary + ": " + detail;
         return new Diagnostic(code, Diagnostic.Severity.ERROR, message, file, field, sheet, row, column,
-                template, action, suggestion);
+                template, action, suggestion, summary, detail, source, context, schemaViolations);
     }
 
     public String format() {
-        StringBuilder output = new StringBuilder(code).append(": ").append(summary);
-        String location = location();
-        if (!location.isEmpty()) output.append("\n  location: ").append(location);
-        if (detail != null && !detail.equals(summary)) appendMultiline(output, "detail", detail);
-        if (suggestion != null) output.append("\n  suggestion: ").append(suggestion);
-        return output.toString();
-    }
-
-    private static void appendMultiline(StringBuilder output, String label, String value) {
-        String[] lines = value.split("\\r?\\n", -1);
-        output.append("\n  ").append(label).append(": ").append(lines[0]);
-        for (int index = 1; index < lines.length; index++) output.append("\n    ").append(lines[index]);
+        return DiagnosticRenderer.exception(toDiagnostic());
     }
 
     @Override public String getMessage() {
@@ -105,24 +149,17 @@ public class DiagnosticException extends IllegalArgumentException {
         return output.toString();
     }
 
-    private String location() {
-        StringBuilder output = new StringBuilder();
-        append(output, "file", file); append(output, "field", field); append(output, "sheet", sheet);
-        append(output, "row", row); append(output, "column", column); append(output, "template", template);
-        append(output, "action", action);
-        return output.toString();
-    }
-
-    private static void append(StringBuilder output, String name, Object value) {
-        if (value == null || String.valueOf(value).isEmpty()) return;
-        if (output.length() > 0) output.append(", ");
-        output.append(name).append('=').append(value);
-    }
-
     private static String causeMessage(Throwable cause) {
         if (cause == null) return null;
         String message = cause.getMessage();
-        return message == null || message.trim().isEmpty() ? cause.getClass().getSimpleName() : message;
+        if (message == null || message.trim().isEmpty()) message = cause.getClass().getSimpleName();
+        att.template.ExpressionSyntaxException syntax = att.template.ExpressionSyntaxException.find(cause);
+        if (syntax != null) {
+            String detail = syntax.diagnosticDetail();
+            if (detail != null && !detail.trim().isEmpty() && message.indexOf(detail) < 0)
+                message = message + "\n" + detail;
+        }
+        return message;
     }
 
     private static String first(String current, String fallback) { return current == null ? blankToNull(fallback) : current; }

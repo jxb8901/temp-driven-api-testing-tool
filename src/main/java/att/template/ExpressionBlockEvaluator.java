@@ -41,13 +41,25 @@ public final class ExpressionBlockEvaluator {
 
     private Parsed parse(String expression) {
         String source = expression == null ? "" : expression.trim();
+        int baseOffset = expression == null ? 0 : expression.indexOf(source);
         if (source.startsWith("#{") && matchingBlockEnd(source, 2) == source.length() - 1) {
             source = source.substring(2, source.length() - 1);
+            baseOffset += 2;
         }
-        Parser parser = new Parser(source);
-        Node root = parser.parseExpression();
-        parser.expect(TokenType.END);
-        return new Parsed(root);
+        try {
+            Parser parser = new Parser(source);
+            Node root = parser.parseExpression();
+            parser.expect(TokenType.END);
+            return new Parsed(root);
+        } catch (ExpressionSyntaxException error) {
+            throw error.shifted(baseOffset).withExpression(expression);
+        } catch (IllegalArgumentException error) {
+            // Keep parser failures structurally locatable. Runtime evaluation errors are
+            // raised after parsing and therefore are not wrapped here.
+            throw new ExpressionSyntaxException(baseOffset, baseOffset + source.length(),
+                    "a valid expression", error.getMessage() == null ? "invalid expression" : error.getMessage())
+                    .withExpression(expression);
+        }
     }
 
     private static int matchingBlockEnd(String text, int bodyStart) {
@@ -289,7 +301,7 @@ public final class ExpressionBlockEvaluator {
                 index++; return new Token(TokenType.OPERATOR, source.substring(start, index), start, index);
             }
             if ("+-*/><".indexOf(value) >= 0) return new Token(TokenType.OPERATOR, String.valueOf(value), start, index);
-            throw new IllegalArgumentException("Unexpected expression character '" + value + "' at position " + start);
+            throw new ExpressionSyntaxException(start, index, "an expression token", "'" + value + "'");
         }
         private Token context(int start) {
             index += 2; int body = index; char quote = 0;
@@ -297,14 +309,14 @@ public final class ExpressionBlockEvaluator {
                 char value = source.charAt(index);
                 if (quote != 0) { if (value == quote && source.charAt(index - 1) != '\\') quote = 0; index++; continue; }
                 if (value == '\'' || value == '"') { quote = value; index++; continue; }
-                if (value == '}') { String path = source.substring(body, index); index++; if (path.trim().isEmpty() || !path.equals(path.trim())) throw new IllegalArgumentException("Invalid Context path"); return new Token(TokenType.CONTEXT, path, start, index); }
+                if (value == '}') { String path = source.substring(body, index); index++; if (path.trim().isEmpty() || !path.equals(path.trim())) throw new ExpressionSyntaxException(start, index, "a non-blank Context path", "invalid Context path"); return new Token(TokenType.CONTEXT, path, start, index); }
                 index++;
             }
-            throw new IllegalArgumentException("Unclosed Context expression at position " + start);
+            throw new ExpressionSyntaxException(start, index, "'}' to close Context expression", "end of expression");
         }
         private Token embedded(int start) {
             int end = matchingBlockEnd(source, index + 2);
-            if (end < 0) throw new IllegalArgumentException("Unclosed nested expression block at position " + start);
+            if (end < 0) throw new ExpressionSyntaxException(start, source.length(), "'}' to close nested expression", "end of expression");
             String body = source.substring(index + 2, end); index = end + 1;
             return new Token(TokenType.EMBEDDED, body, start, index);
         }
@@ -318,7 +330,7 @@ public final class ExpressionBlockEvaluator {
                 else if (ch == close) return new Token(TokenType.STRING, value.toString(), start, index);
                 else value.append(ch);
             }
-            throw new IllegalArgumentException("Unclosed string literal at position " + start);
+            throw new ExpressionSyntaxException(start, index, "matching closing quote", "end of expression");
         }
         private Token number(int start) {
             while (index < source.length() && (Character.isDigit(source.charAt(index)) || source.charAt(index) == '.')) index++;
@@ -361,11 +373,20 @@ public final class ExpressionBlockEvaluator {
             Token token = consume();
             if (token.type == TokenType.NUMBER) {
                 try { return new LiteralNode(raw(token), new BigDecimal(token.text), false); }
-                catch (NumberFormatException error) { throw new IllegalArgumentException("Invalid number: " + token.text); }
+                catch (NumberFormatException error) { throw new ExpressionSyntaxException(token.start, token.end, "a valid number", "invalid number"); }
             }
             if (token.type == TokenType.STRING) return new LiteralNode(raw(token), token.text, true);
             if (token.type == TokenType.CONTEXT) return new ContextNode(raw(token), token.text);
-            if (token.type == TokenType.EMBEDDED) return new Parser(token.text).parseExpression();
+            if (token.type == TokenType.EMBEDDED) {
+                try {
+                    Parser nested = new Parser(token.text);
+                    Node value = nested.parseExpression();
+                    nested.expect(TokenType.END);
+                    return new WrappedNode(raw(token), value);
+                } catch (ExpressionSyntaxException error) {
+                    throw error.shifted(token.start + 2);
+                }
+            }
             if (token.type == TokenType.LPAREN) { Node value = parseOr(); Token close = expect(TokenType.RPAREN); return new WrappedNode(source.substring(token.start, close.end), value); }
             if (token.type == TokenType.LBRACKET) {
                 List<Node> items = new ArrayList<Node>();
@@ -379,7 +400,10 @@ public final class ExpressionBlockEvaluator {
                 if (match(TokenType.LPAREN)) return call(token);
                 return new IdentifierNode(raw(token), token.text);
             }
-            throw new IllegalArgumentException("Expected expression operand at position " + token.start);
+            String actual = token.type == TokenType.OPERATOR
+                    ? "operator '" + token.text + "'"
+                    : token.type.name().toLowerCase(java.util.Locale.ROOT);
+            throw new ExpressionSyntaxException(token.start, token.end, "an expression operand", actual);
         }
         private Node call(Token name) {
             List<CallArgument> arguments = new ArrayList<CallArgument>();
@@ -395,7 +419,7 @@ public final class ExpressionBlockEvaluator {
         }
         private Node binary(String operator, Node left, Node right) { return new BinaryNode(source.substring(start(left), end(right)), operator, left, right); }
         private boolean keyword(String value) { if (peek().type == TokenType.IDENTIFIER && value.equalsIgnoreCase(peek().text)) { position++; return true; } return false; }
-        private void requireKeyword(String value) { if (!keyword(value)) throw new IllegalArgumentException("Expected " + value + " at position " + peek().start); }
+        private void requireKeyword(String value) { if (!keyword(value)) throw new ExpressionSyntaxException(peek().start, peek().end, "'" + value + "'", peek().type.name().toLowerCase(java.util.Locale.ROOT)); }
         private boolean operator(String value) { if (peek().type == TokenType.OPERATOR && value.equals(peek().text)) { position++; return true; } return false; }
         private boolean match(TokenType type) { if (check(type)) { position++; return true; } return false; }
         private boolean check(TokenType type) { return peek().type == type; }
@@ -403,7 +427,7 @@ public final class ExpressionBlockEvaluator {
         private Token peek() { return tokens.get(position); }
         private Token lookahead(int offset) { return tokens.get(Math.min(tokens.size() - 1, position + offset)); }
         private Token previous() { return tokens.get(position - 1); }
-        private Token expect(TokenType type) { if (!check(type)) throw new IllegalArgumentException("Expected " + type + " at position " + peek().start); return consume(); }
+        private Token expect(TokenType type) { if (!check(type)) throw new ExpressionSyntaxException(peek().start, peek().end, type.name().toLowerCase(java.util.Locale.ROOT), peek().type.name().toLowerCase(java.util.Locale.ROOT)); return consume(); }
         private String raw(Token token) { return source.substring(token.start, token.end); }
         private int start(Node node) { return source.indexOf(node.source()); }
         private int end(Node node) { int start = source.indexOf(node.source()); return start < 0 ? source.length() : start + node.source().length(); }

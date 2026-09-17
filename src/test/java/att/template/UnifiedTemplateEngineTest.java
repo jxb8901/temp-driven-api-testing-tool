@@ -73,7 +73,7 @@ class UnifiedTemplateEngineTest {
 
     @Test void expressionBlocksSupportArithmeticPrecedenceMembershipAndTypedCalls() throws Exception {
         LinkedHashMap<String,Object> data = new LinkedHashMap<String,Object>();
-        data.put("amount", 12); data.put("status", "POSTED");
+        data.put("amount", 12); data.put("status", "POSTED"); data.put("optional", null);
         data.put("allowed", Arrays.asList("PENDING", "POSTED"));
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",
                 Collections.<String>emptyList(),data,Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
@@ -86,9 +86,29 @@ class UnifiedTemplateEngineTest {
         assertEquals(Boolean.TRUE, engine.evaluate("#{'a.b' like 'a.b'}", context, null));
         assertEquals(Boolean.FALSE, engine.evaluate("#{'axb' like 'a.b'}", context, null));
         assertEquals(new java.math.BigDecimal("15"), engine.evaluate("#{length(${CASE.status}) + 9}", context, null));
+        assertNull(engine.evaluate("${CASE.optional}", context, null));
+        assertEquals("", engine.render("${CASE.optional}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.evaluate("#{1 / 0}", context, null));
         assertThrows(IllegalArgumentException.class, () -> engine.evaluate("#{${CASE.status} in 'POSTED'}", context, null));
         engine.validateExpressionBlockSyntax("#{(${CASE.amount} + 2) * 3 >= 42 and ${CASE.status} in ${CASE.allowed}}");
+    }
+
+    @Test void syntaxDiagnosticIdentifiesMalformedPathArgument() {
+        String expression = "#{fpp.loghelper(logFiles=[/fpp/log/FPPCommon.log, /fpp/log/FPPCommon.log.*])}";
+        ExpressionSyntaxException syntax = assertThrows(ExpressionSyntaxException.class,
+                () -> new ExpressionBlockEvaluator().validateSyntax(expression));
+        assertEquals("operator '/'", syntax.actual());
+        assertEquals("logFiles", new ToolCallParser().argumentAt(expression, syntax.offset()));
+        assertTrue(syntax.diagnosticDetail().contains("argument=logFiles"));
+        assertTrue(syntax.diagnosticDetail().contains("/fpp/log"));
+        assertTrue(syntax.diagnosticDetail().contains("outputPrefix='${CASE.outputDirectory}/CT001'"));
+        assertTrue(syntax.diagnosticDetail().contains("^"));
+
+        att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.wrap(
+                att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Invalid Action expression", syntax,
+                null, "actions.extract.call", "Quote path values.");
+        assertTrue(diagnostic.detail().contains("argument=logFiles"));
+        assertTrue(diagnostic.format().contains("unexpected token: operator '/'"));
     }
 
     @Test void validationRenderingResolvesStaticCaseValuesAndPreservesRuntimeValues() {

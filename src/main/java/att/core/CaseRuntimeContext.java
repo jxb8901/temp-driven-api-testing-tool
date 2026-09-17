@@ -110,6 +110,17 @@ public final class CaseRuntimeContext {
                     "Ambiguous Context shorthand '${" + path + "}'", detail.toString(), null, path, null, null, null,
                     null, null, "Use a longer unique suffix or one of the listed canonical Context paths.", null);
         }
+        if (resolution.status == ResolutionStatus.INVALID_PATH) {
+            detail.append("The requested Context path cannot be traversed.")
+                    .append("\nrequestedPath: ").append(path)
+                    .append("\ncurrentNode: ").append(resolution.currentNode)
+                    .append("\nreason: ").append(resolution.reason);
+            if (resolution.missingSegment != null) detail.append("\nmissingSegment: ").append(resolution.missingSegment);
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                    "Invalid Context path '${" + path + "}'", detail.toString(), null, path, null, null, null,
+                    null, null,
+                    "Check the path segment type and use a valid map key or list index.", null);
+        }
         detail.append("No value exists at the requested case-sensitive Context path.")
                 .append("\nrequestedPath: ").append(path)
                 .append("\ncurrentNode: ").append(resolution.currentNode)
@@ -135,7 +146,7 @@ public final class CaseRuntimeContext {
     private Resolution resolution(String path) {
         java.util.List<Segment> requested;
         try { requested = parsePath(path); }
-        catch (Exception ignored) { return Resolution.missing("<root>", path == null ? "<null>" : path); }
+        catch (Exception error) { return Resolution.invalidPath("<root>", error.getMessage()); }
         if (requested.isEmpty()) return Resolution.missing("<root>", "<empty>");
         String first = requested.get(0).key;
         if (first != null && explicitRoots().contains(first)) return traverse(logicalRoot(), requested);
@@ -354,6 +365,18 @@ public final class CaseRuntimeContext {
     }
 
     public boolean inFlow() { return !flowScopes.isEmpty(); }
+    public att.validation.DiagnosticContext diagnosticContext() {
+        java.util.List<String> chain = new java.util.ArrayList<String>();
+        java.util.Iterator<FlowFrame> frames = flowScopes.descendingIterator();
+        while (frames.hasNext()) {
+            FlowFrame frame = frames.next();
+            chain.add(frame.invocationId + " -> " + frame.flow.get("id"));
+        }
+        Object workbook = caseNode.get("workbook");
+        return new att.validation.DiagnosticContext(workbook == null ? null : String.valueOf(workbook),
+                String.valueOf(caseNode.get("caseId")), currentStage,
+                flowScopes.isEmpty() ? null : String.valueOf(flowScopes.peek().flow.get("id")), chain);
+    }
     public String qualifiedActionId(String actionId) {
         if (flowScopes.isEmpty()) return actionId;
         java.util.List<FlowFrame> frames = new java.util.ArrayList<FlowFrame>(flowScopes);
@@ -475,9 +498,12 @@ public final class CaseRuntimeContext {
                 current = map.get(segment.key);
             } else if (current instanceof java.util.List && segment.index != null) {
                 java.util.List<?> list = (java.util.List<?>) current;
-                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return Resolution.missing(currentPath, segment.display());
+                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return Resolution.invalidPath(currentPath, segment.display(),
+                        "list index " + segment.index + " is outside 0.." + Math.max(0, list.size() - 1));
                 current = list.get(segment.index.intValue());
-            } else return Resolution.missing(currentPath, segment.display());
+            } else if (current == null) return Resolution.invalidPath(currentPath, "value is null");
+            else if (current instanceof java.util.List) return Resolution.invalidPath(currentPath, "expected a numeric list index but found " + segment.display());
+            else return Resolution.invalidPath(currentPath, "value is a scalar and cannot contain '" + segment.display() + "'");
             currentPath = appendPath("<root>".equals(currentPath) ? "" : currentPath, segment);
         }
         return current == DEFERRED_VALIDATION_VALUE
@@ -551,20 +577,22 @@ public final class CaseRuntimeContext {
 
     private static boolean simpleKey(String key) { return key != null && key.matches("[A-Za-z_][A-Za-z0-9_-]*"); }
 
-    private enum ResolutionStatus { FOUND, DEFERRED, MISSING, AMBIGUOUS }
+    private enum ResolutionStatus { FOUND, DEFERRED, MISSING, INVALID_PATH, AMBIGUOUS }
 
     private static final class Resolution {
         private final ResolutionStatus status; private final Object value; private final String canonicalPath;
-        private final String currentNode; private final String missingSegment; private final java.util.List<String> candidates;
+        private final String currentNode; private final String missingSegment; private final String reason; private final java.util.List<String> candidates;
         private Resolution(ResolutionStatus status, Object value, String canonicalPath, String currentNode,
-                           String missingSegment, java.util.List<String> candidates) {
+                           String missingSegment, String reason, java.util.List<String> candidates) {
             this.status = status; this.value = value; this.canonicalPath = canonicalPath; this.currentNode = currentNode;
-            this.missingSegment = missingSegment; this.candidates = candidates;
+            this.missingSegment = missingSegment; this.reason = reason; this.candidates = candidates;
         }
-        private static Resolution found(Object value, String canonicalPath) { return new Resolution(ResolutionStatus.FOUND, value, canonicalPath, null, null, java.util.Collections.<String>emptyList()); }
-        private static Resolution deferred(String canonicalPath) { return new Resolution(ResolutionStatus.DEFERRED, null, canonicalPath, null, null, java.util.Collections.<String>emptyList()); }
-        private static Resolution missing(String currentNode, String missingSegment) { return new Resolution(ResolutionStatus.MISSING, null, null, currentNode, missingSegment, java.util.Collections.<String>emptyList()); }
-        private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, new java.util.ArrayList<String>(candidates)); }
+        private static Resolution found(Object value, String canonicalPath) { return new Resolution(ResolutionStatus.FOUND, value, canonicalPath, null, null, null, java.util.Collections.<String>emptyList()); }
+        private static Resolution deferred(String canonicalPath) { return new Resolution(ResolutionStatus.DEFERRED, null, canonicalPath, null, null, null, java.util.Collections.<String>emptyList()); }
+        private static Resolution missing(String currentNode, String missingSegment) { return new Resolution(ResolutionStatus.MISSING, null, null, currentNode, missingSegment, null, java.util.Collections.<String>emptyList()); }
+        private static Resolution invalidPath(String currentNode, String reason) { return new Resolution(ResolutionStatus.INVALID_PATH, null, null, currentNode, null, reason, java.util.Collections.<String>emptyList()); }
+        private static Resolution invalidPath(String currentNode, String missingSegment, String reason) { return new Resolution(ResolutionStatus.INVALID_PATH, null, null, currentNode, missingSegment, reason, java.util.Collections.<String>emptyList()); }
+        private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, null, new java.util.ArrayList<String>(candidates)); }
     }
 
     private static final class Segment {

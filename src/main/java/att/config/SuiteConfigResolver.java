@@ -58,14 +58,16 @@ public final class SuiteConfigResolver {
                     global.environment(), global.timeoutMs(), global.templatesRoot(), global.testcasesRoot(),
                     global.tools(), global.dbHelpers(), report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows, global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput());
         } catch (att.validation.DiagnosticException e) {
-            throw e;
+            throw YamlSupport.locate(e, sidecar, e.field());
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
             String field = schema == null ? "sidecar" : schema.field();
-            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TESTCASE_INVALID,
+            att.validation.DiagnosticException diagnostic = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TESTCASE_INVALID,
                     "Invalid workbook sidecar for '" + suitePath.getFileName() + "'", e.getMessage(),
                     sidecar.toString(), field, null, null, null, null, null,
                     "Correct the reported sidecar field, type, stage declaration, or workbook ID.", e);
+            throw schema == null ? YamlSupport.locate(diagnostic, sidecar, field)
+                    : YamlSupport.locateSchema(diagnostic, sidecar, schema.structuredViolations());
         }
     }
 
@@ -116,8 +118,8 @@ public final class SuiteConfigResolver {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> load(Path path) throws Exception {
-        try (Reader reader = Files.newBufferedReader(path)) {
-            Object loaded = YamlSupport.parser().load(reader);
+        {
+            Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Sidecar must be a YAML map: " + path);
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> e : ((Map<?, ?>) loaded).entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());

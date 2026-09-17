@@ -1,7 +1,7 @@
-# ATT V3.2.0 中文用户手册与参考手册
+# ATT V3.3.0 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.2.0
+版本：3.3.0
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -54,7 +54,7 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 
 一个动作可以渲染负载、调用工具、查询／更新数据库、断言表达式、写入结构化日志、分配作用域运行值，或调用 Flow。ATT 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。
 
-### V3.2 的保证
+### V3.3 的保证
 
 - 配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML 键，以及无效动作形状都是错误。
 - dbhelper 使用独立 `att-dbhelper/v2.5` 文件，并通过一級 `type: db` Action 或只读 `#{db.<instance>...}` 表达式调用；它不是 Tool 的特殊配置。
@@ -144,7 +144,7 @@ Flow `inputs`、`outputs`、调用端 `with` 以及专用的 `input`、小写 `a
 
 Template 与所有嵌套 Flow 共用一个 Action ID namespace。Template／Flow 冲突、多个 Flow 冲突、间接嵌套冲突以及在同一 Template 中重复调用同一 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
 
-Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.2.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
+Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.3.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
 
 ## 02 快速开始
 
@@ -666,7 +666,7 @@ evidence:
 
 `statement.timeoutSeconds` 是实例级 SQL timeout，默认 30，范围 1–3600。ATT 对该实例创建的每个 `PreparedStatement` 调用 `setQueryTimeout`；DB Action 不接受 Action 级 `timeoutMs`。
 
-`evidence.parameters` 可为 `masked`、`types` 或 `values`，V3.2 默认是 `values`。`values` 会记录实际 SQL binding 值和 `null`，方便调试；connection URL、username、password 和 connection properties 不会进入 parameter evidence。若 SQL 参数本身含敏感业务数据，套件作者应明确改为 `masked` 或 `types`。
+`evidence.parameters` 可为 `masked`、`types` 或 `values`，V3.3 默认是 `values`。`values` 会记录实际 SQL binding 值和 `null`，方便调试；connection URL、username、password 和 connection properties 不会进入 parameter evidence。若 SQL 参数本身含敏感业务数据，套件作者应明确改为 `masked` 或 `types`。
 
 交易设置组合如下：
 
@@ -1590,7 +1590,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "2.6.2",
+  "attVersion": "3.3.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1610,7 +1610,11 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 }
 ```
 
-每个诊断都包含 `code`、`severity`、`message`、`file`、`field`、`sheet`、`row`、`column`、`template`、`action` 和 `suggestion`。不适用的字段为 `null`。代码稳定；自动化不能解析人类消息。
+每个诊断都包含 `code`、`severity`、`message`、`file`、`field`、`sheet`、`row`、`column`、`template`、`action` 和 `suggestion`。不适用的字段为 `null`。当 package 和 case 验证发现同一个根本错误时，ATT 输出一条诊断，并在适用时附带 `occurrences` 和 `affectedCases`；`summary.errors` 统计唯一诊断，`summary.errorOccurrences` 保留原始出现次数。代码稳定；自动化不能解析人类消息。
+
+ATT 3.3.0 可另外提供 `summary`、`detail`、`source`、`context` 和 `schemaViolations`。`source` 中的 `line`、`column`、`endLine`、`endColumn` 是 YAML 或 payload 文件的物理位置；顶层 `row` 和 `column` 仍表示 Excel 单元格。单行纯文本及可直接对应的引号字符串，表达式语法错误会指向具体字符；折叠、多行或经过转义的 YAML 字符串若无法精确映射，则报告整个 scalar 范围。每项 Schema 错误保留自己的路径、关键字、消息及物理位置。`context` 可包含 Case、Stage、Flow ID 和嵌套调用链。表达式语法详情在安全时会指出所在工具调用参数（例如 `logFiles`）、意外 token 及带 caret 的有限邻近片段；可能含有凭据或敏感值的字段及整行不会显示原文摘要。
+
+运行时 Action 错误的结构化诊断会传入 Case YAML、`run.yaml`、重新生成的报表、CI JSON 和 JUnit 错误详情。嵌套 Flow 错误会指出内部 `flow.yaml` 及 Action，调用链说明 Template 如何到达该位置。Tool 与 DB evidence 在适用时记录尝试次数、超时、解析／采集状态、参数绑定及取消操作；文件保存错误包含配置路径和允许的产物根目录。
 
 ### 生成输出模式摘要
 
@@ -1625,7 +1629,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 
 ### 统一表达式引擎
 
-V3.2 使用一个表达式引擎，但保留两种刻意分开的角色：
+V3.3 使用一个表达式引擎，但保留两种刻意分开的角色：
 
 - `${path}` 读取一个 Context 值并插入周围文字，例如 `Reference=${CASE.VARS.SrcRefNo}`。
 - `#{expression}` 计算一个 typed expression block。block 可包含 Context operand、调用、list literal、括号、unary operator、算术、比较、`like`、`in`、null 判断与布尔逻辑。

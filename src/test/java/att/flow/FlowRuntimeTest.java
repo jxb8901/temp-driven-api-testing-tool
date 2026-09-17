@@ -30,6 +30,27 @@ import static org.junit.jupiter.api.Assertions.*;
 class FlowRuntimeTest {
     @TempDir Path tempDir;
 
+    @Test void nestedFailureRetainsInnerSourceAndCallChainAtTopLevel() throws Exception {
+        writeFlow("inner-error", "schemaVersion: att-flow/v3.0\nid: common.inner-error.v1\nname: Inner\ndescription: Inner\nactions:\n  bad: {type: log, message: '${CASE.notPresent}'}\n");
+        writeFlow("outer-error", "schemaVersion: att-flow/v3.0\nid: common.outer-error.v1\nname: Outer\ndescription: Outer\nactions:\n  nested: {type: flow, use: common.inner-error.v1}\n");
+        StageTemplate template = new StageTemplate("T", tempDir, Collections.singletonList(
+                flowAction("outer", "common.outer-error.v1", "stop")), "att-template/v3.0");
+        CaseRuntimeContext context = context();
+        try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
+            ValidationResult result = new StageTemplateRunner(new UnifiedTemplateEngine(null),
+                    new FlowRegistry(tempDir, tempDir.resolve("templates"))).execute("verify", template, context, log).get(0);
+            assertEquals(ResultStatus.ERROR, result.status());
+            assertNotNull(result.diagnostic());
+            assertTrue(result.diagnostic().file().endsWith("inner-error/flow.yaml"));
+            assertEquals("bad", result.diagnostic().action());
+            assertEquals(Arrays.asList("outer -> common.outer-error.v1", "nested -> common.inner-error.v1"),
+                    result.diagnostic().context().toMap().get("callChain"));
+            assertNotNull(context.resolve("ACTIONS.outer.output.exception"));
+            assertNotNull(context.resolve("ACTIONS.outer.flow.actions.nested.flow.actions.bad.diagnostic"));
+            assertNull(context.resolve("ACTIONS.outer.output.outputs"));
+        }
+    }
+
     @Test void executesNestedFlowsInTheCallingTemplateContext() throws Exception {
         Path project = Paths.get("").toAbsolutePath();
         FlowRegistry flows = new FlowRegistry(project, project.resolve("templates"));
