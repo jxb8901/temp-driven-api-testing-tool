@@ -14,6 +14,7 @@ import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
 import att.template.TemplateAction;
 import att.template.ToolCallParser;
+import att.template.EvidenceCollector;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -139,6 +140,16 @@ public final class PackageValidator {
                     // checks as a tool used from an expression (including nested calls).
                     for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.call()))
                         validateReferencedCall(call, config);
+                    for (Map.Entry<String, EvidenceCollector> collector : action.evidence().entrySet()) {
+                        String collectorField = prefix + ".evidence." + collector.getKey() + ".call";
+                        try {
+                            validateToolCall(collector.getValue().call(), config, false);
+                            for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(collector.getValue().call()))
+                                validateReferencedCall(call, config);
+                        } catch (Exception error) {
+                            throw locateReferencedError(error, template, action, collectorField, template.sourceFile());
+                        }
+                    }
                 }
                 catch (Exception error) { throw locateReferencedError(error, template, action, prefix + ".call", template.sourceFile()); }
             }
@@ -228,6 +239,7 @@ public final class PackageValidator {
             }
         }
         for (Object value : action.fields().values()) expressions.add(String.valueOf(value));
+        for (EvidenceCollector collector : action.evidence().values()) expressions.add(collector.call());
         return expressions;
     }
 
@@ -400,6 +412,9 @@ public final class PackageValidator {
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
             if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if (!"tool".equals(type) && action.raw().containsKey("evidence")) {
+                throw new IllegalArgumentException("Field 'evidence' is only supported for tool actions: " + action.id());
+            }
             validateInlineExpressions(action.description(), syntaxEngine, config);
             validateInlineExpressions(action.expected(), syntaxEngine, config);
             validateInlineExpressions(action.actual(), syntaxEngine, config);
@@ -425,7 +440,7 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolSaveAs(action, config); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolSaveAs(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
@@ -468,6 +483,9 @@ public final class PackageValidator {
             if ("tool".equals(type)) {
                 validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false);
                 validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false);
+                for (EvidenceCollector collector : action.evidence().values()) {
+                    validateStaticContextStructure(collector.call(), syntaxEngine, afterCurrentAction, true);
+                }
             }
             if ("db".equals(type)) {
                 validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false);
@@ -607,6 +625,27 @@ public final class PackageValidator {
         }
     }
 
+    private void validateEvidence(TemplateAction action, StageTemplate template,
+                                  att.template.UnifiedTemplateEngine syntaxEngine,
+                                  FrameworkConfig config, Set<String> completedActions) {
+        if (action.evidence().isEmpty()) return;
+        Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
+        afterCurrentAction.add(action.id());
+        for (Map.Entry<String, EvidenceCollector> entry : action.evidence().entrySet()) {
+            String id = entry.getKey();
+            if (id == null || id.trim().isEmpty() || id.contains(".")) {
+                throw new IllegalArgumentException("Evidence collector ID must be non-blank and dot-free: " + id);
+            }
+            EvidenceCollector collector = entry.getValue();
+            require(collector.call(), "call is required for evidence collector " + id + " on Action " + action.id());
+            if (collector.timeoutMs() != null && (collector.timeoutMs() < 1 || collector.timeoutMs() > 3600000)) {
+                throw new IllegalArgumentException("Evidence collector timeoutMs must be 1..3600000: " + id);
+            }
+            validateToolCall(collector.call(), config, false);
+            validateStaticContextStructure(collector.call(), syntaxEngine, afterCurrentAction, true);
+        }
+    }
+
     private void validateDbSql(String sql, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         require(sql, "DB SQL must not be blank");
         engine.validateValueSyntax(sql);
@@ -625,10 +664,11 @@ public final class PackageValidator {
     private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                                 Set<String> availableActions, boolean currentOutputAvailable) {
         for (String path : engine.parseContextPaths(text)) {
-            String root = firstPathSegment(path);
+            String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
+            String root = firstPathSegment(referencePath);
             if ("CASE".equals(root) || "TOOL".equals(root) || "DB".equals(root)) continue;
             if ("RUN".equals(root)) {
-                String field = firstChildSegment(path, "RUN");
+                String field = firstChildSegment(referencePath, "RUN");
                 if (field.isEmpty() || java.util.Arrays.asList("runId", "id", "runDirectory", "caseLog").contains(field)) continue;
                 throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Unknown RUN Context variable '${" + path + "}'",
@@ -637,11 +677,11 @@ public final class PackageValidator {
                         "Use the exact case-sensitive RUN field name.", null);
             }
             if ("ACTIONS".equals(root)) {
-                String id = firstChildSegment(path, "ACTIONS");
+                String id = firstChildSegment(referencePath, "ACTIONS");
                 if (id.isEmpty()) continue;
                 if (availableActions.contains(id)) {
                     String prefix = "ACTIONS." + id;
-                    String remainder = path.length() <= prefix.length() ? "" : path.substring(prefix.length());
+                    String remainder = referencePath.length() <= prefix.length() ? "" : referencePath.substring(prefix.length());
                     if (remainder.equals(".flow") || remainder.startsWith(".flow.") || remainder.startsWith(".flow[")
                             || remainder.equals(".actions") || remainder.startsWith(".actions.") || remainder.startsWith(".actions[")) {
                         throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
@@ -664,7 +704,7 @@ public final class PackageValidator {
             }
 
             String nearest = nearestAction(root, availableActions);
-            String suffix = path.length() > root.length() ? path.substring(root.length()) : "";
+            String suffix = referencePath.length() > root.length() ? referencePath.substring(root.length()) : "";
             if (availableActions.contains(root)) continue; // Unique action-id suffix; its dynamic output shape is checked at runtime.
             if (nearest == null) continue; // Potential CASE/data-column suffix requires a concrete Case binding.
             throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
@@ -812,6 +852,12 @@ public final class PackageValidator {
                     validateContextStructure(action.call(), engine, context, testCase, completedActions);
                     engine.renderValidationValues(action.call(), context);
                     validateCallArgumentsIn(action.call(), context, engine);
+                    for (EvidenceCollector collector : action.evidence().values()) {
+                        sourceField = "actions." + action.id() + ".evidence." + collector.id() + ".call";
+                        validateContextStructure(collector.call(), engine, context, testCase, afterCurrentAction);
+                        engine.renderValidationValues(collector.call(), context);
+                        validateCallArgumentsIn(collector.call(), context, engine);
+                    }
                 }
                 if ("db".equalsIgnoreCase(action.type())) {
                     Map<String, Object> operation = action.query().isEmpty() ? action.update() : action.query();
@@ -902,29 +948,33 @@ public final class PackageValidator {
 
     private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                           att.core.CaseRuntimeContext context, TestCase testCase,
-                                          Set<String> availableActions) {
+        Set<String> availableActions) {
         for (String path : engine.parseContextPaths(text)) {
-            if (path.startsWith("ACTIONS.")) {
-                String id = firstPathSegment(path.substring("ACTIONS.".length()));
+            String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
+            if (referencePath.startsWith("ACTIONS.")) {
+                String id = firstPathSegment(referencePath.substring("ACTIONS.".length()));
                 if (!availableActions.contains(id)) throw unavailableActionContext(path, id, availableActions);
             }
-            if (path.startsWith("CASE.STAGES.")) {
-                String key = firstPathSegment(path.substring("CASE.STAGES.".length()));
+            if (referencePath.startsWith("CASE.STAGES.")) {
+                String key = firstPathSegment(referencePath.substring("CASE.STAGES.".length()));
                 if (!testCase.stages().containsKey(key)) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Unknown Case stage Context '${" + path + "}'",
                         "Stage '" + key + "' is not declared by this Case. Available stage keys: " + String.join(", ", testCase.stages().keySet()),
                         null, path, null, null, null, null, null,
                         "Use a stage key declared by this Case sidecar selector/data mapping.", null);
             }
-            String root = firstPathSegment(path);
+            String root = firstPathSegment(referencePath);
             if (!("CASE".equals(root) || "RUN".equals(root) || "ACTIONS".equals(root)
                     || "TOOL".equals(root) || "DB".equals(root) || "output".equals(root))) {
-                try { context.require(path); }
+                try {
+                    if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                    else context.require(referencePath);
+                }
                 catch (DiagnosticException e) {
                     // Only an explicitly deferred value may be unresolved at validation time. Do not
                     // turn arbitrary unknown shorthand paths into deferred values: that masks typos
                     // and causes failures to surface only when a run has already started.
-                    if (context.isValidationDeferred(path)) continue;
+                    if (context.isValidationDeferred(referencePath)) continue;
                     throw e;
                 }
             }
@@ -1003,13 +1053,17 @@ public final class PackageValidator {
     }
 
     private void validateToolCall(String call, FrameworkConfig config) {
+        validateToolCall(call, config, true);
+    }
+
+    private void validateToolCall(String call, FrameworkConfig config, boolean allowMqPrimary) {
         java.util.List<ToolCallParser.ParsedCall> calls = expressionEngine.parseCalls(call);
         if (calls.isEmpty()) throw new IllegalArgumentException("Tool call must be one exact #{...} expression");
         ToolCallParser.ParsedCall parsed = callParser.parse(call);
         if (parsed.name().startsWith("db.")) {
             throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
         }
-        validateCall(parsed, config, true);
+        validateCall(parsed, config, allowMqPrimary);
         for (int index = 1; index < calls.size(); index++) validateCall(calls.get(index), config, false);
     }
 
@@ -1024,6 +1078,11 @@ public final class PackageValidator {
         String toolName = parsed.name();
         if (toolName.startsWith("db.")) {
             validateDbExpressionCall(parsed, config);
+            return;
+        }
+        if (toolName.startsWith("mq.")) {
+            if (!allowWriteFacade) throw new IllegalArgumentException("MQ operations may only be the primary call of a type: tool Action");
+            validateMqCall(parsed, config);
             return;
         }
         if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
@@ -1072,6 +1131,55 @@ public final class PackageValidator {
         for (ToolArgumentConfig argument : tool.arguments().values()) if (argument.required() && !supplied.contains(argument.key())) throw toolCallError(tool,
                 "Missing required argument '" + argument.key() + "'", "required=true; supplied arguments=" + supplied,
                 "Add " + argument.key() + "=<value> to the call.");
+    }
+
+    private void validateMqCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length != 3 || !"mq".equals(parts[0]) || parts[1].isEmpty()) {
+            throw new IllegalArgumentException("MQ call must be mq.<instance>.send|receive|request: " + parsed.name());
+        }
+        if (config.mqHelper(parts[1]) == null) {
+            throw new IllegalArgumentException("Unknown mqhelper instance '" + parts[1] + "'");
+        }
+        String operation = parts[2];
+        Set<String> allowed = new LinkedHashSet<String>();
+        Set<String> required = new LinkedHashSet<String>();
+        if ("send".equals(operation)) {
+            allowed.add("queue"); allowed.add("file"); required.add("queue"); required.add("file");
+        } else if ("receive".equals(operation)) {
+            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); required.add("queue");
+        } else if ("request".equals(operation)) {
+            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs");
+            required.add("requestQueue"); required.add("replyQueue"); required.add("file");
+        } else {
+            throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
+        }
+        Set<String> supplied = new LinkedHashSet<String>();
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(parsed.name() + " requires named arguments");
+            if (!allowed.contains(argument.key())) throw new IllegalArgumentException("Unknown MQ argument '" + argument.key() + "' for " + parsed.name());
+            if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate MQ argument '" + argument.key() + "'");
+            String value = argument.expression().trim();
+            boolean dynamic = value.contains("${") || value.contains("#{");
+            if (dynamic) continue;
+            Object literal = callParser.literal(value);
+            if ("waitMs".equals(argument.key())) {
+                if (!(literal instanceof Number)) throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
+                Number number = (Number) literal;
+                if (number.doubleValue() != number.longValue() || number.longValue() < 0 || number.longValue() > 3600000) {
+                    throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
+                }
+            } else {
+                if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty()) {
+                    throw new IllegalArgumentException(parsed.name() + "." + argument.key() + " must be a non-blank string");
+                }
+                if ("queue".equals(argument.key()) || "requestQueue".equals(argument.key()) || "replyQueue".equals(argument.key())) {
+                    String queue = String.valueOf(literal);
+                    if (!queue.matches("[A-Za-z0-9_.%/-]{1,48}")) throw new IllegalArgumentException("Invalid MQ queue name: " + queue);
+                }
+            }
+        }
+        for (String name : required) if (!supplied.contains(name)) throw new IllegalArgumentException("Missing required MQ argument '" + name + "' for " + parsed.name());
     }
 
     private boolean isWriteFacade(ToolConfig tool) {

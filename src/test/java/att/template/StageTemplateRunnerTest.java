@@ -58,6 +58,83 @@ class StageTemplateRunnerTest {
         assertNull(context.resolve("ACTIONS.normalize.TOOL"));
     }
 
+    @Test void toolEvidenceRunsAfterPrimaryResultAndIsAvailableToAssertion() throws Exception {
+        Path caseDir = tempDir.resolve("evidence-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        TemplateAction action = new TemplateAction("call", map("type","tool", "call","#{sample()}",
+                "assert","${output.result} == 'ok'", "evidence", map("snapshot", map("call","#{capture(value=${output.result})}"))));
+        assertFalse(action.evidence().isEmpty());
+        CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
+        CaptureBuiltIns builtIns = new CaptureBuiltIns();
+        List<ValidationResult> results = new StageTemplateRunner(
+                new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new FixedRunner(0,"ok")), builtIns))
+                .execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,log);
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals("ok", builtIns.last.get("value"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.result"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.result"));
+        assertEquals("PASS", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.status"));
+        String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+        assertTrue(caseLog.contains("EVIDENCE call attempt=1 collector=snapshot"));
+        assertTrue(caseLog.contains("status: PASS"));
+    }
+
+    @Test void toolEvidenceRepeatsForEachPrimaryAssertionRetry() throws Exception {
+        Path caseDir = tempDir.resolve("evidence-retry");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        Map<String,Object> retry = map("maxAttempts",3,"intervalMs",0,"retryOn",Arrays.asList("ASSERTION"));
+        TemplateAction action = new TemplateAction("call", map("type","tool", "call","#{sample()}",
+                "assert","${output.result} == 'ok'", "retry",retry,
+                "evidence", map("snapshot", map("call","#{capture(value=${output.result})}"))));
+        CaptureBuiltIns builtIns = new CaptureBuiltIns();
+        SequencedRunner runner = new SequencedRunner(false);
+        List<ValidationResult> results = new StageTemplateRunner(
+                new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,runner), builtIns))
+                .execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals(2, runner.calls);
+        assertEquals(2, builtIns.calls);
+        assertEquals("first", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.result"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[1].evidence.snapshot.result"));
+    }
+
+    @Test void evidenceFailureContinuePreservesPrimaryAssertionAndStopSkipsIt() throws Exception {
+        Path caseDir = tempDir.resolve("evidence-failure");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
+        for (String mode : Arrays.asList("continue", "stop")) {
+            Path directory = caseDir.resolve(mode); Files.createDirectories(directory);
+            CaseRuntimeContext context = new CaseRuntimeContext(test,directory,"R-" + mode,tempDir,directory.resolve("case.log"));
+            context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+            TemplateAction action = new TemplateAction("call", map("type","tool", "call","#{sample()}",
+                    "assert","${output.result} == 'ok'", "evidence", map("broken", map("call","#{fail()}","onFailure",mode))));
+            List<ValidationResult> results = new StageTemplateRunner(
+                    new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new FixedRunner(0,"ok")), new FailingBuiltIns()))
+                    .execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(directory.resolve("case.log")));
+            assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+            assertEquals("ok", context.resolve("ACTIONS.call.output.result"));
+            assertEquals("ERROR", context.resolve("ACTIONS.call.output.attempts[0].evidence.broken.status"));
+            if ("stop".equals(mode)) assertNull(context.resolve("ACTIONS.call.output.assertion"));
+        }
+    }
+
     @Test void everyActionTextSurfaceSupportsInlineBuiltIns() throws Exception {
         Map<String,Object> data = new LinkedHashMap<String,Object>(); data.put("SrcRefNo", "ABC123");
         TestCase test=new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),data,Collections.emptyMap(),null);
@@ -319,14 +396,27 @@ class StageTemplateRunnerTest {
         List<TemplateAction> actions = Arrays.asList(
                 new TemplateAction("first",map("type","assign","name","txnSeq","expression","FIRST")),
                 new TemplateAction("duplicate",map("type","assign","name","txnSeq","expression","SECOND","onFailure","continue")),
-                new TemplateAction("failed",map("type","assign","name","missingValue","expression","${CASE.missing}","onFailure","continue")));
+                new TemplateAction("failed",map("type","assign","name","missingValue","expression","${CASE.missing}","onFailure","continue")),
+                new TemplateAction("optional",map("type","assign","name","missingValueOptional","expression","${CASE.missing?}")));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
                 .execute("prepare",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(caseDir.resolve("case.log")));
         assertEquals(ResultStatus.PASS, results.get(0).status());
         assertEquals(ResultStatus.ERROR, results.get(1).status());
         assertEquals(ResultStatus.ERROR, results.get(2).status());
+        assertEquals(ResultStatus.PASS, results.get(3).status());
         assertEquals("FIRST", context.resolve("CASE.VARS.txnSeq"));
         assertNull(context.resolve("CASE.VARS.missingValue"));
+        assertNull(context.resolve("CASE.VARS.missingValueOptional"));
+    }
+    private static final class CaptureBuiltIns implements BuiltInProvider {
+        int calls;
+        Map<String,Object> last;
+        @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("capture")); }
+        @Override public Object invoke(String name, Map<String,Object> arguments) { calls++; last = new LinkedHashMap<String,Object>(arguments); return arguments.get("value"); }
+    }
+    private static final class FailingBuiltIns implements BuiltInProvider {
+        @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("fail")); }
+        @Override public Object invoke(String name, Map<String,Object> arguments) { throw new IllegalStateException("collector failed"); }
     }
     private static final class SequencedRunner extends CommandRunner {
         int calls; final boolean timeout;

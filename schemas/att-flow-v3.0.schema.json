@@ -19,10 +19,24 @@
         "name": {"type": "string"}, "expression": {"type": "string"}, "payload": {"type": "string"}, "renderAs": {"enum": ["file", "text", "json", "yaml", "xml"]}, "saveAs": {}, "call": {"type": "string"},
         "db": {"type": "string"}, "query": {"type": "object"}, "update": {"type": "object"}, "assert": {"type": "string"}, "expected": {"type": "string"}, "actual": {"type": "string"},
         "message": {"type": "string"}, "file": {"type": "string"}, "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]}, "fields": {"type": "object"}, "timeoutMs": {"type": "integer"}, "retry": {"type": "object"},
+        "evidence": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[^.]+$"}, "additionalProperties": {"$ref": "#/$defs/evidenceCollector"}},
         "use": {"type": "string", "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*$"}
       },
       "patternProperties": {"^x-": {}}, "additionalProperties": false,
-      "allOf": [{"if": {"properties": {"type": {"const": "flow"}}}, "then": {"required": ["use"]}}]
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "flow"}}}, "then": {"required": ["use"]}},
+        {"if": {"not": {"properties": {"type": {"const": "tool"}}}}, "then": {"not": {"required": ["evidence"]}}}
+      ]
+    },
+    "evidenceCollector": {
+      "type": "object",
+      "required": ["call"],
+      "properties": {
+        "call": {"type": "string", "minLength": 1},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "onFailure": {"enum": ["stop", "continue"]}
+      },
+      "additionalProperties": false
     }
   }
 }

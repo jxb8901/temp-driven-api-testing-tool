@@ -68,7 +68,8 @@
         "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]},
         "fields": {"type": "object"},
         "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
-        "retry": {"$ref": "#/$defs/retry"}
+        "retry": {"$ref": "#/$defs/retry"},
+        "evidence": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[^.]+$"}, "additionalProperties": {"$ref": "#/$defs/evidenceCollector"}}
       },
       "patternProperties": {"^x-": {}},
       "additionalProperties": false
@@ -83,17 +84,27 @@
       },
       "additionalProperties": false
     },
+    "evidenceCollector": {
+      "type": "object",
+      "required": ["call"],
+      "properties": {
+        "call": {"type": "string", "minLength": 1},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "onFailure": {"enum": ["stop", "continue"]}
+      },
+      "additionalProperties": false
+    },
     "action": {
       "allOf": [
         {"$ref": "#/$defs/common"},
         {
           "oneOf": [
-            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
+            {"properties": {"type": {"const": "render"}}, "required": ["type", "payload", "renderAs"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}, {"required": ["evidence"]}]}},
             {"properties": {"type": {"const": "tool"}}, "required": ["type", "call"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}]}},
-            {"properties": {"type": {"const": "db"}, "saveAs": {"$ref": "#/$defs/dbSaveAs"}}, "required": ["type", "db"], "oneOf": [{"required": ["query"], "not": {"required": ["update"]}}, {"required": ["update"], "not": {"required": ["query"]}}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "log"}}, "required": ["type"], "anyOf": [{"required": ["message"]}, {"required": ["file"]}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}},
-            {"properties": {"type": {"const": "assign"}}, "required": ["type", "name", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}]}}
+            {"properties": {"type": {"const": "db"}, "saveAs": {"$ref": "#/$defs/dbSaveAs"}}, "required": ["type", "db"], "oneOf": [{"required": ["query"], "not": {"required": ["update"]}}, {"required": ["update"], "not": {"required": ["query"]}}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["call"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}, {"required": ["evidence"]}]}},
+            {"properties": {"type": {"const": "assert"}}, "required": ["type", "assert"], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}, {"required": ["evidence"]}]}},
+            {"properties": {"type": {"const": "log"}}, "required": ["type"], "anyOf": [{"required": ["message"]}, {"required": ["file"]}], "not": {"anyOf": [{"required": ["name"]}, {"required": ["expression"]}, {"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}, {"required": ["evidence"]}]}},
+            {"properties": {"type": {"const": "assign"}}, "required": ["type", "name", "expression"], "not": {"anyOf": [{"required": ["payload"]}, {"required": ["renderAs"]}, {"required": ["saveAs"]}, {"required": ["call"]}, {"required": ["db"]}, {"required": ["query"]}, {"required": ["update"]}, {"required": ["expected"]}, {"required": ["actual"]}, {"required": ["message"]}, {"required": ["file"]}, {"required": ["level"]}, {"required": ["fields"]}, {"required": ["retry"]}, {"required": ["timeoutMs"]}, {"required": ["evidence"]}]}}
           ]
         }
       ]

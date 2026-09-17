@@ -35,6 +35,7 @@ public class TemplateAction {
     private final Map<String, Object> fields;
     private final Map<String, Object> raw;
     private final Map<String, Object> retry;
+    private final Map<String, EvidenceCollector> evidence;
     private final Long timeoutMs;
     private final String use;
     private final String runWhen;
@@ -68,6 +69,7 @@ public class TemplateAction {
         this.level = text(data.get("level"), "INFO");
         this.fields = map(data.get("fields"));
         this.retry = map(data.get("retry"));
+        this.evidence = collectors(data.get("evidence"));
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
         this.use = text(data.get("use"), "");
         this.runWhen = text(data.get("runWhen"), "");
@@ -98,6 +100,7 @@ public class TemplateAction {
     public Map<String, Object> fields() { return fields; }
     public Map<String, Object> raw() { return raw; }
     public Map<String, Object> retry() { return retry; }
+    public Map<String, EvidenceCollector> evidence() { return evidence; }
     public Long timeoutMs() { return timeoutMs; }
     public String use() { return use; }
     public String runWhen() { return runWhen; }
@@ -121,6 +124,20 @@ public class TemplateAction {
             return Collections.<String, Object>emptyMap();
         }
         return new LinkedHashMap<String, Object>((Map<String, Object>) value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, EvidenceCollector> collectors(Object value) {
+        if (!(value instanceof Map)) return Collections.<String, EvidenceCollector>emptyMap();
+        Map<String, EvidenceCollector> result = new LinkedHashMap<String, EvidenceCollector>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            String id = String.valueOf(entry.getKey());
+            if (!(entry.getValue() instanceof Map)) {
+                throw new IllegalArgumentException("Evidence collector must be a map: " + id);
+            }
+            result.put(id, new EvidenceCollector(id, (Map<String, Object>) entry.getValue()));
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     @SuppressWarnings("unchecked")

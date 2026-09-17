@@ -1,7 +1,7 @@
-# ATT V3.3.0 User Manual and Reference
+# ATT V3.4.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 3.3.0
+Version: 3.4.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -54,7 +54,7 @@ The four concepts you need first are:
 
 An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, assign a scoped runtime value, or invoke a Flow. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.
 
-### What V3.3 guarantees
+### What V3.4 guarantees
 
 - Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
 - Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
@@ -68,6 +68,8 @@ An action can render a payload, call a tool, query/update a database, assert an 
 - V2.6 Templates remain readable, but only `att-template/v3.0` may use Flow Actions or Action `runWhen`.
 - Multiline Log Action text and process output remain physical Case-log lines; ordinary runs create no persistent `process-output` artifact.
 - `#{...}` supports typed calls, arithmetic, comparisons, boolean logic, lists, and `in`, while `${...}` remains the Context-reference syntax.
+- Tool Actions may run post-invocation evidence collectors before assertion, with per-attempt results, independent timeout, and `continue|stop` failure policy.
+- IBM MQ helpers provide primary Tool Action `send`, `receive`, and `request` calls with exact file payloads and correlation-aware request/reply evidence.
 
 ### Package layout
 
@@ -78,6 +80,8 @@ att-package/
 ├── config/
 │   ├── config.yaml
 │   ├── dbhelpers/
+│   │   └── orders.yaml
+│   ├── mqhelpers/
 │   │   └── orders.yaml
 │   └── tools/
 │       └── orders-db.yaml
@@ -141,7 +145,7 @@ Flow `inputs`, `outputs`, invocation `with`, and the dedicated `input`, lowercas
 
 The Template and all nested Flows share one Action-ID namespace. Template/Flow collisions, collisions between used Flows, indirect nested collisions, and repeated use of the same Flow in one Template fail validation. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own `runWhen` is false is SKIPPED.
 
-Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.3.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
+Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.4.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
 
 ## 02 Quick Start
 
@@ -857,6 +861,51 @@ ATT creates `CASE.DB` as an empty map when the Case starts, then adds one entry 
 
 ATT bundles no JDBC driver. Put the driver and all dependencies in package-root `lib/` before starting ATT. JDBC service discovery is automatic; `connection.driverClass` supports legacy drivers. Jars load at JVM startup on a flat shared classpath.
 
+#### IBM MQ helpers
+
+MQ helpers are independent configuration files listed by the global `mqhelpers` array. The V1 schema requires a queue manager, host, port, and channel and supports optional environment-backed username/password values. The runtime adapter uses IBM MQ Classes for Java in TCP client mode. The default ATT build does not load the vendor client; add `com.ibm.mq:com.ibm.mq.allclient` through the Maven `ibm-mq` profile or place the resolved jar in the package `lib/` directory.
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.6
+mqhelpers:
+  - config/mqhelpers/orders.yaml
+```
+
+```yaml
+# config/mqhelpers/orders.yaml
+schemaVersion: att-mqhelper/v1.0
+id: orders
+name: Orders MQ
+description: Order request and reply queues
+connection:
+  queueManager: QM1
+  host: mq.example.internal
+  port: 1414
+  channel: APP.SVRCONN
+  username: att
+  password: "${ENV:MQ_PASSWORD}"
+message: {ccsid: 1208, format: MQSTR, persistence: asQueue}
+requestReply: {waitMs: 10000}
+evidence: {payload: metadata}
+```
+
+Only a primary `type: tool` call may invoke MQ:
+
+```yaml
+requestOrder:
+  type: tool
+  call: >-
+    #{mq.orders.request(
+      requestQueue='ORDER.REQUEST',
+      replyQueue='ORDER.REPLY',
+      file=${ACTIONS.renderRequest.output.targetFiles[0]},
+      waitMs=5000
+    )}
+```
+
+`send` accepts `queue` and `file`; `receive` accepts `queue`, optional `waitMs`, and optional `correlationId`; `request` accepts `requestQueue`, `replyQueue`, `file`, and optional `waitMs`. Payloads are read as exact bytes. Request PUT captures MsgId and GET matches CorrelId. Reason 2033 is a successful no-message result (`received: false` or `replyReceived: false`), so a required reply must be asserted explicitly. MQ connections and queues are invocation-scoped and use no syncpoint. Reply bytes are written once below the Case output directory; structured evidence contains paths, lengths, IDs, status, duration, and safe reason metadata, never full payloads or credentials.
+
 #### Call-backed Tools (V2.6)
 
 Call-backed Tools give repeated DB operations a short business name while preserving first-class dbhelper behavior. They are façades, not a replacement for `type: db` or `#{db.<instance>.*}`.
@@ -1158,6 +1207,24 @@ retry:
 
 `maxAttempts` includes the first attempt and is 2–10; `intervalMs` is 0–3600000. `ASSERTION` requires an Action `assert`: ATT evaluates it after every normal result and retries only when it is false. `TIMEOUT` retries only an attempt timeout. Exit code has no retry category and remains available at `${output.exitCode}` for the assertion. Configuration, argument, I/O, parse, non-timeout DB, and assertion-evaluation errors are not retried.
 
+#### Post-invocation evidence collectors
+
+A Tool Action may declare an `evidence` map whose keys are collector IDs. A collector requires a `call` and may set an independent `timeoutMs` and `onFailure: continue|stop`:
+
+```yaml
+invokeApi:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=${CASE.requestFile})}"
+  evidence:
+    queueState:
+      call: "#{readQueueState(queue=${CASE.queue})}"
+      timeoutMs: 3000
+      onFailure: continue
+  assert: "${output.result.status} == 'SUCCESS'"
+```
+
+ATT runs the primary attempt first, then collectors in declaration order, then the primary assertion. During collection `${output.result}` is the primary result; collector output never replaces it. The complete record is stored at `output.attempts[n].evidence.<collectorId>` and includes collector ID, attempt, invocation ID, status, success, result, duration, and error details where applicable. A primary assertion retry reruns the primary and every collector. `continue` records a collector failure while preserving the primary assertion result; `stop` makes the Action `ERROR` and skips assertion evaluation. Collector calls may target permitted built-ins, configured Tools, or read-only call-backed Tool façades. Direct DB and MQ helper calls remain restricted to their primary Action scopes.
+
 ### 3.4 Running Tests
 
 #### Validate first
@@ -1203,7 +1270,7 @@ An empty selection is an error. `--rerun-failed` is itself a valid selection and
 
 `--update-snapshot` is valid only for `run`. It explicitly creates or atomically replaces changed canonical XML snapshots for the complete workbooks selected by that run before validation and output-directory creation; byte-identical files retain their bytes and modification time. Workbook preparation completes before any selected XML is replaced. A snapshot symlink is rejected. A later per-file I/O failure reports earlier completed updates, and concurrent snapshot generation/update phases for the same package are serialized. With `--format json`, successful update notices go to stderr so stdout remains one JSON document; `--quiet` suppresses them. Combining it with `--dry-run` still authorizes the XML update while testcase tools remain disabled.
 
-The default human run prints only its final result counts and report path. `--quiet` suppresses that normal output. `--verbose` adds run/suite/Case/stage/action lifecycle progress and mirrors every complete Case-log block to the console, including template/tool input, logical and executed argv, stdout, stderr, payload, and action evidence. Verbose output can therefore contain secrets or personal data and must be enabled only in an appropriately protected terminal. The two options are mutually exclusive.
+Human `run` enables run/suite/Case/stage/action lifecycle progress and mirrors every complete Case-log block to the console by default, including template/tool input, logical and executed argv, stdout, stderr, payload, and action evidence. `--verbose` remains accepted for compatibility; `--quiet` suppresses this default output, while explicitly combining `--verbose --quiet` remains invalid. Non-quiet output can contain secrets or personal data and must be used only in an appropriately protected terminal.
 
 #### Result and exit code
 
@@ -1488,6 +1555,7 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 |---|---|
 | `./att.sh` or `./att.sh help` | Show help |
 | `./att.sh version` | Print version |
+| `./att.sh snapshot` | Generate snapshots recursively below `testcase.root`; equivalent to `--all` when no selector is supplied |
 | `./att.sh snapshot --suite <xlsx>` | Generate one same-basename XML snapshot |
 | `./att.sh snapshot --all` | Generate snapshots recursively below `testcase.root` |
 | `./att.sh snapshot --suite-dir <dir>` | Generate snapshots recursively below a directory |
@@ -1511,8 +1579,8 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --queue` | Wait for another ATT process using the same output root |
 | `./att.sh run <selection> --allow-parallel-runs` | Allow concurrent ATT processes; does not parallelize Cases in this run |
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
-| `./att.sh run <selection> --quiet` | Suppress normal completion output |
-| `./att.sh run <selection> --verbose` | Show lifecycle progress and mirror complete Case logs |
+| `./att.sh run <selection> --quiet` | Suppress the default lifecycle and Case-log output |
+| `./att.sh run <selection> --verbose` | Explicitly retain the default lifecycle progress and complete Case-log mirroring; accepted for compatibility |
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
@@ -1539,7 +1607,7 @@ This chapter is the authoritative reading reference for author-authored configur
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, optional global SSH |
+| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, MQ helper paths, optional global SSH |
 | Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
@@ -1550,13 +1618,14 @@ Tool Action timeout overrides Tool descriptor timeout, which overrides global ti
 
 ### Schema catalog
 
-V2.6.2 adds `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy. The dbhelper schema remains V2.5.
+V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 adds `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy. The dbhelper schema remains V2.5.
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../schemas/att-config-v2.6.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
+| MQ helper instance | `att-mqhelper/v1.0` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json) |
 | Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../schemas/att-tool-group-v2.6.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
@@ -1593,6 +1662,7 @@ report:
 xml: {namespaceMode: ignore}
 toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
+mqhelpers: [config/mqhelpers/orders.yaml]
 tools: {}
 ```
 
@@ -1617,6 +1687,7 @@ tools: {}
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` YAML paths; normalized duplicates are rejected |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -1624,7 +1695,7 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `ssh`, `tools`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `ssh`, `tools`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -1658,6 +1729,20 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [Database helpers](#database-helpers) for Action, expression, result, security, and lifecycle behaviour.
 
+### MQ helper configuration
+
+Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` object:
+
+| Object | Required/default | Allowed properties and constraints |
+|---|---|---|
+| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `message`, `requestReply`, `evidence`, `x-*` |
+| `connection` | required | `queueManager`, `host`, `port`, and `channel` required; optional `username`, `password`; port 1–65535 |
+| `message` | defaults | `ccsid` defaults to 1208; `format` is `MQSTR`, `MQHRF2`, `MQFMT_STRING`, `MQFMT_NONE`, or `NONE`; `persistence` is `asQueue`, `persistent`, `notPersistent`, or `nonPersistent` |
+| `requestReply` | defaults | `waitMs` defaults to 10000 and is 0–3600000 milliseconds |
+| `evidence` | defaults | `payload: metadata` is the only V1 mode; full payload bytes are never placed in structured evidence |
+
+Connection credentials may be complete `${ENV:NAME}` references. The loader resolves them without putting the secret or the environment variable value in diagnostics, metadata, or Case evidence. Queue names supplied in calls are non-blank, at most 48 characters, and restricted to IBM MQ queue-name characters. A helper instance is selected case-insensitively by its `id`; configured paths and IDs must be unique.
+
 Case log structured entries use YAML. The human log records each normal action and each Tool/DB invocation once; duplicated attempt fields and persisted `TOOL`/`DB` subtrees are omitted from this projection. The complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` is the default for remaining shared Map/List objects; `true` permits SnakeYAML `&id001` / `*id001` anchor markers, which carry no ATT identifier semantics.
 
 ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `FAIL`, or `INVALID` with `【!!!!!】`. Search for that exact marker to locate abnormal blocks; PASS, SKIPPED, and informational blocks remain unmarked.
@@ -1680,7 +1765,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
 | render | requires `payload`, `renderAs`; optional `assert`; no saveAs/output/call/expression/message/file/level/fields/timeout/retry/DB fields |
-| tool | requires `call`; optional object-shaped `saveAs`, `assert`, `expected`, `actual`, `timeoutMs`, and Action-only `retry`; command/call-backed Tools share this contract |
+| tool | requires `call`; optional object-shaped `saveAs`, `assert`, `expected`, `actual`, `timeoutMs`, Action-only `retry`, and `evidence`; command/call-backed Tools share this contract |
 | db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and either typed-list `params` or named `parameters`; optional `assert` and object-shaped `saveAs`; no action-level `overwrite`, `call`, retry, or Action timeout |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
@@ -1816,7 +1901,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.3.0",
+  "attVersion": "3.4.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1857,12 +1942,18 @@ Generated envelopes reject additional top-level fields according to their schema
 
 ### Unified expression engine
 
-V3.3 uses one engine with two deliberately separate roles:
+V3.4 uses one engine with two deliberately separate roles:
 
 - `${path}` reads one Context value and interpolates it into surrounding text, for example `Reference=${CASE.VARS.SrcRefNo}`.
 - `#{expression}` evaluates one typed expression block. The block may contain Context operands, calls, list literals, parentheses, unary operators, arithmetic, comparisons, `like`, `in`, null tests, and boolean logic.
 
-Context references remain explicit inside a block; write `${CASE.amount}`, never bare `CASE.amount`. Exact blocks preserve their Java result type, while a block embedded in surrounding text is converted to text.
+Context references remain explicit inside a block; write `${CASE.amount}`, never bare `CASE.amount`. Append `?` to make the entire reference optional, for example `${CASE.response.body.missing?}`. If any map, list, root-owned Context value, or intermediate segment is missing, the result is the real `null`; an existing final `null` also remains `null`. `${path}` remains strict. Optional lookup does not suppress ambiguity, malformed syntax, or invalid traversal such as indexing a scalar, so those authoring errors still fail. Exact blocks preserve their Java result type, while a block embedded in surrounding text is converted to text.
+
+```yaml
+assert: "#{${CASE.response.body.missing?} is null}"
+actual: "#{nvl(${CASE.response.body.missing?}, 'not supplied')}"
+description: "status=${CASE.response.body.status?}; fallback=#{coalesce(${CASE.response.body.missing?}, 'N/A')}"
+```
 
 ```yaml
 assert: >-

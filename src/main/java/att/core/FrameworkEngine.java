@@ -105,7 +105,8 @@ public class FrameworkEngine {
             FrameworkConfig suiteConfig = suitePlan.config();
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, suiteConfig);
-            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor);
+            att.exec.MqHelperExecutor mqHelperExecutor = new att.exec.MqHelperExecutor(projectRoot, suiteConfig);
+            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor);
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
@@ -485,6 +486,12 @@ public class FrameworkEngine {
         for (att.config.DbHelperConfig helper : config.dbHelpers().values()) {
             if (helper.sourceFile() != null && dbHelperFiles.add(helper.sourceFile())) {
                 addInput(inputs, "dbhelper", helper.sourceFile());
+            }
+        }
+        java.util.Set<Path> mqHelperFiles = new java.util.LinkedHashSet<Path>();
+        for (att.config.MqHelperConfig helper : config.mqHelpers().values()) {
+            if (helper.sourceFile() != null && mqHelperFiles.add(helper.sourceFile())) {
+                addInput(inputs, "mqhelper", helper.sourceFile());
             }
         }
         Path schemas = projectRoot.resolve("schemas");

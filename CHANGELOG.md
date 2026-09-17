@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.4.0 - 2026-09-17
+
+- Changed CLI defaults so human `run` output is verbose by default and `snapshot` without a selector generates all discovered workbook snapshots; `--verbose` and `--all` remain accepted for compatibility, while explicit selectors retain their existing narrowing behavior.
+- Added optional Context references using `${path?}`. Missing map/list/root/intermediate segments now resolve to a real null through interpolation, typed expression blocks, built-ins, Tool arguments, assertions, and assignments; strict references, ambiguity, malformed syntax, and invalid traversal remain errors.
+- Added Tool Action post-invocation evidence collectors. Collectors run after the primary result and before assertion, repeat for each primary retry attempt, preserve the primary result, and record timeout/failure policy and per-collector evidence.
+- Added the `att-mqhelper/v1.0` IBM MQ helper with send, receive, and request/reply operations, exact file payload bytes, correlation matching, no-message success semantics, bounded reply artifacts, environment-backed credentials, and redacted evidence.
+- Added the optional `ibm-mq` Maven profile and release-build jar injection path so default builds remain independent of the vendor client while MQ-enabled packages can include it.
+- Added V3.4 schemas, configuration loading, validation, runtime coverage, and user documentation for both features.
+
 ## 3.3.0 - 2026-09-17
 
 - Added structured diagnostics with physical YAML source ranges and execution provenance.

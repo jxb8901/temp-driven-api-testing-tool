@@ -10,20 +10,28 @@ class FrameworkRunnerTest {
         java.lang.reflect.Method help=FrameworkRunner.class.getDeclaredMethod("help"); help.setAccessible(true);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream(); PrintStream previous=System.out;
         try { System.setOut(new PrintStream(bytes)); help.invoke(null); } finally { System.setOut(previous); }
-        String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertTrue(text.contains("--update-snapshot")); assertTrue(text.contains("att.bat")); assertFalse(text.contains("--single-page"));
+        String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertTrue(text.contains("--update-snapshot")); assertTrue(text.contains("att.bat")); assertTrue(text.contains("defaults to --all")); assertTrue(text.contains("verbose lifecycle")); assertFalse(text.contains("--single-page"));
     }
 
     @Test void verboseIsAnExplicitOutputModeAndConflictsWithQuiet() {
+        att.core.ExecutionOptions defaults = att.core.ExecutionOptions.parse(new String[]{"run", "--all"});
+        assertTrue(defaults.verbose());
+        assertFalse(defaults.quiet());
         att.core.ExecutionOptions verbose = att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose"});
         assertTrue(verbose.verbose());
         assertFalse(verbose.quiet());
+        att.core.ExecutionOptions quiet = att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--quiet"});
+        assertTrue(quiet.quiet());
+        assertFalse(quiet.verbose());
         assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose", "--quiet"}));
     }
 
-    @Test void snapshotCommandRequiresWorkbookSelectionAndRejectsRunOnlyOptions() {
-        assertEquals("snapshot", att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all"}).command());
+    @Test void snapshotDefaultsToAllWorkbooksAndRejectsRunOnlyOptions() {
+        att.core.ExecutionOptions implicitAll = att.core.ExecutionOptions.parse(new String[]{"snapshot"});
+        assertEquals("snapshot", implicitAll.command());
+        assertTrue(implicitAll.all());
+        assertTrue(att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all"}).all());
         assertEquals(1, att.core.ExecutionOptions.parse(new String[]{"snapshot", "--suite", "testcase/payment.xlsx"}).suitePaths().size());
-        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"snapshot"}));
         assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all", "--tag", "smoke"}));
         att.core.ExecutionOptions update = att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--update-snapshot"});
         assertTrue(update.updateSnapshot());

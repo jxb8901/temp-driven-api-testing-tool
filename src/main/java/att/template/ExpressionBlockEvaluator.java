@@ -17,6 +17,10 @@ public final class ExpressionBlockEvaluator {
         Object call(String name, Map<String, Object> arguments) throws Exception;
         String interpolate(String value) throws Exception;
         default boolean hasContext(String path) { return false; }
+        default Object contextOptional(String path) throws Exception { return context(path); }
+        default Object context(String path, boolean optional) throws Exception {
+            return optional ? contextOptional(path) : context(path);
+        }
     }
 
     public Object evaluate(String expression, Resolver resolver) throws Exception {
@@ -103,10 +107,10 @@ public final class ExpressionBlockEvaluator {
     }
 
     private static final class ContextNode extends BaseNode {
-        private final String path;
-        ContextNode(String source, String path) { super(source); this.path = path; }
-        @Override public Object evaluate(Resolver resolver) throws Exception { return resolver.context(path); }
-        @Override public void collectContextPaths(List<String> paths) { paths.add(path); }
+        private final String path; private final boolean optional;
+        ContextNode(String source, String path, boolean optional) { super(source); this.path = path; this.optional = optional; }
+        @Override public Object evaluate(Resolver resolver) throws Exception { return resolver.context(path, optional); }
+        @Override public void collectContextPaths(List<String> paths) { paths.add(optional ? path + "?" : path); }
     }
 
     private static final class IdentifierNode extends BaseNode {
@@ -376,7 +380,15 @@ public final class ExpressionBlockEvaluator {
                 catch (NumberFormatException error) { throw new ExpressionSyntaxException(token.start, token.end, "a valid number", "invalid number"); }
             }
             if (token.type == TokenType.STRING) return new LiteralNode(raw(token), token.text, true);
-            if (token.type == TokenType.CONTEXT) return new ContextNode(raw(token), token.text);
+            if (token.type == TokenType.CONTEXT) {
+                boolean optional = token.text.endsWith("?");
+                String path = optional ? token.text.substring(0, token.text.length() - 1) : token.text;
+                try { att.core.CaseRuntimeContext.validateReferencePath(path); }
+                catch (IllegalArgumentException error) {
+                    throw new ExpressionSyntaxException(token.start, token.end, "a valid Context path", error.getMessage());
+                }
+                return new ContextNode(raw(token), path, optional);
+            }
             if (token.type == TokenType.EMBEDDED) {
                 try {
                     Parser nested = new Parser(token.text);

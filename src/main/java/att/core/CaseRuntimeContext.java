@@ -93,10 +93,30 @@ public final class CaseRuntimeContext {
         return resolution.status == ResolutionStatus.FOUND ? resolution.value : null;
     }
 
+    /** Resolves an optional Context reference without changing strict lookup diagnostics. */
+    public Object resolveOptional(String path) {
+        Resolution resolution = resolution(requiredReferencePath(path));
+        return resolution.status == ResolutionStatus.FOUND ? resolution.value : null;
+    }
+
     public Object require(String path) {
+        return requireResolved(path, false);
+    }
+
+    /**
+     * Resolves ${path?}. Missing maps, list entries, and intermediate nodes are
+     * nullable; ambiguous, malformed, and structurally invalid paths remain
+     * errors so optional lookup cannot hide authoring mistakes.
+     */
+    public Object requireOptional(String path) {
+        return requireResolved(requiredReferencePath(path), true);
+    }
+
+    private Object requireResolved(String path, boolean optional) {
         Resolution resolution = resolution(path);
         if (resolution.status == ResolutionStatus.FOUND) return resolution.value;
         if (resolution.status == ResolutionStatus.DEFERRED) return null;
+        if (optional && resolution.status == ResolutionStatus.MISSING) return null;
         java.util.List<String> paths = availablePaths();
         String nearest = nearest(path, paths);
         StringBuilder detail = new StringBuilder();
@@ -134,13 +154,32 @@ public final class CaseRuntimeContext {
     }
 
     public boolean contains(String path) {
-        ResolutionStatus status = resolution(path).status;
+        ResolutionStatus status = resolution(requiredReferencePath(path)).status;
         return status == ResolutionStatus.FOUND || status == ResolutionStatus.DEFERRED;
     }
 
     /** True when validation knows the owning value exists but cannot know its runtime shape yet. */
     public boolean isValidationDeferred(String path) {
-        return resolution(path).status == ResolutionStatus.DEFERRED;
+        return resolution(requiredReferencePath(path)).status == ResolutionStatus.DEFERRED;
+    }
+
+    public static boolean isOptionalReference(String path) {
+        return path != null && path.endsWith("?");
+    }
+
+    /** Removes the trailing optional marker while preserving all other path syntax. */
+    public static String requiredReferencePath(String path) {
+        if (path == null) return null;
+        if (!isOptionalReference(path)) return path;
+        String required = path.substring(0, path.length() - 1);
+        if (required.isEmpty()) throw new IllegalArgumentException("Optional Context path must contain a path before '?'");
+        return required;
+    }
+
+    /** Validates path grammar without requiring the referenced value to exist. */
+    public static void validateReferencePath(String path) {
+        java.util.List<Segment> segments = parsePath(requiredReferencePath(path));
+        if (segments.isEmpty()) throw new IllegalArgumentException("Context path must contain at least one segment");
     }
 
     private Resolution resolution(String path) {
@@ -498,8 +537,7 @@ public final class CaseRuntimeContext {
                 current = map.get(segment.key);
             } else if (current instanceof java.util.List && segment.index != null) {
                 java.util.List<?> list = (java.util.List<?>) current;
-                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return Resolution.invalidPath(currentPath, segment.display(),
-                        "list index " + segment.index + " is outside 0.." + Math.max(0, list.size() - 1));
+                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return Resolution.missing(currentPath, segment.display());
                 current = list.get(segment.index.intValue());
             } else if (current == null) return Resolution.invalidPath(currentPath, "value is null");
             else if (current instanceof java.util.List) return Resolution.invalidPath(currentPath, "expected a numeric list index but found " + segment.display());
@@ -541,7 +579,13 @@ public final class CaseRuntimeContext {
         java.util.List<Segment> result = new java.util.ArrayList<Segment>();
         int position = 0;
         while (position < path.length()) {
-            if (path.charAt(position) == '.') { position++; continue; }
+            if (path.charAt(position) == '.') {
+                if (result.isEmpty() || position + 1 >= path.length() || path.charAt(position + 1) == '.') {
+                    throw new IllegalArgumentException("Empty path segment");
+                }
+                position++;
+                continue;
+            }
             if (path.charAt(position) == '[') {
                 int end = bracketEnd(path, position);
                 if (end < 0) throw new IllegalArgumentException("Unclosed bracket");
@@ -556,6 +600,7 @@ public final class CaseRuntimeContext {
             while (end < path.length() && path.charAt(end) != '.' && path.charAt(end) != '[') end++;
             String key = path.substring(position, end);
             if (key.isEmpty()) throw new IllegalArgumentException("Empty path segment");
+            if (key.indexOf('?') >= 0) throw new IllegalArgumentException("Invalid optional marker");
             result.add(numeric(key) && !result.isEmpty() ? Segment.index(Integer.parseInt(key)) : Segment.key(key));
             position = end;
         }

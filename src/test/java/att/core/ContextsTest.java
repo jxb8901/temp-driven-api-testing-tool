@@ -156,6 +156,49 @@ class ContextsTest {
         assertTrue(!missingQuotedKey.format().contains("contextTree:"));
     }
 
+    @Test void optionalReferencesReturnNullOnlyForMissingValues() {
+        Map<String, Object> nested = new LinkedHashMap<String, Object>();
+        nested.put("text", "READY");
+        nested.put("amount", 7);
+        nested.put("enabled", Boolean.TRUE);
+        nested.put("actualNull", null);
+        nested.put("items", Arrays.asList(Collections.singletonMap("code", "A")));
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("result", nested);
+        data.put("scalar", "text");
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), data,
+                        Collections.<String, StageCaseData>emptyMap(), null),
+                tempDir, "R", tempDir, tempDir.resolve("case.log"));
+
+        assertNull(context.requireOptional("CASE.result.missing?"));
+        assertNull(context.requireOptional("CASE.result.missing.child?"));
+        assertNull(context.requireOptional("CASE.missing.child?"));
+        assertEquals("READY", context.requireOptional("CASE.result.text?"));
+        assertEquals(Integer.valueOf(7), context.requireOptional("CASE.result.amount?"));
+        assertEquals(Boolean.TRUE, context.requireOptional("CASE.result.enabled?"));
+        assertNull(context.requireOptional("CASE.result.actualNull?"));
+        assertEquals("A", context.requireOptional("CASE.result.items[0].code?"));
+        assertNull(context.requireOptional("CASE.result.items[9].code?"));
+
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> context.require("CASE.result.missing"));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> context.requireOptional("CASE.scalar.child?"));
+
+        context.put("CASE.first", Collections.singletonMap("status", "A"));
+        context.put("CASE.second", Collections.singletonMap("status", "B"));
+        att.validation.DiagnosticException ambiguous = assertThrows(att.validation.DiagnosticException.class,
+                () -> context.requireOptional("status?"));
+        assertEquals(att.validation.DiagnosticCodes.CONTEXT_AMBIGUOUS, ambiguous.code());
+    }
+
+    @Test void optionalReferenceSyntaxRejectsMalformedPaths() {
+        assertThrows(IllegalArgumentException.class, () -> CaseRuntimeContext.validateReferencePath("CASE..value?"));
+        assertThrows(IllegalArgumentException.class, () -> CaseRuntimeContext.validateReferencePath("CASE.value??"));
+        assertThrows(IllegalArgumentException.class, () -> CaseRuntimeContext.validateReferencePath("?"));
+    }
+
     @Test void resolvesUniqueSuffixFromCompletedActionCanonicalTree() {
         StageCaseData stage = new StageCaseData("invoke", "PAYMENT", Collections.<String,Object>emptyMap());
         CaseRuntimeContext context = new CaseRuntimeContext(

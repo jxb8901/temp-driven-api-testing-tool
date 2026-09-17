@@ -36,7 +36,9 @@ public final class FrameworkConfigLoader {
             String schemaName = v26 ? "att-config-v2.6.schema.json" : (v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json"));
             Path schema = schema(projectRoot, schemaName);
             if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
-            SchemaSupport.rejectUnknown(map, "config", (v26 || v25)
+            SchemaSupport.rejectUnknown(map, "config", v26
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "ssh", "tools"}
+                    : v25
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "ssh", "tools"}
                     : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
@@ -55,10 +57,13 @@ public final class FrameworkConfigLoader {
             Map<String, DbHelperConfig> dbHelpers = (v26 || v25)
                     ? new DbHelperConfigLoader().load(map.get("dbhelpers"), projectRoot)
                     : Collections.<String, DbHelperConfig>emptyMap();
+            Map<String, MqHelperConfig> mqHelpers = v26
+                    ? new MqHelperConfigLoader().load(map.get("mqhelpers"), projectRoot)
+                    : Collections.<String, MqHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
-                    templatesRoot(map), testcasesRoot(map), tools, dbHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
+                    templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, path, e.field());
         } catch (Exception e) {

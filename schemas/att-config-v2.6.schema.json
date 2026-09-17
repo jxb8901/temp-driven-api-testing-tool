@@ -17,6 +17,7 @@
     "xml": {"type": "object", "properties": {"namespaceMode": {"enum": ["ignore", "preserve"]}}, "patternProperties": {"^x-": {}}, "additionalProperties": false},
     "toolGroups": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "dbhelpers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\.ya?ml$"}},
+    "mqhelpers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\.ya?ml$"}},
     "ssh": {"$ref": "#/$defs/ssh"},
     "tools": {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"}, "additionalProperties": {"$ref": "#/$defs/tool"}}
   },

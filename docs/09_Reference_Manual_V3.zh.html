@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.3.0 中文用户手册与参考手册</title>
+  <title>ATT V3.4.0 中文用户手册与参考手册</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,11 +233,11 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.3.0 中文用户手册与参考手册</h1>
+<h1 class="title">ATT V3.4.0 中文用户手册与参考手册</h1>
 </header>
-<h1 id="att-v3.3.0-中文用户手册与参考手册">ATT V3.3.0
+<h1 id="att-v3.4.0-中文用户手册与参考手册">ATT V3.4.0
 中文用户手册与参考手册</h1>
-<p>作者：Jeffrey + ChatGPT 版本：3.3.0 状态：规范性终端用户文档</p>
+<p>作者：Jeffrey + ChatGPT 版本：3.4.0 状态：规范性终端用户文档</p>
 <p>本手册设计为两种阅读方式：</p>
 <ul>
 <li>如果你是第一次使用 ATT，请按章节 1–4
@@ -323,7 +323,7 @@ evidence 策略</td>
 <p>一个动作可以渲染负载、调用工具、查询／更新数据库、断言表达式、写入结构化日志、分配作用域运行值，或调用
 Flow。ATT
 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。</p>
-<h3 id="v3.3-的保证">V3.3 的保证</h3>
+<h3 id="v3.4-的保证">V3.4 的保证</h3>
 <ul>
 <li>配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML
 键，以及无效动作形状都是错误。</li>
@@ -359,6 +359,12 @@ expression block。</li>
 输出都有版本化契约。</li>
 <li>V2.6 Template 保持可读，但只有 <code>att-template/v3.0</code> 可使用
 Flow Action 或 Action <code>runWhen</code>。</li>
+<li>Tool Action 可在主要结果之后、assertion 之前运行
+<code>evidence</code> collectors；每次 retry 都会重新收集，并记录独立
+timeout 与 <code>continue|stop</code> 失败策略。</li>
+<li>IBM MQ helper 使用 <code>att-mqhelper/v1.0</code>，提供主要 Tool
+Action 的 <code>send</code>、<code>receive</code> 和
+<code>request</code>，保留精确文件 bytes 及 CorrelId/MsgId 证据。</li>
 </ul>
 <h3 id="包布局">包布局</h3>
 <pre class="text"><code>att-package/
@@ -440,7 +446,7 @@ built-in。Action 只能读取展开后执行计划中已经完成的 Action。<
 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action
 自身 <code>runWhen</code> 为 false 时才是 SKIPPED。</p>
 <p>Flow <code>use</code> 不支持动态选择。<code>runAlways</code>、warning
-impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.3.0
+impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.4.0
 能力。聚合优先级保持
 <code>ERROR &gt; INVALID &gt; FAIL &gt; PASS &gt; SKIPPED</code>。</p>
 <h2 id="快速开始">02 快速开始</h2>
@@ -1191,35 +1197,68 @@ connection properties 不会进入 parameter evidence。若 SQL
 </tbody>
 </table>
 <p>默认值为 <code>scope: case</code>、<code>onEnd: rollback</code>。</p>
+<h4 id="ibm-mq-helper">IBM MQ helper</h4>
+<p>全局配置使用 <code>mqhelpers</code> 引用独立的
+<code>att-mqhelper/v1.0</code> 文件：</p>
+<div class="sourceCode" id="cb30"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mqhelpers</span><span class="kw">:</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/mqhelpers/orders.yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb31"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-mqhelper/v1.0</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> orders</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Orders MQ</span></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> Order request and reply queues</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a><span class="fu">connection</span><span class="kw">:</span></span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queueManager</span><span class="kw">:</span><span class="at"> QM1</span></span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">host</span><span class="kw">:</span><span class="at"> mq.example.internal</span></span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">1414</span></span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">channel</span><span class="kw">:</span><span class="at"> APP.SVRCONN</span></span>
+<span id="cb31-10"><a href="#cb31-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">username</span><span class="kw">:</span><span class="at"> att</span></span>
+<span id="cb31-11"><a href="#cb31-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">password</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ENV:MQ_PASSWORD}&quot;</span></span>
+<span id="cb31-12"><a href="#cb31-12" aria-hidden="true" tabindex="-1"></a><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">ccsid</span><span class="kw">:</span><span class="at"> </span><span class="dv">1208</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> MQSTR</span><span class="kw">,</span><span class="at"> </span><span class="fu">persistence</span><span class="kw">:</span><span class="at"> asQueue</span><span class="kw">}</span></span>
+<span id="cb31-13"><a href="#cb31-13" aria-hidden="true" tabindex="-1"></a><span class="fu">requestReply</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">waitMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span><span class="kw">}</span></span>
+<span id="cb31-14"><a href="#cb31-14" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span></code></pre></div>
+<p>MQ 仅可作为 <code>type: tool</code> Action 的主要
+call：<code>mq.orders.send(queue=..., file=...)</code>、<code>mq.orders.receive(queue=..., waitMs=..., correlationId=...)</code>
+或
+<code>mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)</code>。Payload
+按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET
+CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion
+判断 <code>replyReceived</code>。连接与 queue 按 invocation
+创建并关闭，syncpoint 固定为 none；reply 文件只写一次到 Case
+output，evidence 不保存完整 payload 或 credential。IBM client jar 通过
+Maven <code>ibm-mq</code> profile 或 package <code>lib/</code>
+提供，默认 ATT build 不内置 vendor client。</p>
 <h5 id="db-action">DB Action</h5>
 <p>查询使用 <code>query</code> block，不另设沉重的
 <code>operation</code> 字段：</p>
-<div class="sourceCode" id="cb30"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="fu">queryOrder</span><span class="kw">:</span></span>
-<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
-<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">db</span><span class="kw">:</span><span class="at"> orders</span></span>
-<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">query</span><span class="kw">:</span></span>
-<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a><span class="fu">    sql</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a>      select id, status</span>
-<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a>      from orders</span>
-<span id="cb30-8"><a href="#cb30-8" aria-hidden="true" tabindex="-1"></a>      where customer_id = :customerId and status = :status</span>
-<span id="cb30-9"><a href="#cb30-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">parameters</span><span class="kw">:</span></span>
-<span id="cb30-10"><a href="#cb30-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.customerId}&quot;</span></span>
-<span id="cb30-11"><a href="#cb30-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> OPEN</span></span>
-<span id="cb30-12"><a href="#cb30-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.rowCount} &gt; 0&quot;</span></span>
-<span id="cb30-13"><a href="#cb30-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span></span>
-<span id="cb30-14"><a href="#cb30-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> order-result.json</span></span>
-<span id="cb30-15"><a href="#cb30-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb30-16"><a href="#cb30-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
+<div class="sourceCode" id="cb32"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="fu">queryOrder</span><span class="kw">:</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">db</span><span class="kw">:</span><span class="at"> orders</span></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">query</span><span class="kw">:</span></span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a><span class="fu">    sql</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>      select id, status</span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>      from orders</span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>      where customer_id = :customerId and status = :status</span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">parameters</span><span class="kw">:</span></span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.customerId}&quot;</span></span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> OPEN</span></span>
+<span id="cb32-12"><a href="#cb32-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.rowCount} &gt; 0&quot;</span></span>
+<span id="cb32-13"><a href="#cb32-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span></span>
+<span id="cb32-14"><a href="#cb32-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> order-result.json</span></span>
+<span id="cb32-15"><a href="#cb32-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb32-16"><a href="#cb32-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
 <p>更新使用 <code>update</code> block：</p>
-<div class="sourceCode" id="cb31"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">closeOrder</span><span class="kw">:</span></span>
-<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
-<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">db</span><span class="kw">:</span><span class="at"> orders</span></span>
-<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">update</span><span class="kw">:</span></span>
-<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;update orders set status = ? where id = ?&quot;</span></span>
-<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">params</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">CLOSED</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${CASE.orderId}&quot;</span><span class="kw">]</span></span>
-<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.affectedRows} == 1&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb33"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">closeOrder</span><span class="kw">:</span></span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">db</span><span class="kw">:</span><span class="at"> orders</span></span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">update</span><span class="kw">:</span></span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;update orders set status = ? where id = ?&quot;</span></span>
+<span id="cb33-6"><a href="#cb33-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">params</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">CLOSED</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${CASE.orderId}&quot;</span><span class="kw">]</span></span>
+<span id="cb33-7"><a href="#cb33-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.affectedRows} == 1&quot;</span></span></code></pre></div>
 <p><code>query</code> 与 <code>update</code> 必须且只能出现一个。block
 内的 <code>sql</code> 与 <code>sqlFile</code>
 也必须且只能出现一个。位置参数使用 <code>params</code>：可省略（默认为空
@@ -1263,15 +1302,15 @@ A101  DONE         3
 <h5 id="渲染-sql-与-sql-文件">渲染 SQL 与 SQL 文件</h5>
 <p>inline SQL 在 JDBC prepare 前使用当前 Context 渲染。前置 render
 Action 也可提供完整 SQL：</p>
-<div class="sourceCode" id="cb33"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">query</span><span class="kw">:</span></span>
-<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ACTIONS.renderSql.output.result}&quot;</span></span>
-<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">params</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.queryParams}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb35"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">query</span><span class="kw">:</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ACTIONS.renderSql.output.result}&quot;</span></span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">params</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.queryParams}&quot;</span></span></code></pre></div>
 <p>也可引用静态、包内 UTF-8 文件：</p>
-<div class="sourceCode" id="cb34"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">query</span><span class="kw">:</span></span>
-<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sqlFile</span><span class="kw">:</span><span class="at"> sql/orders/find-by-customer.sql</span></span>
-<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">params</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;${CASE.customerId}&quot;</span><span class="kw">,</span><span class="at"> OPEN</span><span class="kw">]</span></span></code></pre></div>
+<div class="sourceCode" id="cb36"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">query</span><span class="kw">:</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sqlFile</span><span class="kw">:</span><span class="at"> sql/orders/find-by-customer.sql</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">params</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;${CASE.customerId}&quot;</span><span class="kw">,</span><span class="at"> OPEN</span><span class="kw">]</span></span></code></pre></div>
 <p>validate 会确认 <code>sqlFile</code> 是包内普通非符号链接文件。ATT
 对文件内容使用与 inline SQL 相同的渲染规则，并记录 source path 与 SQL
 hash／全文；路径本身不渲染。SQL source 只允许 Context 与 pure
@@ -1282,18 +1321,18 @@ built-in，不允许配置 Tool 或巢状 DB 调用。外部准备应在前一 A
 字串。</p>
 <h5 id="表达式中的-db-查询">表达式中的 DB 查询</h5>
 <p>只读查询可在所有 Case-runtime expression 位置调用：</p>
-<div class="sourceCode" id="cb35"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>  #{db.orders.scalar(</span>
-<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>      sql=&#39;select count(*) from orders where customer_id = ?&#39;,</span>
-<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a>      params=${CASE.customerParams}</span>
-<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a>  )} == 1</span></code></pre></div>
+<div class="sourceCode" id="cb37"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  #{db.orders.scalar(</span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>      sql=&#39;select count(*) from orders where customer_id = ?&#39;,</span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>      params=${CASE.customerParams}</span>
+<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>  )} == 1</span></code></pre></div>
 <p>多参数可按 JDBC placeholder 次序 inline 编写：</p>
-<div class="sourceCode" id="cb36"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="co">#{db.orders.query(</span></span>
-<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="at">    sql=&#39;select id from orders where customer_id = ? and status = ? and amount &gt;= ?&#39;,</span></span>
-<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="at">    params=[${CASE.customerId}, &#39;OPEN&#39;, ${CASE.minimumAmount}]</span></span>
-<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="at">)}</span></span></code></pre></div>
+<div class="sourceCode" id="cb38"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="co">#{db.orders.query(</span></span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a><span class="at">    sql=&#39;select id from orders where customer_id = ? and status = ? and amount &gt;= ?&#39;,</span></span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a><span class="at">    params=[${CASE.customerId}, &#39;OPEN&#39;, ${CASE.minimumAmount}]</span></span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a><span class="at">)}</span></span></code></pre></div>
 <ul>
 <li><code>#{db.&lt;instance&gt;.query(sql|sqlFile, params?)}</code>
 返回稳定查询结果 object。</li>
@@ -1301,15 +1340,15 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href=
 要求恰好一行一列并返回该 typed cell；其他基数都是 ERROR。</li>
 </ul>
 <p>完整 query call 可在 assign 中保留 Java object：</p>
-<div class="sourceCode" id="cb37"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loadOrders</span><span class="kw">:</span></span>
-<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
-<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> customerOrders</span></span>
-<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a><span class="fu">  expression</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>    #{db.orders.query(</span>
-<span id="cb37-6"><a href="#cb37-6" aria-hidden="true" tabindex="-1"></a>        sql=&#39;select id, status from orders where customer_id = ?&#39;,</span>
-<span id="cb37-7"><a href="#cb37-7" aria-hidden="true" tabindex="-1"></a>        params=${CASE.customerParams}</span>
-<span id="cb37-8"><a href="#cb37-8" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
+<div class="sourceCode" id="cb39"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loadOrders</span><span class="kw">:</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> customerOrders</span></span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a><span class="fu">  expression</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a>    #{db.orders.query(</span>
+<span id="cb39-6"><a href="#cb39-6" aria-hidden="true" tabindex="-1"></a>        sql=&#39;select id, status from orders where customer_id = ?&#39;,</span>
+<span id="cb39-7"><a href="#cb39-7" aria-hidden="true" tabindex="-1"></a>        params=${CASE.customerParams}</span>
+<span id="cb39-8"><a href="#cb39-8" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
 <p>后续可读取
 <code>${CASE.VARS.customerOrders.rows[0].STATUS}</code>。非 scalar 的
 query object 不能插入周围文字；请用 assign 或 DB Action。expression
@@ -1319,16 +1358,16 @@ update、DDL、callable statement 与 generic execute
 <code>ACTIONS.&lt;action&gt;.DB.&lt;instance&gt;.&lt;callId&gt;</code>。</p>
 <h5 id="结果与连接生命周期">结果与连接生命周期</h5>
 <p>查询的 <code>rows</code> 永远是 List，包括零行或一行：</p>
-<div class="sourceCode" id="cb38"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="fu">success</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a><span class="fu">operation</span><span class="kw">:</span><span class="at"> query</span></span>
-<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a><span class="fu">rowCount</span><span class="kw">:</span><span class="at"> </span><span class="dv">1</span></span>
-<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a><span class="fu">rows</span><span class="kw">:</span></span>
-<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">ID</span><span class="kw">:</span><span class="at"> A100</span></span>
-<span id="cb38-6"><a href="#cb38-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">STATUS</span><span class="kw">:</span><span class="at"> READY</span></span>
-<span id="cb38-7"><a href="#cb38-7" aria-hidden="true" tabindex="-1"></a><span class="fu">affectedRows</span><span class="kw">:</span><span class="at"> </span><span class="ch">null</span></span>
-<span id="cb38-8"><a href="#cb38-8" aria-hidden="true" tabindex="-1"></a><span class="fu">transaction</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span><span class="kw">,</span><span class="at"> </span><span class="fu">onEnd</span><span class="kw">:</span><span class="at"> rollback</span><span class="kw">,</span><span class="at"> </span><span class="fu">state</span><span class="kw">:</span><span class="at"> PENDING_ROLLBACK</span><span class="kw">}</span></span>
-<span id="cb38-9"><a href="#cb38-9" aria-hidden="true" tabindex="-1"></a><span class="fu">error</span><span class="kw">:</span><span class="at"> </span><span class="ch">null</span></span></code></pre></div>
+<div class="sourceCode" id="cb40"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="fu">success</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a><span class="fu">operation</span><span class="kw">:</span><span class="at"> query</span></span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a><span class="fu">rowCount</span><span class="kw">:</span><span class="at"> </span><span class="dv">1</span></span>
+<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a><span class="fu">rows</span><span class="kw">:</span></span>
+<span id="cb40-5"><a href="#cb40-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">ID</span><span class="kw">:</span><span class="at"> A100</span></span>
+<span id="cb40-6"><a href="#cb40-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">STATUS</span><span class="kw">:</span><span class="at"> READY</span></span>
+<span id="cb40-7"><a href="#cb40-7" aria-hidden="true" tabindex="-1"></a><span class="fu">affectedRows</span><span class="kw">:</span><span class="at"> </span><span class="ch">null</span></span>
+<span id="cb40-8"><a href="#cb40-8" aria-hidden="true" tabindex="-1"></a><span class="fu">transaction</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span><span class="kw">,</span><span class="at"> </span><span class="fu">onEnd</span><span class="kw">:</span><span class="at"> rollback</span><span class="kw">,</span><span class="at"> </span><span class="fu">state</span><span class="kw">:</span><span class="at"> PENDING_ROLLBACK</span><span class="kw">}</span></span>
+<span id="cb40-9"><a href="#cb40-9" aria-hidden="true" tabindex="-1"></a><span class="fu">error</span><span class="kw">:</span><span class="at"> </span><span class="ch">null</span></span></code></pre></div>
 <p>update 使用 <code>rows: []</code>、<code>rowCount: 0</code> 与整数
 <code>affectedRows</code>。重复 column label 是 ERROR，需在 SQL 加
 alias。binary 使用 Base64，temporal
@@ -1353,15 +1392,15 @@ rollback。vendor DDL 可能按自身规则隐式 commit，ATT
 <p>最终结果写入固定
 <code>${CASE.DB.&lt;instance&gt;}</code>。<code>CASE.DB</code>
 由框架拥有、区分大小写、不能改名或由 Case 数据提供：</p>
-<div class="sourceCode" id="cb39"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="fu">CASE</span><span class="kw">:</span></span>
-<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">DB</span><span class="kw">:</span></span>
-<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">orders</span><span class="kw">:</span></span>
-<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span></span>
-<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onEnd</span><span class="kw">:</span><span class="at"> rollback</span></span>
-<span id="cb39-6"><a href="#cb39-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">state</span><span class="kw">:</span><span class="at"> ROLLED_BACK</span></span>
-<span id="cb39-7"><a href="#cb39-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">success</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb39-8"><a href="#cb39-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">error</span><span class="kw">:</span><span class="at"> </span><span class="ch">null</span></span></code></pre></div>
+<div class="sourceCode" id="cb41"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">CASE</span><span class="kw">:</span></span>
+<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">DB</span><span class="kw">:</span></span>
+<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">orders</span><span class="kw">:</span></span>
+<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span></span>
+<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onEnd</span><span class="kw">:</span><span class="at"> rollback</span></span>
+<span id="cb41-6"><a href="#cb41-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">state</span><span class="kw">:</span><span class="at"> ROLLED_BACK</span></span>
+<span id="cb41-7"><a href="#cb41-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">success</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb41-8"><a href="#cb41-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">error</span><span class="kw">:</span><span class="at"> </span><span class="ch">null</span></span></code></pre></div>
 <p>三个相似写法职责不同：</p>
 <table>
 <colgroup>
@@ -1406,57 +1445,57 @@ dbhelper 的 typed result、SQL timeout、transaction 与 evidence
 <code>#{db.&lt;instance&gt;.*}</code>。</p>
 <p>主配置使用 <code>att-config/v2.6</code>，并引用独立的 V2.6 Tool group
 与 V2.5 dbhelper：</p>
-<div class="sourceCode" id="cb40"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
-<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span></span>
-<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/orders-db.yaml</span></span>
-<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a><span class="fu">dbhelpers</span><span class="kw">:</span></span>
-<span id="cb40-5"><a href="#cb40-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/dbhelpers/orders.yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb42"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span></span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/orders-db.yaml</span></span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a><span class="fu">dbhelpers</span><span class="kw">:</span></span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/dbhelpers/orders.yaml</span></span></code></pre></div>
 <p>一个 Tool 必须且只能有 <code>command</code> 或
 <code>call</code>。下面配置覆盖多参数 query、scalar、SQL file、update
 与两种 cache scope：</p>
-<div class="sourceCode" id="cb41"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/tools/orders-db.yaml</span></span>
-<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-tool-group/v2.6</span></span>
-<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> orders</span></span>
-<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Order database tools</span></span>
-<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> 可复用的 typed order 操作</span></span>
-<span id="cb41-6"><a href="#cb41-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-7"><a href="#cb41-7" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb41-8"><a href="#cb41-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">find</span><span class="kw">:</span></span>
-<span id="cb41-9"><a href="#cb41-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Find orders</span></span>
-<span id="cb41-10"><a href="#cb41-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 按客户与状态查询订单</span></span>
-<span id="cb41-11"><a href="#cb41-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.query(sql=&#39;select order_id, status from orders where customer_id = ? and status = ?&#39;, params=[${input.customerId}, ${input.status}])}&quot;</span></span>
-<span id="cb41-12"><a href="#cb41-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">cache</span><span class="kw">:</span></span>
-<span id="cb41-13"><a href="#cb41-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span></span>
-<span id="cb41-14"><a href="#cb41-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb41-15"><a href="#cb41-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Customer ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要查询的客户</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb41-16"><a href="#cb41-16" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 精确订单状态</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb41-17"><a href="#cb41-17" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-18"><a href="#cb41-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">count</span><span class="kw">:</span></span>
-<span id="cb41-19"><a href="#cb41-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Count orders</span></span>
-<span id="cb41-20"><a href="#cb41-20" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 返回一个 typed count</span></span>
-<span id="cb41-21"><a href="#cb41-21" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.scalar(sql=&#39;select count(*) from orders where customer_id = ?&#39;, params=[${input.customerId}])}&quot;</span></span>
-<span id="cb41-22"><a href="#cb41-22" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">cache</span><span class="kw">:</span></span>
-<span id="cb41-23"><a href="#cb41-23" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> db</span></span>
-<span id="cb41-24"><a href="#cb41-24" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb41-25"><a href="#cb41-25" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Customer ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要统计的客户</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb41-26"><a href="#cb41-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-27"><a href="#cb41-27" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">findByDate</span><span class="kw">:</span></span>
-<span id="cb41-28"><a href="#cb41-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Find orders by date</span></span>
-<span id="cb41-29"><a href="#cb41-29" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 使用 package 内的 rendered SQL file</span></span>
-<span id="cb41-30"><a href="#cb41-30" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.query(sqlFile=&#39;sql/orders-by-date.sql&#39;, params=[${input.customerId}, ${input.fromDate}])}&quot;</span></span>
-<span id="cb41-31"><a href="#cb41-31" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb41-32"><a href="#cb41-32" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Customer ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要查询的客户</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb41-33"><a href="#cb41-33" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">fromDate</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> From date</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 包含此日期起的订单</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb41-34"><a href="#cb41-34" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-35"><a href="#cb41-35" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">updateStatus</span><span class="kw">:</span></span>
-<span id="cb41-36"><a href="#cb41-36" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Update order status</span></span>
-<span id="cb41-37"><a href="#cb41-37" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 更新一个订单</span></span>
-<span id="cb41-38"><a href="#cb41-38" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.update(sql=&#39;update orders set status = ? where order_id = ?&#39;, params=[${input.status}, ${input.orderId}])}&quot;</span></span>
-<span id="cb41-39"><a href="#cb41-39" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb41-40"><a href="#cb41-40" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">orderId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Order ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要更新的订单</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb41-41"><a href="#cb41-41" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 新状态</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb43"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/tools/orders-db.yaml</span></span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-tool-group/v2.6</span></span>
+<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> orders</span></span>
+<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Order database tools</span></span>
+<span id="cb43-5"><a href="#cb43-5" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> 可复用的 typed order 操作</span></span>
+<span id="cb43-6"><a href="#cb43-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb43-7"><a href="#cb43-7" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb43-8"><a href="#cb43-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">find</span><span class="kw">:</span></span>
+<span id="cb43-9"><a href="#cb43-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Find orders</span></span>
+<span id="cb43-10"><a href="#cb43-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 按客户与状态查询订单</span></span>
+<span id="cb43-11"><a href="#cb43-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.query(sql=&#39;select order_id, status from orders where customer_id = ? and status = ?&#39;, params=[${input.customerId}, ${input.status}])}&quot;</span></span>
+<span id="cb43-12"><a href="#cb43-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">cache</span><span class="kw">:</span></span>
+<span id="cb43-13"><a href="#cb43-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span></span>
+<span id="cb43-14"><a href="#cb43-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb43-15"><a href="#cb43-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Customer ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要查询的客户</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb43-16"><a href="#cb43-16" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 精确订单状态</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb43-17"><a href="#cb43-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb43-18"><a href="#cb43-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">count</span><span class="kw">:</span></span>
+<span id="cb43-19"><a href="#cb43-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Count orders</span></span>
+<span id="cb43-20"><a href="#cb43-20" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 返回一个 typed count</span></span>
+<span id="cb43-21"><a href="#cb43-21" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.scalar(sql=&#39;select count(*) from orders where customer_id = ?&#39;, params=[${input.customerId}])}&quot;</span></span>
+<span id="cb43-22"><a href="#cb43-22" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">cache</span><span class="kw">:</span></span>
+<span id="cb43-23"><a href="#cb43-23" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> db</span></span>
+<span id="cb43-24"><a href="#cb43-24" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb43-25"><a href="#cb43-25" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Customer ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要统计的客户</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb43-26"><a href="#cb43-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb43-27"><a href="#cb43-27" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">findByDate</span><span class="kw">:</span></span>
+<span id="cb43-28"><a href="#cb43-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Find orders by date</span></span>
+<span id="cb43-29"><a href="#cb43-29" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 使用 package 内的 rendered SQL file</span></span>
+<span id="cb43-30"><a href="#cb43-30" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.query(sqlFile=&#39;sql/orders-by-date.sql&#39;, params=[${input.customerId}, ${input.fromDate}])}&quot;</span></span>
+<span id="cb43-31"><a href="#cb43-31" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb43-32"><a href="#cb43-32" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">customerId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Customer ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要查询的客户</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb43-33"><a href="#cb43-33" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">fromDate</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> From date</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 包含此日期起的订单</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb43-34"><a href="#cb43-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb43-35"><a href="#cb43-35" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">updateStatus</span><span class="kw">:</span></span>
+<span id="cb43-36"><a href="#cb43-36" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Update order status</span></span>
+<span id="cb43-37"><a href="#cb43-37" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 更新一个订单</span></span>
+<span id="cb43-38"><a href="#cb43-38" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{db.orders.update(sql=&#39;update orders set status = ? where order_id = ?&#39;, params=[${input.status}, ${input.orderId}])}&quot;</span></span>
+<span id="cb43-39"><a href="#cb43-39" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb43-40"><a href="#cb43-40" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">orderId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Order ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要更新的订单</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb43-41"><a href="#cb43-41" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 新状态</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
 <p>Tool 定义必须通过 <code>${input.&lt;argument&gt;}</code> 或
 <code>${TOOL.input.&lt;argument&gt;}</code> 读取 typed 参数；裸
 <code>input.*</code>／<code>TOOL.input.*</code> 会被拒绝。定义内不能读取
@@ -1479,75 +1518,75 @@ pure built-in。</p>
 typed query result</h5>
 <p>READ façade 可用于 <code>assign</code>、<code>assert</code>、render
 payload、log field、description 与普通调用参数：</p>
-<div class="sourceCode" id="cb42"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loadOrders</span><span class="kw">:</span></span>
-<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
-<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> customerOrders</span></span>
-<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a><span class="fu">  expression</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a>    #{orders.find(</span>
-<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a>        customerId=${CASE.customerId},</span>
-<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a>        status=&#39;OPEN&#39;</span>
-<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb42-9"><a href="#cb42-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb42-10"><a href="#cb42-10" aria-hidden="true" tabindex="-1"></a><span class="fu">checkOrders</span><span class="kw">:</span></span>
-<span id="cb42-11"><a href="#cb42-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assert</span></span>
-<span id="cb42-12"><a href="#cb42-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.VARS.customerOrders.rowCount} &gt; 0&quot;</span></span>
-<span id="cb42-13"><a href="#cb42-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">expected</span><span class="kw">:</span><span class="at"> 至少一个 OPEN order</span></span>
-<span id="cb42-14"><a href="#cb42-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">actual</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.VARS.customerOrders.rowCount}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb44"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loadOrders</span><span class="kw">:</span></span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> customerOrders</span></span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a><span class="fu">  expression</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a>    #{orders.find(</span>
+<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a>        customerId=${CASE.customerId},</span>
+<span id="cb44-7"><a href="#cb44-7" aria-hidden="true" tabindex="-1"></a>        status=&#39;OPEN&#39;</span>
+<span id="cb44-8"><a href="#cb44-8" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb44-9"><a href="#cb44-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb44-10"><a href="#cb44-10" aria-hidden="true" tabindex="-1"></a><span class="fu">checkOrders</span><span class="kw">:</span></span>
+<span id="cb44-11"><a href="#cb44-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assert</span></span>
+<span id="cb44-12"><a href="#cb44-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.VARS.customerOrders.rowCount} &gt; 0&quot;</span></span>
+<span id="cb44-13"><a href="#cb44-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">expected</span><span class="kw">:</span><span class="at"> 至少一个 OPEN order</span></span>
+<span id="cb44-14"><a href="#cb44-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">actual</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${CASE.VARS.customerOrders.rowCount}&quot;</span></span></code></pre></div>
 <p>精确调用直接返回与 <code>db.orders.query</code> 相同的 Java
 object，不经过文本序列化；后续可读取
 <code>${CASE.VARS.customerOrders.rows[0].STATUS}</code>。</p>
 <p>Scalar 也可直接放入断言：</p>
-<div class="sourceCode" id="cb43"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="fu">checkOrderCount</span><span class="kw">:</span></span>
-<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assert</span></span>
-<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{orders.count(customerId=${CASE.customerId})} &gt;= 1&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb45"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">checkOrderCount</span><span class="kw">:</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assert</span></span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{orders.count(customerId=${CASE.customerId})} &gt;= 1&quot;</span></span></code></pre></div>
 <p><code>scalar</code> 仍要求正好一行一列，否则是 ERROR。</p>
 <h5 id="场景tool-actionsaveas-与-update">场景：Tool Action、saveAs 与
 update</h5>
 <p>READ façade 可作为主要 Tool Action，并保存 typed result：</p>
-<div class="sourceCode" id="cb44"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">queryOrders</span><span class="kw">:</span></span>
-<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{orders.find(customerId=${CASE.customerId}, status=&#39;OPEN&#39;)}&quot;</span></span>
-<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span></span>
-<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> db/open-orders.json</span></span>
-<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb44-7"><a href="#cb44-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
+<div class="sourceCode" id="cb46"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="fu">queryOrders</span><span class="kw">:</span></span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{orders.find(customerId=${CASE.customerId}, status=&#39;OPEN&#39;)}&quot;</span></span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span></span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> db/open-orders.json</span></span>
+<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
 <p>Call-backed <code>saveAs</code> 与其它 Action 一样使用
 <code>path</code>、<code>format</code>、<code>overwrite</code>。<code>format</code>
 必填，可为 <code>text|json|yaml|xml</code>；因为没有 process
 stdout，<code>raw</code> 无效。Query/update object 建议用
 JSON/YAML/XML，scalar 才通常使用 text。</p>
 <p>WRITE façade 只能是 <code>type: tool</code> 的主要调用：</p>
-<div class="sourceCode" id="cb45"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">closeOrder</span><span class="kw">:</span></span>
-<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{orders.updateStatus(orderId=${CASE.orderId}, status=&#39;CLOSED&#39;)}&quot;</span></span>
-<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.affectedRows} == 1&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb47"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="fu">closeOrder</span><span class="kw">:</span></span>
+<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb47-3"><a href="#cb47-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{orders.updateStatus(orderId=${CASE.orderId}, status=&#39;CLOSED&#39;)}&quot;</span></span>
+<span id="cb47-4"><a href="#cb47-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.affectedRows} == 1&quot;</span></span></code></pre></div>
 <p>若把 update façade 放入
 <code>assign</code>、<code>assert</code>、payload、另一个 Tool 参数或
 SQL，validate 与 runtime 都会拒绝。DB 操作异常令 Action/Case 为
 ERROR，不是 FAIL。</p>
 <h5 id="场景包装-pure-built-in">场景：包装 pure built-in</h5>
-<div class="sourceCode" id="cb46"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">normalizeStatus</span><span class="kw">:</span></span>
-<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Normalize status</span></span>
-<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> trim 后转大写</span></span>
-<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(#{trim(${input.value})})}&quot;</span></span>
-<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">cache</span><span class="kw">:</span></span>
-<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span></span>
-<span id="cb46-8"><a href="#cb46-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb46-9"><a href="#cb46-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Value</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 状态文字</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb48"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">normalizeStatus</span><span class="kw">:</span></span>
+<span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Normalize status</span></span>
+<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> trim 后转大写</span></span>
+<span id="cb48-5"><a href="#cb48-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(#{trim(${input.value})})}&quot;</span></span>
+<span id="cb48-6"><a href="#cb48-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">cache</span><span class="kw">:</span></span>
+<span id="cb48-7"><a href="#cb48-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span></span>
+<span id="cb48-8"><a href="#cb48-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb48-9"><a href="#cb48-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Value</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 状态文字</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
 <p>调用方式为
 <code>#{normalizeStatus(value=${CASE.status})}</code>。Pure built-in
 façade 可用 Case cache，但不能用 DB cache。</p>
 <h5 id="cache-scope-与-stale-read-契约">Cache scope 与 stale-read
 契约</h5>
-<div class="sourceCode" id="cb47"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cache</span><span class="kw">:</span></span>
-<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span><span class="co">   # 或 db</span></span></code></pre></div>
+<div class="sourceCode" id="cb49"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cache</span><span class="kw">:</span></span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">scope</span><span class="kw">:</span><span class="at"> case</span><span class="co">   # 或 db</span></span></code></pre></div>
 <p>只缓存成功的 query、scalar 或 pure-built-in result；update 不能配置
 cache。Key 是「qualified Tool 名称 + typed input 的确定性表示」的
 SHA-256；named arguments 的书写顺序不会改变 key，不同 Java 类型则是不同
@@ -1687,8 +1726,8 @@ shell 类字符。Tool call 传入的 typed List 只会在完整 token
 </tbody>
 </table>
 <p>这份配置：</p>
-<div class="sourceCode" id="cb48"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;./tools/send.sh &#39;${requestFile}&#39; --label &#39;Payment regression&#39;&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb50"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;./tools/send.sh &#39;${requestFile}&#39; --label &#39;Payment regression&#39;&quot;</span></span></code></pre></div>
 <p>会产生这些逻辑参数：</p>
 <pre class="text"><code>./tools/send.sh
 &lt;request-file-value&gt;
@@ -1698,23 +1737,23 @@ Payment regression</code></pre>
 仍然是一个字面参数，<code>&gt;result</code>
 不会重定向输出。静态模板组模板文本中的引号只是文本内容的一部分，并不是解析后值的转义要求。</p>
 <p>更推荐等价写法为：</p>
-<div class="sourceCode" id="cb50"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/send.sh</span></span>
-<span id="cb50-3"><a href="#cb50-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${requestFile}&quot;</span></span>
-<span id="cb50-4"><a href="#cb50-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> --label</span></span>
-<span id="cb50-5"><a href="#cb50-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> Payment regression</span></span></code></pre></div>
+<div class="sourceCode" id="cb52"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/send.sh</span></span>
+<span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${requestFile}&quot;</span></span>
+<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> --label</span></span>
+<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> Payment regression</span></span></code></pre></div>
 <p>参数可以定义可选的原子 <code>argName</code>
 标记。其占位符决定插入位置，且在 <code>argName</code>
 非空时必须占据一个完整命令 token：</p>
-<div class="sourceCode" id="cb51"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/send.sh</span></span>
-<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${requestFile}&quot;</span></span>
-<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${reference}&quot;</span></span>
-<span id="cb51-5"><a href="#cb51-5" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb51-6"><a href="#cb51-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestFile</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Input file</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb51-7"><a href="#cb51-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">reference</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Reference</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Optional reference</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --reference</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb53"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/send.sh</span></span>
+<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${requestFile}&quot;</span></span>
+<span id="cb53-4"><a href="#cb53-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${reference}&quot;</span></span>
+<span id="cb53-5"><a href="#cb53-5" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb53-6"><a href="#cb53-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestFile</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Input file</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb53-7"><a href="#cb53-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">reference</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Reference</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Optional reference</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --reference</span><span class="kw">}</span></span></code></pre></div>
 <p>当 <code>reference='REF 123'</code> 时，逻辑 argv 的最后一部分为
 <code>--reference</code>、<code>REF 123</code>；该值仍是一个原子参数。如果可选值缺失或归一化为空白，则这两个
 token 都不会输出。省略 <code>argName</code> 或将
@@ -1734,12 +1773,12 @@ stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。</p>
 作用域。需要把运行时数据显式传递到动作调用中，然后再在命令中引用对应声明参数。这使全局工具保持独立，并使依赖可静态校验。</p>
 <h4 id="ssh-执行">SSH 执行</h4>
 <p>全局工具和每个工具组都可以在其自身根配置中定义一个执行目标：</p>
-<div class="sourceCode" id="cb52"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span><span class="kw">:</span></span>
-<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">host</span><span class="kw">:</span><span class="at"> tools.example.internal</span></span>
-<span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">user</span><span class="kw">:</span><span class="at"> att</span></span>
-<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">22</span></span>
-<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> /secure/keys/att_ed25519</span></span></code></pre></div>
+<div class="sourceCode" id="cb54"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span><span class="kw">:</span></span>
+<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">host</span><span class="kw">:</span><span class="at"> tools.example.internal</span></span>
+<span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">user</span><span class="kw">:</span><span class="at"> att</span></span>
+<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">22</span></span>
+<span id="cb54-5"><a href="#cb54-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> /secure/keys/att_ed25519</span></span></code></pre></div>
 <p>根 <code>ssh</code> 仅适用于内联全局工具；工具组仅使用其自身
 <code>ssh</code>，不会继承根配置。host/user 是必需的，port 默认为
 22，key 是可选的。密码字段不受支持。ATT 优先使用本地 OpenSSH，带
@@ -1803,11 +1842,11 @@ PASS，即使进程退出码非零。退出码仍保留在
 <p>所有配置的超时都是 1 到 3600000 毫秒的整数。</p>
 <p>retry 只属于 <code>type: tool</code>
 Action，不存在全局、Tool、Template、stage 或 sidecar 默认：</p>
-<div class="sourceCode" id="cb54"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">retry</span><span class="kw">:</span></span>
-<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxAttempts</span><span class="kw">:</span><span class="at"> </span><span class="dv">3</span></span>
-<span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">intervalMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">1000</span></span>
-<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">retryOn</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">ASSERTION</span><span class="kw">,</span><span class="at"> TIMEOUT</span><span class="kw">]</span></span></code></pre></div>
+<div class="sourceCode" id="cb56"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="fu">retry</span><span class="kw">:</span></span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxAttempts</span><span class="kw">:</span><span class="at"> </span><span class="dv">3</span></span>
+<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">intervalMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">1000</span></span>
+<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">retryOn</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">ASSERTION</span><span class="kw">,</span><span class="at"> TIMEOUT</span><span class="kw">]</span></span></code></pre></div>
 <p><code>maxAttempts</code> 包含首次 attempt，范围
 2–10；<code>intervalMs</code> 范围 0–3600000。<code>ASSERTION</code>
 要求同一 Tool Action 配置
@@ -1816,15 +1855,38 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb54-1"><a href=
 <code>${output.exitCode}</code> 证据，由 assert
 判断。配置、参数、I/O、解析、非 timeout DB 错误及 assertion
 求值错误均不重试。</p>
+<h4 id="调用后的-evidence-collector">调用后的 Evidence Collector</h4>
+<p>Tool Action 可声明以 collector ID 为 key 的 <code>evidence</code>
+map。每个 collector 必须有 <code>call</code>，并可配置独立
+<code>timeoutMs</code> 及 <code>onFailure: continue|stop</code>：</p>
+<div class="sourceCode" id="cb57"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="fu">invokeApi</span><span class="kw">:</span></span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${CASE.requestFile})}&quot;</span></span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">queueState</span><span class="kw">:</span></span>
+<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{readQueueState(queue=${CASE.queue})}&quot;</span></span>
+<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">3000</span></span>
+<span id="cb57-8"><a href="#cb57-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
+<span id="cb57-9"><a href="#cb57-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.status} == &#39;SUCCESS&#39;&quot;</span></span></code></pre></div>
+<p>ATT 先完成主要 Tool attempt，再按声明顺序运行
+collectors，最后求值主要 assertion。Collector 期间
+<code>${output.result}</code> 仍是主要结果；结果写入
+<code>output.attempts[n].evidence.&lt;collectorId&gt;</code>，不会替换主要结果。主要
+assertion retry 会重新执行主要 call 和所有
+collectors；<code>continue</code> 只记录 collector
+错误，<code>stop</code> 会让 Action ERROR 并跳过 assertion。Collector
+可调用 built-in、配置 Tool 或只读 call-backed Tool façade；直接 DB/MQ
+helper call 仍限于主要 Action。</p>
 <h3 id="运行测试">3.4 运行测试</h3>
 <h4 id="先校验">先校验</h4>
-<div class="sourceCode" id="cb55"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb58"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>包模式是默认模式，会检查全局配置、所有发现的工作簿/侧车、配置的
 sheets
 和行、所有模板（包括未被引用的模板）、表达式、工具、路径和包完整性。它不会调用外部工具，是发布前的必需门槛。</p>
-<div class="sourceCode" id="cb56"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--selected</span> <span class="at">--case</span> payment.payment.TC001</span></code></pre></div>
+<div class="sourceCode" id="cb59"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--selected</span> <span class="at">--case</span> payment.payment.TC001</span></code></pre></div>
 <p>选中模式只检查显式选中的 Case
 及其依赖闭包。它适合快速反馈，可报告未选中内容未被检查。<code>run</code>
 总是会对其不可变执行计划执行选中范围校验。</p>
@@ -1871,14 +1933,14 @@ ID。额外的
 无当前可发现 Case 匹配，都会导致命令错误。当前工作簿、侧车、testcase XML
 快照、模板和工具定义都会被校验和执行；ATT 不会重放旧 run 的输入。</p>
 <h4 id="执行">执行</h4>
-<div class="sourceCode" id="cb57"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span></span>
-<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--suite</span> testcase/payment.xlsx <span class="at">--tag</span> smoke</span>
-<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span> <span class="at">--case</span> payment.payment.TC001 <span class="at">--run-id</span> SIT-001</span>
-<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--rerun-failed</span></span>
-<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--rerun-failed</span> <span class="at">--tag</span> payment</span>
-<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span> <span class="at">--dry-run</span></span>
-<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--suite</span> testcase/payment.xlsx <span class="at">--update-snapshot</span></span></code></pre></div>
+<div class="sourceCode" id="cb60"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span></span>
+<span id="cb60-2"><a href="#cb60-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--suite</span> testcase/payment.xlsx <span class="at">--tag</span> smoke</span>
+<span id="cb60-3"><a href="#cb60-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span> <span class="at">--case</span> payment.payment.TC001 <span class="at">--run-id</span> SIT-001</span>
+<span id="cb60-4"><a href="#cb60-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--rerun-failed</span></span>
+<span id="cb60-5"><a href="#cb60-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--rerun-failed</span> <span class="at">--tag</span> payment</span>
+<span id="cb60-6"><a href="#cb60-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span> <span class="at">--dry-run</span></span>
+<span id="cb60-7"><a href="#cb60-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--suite</span> testcase/payment.xlsx <span class="at">--update-snapshot</span></span></code></pre></div>
 <p><code>--dry-run</code> 会校验/规划并把所选 Case 记录为
 SKIPPED，而不调用工具。<code>--fail-fast</code> 会在第一次 FAIL 或 ERROR
 后停止调度后续 Case。<code>--output-dir</code>
@@ -1893,12 +1955,10 @@ XML。快照符号链接会被拒绝。后续单文件 I/O
 stdout 为单个 JSON 文档；<code>--quiet</code> 会抑制它们。与
 <code>--dry-run</code> 组合时，仍然允许 XML
 更新，但测试用例工具保持禁用。</p>
-<p>默认人类可读 run 只打印最终结果计数和报告路径。<code>--quiet</code>
-会抑制正常输出。<code>--verbose</code> 会增加
-run/suite/Case/stage/action 生命周期进度，并把每个完整 Case
-日志块镜像到控制台，包括模板/工具输入、逻辑和执行
-argv、stdout、stderr、负载和动作证据。Verbose
-输出可能包含秘密或个人数据，因此只应在合适受保护的终端中启用。两个选项互斥。</p>
+<p>人类可读 <code>run</code> 默认显示 run/suite/Case/stage/action
+生命周期进度，并把每个完整 Case 日志块镜像到控制台，包括模板/工具输入、逻辑和执行
+argv、stdout、stderr、负载和动作证据。<code>--verbose</code> 仍然接受，但只是兼容性选项；<code>--quiet</code>
+会抑制这个默认输出，明确同时指定 <code>--verbose --quiet</code> 仍然无效。非 quiet 输出可能包含秘密或个人数据，只应在合适受保护的终端中使用。</p>
 <h4 id="结果与退出码">结果与退出码</h4>
 <table>
 <thead>
@@ -1981,89 +2041,89 @@ JSON 汇总：</p>
 <p>JUnit HTML 是与 JUnit XML
 相同已完成汇总的人类可读投影，不是第二次聚合。</p>
 <p>可从持久化 run 证据重新生成报告：</p>
-<div class="sourceCode" id="cb59"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> report <span class="at">--run-id</span> SIT-001</span></code></pre></div>
+<div class="sourceCode" id="cb62"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb62-1"><a href="#cb62-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> report <span class="at">--run-id</span> SIT-001</span></code></pre></div>
 <h2 id="cookbook">04 Cookbook</h2>
 <p>本章从你想要完成的任务出发，展示对应的 ATT 模式。</p>
 <h3
 id="在失败后执行回滚并每次都清理">在失败后执行回滚，并每次都清理</h3>
-<div class="sourceCode" id="cb60"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a><span class="fu">stages</span><span class="kw">:</span></span>
-<span id="cb60-2"><a href="#cb60-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">key</span><span class="kw">:</span><span class="at"> invoke</span><span class="kw">,</span><span class="at"> </span><span class="fu">template</span><span class="kw">:</span><span class="at"> 執行模板</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb60-3"><a href="#cb60-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">key</span><span class="kw">:</span><span class="at"> rollback</span><span class="kw">,</span><span class="at"> </span><span class="fu">template</span><span class="kw">:</span><span class="at"> 回滾模板</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">runWhen</span><span class="kw">:</span><span class="at"> onFailure</span><span class="kw">,</span><span class="at"> </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span><span class="kw">}</span></span>
-<span id="cb60-4"><a href="#cb60-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">key</span><span class="kw">:</span><span class="at"> cleanup</span><span class="kw">,</span><span class="at"> </span><span class="fu">template</span><span class="kw">:</span><span class="at"> 清理模板</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">runWhen</span><span class="kw">:</span><span class="at"> always</span><span class="kw">,</span><span class="at"> </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb63"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="fu">stages</span><span class="kw">:</span></span>
+<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">key</span><span class="kw">:</span><span class="at"> invoke</span><span class="kw">,</span><span class="at"> </span><span class="fu">template</span><span class="kw">:</span><span class="at"> 執行模板</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">key</span><span class="kw">:</span><span class="at"> rollback</span><span class="kw">,</span><span class="at"> </span><span class="fu">template</span><span class="kw">:</span><span class="at"> 回滾模板</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">runWhen</span><span class="kw">:</span><span class="at"> onFailure</span><span class="kw">,</span><span class="at"> </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span><span class="kw">}</span></span>
+<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">key</span><span class="kw">:</span><span class="at"> cleanup</span><span class="kw">,</span><span class="at"> </span><span class="fu">template</span><span class="kw">:</span><span class="at"> 清理模板</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">runWhen</span><span class="kw">:</span><span class="at"> always</span><span class="kw">,</span><span class="at"> </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span><span class="kw">}</span></span></code></pre></div>
 <p>回滚只在先前失败后运行。清理无论先前结果如何都会运行。回滚或清理失败仍会保留在最终聚合中。</p>
 <h3 id="覆盖结果工作簿列标签">覆盖结果工作簿列标签</h3>
-<div class="sourceCode" id="cb61"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span></span>
-<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> 測試結果</span></span>
-<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">durationMs</span><span class="kw">:</span><span class="at"> 耗時毫秒</span></span>
-<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">expectedResult</span><span class="kw">:</span><span class="at"> 預期結果</span></span>
-<span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">actualResult</span><span class="kw">:</span><span class="at"> 實際結果</span></span>
-<span id="cb61-7"><a href="#cb61-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">caseLog</span><span class="kw">:</span><span class="at"> 案例日誌</span></span>
-<span id="cb61-8"><a href="#cb61-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">reportLink</span><span class="kw">:</span><span class="at"> 詳細報告</span></span>
-<span id="cb61-9"><a href="#cb61-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">runTime</span><span class="kw">:</span><span class="at"> 執行時間</span></span></code></pre></div>
+<div class="sourceCode" id="cb64"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span></span>
+<span id="cb64-3"><a href="#cb64-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> 測試結果</span></span>
+<span id="cb64-4"><a href="#cb64-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">durationMs</span><span class="kw">:</span><span class="at"> 耗時毫秒</span></span>
+<span id="cb64-5"><a href="#cb64-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">expectedResult</span><span class="kw">:</span><span class="at"> 預期結果</span></span>
+<span id="cb64-6"><a href="#cb64-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">actualResult</span><span class="kw">:</span><span class="at"> 實際結果</span></span>
+<span id="cb64-7"><a href="#cb64-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">caseLog</span><span class="kw">:</span><span class="at"> 案例日誌</span></span>
+<span id="cb64-8"><a href="#cb64-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">reportLink</span><span class="kw">:</span><span class="at"> 詳細報告</span></span>
+<span id="cb64-9"><a href="#cb64-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">runTime</span><span class="kw">:</span><span class="at"> 執行時間</span></span></code></pre></div>
 <p>这只会修改复制出来的工作簿标签，不会重命名 Context 键、HTML 字段或 CI
 schema 属性。</p>
 <h3 id="解析-json-工具输出">解析 JSON 工具输出</h3>
 <p>配置 <code>output: json</code> 后，使用普通 map/list 导航即可：</p>
-<div class="sourceCode" id="cb62"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb62-1"><a href="#cb62-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assertStatus</span><span class="kw">:</span></span>
-<span id="cb62-2"><a href="#cb62-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assert</span></span>
-<span id="cb62-3"><a href="#cb62-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">description</span><span class="kw">:</span><span class="at"> API status is successful</span></span>
-<span id="cb62-4"><a href="#cb62-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ACTIONS.callApi.output.result.status} == &#39;SUCCESS&#39;&quot;</span></span>
-<span id="cb62-5"><a href="#cb62-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">expected</span><span class="kw">:</span><span class="at"> SUCCESS</span></span>
-<span id="cb62-6"><a href="#cb62-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">actual</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ACTIONS.callApi.output.result.status}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb65"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assertStatus</span><span class="kw">:</span></span>
+<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assert</span></span>
+<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">description</span><span class="kw">:</span><span class="at"> API status is successful</span></span>
+<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ACTIONS.callApi.output.result.status} == &#39;SUCCESS&#39;&quot;</span></span>
+<span id="cb65-5"><a href="#cb65-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">expected</span><span class="kw">:</span><span class="at"> SUCCESS</span></span>
+<span id="cb65-6"><a href="#cb65-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">actual</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ACTIONS.callApi.output.result.status}&quot;</span></span></code></pre></div>
 <p>JSON 重复对象键、格式错误，或声明为 JSON
 但无法解析的输出，都会在进程退出码为 0 时仍然报 ERROR。</p>
 <h3 id="访问-xml-属性文本和重复元素">访问 XML 属性、文本和重复元素</h3>
 <p>ATT 会把 XML 转换为稳定的 map/list 树：</p>
-<div class="sourceCode" id="cb63"><pre
-class="sourceCode xml"><code class="sourceCode xml"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a>&lt;<span class="kw">Response</span><span class="ot"> requestId=</span><span class="st">&quot;R-100&quot;</span>&gt;</span>
-<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a>  &lt;<span class="kw">Status</span><span class="ot"> code=</span><span class="st">&quot;00&quot;</span>&gt;SUCCESS&lt;/<span class="kw">Status</span>&gt;</span>
-<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a>  &lt;<span class="kw">Messages</span>&gt;</span>
-<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a>    &lt;<span class="kw">Message</span><span class="ot"> severity=</span><span class="st">&quot;INFO&quot;</span>&gt;accepted&lt;/<span class="kw">Message</span>&gt;</span>
-<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a>    &lt;<span class="kw">Message</span><span class="ot"> severity=</span><span class="st">&quot;WARN&quot;</span>&gt;review later&lt;/<span class="kw">Message</span>&gt;</span>
-<span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a>  &lt;/<span class="kw">Messages</span>&gt;</span>
-<span id="cb63-7"><a href="#cb63-7" aria-hidden="true" tabindex="-1"></a>&lt;/<span class="kw">Response</span>&gt;</span></code></pre></div>
-<div class="sourceCode" id="cb64"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Response</span></span>
-<span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a><span class="fu">attributes</span><span class="kw">:</span></span>
-<span id="cb64-3"><a href="#cb64-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestId</span><span class="kw">:</span><span class="at"> R-100</span></span>
-<span id="cb64-4"><a href="#cb64-4" aria-hidden="true" tabindex="-1"></a><span class="fu">Status</span><span class="kw">:</span></span>
-<span id="cb64-5"><a href="#cb64-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">attributes</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">code</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;00&quot;</span><span class="kw">}</span></span>
-<span id="cb64-6"><a href="#cb64-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">text</span><span class="kw">:</span><span class="at"> SUCCESS</span></span>
-<span id="cb64-7"><a href="#cb64-7" aria-hidden="true" tabindex="-1"></a><span class="fu">Messages</span><span class="kw">:</span></span>
-<span id="cb64-8"><a href="#cb64-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">Message</span><span class="kw">:</span></span>
-<span id="cb64-9"><a href="#cb64-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> </span><span class="fu">attributes</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">severity</span><span class="kw">:</span><span class="at"> INFO</span><span class="kw">}</span></span>
-<span id="cb64-10"><a href="#cb64-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">text</span><span class="kw">:</span><span class="at"> accepted</span></span>
-<span id="cb64-11"><a href="#cb64-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> </span><span class="fu">attributes</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">severity</span><span class="kw">:</span><span class="at"> WARN</span><span class="kw">}</span></span>
-<span id="cb64-12"><a href="#cb64-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">text</span><span class="kw">:</span><span class="at"> review later</span></span></code></pre></div>
+<div class="sourceCode" id="cb66"><pre
+class="sourceCode xml"><code class="sourceCode xml"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a>&lt;<span class="kw">Response</span><span class="ot"> requestId=</span><span class="st">&quot;R-100&quot;</span>&gt;</span>
+<span id="cb66-2"><a href="#cb66-2" aria-hidden="true" tabindex="-1"></a>  &lt;<span class="kw">Status</span><span class="ot"> code=</span><span class="st">&quot;00&quot;</span>&gt;SUCCESS&lt;/<span class="kw">Status</span>&gt;</span>
+<span id="cb66-3"><a href="#cb66-3" aria-hidden="true" tabindex="-1"></a>  &lt;<span class="kw">Messages</span>&gt;</span>
+<span id="cb66-4"><a href="#cb66-4" aria-hidden="true" tabindex="-1"></a>    &lt;<span class="kw">Message</span><span class="ot"> severity=</span><span class="st">&quot;INFO&quot;</span>&gt;accepted&lt;/<span class="kw">Message</span>&gt;</span>
+<span id="cb66-5"><a href="#cb66-5" aria-hidden="true" tabindex="-1"></a>    &lt;<span class="kw">Message</span><span class="ot"> severity=</span><span class="st">&quot;WARN&quot;</span>&gt;review later&lt;/<span class="kw">Message</span>&gt;</span>
+<span id="cb66-6"><a href="#cb66-6" aria-hidden="true" tabindex="-1"></a>  &lt;/<span class="kw">Messages</span>&gt;</span>
+<span id="cb66-7"><a href="#cb66-7" aria-hidden="true" tabindex="-1"></a>&lt;/<span class="kw">Response</span>&gt;</span></code></pre></div>
+<div class="sourceCode" id="cb67"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Response</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="fu">attributes</span><span class="kw">:</span></span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestId</span><span class="kw">:</span><span class="at"> R-100</span></span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a><span class="fu">Status</span><span class="kw">:</span></span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">attributes</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">code</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;00&quot;</span><span class="kw">}</span></span>
+<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">text</span><span class="kw">:</span><span class="at"> SUCCESS</span></span>
+<span id="cb67-7"><a href="#cb67-7" aria-hidden="true" tabindex="-1"></a><span class="fu">Messages</span><span class="kw">:</span></span>
+<span id="cb67-8"><a href="#cb67-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">Message</span><span class="kw">:</span></span>
+<span id="cb67-9"><a href="#cb67-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> </span><span class="fu">attributes</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">severity</span><span class="kw">:</span><span class="at"> INFO</span><span class="kw">}</span></span>
+<span id="cb67-10"><a href="#cb67-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">text</span><span class="kw">:</span><span class="at"> accepted</span></span>
+<span id="cb67-11"><a href="#cb67-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> </span><span class="fu">attributes</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">severity</span><span class="kw">:</span><span class="at"> WARN</span><span class="kw">}</span></span>
+<span id="cb67-12"><a href="#cb67-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">text</span><span class="kw">:</span><span class="at"> review later</span></span></code></pre></div>
 <p>只有重复兄弟节点才会变成数组，因此索引只对重复节点有意义。</p>
 <h3 id="把列表作为单独进程参数传递">把列表作为单独进程参数传递</h3>
 <p>V2.6 调用直接传入 typed YAML
 array。下面示例在没有分隔符配置的情况下展示两种
 <code>argNameMode</code>：</p>
-<div class="sourceCode" id="cb65"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">grepFromAppLogs</span><span class="kw">:</span></span>
-<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Grep application logs</span></span>
-<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Search one or more keywords and log levels</span></span>
-<span id="cb65-5"><a href="#cb65-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb65-6"><a href="#cb65-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/grep_from_app_logs.sh</span></span>
-<span id="cb65-7"><a href="#cb65-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${logFile}&quot;</span></span>
-<span id="cb65-8"><a href="#cb65-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${keywords}&quot;</span></span>
-<span id="cb65-9"><a href="#cb65-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${levels}&quot;</span></span>
-<span id="cb65-10"><a href="#cb65-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
-<span id="cb65-11"><a href="#cb65-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb65-12"><a href="#cb65-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">logFile</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Log File</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Source log</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
-<span id="cb65-13"><a href="#cb65-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">keywords</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Keywords</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Ordered keyword array</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">,</span><span class="at"> </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --keyword</span><span class="kw">,</span><span class="at"> </span><span class="fu">argNameMode</span><span class="kw">:</span><span class="at"> repeat</span><span class="kw">}</span></span>
-<span id="cb65-14"><a href="#cb65-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">levels</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Levels</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Ordered level array</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --levels</span><span class="kw">,</span><span class="at"> </span><span class="fu">argNameMode</span><span class="kw">:</span><span class="at"> once</span><span class="kw">}</span></span></code></pre></div>
-<div class="sourceCode" id="cb66"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a><span class="fu">grepLogs</span><span class="kw">:</span></span>
-<span id="cb66-2"><a href="#cb66-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb66-3"><a href="#cb66-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords=[&#39;PAYMENT&#39;, &#39;POSTED&#39;], levels=[&#39;ERROR&#39;, &#39;WARN&#39;])}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb68"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">grepFromAppLogs</span><span class="kw">:</span></span>
+<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Grep application logs</span></span>
+<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Search one or more keywords and log levels</span></span>
+<span id="cb68-5"><a href="#cb68-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb68-6"><a href="#cb68-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/grep_from_app_logs.sh</span></span>
+<span id="cb68-7"><a href="#cb68-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${logFile}&quot;</span></span>
+<span id="cb68-8"><a href="#cb68-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${keywords}&quot;</span></span>
+<span id="cb68-9"><a href="#cb68-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${levels}&quot;</span></span>
+<span id="cb68-10"><a href="#cb68-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
+<span id="cb68-11"><a href="#cb68-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb68-12"><a href="#cb68-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">logFile</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Log File</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Source log</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
+<span id="cb68-13"><a href="#cb68-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">keywords</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Keywords</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Ordered keyword array</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">,</span><span class="at"> </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --keyword</span><span class="kw">,</span><span class="at"> </span><span class="fu">argNameMode</span><span class="kw">:</span><span class="at"> repeat</span><span class="kw">}</span></span>
+<span id="cb68-14"><a href="#cb68-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">levels</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Levels</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Ordered level array</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">,</span><span class="at"> </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --levels</span><span class="kw">,</span><span class="at"> </span><span class="fu">argNameMode</span><span class="kw">:</span><span class="at"> once</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb69"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">grepLogs</span><span class="kw">:</span></span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords=[&#39;PAYMENT&#39;, &#39;POSTED&#39;], levels=[&#39;ERROR&#39;, &#39;WARN&#39;])}&quot;</span></span></code></pre></div>
 <p>结果尾部逻辑 argv 为
 <code>--keyword</code>、<code>PAYMENT</code>、<code>--keyword</code>、<code>POSTED</code>、<code>--levels</code>、<code>ERROR</code>、<code>WARN</code>。<code>repeat</code>
 会对每个关键词重复 <code>--keyword</code>；<code>once</code>
@@ -2076,16 +2136,16 @@ typed List 都在各自的完整命令占位符位置独立扩展。V2.6 schema 
 <h3 id="重试-assertion-轮询或-timeout">重试 assertion 轮询或
 timeout</h3>
 <p>重试属于 tool 动作，而不是工作流或任意 stage：</p>
-<div class="sourceCode" id="cb67"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callApi</span><span class="kw">:</span></span>
-<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span></span>
-<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
-<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.status} == &#39;COMPLETED&#39;&quot;</span></span>
-<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">retry</span><span class="kw">:</span></span>
-<span id="cb67-7"><a href="#cb67-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxAttempts</span><span class="kw">:</span><span class="at"> </span><span class="dv">3</span></span>
-<span id="cb67-8"><a href="#cb67-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">intervalMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">1000</span></span>
-<span id="cb67-9"><a href="#cb67-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">retryOn</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">ASSERTION</span><span class="kw">,</span><span class="at"> TIMEOUT</span><span class="kw">]</span></span></code></pre></div>
+<div class="sourceCode" id="cb70"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callApi</span><span class="kw">:</span></span>
+<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span></span>
+<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
+<span id="cb70-5"><a href="#cb70-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.status} == &#39;COMPLETED&#39;&quot;</span></span>
+<span id="cb70-6"><a href="#cb70-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">retry</span><span class="kw">:</span></span>
+<span id="cb70-7"><a href="#cb70-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxAttempts</span><span class="kw">:</span><span class="at"> </span><span class="dv">3</span></span>
+<span id="cb70-8"><a href="#cb70-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">intervalMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">1000</span></span>
+<span id="cb70-9"><a href="#cb70-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">retryOn</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">ASSERTION</span><span class="kw">,</span><span class="at"> TIMEOUT</span><span class="kw">]</span></span></code></pre></div>
 <p><code>maxAttempts</code> 包含第一次尝试。ATT
 每次取得正常结果后立即执行 Tool Action assertion；<code>ASSERTION</code>
 重试 false，<code>TIMEOUT</code> 则独立允许超时重试。已移除的
@@ -2183,14 +2243,18 @@ ERROR。只有安全可重复的操作才应使用重试。</p>
 <td>输出版本</td>
 </tr>
 <tr class="odd">
+<td><code>./att.sh snapshot</code></td>
+<td>未指定 selector 时递归生成 <code>testcase.root</code> 下所有快照；等同于 <code>--all</code></td>
+</tr>
+<tr class="even">
 <td><code>./att.sh snapshot --suite &lt;xlsx&gt;</code></td>
 <td>生成一个同名 XML 快照</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh snapshot --all</code></td>
 <td>递归生成 <code>testcase.root</code> 下所有快照</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh snapshot --suite-dir &lt;dir&gt;</code></td>
 <td>在某目录下递归生成快照</td>
 </tr>
@@ -2264,11 +2328,11 @@ ERROR。只有安全可重复的操作才应使用重试。</p>
 </tr>
 <tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --quiet</code></td>
-<td>抑制正常完成输出</td>
+<td>抑制默认生命周期和完整 Case 日志输出</td>
 </tr>
 <tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --verbose</code></td>
-<td>显示生命周期进度并镜像完整 Case 日志</td>
+<td>明确保留默认生命周期进度和完整 Case 日志镜像；为兼容性保留</td>
 </tr>
 <tr class="odd">
 <td><code>./att.sh report --run-id &lt;id&gt;</code></td>
@@ -2348,21 +2412,27 @@ href="../schemas/"><code>schemas/</code></a>
 evidence policy</td>
 </tr>
 <tr class="odd">
+<td>MQ helper</td>
+<td><code>mqhelpers</code> 引用的独立 YAML</td>
+<td>一个 IBM MQ TCP client 实例的队列管理器、连接、消息及 request/reply
+默认值</td>
+</tr>
+<tr class="even">
 <td>工具组</td>
 <td>配置的 YAML 路径</td>
 <td>组身份、可选 script/SSH、分组工具</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>工作簿</td>
 <td><code>&lt;workbook&gt;.yaml</code></td>
 <td>Excel 映射、阶段、工作簿标签</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>模板</td>
 <td><code>template.yaml</code></td>
 <td>模板身份和有序动作</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>CLI</td>
 <td>命令选项</td>
 <td>选择、Run ID、输出覆盖、展示、CI 格式</td>
@@ -2382,24 +2452,25 @@ group、sidecar 与 template 分别为
 schema 保持有限 read compatibility，但旧 <code>EXIT_CODE</code> retry 与
 sidecar timeout 必须迁移。</p>
 <h3 id="全局配置">全局配置</h3>
-<div class="sourceCode" id="cb68"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
-<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="fu">outputDirectory</span><span class="kw">:</span><span class="at"> output</span></span>
-<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
-<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
-<span id="cb68-5"><a href="#cb68-5" aria-hidden="true" tabindex="-1"></a><span class="fu">caseLog</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">yamlAnchors</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
-<span id="cb68-6"><a href="#cb68-6" aria-hidden="true" tabindex="-1"></a><span class="fu">testcase</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> testcase</span><span class="kw">}</span></span>
-<span id="cb68-7"><a href="#cb68-7" aria-hidden="true" tabindex="-1"></a><span class="fu">templates</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> templates</span><span class="kw">}</span></span>
-<span id="cb68-8"><a href="#cb68-8" aria-hidden="true" tabindex="-1"></a><span class="fu">run</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">default</span><span class="kw">:</span><span class="at"> timestamp</span><span class="kw">,</span><span class="at"> </span><span class="fu">timestampFormat</span><span class="kw">:</span><span class="at"> yyyyMMdd-HHmmss</span><span class="kw">}}</span></span>
-<span id="cb68-9"><a href="#cb68-9" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb68-10"><a href="#cb68-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> append-to-copy</span></span>
-<span id="cb68-11"><a href="#cb68-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span>
-<span id="cb68-12"><a href="#cb68-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
-<span id="cb68-13"><a href="#cb68-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">junit</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogEmbedThresholdBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10240</span><span class="kw">}</span></span>
-<span id="cb68-14"><a href="#cb68-14" aria-hidden="true" tabindex="-1"></a><span class="fu">xml</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">namespaceMode</span><span class="kw">:</span><span class="at"> ignore</span><span class="kw">}</span></span>
-<span id="cb68-15"><a href="#cb68-15" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/tools/database.yaml</span><span class="kw">]</span></span>
-<span id="cb68-16"><a href="#cb68-16" aria-hidden="true" tabindex="-1"></a><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb68-17"><a href="#cb68-17" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span></code></pre></div>
+<div class="sourceCode" id="cb71"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="fu">outputDirectory</span><span class="kw">:</span><span class="at"> output</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a><span class="fu">caseLog</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">yamlAnchors</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
+<span id="cb71-6"><a href="#cb71-6" aria-hidden="true" tabindex="-1"></a><span class="fu">testcase</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> testcase</span><span class="kw">}</span></span>
+<span id="cb71-7"><a href="#cb71-7" aria-hidden="true" tabindex="-1"></a><span class="fu">templates</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> templates</span><span class="kw">}</span></span>
+<span id="cb71-8"><a href="#cb71-8" aria-hidden="true" tabindex="-1"></a><span class="fu">run</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">default</span><span class="kw">:</span><span class="at"> timestamp</span><span class="kw">,</span><span class="at"> </span><span class="fu">timestampFormat</span><span class="kw">:</span><span class="at"> yyyyMMdd-HHmmss</span><span class="kw">}}</span></span>
+<span id="cb71-9"><a href="#cb71-9" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb71-10"><a href="#cb71-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> append-to-copy</span></span>
+<span id="cb71-11"><a href="#cb71-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span>
+<span id="cb71-12"><a href="#cb71-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
+<span id="cb71-13"><a href="#cb71-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">junit</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogEmbedThresholdBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10240</span><span class="kw">}</span></span>
+<span id="cb71-14"><a href="#cb71-14" aria-hidden="true" tabindex="-1"></a><span class="fu">xml</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">namespaceMode</span><span class="kw">:</span><span class="at"> ignore</span><span class="kw">}</span></span>
+<span id="cb71-15"><a href="#cb71-15" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/tools/database.yaml</span><span class="kw">]</span></span>
+<span id="cb71-16"><a href="#cb71-16" aria-hidden="true" tabindex="-1"></a><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb71-17"><a href="#cb71-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb71-18"><a href="#cb71-18" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span></code></pre></div>
 <table>
 <colgroup>
 <col style="width: 33%" />
@@ -2498,11 +2569,17 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href=
 路径；每个文件声明一个实例</td>
 </tr>
 <tr class="odd">
+<td><code>mqhelpers</code></td>
+<td><code>[]</code></td>
+<td>唯一、安全、包相对的 <code>att-mqhelper/v1.0</code> YAML
+路径；每个文件声明一个实例</td>
+</tr>
+<tr class="even">
 <td><code>ssh</code></td>
 <td>absent</td>
 <td>内联全局工具的可选 SSH 目标</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>tools</code></td>
 <td><code>{}</code></td>
 <td>可复用工具契约映射</td>
@@ -2690,8 +2767,9 @@ saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry<
 <tr class="even">
 <td>tool</td>
 <td>需要 <code>call</code>；可选 object
-<code>saveAs</code>、<code>assert</code>、<code>expected</code>、<code>actual</code>、<code>timeoutMs</code>
-与 Action-only <code>retry</code>；command/call-backed 共用契约</td>
+<code>saveAs</code>、<code>assert</code>、<code>expected</code>、<code>actual</code>、<code>timeoutMs</code>、Action-only
+<code>retry</code> 与 <code>evidence</code>；command/call-backed
+共用契约</td>
 </tr>
 <tr class="odd">
 <td>db</td>
@@ -2745,11 +2823,11 @@ render/tool/assert-action-only 字段、timeout 或 retry</td>
 内每个变量名必须唯一。重复声明会导致校验失败。</p>
 <h4 id="action-saveas">Action <code>saveAs</code></h4>
 <p>V2.6 的 Tool 与 DB Action 共用一个 object shape：</p>
-<div class="sourceCode" id="cb69"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span></span>
-<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> relative/path/result.yaml</span></span>
-<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span>
-<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span></span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> relative/path/result.yaml</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
 <p><code>path</code> 必填，<code>overwrite</code> 默认
 false。<code>format</code> 只控制写入表示，不改变
 <code>${output.result}</code> 的 typed
@@ -2858,31 +2936,35 @@ boolean <code>required</code>。Command-backed 参数可使用 argv
 <code>saveAs.path</code> 目标必须保持在 Case artifact 目录下。ATT
 会规范化并检查根包含性。</p>
 <h3 id="validation-json-合约">Validation JSON 合约</h3>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode json"><code class="sourceCode json"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.3.0&quot;</span><span class="fu">,</span></span>
-<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
-<span id="cb70-5"><a href="#cb70-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
-<span id="cb70-6"><a href="#cb70-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
-<span id="cb70-7"><a href="#cb70-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
-<span id="cb70-8"><a href="#cb70-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
-<span id="cb70-9"><a href="#cb70-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
-<span id="cb70-10"><a href="#cb70-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
-<span id="cb70-11"><a href="#cb70-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
-<span id="cb70-12"><a href="#cb70-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
-<span id="cb70-13"><a href="#cb70-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb70-14"><a href="#cb70-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb70-15"><a href="#cb70-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb70-16"><a href="#cb70-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
-<span id="cb70-17"><a href="#cb70-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
-<span id="cb70-18"><a href="#cb70-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
-<span id="cb70-19"><a href="#cb70-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
-<span id="cb70-20"><a href="#cb70-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.4.0&quot;</span><span class="fu">,</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
+<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
+<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
+<span id="cb73-11"><a href="#cb73-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
+<span id="cb73-12"><a href="#cb73-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
+<span id="cb73-13"><a href="#cb73-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb73-14"><a href="#cb73-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb73-15"><a href="#cb73-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb73-16"><a href="#cb73-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
+<span id="cb73-17"><a href="#cb73-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
+<span id="cb73-18"><a href="#cb73-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
+<span id="cb73-19"><a href="#cb73-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
+<span id="cb73-20"><a href="#cb73-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
 <p>每个诊断都包含
 <code>code</code>、<code>severity</code>、<code>message</code>、<code>file</code>、<code>field</code>、<code>sheet</code>、<code>row</code>、<code>column</code>、<code>template</code>、<code>action</code>
-和 <code>suggestion</code>。不适用的字段为
-<code>null</code>。代码稳定；自动化不能解析人类消息。</p>
+和 <code>suggestion</code>。不适用的字段为 <code>null</code>。当 package
+和 case 验证发现同一个根本错误时，ATT 输出一条诊断，并在适用时附带
+<code>occurrences</code> 和
+<code>affectedCases</code>；<code>summary.errors</code>
+统计唯一诊断，<code>summary.errorOccurrences</code>
+保留原始出现次数。代码稳定；自动化不能解析人类消息。</p>
 <p>ATT 3.3.0 可另外提供
 <code>summary</code>、<code>detail</code>、<code>source</code>、<code>context</code>
 和 <code>schemaViolations</code>。<code>source</code> 中的
@@ -2893,7 +2975,9 @@ class="sourceCode json"><code class="sourceCode json"><span id="cb70-1"><a href=
 YAML 字符串若无法精确映射，则报告整个 scalar 范围。每项 Schema
 错误保留自己的路径、关键字、消息及物理位置。<code>context</code> 可包含
 Case、Stage、Flow ID
-和嵌套调用链。可能含有凭据或敏感值的字段及整行不会显示原文摘要。</p>
+和嵌套调用链。表达式语法详情在安全时会指出所在工具调用参数（例如
+<code>logFiles</code>）、意外 token 及带 caret
+的有限邻近片段；可能含有凭据或敏感值的字段及整行不会显示原文摘要。</p>
 <p>运行时 Action 错误的结构化诊断会传入 Case
 YAML、<code>run.yaml</code>、重新生成的报表、CI JSON 和 JUnit
 错误详情。嵌套 Flow 错误会指出内部 <code>flow.yaml</code> 及
@@ -2933,7 +3017,7 @@ Action，调用链说明 Template 如何到达该位置。Tool 与 DB evidence
 </table>
 <h2 id="表达式参考">07 表达式参考</h2>
 <h3 id="统一表达式引擎">统一表达式引擎</h3>
-<p>V3.3 使用一个表达式引擎，但保留两种刻意分开的角色：</p>
+<p>V3.4 使用一个表达式引擎，但保留两种刻意分开的角色：</p>
 <ul>
 <li><code>${path}</code> 读取一个 Context 值并插入周围文字，例如
 <code>Reference=${CASE.VARS.SrcRefNo}</code>。</li>
@@ -2943,14 +3027,18 @@ operator、算术、比较、<code>like</code>、<code>in</code>、null
 判断与布尔逻辑。</li>
 </ul>
 <p>Context 引用在 block 内仍必须明确使用 <code>${...}</code>；应写
-<code>${CASE.amount}</code>，不可写裸 <code>CASE.amount</code>。精确
+<code>${CASE.amount}</code>，不可写裸 <code>CASE.amount</code>。可在整条引用路径末尾加
+<code>?</code>，例如 <code>${CASE.response.body.missing?}</code>。只要任一 map、list、root-owned
+Context 值或中间 segment 不存在，结果就是真正的 <code>null</code>；路径存在但最后值本身为
+<code>null</code> 时也保持 <code>null</code>。<code>${path}</code> 仍然 strict。Optional lookup
+不会抑制歧义、错误语法或在 scalar 上索引等 invalid traversal，因此这些 authoring 错误仍会失败。精确
 block 保留 Java 结果类型；嵌入周围文字的 block 才会转换为文字。</p>
-<div class="sourceCode" id="cb71"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a>  #{(${CASE.amount} * ${CASE.rate}) &gt;= 100</span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a>    and ${CASE.status} in [&#39;PENDING&#39;, &#39;POSTED&#39;]}</span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Reference length: #{length(${CASE.VARS.SrcRefNo})}&quot;</span></span>
-<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a><span class="fu">expression</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{${ACTIONS.query.output.result.rowCount} + 1}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb74"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a>  #{(${CASE.amount} * ${CASE.rate}) &gt;= 100</span>
+<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a>    and ${CASE.status} in [&#39;PENDING&#39;, &#39;POSTED&#39;]}</span>
+<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Reference length: #{length(${CASE.VARS.SrcRefNo})}&quot;</span></span>
+<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a><span class="fu">expression</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{${ACTIONS.query.output.result.rowCount} + 1}&quot;</span></span></code></pre></div>
 <p>运算优先级由高至低：</p>
 <ol type="1">
 <li>括号、literal、<code>${...}</code>、list 和调用；</li>
@@ -3119,16 +3207,16 @@ id="config.report.filenamepattern"><code>config.report.fileNamePattern</code></h
 <p>配置字符串必须显式引用
 <code>${suiteName}</code>，无论它用于文本插值还是内建函数参数。call
 内的裸 <code>suiteName</code> 会被拒绝。合法示例包括：</p>
-<div class="sourceCode" id="cb73"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb76"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
 <p>以及：</p>
-<div class="sourceCode" id="cb74"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
-<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
-<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
-<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
-<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb77"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
+<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
+<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
 <p>但不支持如
 <code>${runId}</code>、<code>${workbookId}</code>、<code>${environment}</code>、<code>${CASE.caseId}</code>
 等运行时值引用。</p>
@@ -3160,25 +3248,25 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href=
 </tbody>
 </table>
 <p>例如：</p>
-<div class="sourceCode" id="cb75"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
-<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
-<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a rendered payment request</span></span>
-<span id="cb75-5"><a href="#cb75-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb75-6"><a href="#cb75-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
-<span id="cb75-7"><a href="#cb75-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${requestFile}&quot;</span></span>
-<span id="cb75-8"><a href="#cb75-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${environment}&quot;</span></span>
-<span id="cb75-9"><a href="#cb75-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb75-10"><a href="#cb75-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb75-11"><a href="#cb75-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span></span>
-<span id="cb75-12"><a href="#cb75-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
-<span id="cb75-13"><a href="#cb75-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
-<span id="cb75-14"><a href="#cb75-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb75-15"><a href="#cb75-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">environment</span><span class="kw">:</span></span>
-<span id="cb75-16"><a href="#cb75-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Environment</span></span>
-<span id="cb75-17"><a href="#cb75-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Target environment</span></span>
-<span id="cb75-18"><a href="#cb75-18" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb78"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
+<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
+<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a rendered payment request</span></span>
+<span id="cb78-5"><a href="#cb78-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb78-6"><a href="#cb78-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
+<span id="cb78-7"><a href="#cb78-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${requestFile}&quot;</span></span>
+<span id="cb78-8"><a href="#cb78-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${environment}&quot;</span></span>
+<span id="cb78-9"><a href="#cb78-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb78-10"><a href="#cb78-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb78-11"><a href="#cb78-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span></span>
+<span id="cb78-12"><a href="#cb78-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
+<span id="cb78-13"><a href="#cb78-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
+<span id="cb78-14"><a href="#cb78-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb78-15"><a href="#cb78-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">environment</span><span class="kw">:</span></span>
+<span id="cb78-16"><a href="#cb78-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Environment</span></span>
+<span id="cb78-17"><a href="#cb78-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Target environment</span></span>
+<span id="cb78-18"><a href="#cb78-18" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>每个 YAML command list item 在 render 后仍是一个 atomic
 argv；值中含空格、引号或类似 shell 的字符也不会再次分词。ATT
 不会启动本地 shell。</p>
@@ -3191,56 +3279,56 @@ escape。Quoted value 内嵌 <code>${...}</code> 会做
 interpolation；未加引号的 canonical Context path 则直接传递 typed
 value。</p>
 <p>以下 Tool 会把每个输入保持为一个 argv：</p>
-<div class="sourceCode" id="cb76"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">writeAudit</span><span class="kw">:</span></span>
-<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Write audit</span></span>
-<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Write one audit message for one source file</span></span>
-<span id="cb76-5"><a href="#cb76-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/write_audit.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${message}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${sourceFile}&quot;</span><span class="kw">]</span></span>
-<span id="cb76-6"><a href="#cb76-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
-<span id="cb76-7"><a href="#cb76-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb76-8"><a href="#cb76-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">message</span><span class="kw">:</span></span>
-<span id="cb76-9"><a href="#cb76-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Message</span></span>
-<span id="cb76-10"><a href="#cb76-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Exact audit message</span></span>
-<span id="cb76-11"><a href="#cb76-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb76-12"><a href="#cb76-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sourceFile</span><span class="kw">:</span></span>
-<span id="cb76-13"><a href="#cb76-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Source file</span></span>
-<span id="cb76-14"><a href="#cb76-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File associated with the message</span></span>
-<span id="cb76-15"><a href="#cb76-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb79"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">writeAudit</span><span class="kw">:</span></span>
+<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Write audit</span></span>
+<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Write one audit message for one source file</span></span>
+<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/write_audit.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${message}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${sourceFile}&quot;</span><span class="kw">]</span></span>
+<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
+<span id="cb79-7"><a href="#cb79-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb79-8"><a href="#cb79-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">message</span><span class="kw">:</span></span>
+<span id="cb79-9"><a href="#cb79-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Message</span></span>
+<span id="cb79-10"><a href="#cb79-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Exact audit message</span></span>
+<span id="cb79-11"><a href="#cb79-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb79-12"><a href="#cb79-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sourceFile</span><span class="kw">:</span></span>
+<span id="cb79-13"><a href="#cb79-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Source file</span></span>
+<span id="cb79-14"><a href="#cb79-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File associated with the message</span></span>
+<span id="cb79-15"><a href="#cb79-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>当 call 同时包含多层引号时，建议使用 YAML block scalar：</p>
-<div class="sourceCode" id="cb77"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">singleQuote</span><span class="kw">:</span></span>
-<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a>        message=&quot;Customer O&#39;Reilly&quot;,</span>
-<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a>        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb77-7"><a href="#cb77-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb77-8"><a href="#cb77-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb77-9"><a href="#cb77-9" aria-hidden="true" tabindex="-1"></a><span class="fu">doubleQuote</span><span class="kw">:</span></span>
-<span id="cb77-10"><a href="#cb77-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb77-11"><a href="#cb77-11" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb77-12"><a href="#cb77-12" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb77-13"><a href="#cb77-13" aria-hidden="true" tabindex="-1"></a>        message=&#39;status=&quot;READY&quot;&#39;,</span>
-<span id="cb77-14"><a href="#cb77-14" aria-hidden="true" tabindex="-1"></a>        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb77-15"><a href="#cb77-15" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb77-16"><a href="#cb77-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb77-17"><a href="#cb77-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mixedQuotesAndContext</span><span class="kw">:</span></span>
-<span id="cb77-18"><a href="#cb77-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb77-19"><a href="#cb77-19" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb77-20"><a href="#cb77-20" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb77-21"><a href="#cb77-21" aria-hidden="true" tabindex="-1"></a>        message=&quot;O&#39;Reilly said \&quot;READY\&quot; for ${CASE.caseId}&quot;,</span>
-<span id="cb77-22"><a href="#cb77-22" aria-hidden="true" tabindex="-1"></a>        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb77-23"><a href="#cb77-23" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
+<div class="sourceCode" id="cb80"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">singleQuote</span><span class="kw">:</span></span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb80-5"><a href="#cb80-5" aria-hidden="true" tabindex="-1"></a>        message=&quot;Customer O&#39;Reilly&quot;,</span>
+<span id="cb80-6"><a href="#cb80-6" aria-hidden="true" tabindex="-1"></a>        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb80-7"><a href="#cb80-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb80-8"><a href="#cb80-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb80-9"><a href="#cb80-9" aria-hidden="true" tabindex="-1"></a><span class="fu">doubleQuote</span><span class="kw">:</span></span>
+<span id="cb80-10"><a href="#cb80-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-11"><a href="#cb80-11" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb80-12"><a href="#cb80-12" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb80-13"><a href="#cb80-13" aria-hidden="true" tabindex="-1"></a>        message=&#39;status=&quot;READY&quot;&#39;,</span>
+<span id="cb80-14"><a href="#cb80-14" aria-hidden="true" tabindex="-1"></a>        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb80-15"><a href="#cb80-15" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb80-16"><a href="#cb80-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb80-17"><a href="#cb80-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mixedQuotesAndContext</span><span class="kw">:</span></span>
+<span id="cb80-18"><a href="#cb80-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-19"><a href="#cb80-19" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb80-20"><a href="#cb80-20" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb80-21"><a href="#cb80-21" aria-hidden="true" tabindex="-1"></a>        message=&quot;O&#39;Reilly said \&quot;READY\&quot; for ${CASE.caseId}&quot;,</span>
+<span id="cb80-22"><a href="#cb80-22" aria-hidden="true" tabindex="-1"></a>        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb80-23"><a href="#cb80-23" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
 <p>Child process 收到的三条 message 分别是
 <code>Customer O'Reilly</code>、<code>status="READY"</code>，以及例如
 <code>O'Reilly said "READY" for payment.payment.TC001</code>。Context
 value 自身包含任一种引号时，无需 caller 做 shell escaping，仍只占一个
 argv。</p>
 <p>如果坚持把 call 写成单行，还需额外处理独立的 YAML escaping 层：</p>
-<div class="sourceCode" id="cb78"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{writeAudit(message=&#39;status=</span><span class="sc">\&quot;</span><span class="st">READY</span><span class="sc">\&quot;</span><span class="st">&#39;, sourceFile=${CASE.sourceFile})}&quot;</span></span>
-<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;#{writeAudit(message=&quot;O</span><span class="sc">&#39;&#39;</span><span class="st">Reilly&quot;, sourceFile=${CASE.sourceFile})}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb81"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{writeAudit(message=&#39;status=</span><span class="sc">\&quot;</span><span class="st">READY</span><span class="sc">\&quot;</span><span class="st">&#39;, sourceFile=${CASE.sourceFile})}&quot;</span></span>
+<span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;#{writeAudit(message=&quot;O</span><span class="sc">&#39;&#39;</span><span class="st">Reilly&quot;, sourceFile=${CASE.sourceFile})}&#39;</span></span></code></pre></div>
 <p>第一行是为 YAML double-quoted scalar escape 双引号；第二行是为 YAML
 single-quoted scalar 把 apostrophe 写成两个。之后 expression engine
 才会解析所得的 <code>#{...}</code>。</p>
@@ -3542,8 +3630,8 @@ schema/catalog 版本的 SHA-256 hash。</p>
 <h2 id="故障排查">09 故障排查</h2>
 <h3 id="先从校验开始">先从校验开始</h3>
 <p>在每次工作簿、侧车、模板或工具变更后执行：</p>
-<div class="sourceCode" id="cb80"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb83"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。</p>
 <table>
 <colgroup>

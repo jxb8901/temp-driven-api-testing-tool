@@ -64,6 +64,30 @@ class PackageValidatorTest {
                 new StageTemplate("DB",tempDir,Collections.singletonList(rawDb),"att-template/v2.5"),config));
     }
 
+    @Test void validatesMqPrimaryCallsAndRejectsMqEvidenceCollectors() throws Exception {
+        MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "MQ", "QM1", "localhost", 1414,
+                "APP.SVRCONN", "", "", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("broker.yaml"));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), Collections.<String, DbHelperConfig>emptyMap(),
+                Collections.singletonMap("broker", helper), null, null, null, "", "", null, null, 1,
+                "ignore", "", false, ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+
+        TemplateAction primary = new TemplateAction("send", map("type", "tool",
+                "call", "#{mq.broker.send(queue='REQUEST.Q', file='request.bin')}"), "att-template/v3.0");
+        assertDoesNotThrow(() -> {
+            try { contract.invoke(validator, new StageTemplate("MQ", tempDir, Collections.singletonList(primary), "att-template/v3.0"), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        });
+
+        TemplateAction collector = new TemplateAction("send", map("type", "tool",
+                "call", "#{upper('ok')}", "evidence", map("mq", map("call", "#{mq.broker.receive(queue='REPLY.Q')}"))), "att-template/v3.0");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("MQ", tempDir, Collections.singletonList(collector), "att-template/v3.0"), config));
+    }
+
     @Test void validatesCallBackedReadAndWriteToolBoundaries() throws Exception {
         DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB", "jdbc:never-connect",
                 "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 7,
@@ -143,6 +167,27 @@ class PackageValidatorTest {
         method.setAccessible(true);
         assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send(message='hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
         assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send('hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
+    @Test void validatorAcceptsMissingOptionalContextButRejectsMalformedOptionalPath() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        method.setAccessible(true);
+
+        TemplateAction optional = new TemplateAction("check", map("type", "assert",
+                "assert", "#{${CASE.notPresent.deep?} is null}"), "att-template/v2.5");
+        assertDoesNotThrow(() -> {
+            try { method.invoke(validator, new StageTemplate("Optional", tempDir,
+                    Collections.singletonList(optional), "att-template/v2.5"), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        });
+
+        TemplateAction malformed = new TemplateAction("bad", map("type", "assert",
+                "assert", "#{${CASE..notPresent?} is null}"), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,
+                new StageTemplate("Optional", tempDir, Collections.singletonList(malformed), "att-template/v2.5"), config));
     }
 
     @Test void rejectsBareContextReferencesInsideCalls() throws Exception {

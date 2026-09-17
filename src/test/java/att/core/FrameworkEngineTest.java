@@ -129,7 +129,7 @@ class FrameworkEngineTest {
         } finally {
             System.setOut(previous);
         }
-        assertEquals("", defaultConsole.toString("UTF-8").trim());
+        assertTrue(defaultConsole.toString("UTF-8").contains("[RUN] id=TEST-DEFAULT"));
 
         ExecutionOptions noWorkbook = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-NO-WORKBOOK"});
         new FrameworkEngine(projectRoot, globalConfig("none")).run(noWorkbook);

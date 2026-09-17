@@ -1,7 +1,7 @@
-# ATT V3.3.0 中文用户手册与参考手册
+# ATT V3.4.0 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.3.0
+版本：3.4.0
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -54,7 +54,7 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 
 一个动作可以渲染负载、调用工具、查询／更新数据库、断言表达式、写入结构化日志、分配作用域运行值，或调用 Flow。ATT 会在执行外部工具前校验所选包，并将结果证据记录到一个已完成的运行目录下。
 
-### V3.3 的保证
+### V3.4 的保证
 
 - 配置是严格的。未知字段、错误类型、无效枚举值、重复 YAML 键，以及无效动作形状都是错误。
 - dbhelper 使用独立 `att-dbhelper/v2.5` 文件，并通过一級 `type: db` Action 或只读 `#{db.<instance>...}` 表达式调用；它不是 Tool 的特殊配置。
@@ -71,6 +71,8 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 - FAIL、ERROR、INVALID、SKIPPED、PASS 具有稳定的聚合与退出码含义。
 - JSON、XML、JUnit XML、JUnit HTML 和 CI JSON 输出都有版本化契约。
 - V2.6 Template 保持可读，但只有 `att-template/v3.0` 可使用 Flow Action 或 Action `runWhen`。
+- Tool Action 可在主要结果之后、assertion 之前运行 `evidence` collectors；每次 retry 都会重新收集，并记录独立 timeout 与 `continue|stop` 失败策略。
+- IBM MQ helper 使用 `att-mqhelper/v1.0`，提供主要 Tool Action 的 `send`、`receive` 和 `request`，保留精确文件 bytes 及 CorrelId/MsgId 证据。
 
 ### 包布局
 
@@ -144,7 +146,7 @@ Flow `inputs`、`outputs`、调用端 `with` 以及专用的 `input`、小写 `a
 
 Template 与所有嵌套 Flow 共用一个 Action ID namespace。Template／Flow 冲突、多个 Flow 冲突、间接嵌套冲突以及在同一 Template 中重复调用同一 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
 
-Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.3.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
+Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.4.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
 
 ## 02 快速开始
 
@@ -679,6 +681,35 @@ evidence:
 
 默认值为 `scope: case`、`onEnd: rollback`。
 
+#### IBM MQ helper
+
+全局配置使用 `mqhelpers` 引用独立的 `att-mqhelper/v1.0` 文件：
+
+```yaml
+schemaVersion: att-config/v2.6
+mqhelpers:
+  - config/mqhelpers/orders.yaml
+```
+
+```yaml
+schemaVersion: att-mqhelper/v1.0
+id: orders
+name: Orders MQ
+description: Order request and reply queues
+connection:
+  queueManager: QM1
+  host: mq.example.internal
+  port: 1414
+  channel: APP.SVRCONN
+  username: att
+  password: "${ENV:MQ_PASSWORD}"
+message: {ccsid: 1208, format: MQSTR, persistence: asQueue}
+requestReply: {waitMs: 10000}
+evidence: {payload: metadata}
+```
+
+MQ 仅可作为 `type: tool` Action 的主要 call：`mq.orders.send(queue=..., file=...)`、`mq.orders.receive(queue=..., waitMs=..., correlationId=...)` 或 `mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)`。Payload 按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion 判断 `replyReceived`。连接与 queue 按 invocation 创建并关闭，syncpoint 固定为 none；reply 文件只写一次到 Case output，evidence 不保存完整 payload 或 credential。IBM client jar 通过 Maven `ibm-mq` profile 或 package `lib/` 提供，默认 ATT build 不内置 vendor client。
+
 ##### DB Action
 
 查询使用 `query` block，不另设沉重的 `operation` 字段：
@@ -1132,6 +1163,24 @@ retry:
 
 `maxAttempts` 包含首次 attempt，范围 2–10；`intervalMs` 范围 0–3600000。`ASSERTION` 要求同一 Tool Action 配置 `assert`，每次正常返回后立即判断，false 才重试；`TIMEOUT` 独立控制单次超时是否重试。exit code 只作为 `${output.exitCode}` 证据，由 assert 判断。配置、参数、I/O、解析、非 timeout DB 错误及 assertion 求值错误均不重试。
 
+#### 调用后的 Evidence Collector
+
+Tool Action 可声明以 collector ID 为 key 的 `evidence` map。每个 collector 必须有 `call`，并可配置独立 `timeoutMs` 及 `onFailure: continue|stop`：
+
+```yaml
+invokeApi:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=${CASE.requestFile})}"
+  evidence:
+    queueState:
+      call: "#{readQueueState(queue=${CASE.queue})}"
+      timeoutMs: 3000
+      onFailure: continue
+  assert: "${output.result.status} == 'SUCCESS'"
+```
+
+ATT 先完成主要 Tool attempt，再按声明顺序运行 collectors，最后求值主要 assertion。Collector 期间 `${output.result}` 仍是主要结果；结果写入 `output.attempts[n].evidence.<collectorId>`，不会替换主要结果。主要 assertion retry 会重新执行主要 call 和所有 collectors；`continue` 只记录 collector 错误，`stop` 会让 Action ERROR 并跳过 assertion。Collector 可调用 built-in、配置 Tool 或只读 call-backed Tool façade；直接 DB/MQ helper call 仍限于主要 Action。
+
 ### 3.4 运行测试
 
 #### 先校验
@@ -1177,7 +1226,7 @@ retry:
 
 `--update-snapshot` 仅对 `run` 有效。它会在验证和输出目录创建前，显式创建或原子替换所选工作簿的已更改规范 XML 快照；字节内容完全相同的文件保留原有字节和修改时间。工作簿准备完成后再替换任何选中的 XML。快照符号链接会被拒绝。后续单文件 I/O 失败会报告先前已完成的更新，并且相同包的并发快照生成/更新阶段会被串行化。结合 `--format json` 时，成功更新通知会写入 stderr，从而保持 stdout 为单个 JSON 文档；`--quiet` 会抑制它们。与 `--dry-run` 组合时，仍然允许 XML 更新，但测试用例工具保持禁用。
 
-默认人类可读 run 只打印最终结果计数和报告路径。`--quiet` 会抑制正常输出。`--verbose` 会增加 run/suite/Case/stage/action 生命周期进度，并把每个完整 Case 日志块镜像到控制台，包括模板/工具输入、逻辑和执行 argv、stdout、stderr、负载和动作证据。Verbose 输出可能包含秘密或个人数据，因此只应在合适受保护的终端中启用。两个选项互斥。
+人类可读 `run` 默认显示 run/suite/Case/stage/action 生命周期进度，并把每个完整 Case 日志块镜像到控制台，包括模板/工具输入、逻辑和执行 argv、stdout、stderr、负载和动作证据。`--verbose` 仍然接受，但只是兼容性选项；`--quiet` 会抑制这个默认输出，明确同时指定 `--verbose --quiet` 仍然无效。非 quiet 输出可能包含秘密或个人数据，只应在合适受保护的终端中使用。
 
 #### 结果与退出码
 
@@ -1384,6 +1433,7 @@ callApi:
 |---|---|
 | `./att.sh` 或 `./att.sh help` | 显示帮助 |
 | `./att.sh version` | 输出版本 |
+| `./att.sh snapshot` | 未指定 selector 时递归生成 `testcase.root` 下所有快照；等同于 `--all` |
 | `./att.sh snapshot --suite <xlsx>` | 生成一个同名 XML 快照 |
 | `./att.sh snapshot --all` | 递归生成 `testcase.root` 下所有快照 |
 | `./att.sh snapshot --suite-dir <dir>` | 在某目录下递归生成快照 |
@@ -1404,8 +1454,8 @@ callApi:
 | `./att.sh run <selection> --output-dir <dir>` | 覆盖输出根目录 |
 | `./att.sh run <selection> --ci-output junit,json` | 写出 CI XML/JSON 与 JUnit HTML |
 | `./att.sh run <selection> --format json` | 输出机器可读摘要 |
-| `./att.sh run <selection> --quiet` | 抑制正常完成输出 |
-| `./att.sh run <selection> --verbose` | 显示生命周期进度并镜像完整 Case 日志 |
+| `./att.sh run <selection> --quiet` | 抑制默认生命周期和完整 Case 日志输出 |
+| `./att.sh run <selection> --verbose` | 明确保留默认生命周期进度和完整 Case 日志镜像；为兼容性保留 |
 | `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中归档最新完成 run |
@@ -1430,6 +1480,7 @@ callApi:
 |---|---|---|
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
+| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 IBM MQ TCP client 实例的队列管理器、连接、消息及 request/reply 默认值 |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -1460,6 +1511,7 @@ report:
 xml: {namespaceMode: ignore}
 toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
+mqhelpers: [config/mqhelpers/orders.yaml]
 tools: {}
 ```
 
@@ -1481,6 +1533,7 @@ tools: {}
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
+| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` YAML 路径；每个文件声明一个实例 |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
@@ -1526,7 +1579,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | 模板根对象 | `schemaVersion`、`name`、`description`、`actions`、`x-*`；`schemaVersion`、`description`、非空 `actions` 必需 |
 | 动作 common | `type`、`description`、`onFailure`，以及其选定类型所属字段；动作 ID 不能含点号 |
 | render | 需要 `payload`、`renderAs`；可选 `assert`; 不允许 saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry |
-| tool | 需要 `call`；可选 object `saveAs`、`assert`、`expected`、`actual`、`timeoutMs` 与 Action-only `retry`；command/call-backed 共用契约 |
+| tool | 需要 `call`；可选 object `saveAs`、`assert`、`expected`、`actual`、`timeoutMs`、Action-only `retry` 与 `evidence`；command/call-backed 共用契约 |
 | db | 需要 `db` 与恰好一个 `query`／`update`；block 内恰好一个 `sql`／`sqlFile`；可选位置 `params` 或具名 `parameters`、object `saveAs`、`assert`；不允许同时使用两种 parameter 形式，也不允许 retry 或 Action timeout |
 | assert | 需要 `assert`；可选 `expected`、`actual`；不允许 expression/render/tool/log-only 字段、timeout 或 retry |
 | log | 至少需要 `message` 或 `file`；可选 `level`、`fields`、`assert`；不允许 render/tool/assert-action-only 字段、timeout 或 retry |
@@ -1590,7 +1643,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.3.0",
+  "attVersion": "3.4.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1629,12 +1682,18 @@ ATT 3.3.0 可另外提供 `summary`、`detail`、`source`、`context` 和 `schem
 
 ### 统一表达式引擎
 
-V3.3 使用一个表达式引擎，但保留两种刻意分开的角色：
+V3.4 使用一个表达式引擎，但保留两种刻意分开的角色：
 
 - `${path}` 读取一个 Context 值并插入周围文字，例如 `Reference=${CASE.VARS.SrcRefNo}`。
 - `#{expression}` 计算一个 typed expression block。block 可包含 Context operand、调用、list literal、括号、unary operator、算术、比较、`like`、`in`、null 判断与布尔逻辑。
 
-Context 引用在 block 内仍必须明确使用 `${...}`；应写 `${CASE.amount}`，不可写裸 `CASE.amount`。精确 block 保留 Java 结果类型；嵌入周围文字的 block 才会转换为文字。
+Context 引用在 block 内仍必须明确使用 `${...}`；应写 `${CASE.amount}`，不可写裸 `CASE.amount`。可在整条引用路径末尾加 `?`，例如 `${CASE.response.body.missing?}`。只要任一 map、list、root-owned Context 值或中间 segment 不存在，结果就是真正的 `null`；路径存在但最后值本身为 `null` 时也保持 `null`。`${path}` 仍然 strict。Optional lookup 不会抑制歧义、错误语法或在 scalar 上索引等 invalid traversal，因此这些 authoring 错误仍会失败。精确 block 保留 Java 结果类型；嵌入周围文字的 block 才会转换为文字。
+
+```yaml
+assert: "#{${CASE.response.body.missing?} is null}"
+actual: "#{nvl(${CASE.response.body.missing?}, 'not supplied')}"
+description: "status=${CASE.response.body.status?}; fallback=#{coalesce(${CASE.response.body.missing?}, 'N/A')}"
+```
 
 ```yaml
 assert: >-

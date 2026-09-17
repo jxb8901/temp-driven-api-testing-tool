@@ -410,6 +410,7 @@ public class StageTemplateRunner {
                     return ResultStatus.ERROR;
                 }
                 context.setActionOutput(output);
+                runEvidenceCollectors(action, number, context, log, output, invocation);
                 boolean passed = evaluateAssertion(action, output, context, log);
                 if (output.get("assertion") != null) invocation.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) output.get("assertion")));
                 if (passed) {
@@ -443,6 +444,97 @@ public class StageTemplateRunner {
             }
         }
         throw new IllegalStateException("Tool action completed without a final attempt: " + action.id());
+    }
+
+    private void runEvidenceCollectors(TemplateAction action, int attempt, CaseRuntimeContext context,
+                                       CaseExecutionLog log, Map<String, Object> output,
+                                       Map<String, Object> invocation) throws Exception {
+        if (action.evidence().isEmpty()) return;
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        invocation.put("evidence", evidence);
+        for (EvidenceCollector collector : action.evidence().values()) {
+            long started = System.nanoTime();
+            Map<String, Object> record = new LinkedHashMap<String, Object>();
+            record.put("collectorId", collector.id());
+            record.put("attempt", attempt);
+            record.put("status", "ERROR");
+            try {
+                if ("mq".equals(templateEngine.callKind(collector.call()))) {
+                    throw new IllegalArgumentException("MQ operations may only be the primary call of a type: tool Action");
+                }
+                String invocationId = context.qualifiedActionId(action.id()) + ".evidence." + collector.id() + "." + attempt;
+                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(collector.call(), context, log,
+                        invocationId, collector.timeoutMs(), "", false, true);
+                Object status = result.invocation().get("status");
+                boolean passed = result.executionSuccess() && "PASS".equalsIgnoreCase(String.valueOf(status));
+                record.put("status", passed ? "PASS" : (status == null ? "ERROR" : String.valueOf(status)));
+                record.put("success", Boolean.valueOf(passed));
+                record.put("invocationId", result.invocationId());
+                record.put("result", result.output());
+                record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
+                evidence.put(collector.id(), record);
+                if (!passed) {
+                    record.put("error", collectorError(result.invocation(), "Evidence collector did not complete successfully"));
+                    throw new EvidenceCollectorFailure(collector, record);
+                }
+                appendEvidenceLog(log, action, attempt, collector, record);
+            } catch (EvidenceCollectorFailure failure) {
+                record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
+                evidence.put(collector.id(), record);
+                appendEvidenceLog(log, action, attempt, collector, record);
+                if ("stop".equals(collector.onFailure())) throw failure;
+            } catch (Exception error) {
+                record.put("status", error instanceof att.exec.ToolExecutionException
+                        ? ((att.exec.ToolExecutionException) error).category() : "ERROR");
+                record.put("success", false);
+                record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
+                record.put("error", collectorError(error));
+                evidence.put(collector.id(), record);
+                appendEvidenceLog(log, action, attempt, collector, record);
+                if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, error);
+            }
+        }
+    }
+
+    private Map<String, Object> collectorError(Object source, String fallback) {
+        Map<String, Object> error = new LinkedHashMap<String, Object>();
+        if (source instanceof Map) {
+            Map<?, ?> invocation = (Map<?, ?>) source;
+            Object category = invocation.get("category");
+            Object message = invocation.get("error");
+            if (category != null) error.put("category", category);
+            if (message != null) error.put("message", message);
+            Object exitCode = invocation.get("exitCode");
+            if (exitCode != null) error.put("exitCode", exitCode);
+        }
+        if (error.isEmpty()) error.put("message", fallback);
+        return error;
+    }
+
+    private Map<String, Object> collectorError(Exception error) {
+        if (error instanceof att.exec.ToolExecutionException) {
+            att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
+            return collectorError(tool.evidence(), tool.getMessage());
+        }
+        return collectorError(null, safeMessage(error));
+    }
+
+    private void appendEvidenceLog(CaseExecutionLog log, TemplateAction action, int attempt,
+                                   EvidenceCollector collector, Map<String, Object> record) {
+        try {
+            log.append("EVIDENCE " + action.id() + " attempt=" + attempt + " collector=" + collector.id(), record);
+        } catch (Exception error) {
+            record.put("logError", safeMessage(error));
+        }
+    }
+
+    private static final class EvidenceCollectorFailure extends Exception {
+        private EvidenceCollectorFailure(EvidenceCollector collector, Map<String, Object> record) {
+            super("Evidence collector '" + collector.id() + "' failed: " + String.valueOf(record.get("status")));
+        }
+        private EvidenceCollectorFailure(EvidenceCollector collector, Map<String, Object> record, Throwable cause) {
+            super("Evidence collector '" + collector.id() + "' failed: " + String.valueOf(record.get("status")), cause);
+        }
     }
 
     private String toolFormat(ActionSaveConfig save, String kind) {

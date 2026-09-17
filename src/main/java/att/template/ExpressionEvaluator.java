@@ -69,7 +69,10 @@ public class ExpressionEvaluator {
         Matcher matcher = CONTEXT.matcher(expression);
         StringBuffer rendered = new StringBuffer();
         while (matcher.find()) {
-            Object value = context.require(matcher.group(1));
+            String reference = matcher.group(1);
+            String path = CaseRuntimeContext.requiredReferencePath(reference);
+            Object value = CaseRuntimeContext.isOptionalReference(reference)
+                    ? context.requireOptional(path) : context.require(path);
             char activeQuote = activeQuote(expression, matcher.start());
             String replacement = activeQuote != 0 ? escapeInside(value, activeQuote) : literal(value);
             matcher.appendReplacement(rendered, Matcher.quoteReplacement(replacement));

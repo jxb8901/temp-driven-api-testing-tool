@@ -55,7 +55,7 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 2
 fi
 if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to execute the V3.3 release gate" >&2
+  echo "mvn is required to execute the V3.4 release gate" >&2
   exit 2
 fi
 
@@ -83,6 +83,16 @@ for dep in $DEPS; do
   cp "$jar" "$PACKAGE_DIR/lib/"
   CP="${CP:+$CP:}$jar"
 done
+
+# IBM MQ is an optional runtime integration. The default build remains usable
+# without the vendor client; provide its jar explicitly when packaging MQ use.
+if [ -n "${IBM_MQ_JAR:-}" ]; then
+  if [ ! -f "$IBM_MQ_JAR" ]; then
+    echo "IBM_MQ_JAR does not point to a file: $IBM_MQ_JAR" >&2
+    exit 2
+  fi
+  cp "$IBM_MQ_JAR" "$PACKAGE_DIR/lib/"
+fi
 
 find "$ROOT_DIR/src/main/java" -name '*.java' | sort > "$BUILD_DIR/sources.txt"
 if javac --help 2>&1 | grep -q -- '--release'; then

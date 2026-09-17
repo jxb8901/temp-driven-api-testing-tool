@@ -1,8 +1,8 @@
-# ATT V3.3.0 新手入門
+# ATT V3.4.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.3.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V3.4.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.3.0 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.4.0 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
@@ -27,7 +27,7 @@ validate + plan
 
 只有具有 `COMPLETE` manifest 的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 保留在 `output/<RunID>` 供除錯，但不會成為 latest；重試同一 Run ID 前需先移走或清理該未完成目錄。
 
-V3.3.0 沿用既有狀態及聚合契約，不可混淆：
+V3.4.0 沿用既有狀態及聚合契約，不可混淆：
 
 | 狀態 | 意義 | 例子 |
 |---|---|---|
@@ -99,9 +99,9 @@ Flow 不再有 `inputs`、`outputs` 或調用端 `with`。內部 Action 完成�
 
 同一 Template 及其全部巢狀 Flow 共用一個 Action ID namespace；任何重名或同一 Flow 的重複調用都會在 validate 時失敗。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
 
-V3.3.0 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
+V3.4.0 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
 
-### 3.2 使用 V3.3 expression、console 及命名 SQL
+### 3.2 使用 V3.4 expression、evidence、console 及命名 SQL
 
 `${...}` 只負責 Context 取值及文字插值；需要計算時使用完整的 `#{...}` expression block：
 
@@ -140,6 +140,22 @@ queryOrder:
 
 Log Action 多行內容及 process stdout/stderr 會以原始行寫入 Case log。普通 run 不再建立 `process-output`；只有明確指定非 `console` 的 `saveAs` 才建立 Action artifact。
 
+Tool Action 的 `evidence` collector 在主要 Tool result 之後、assertion 之前執行；`${output.result}` 仍是主要結果。每次 `ASSERTION` retry 都會重新執行全部 collector：
+
+```yaml
+invokeApi:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=${CASE.requestFile}, environment=${CASE.environment})}"
+  evidence:
+    queueState:
+      call: "#{readQueueState(queue=${CASE.queue})}"
+      timeoutMs: 3000
+      onFailure: continue
+  assert: "${output.result.status} == 'SUCCESS'"
+```
+
+Collector 結果位於 `output.attempts[n].evidence.queueState.result`；`continue` 只記錄 collector 錯誤，`stop` 會讓 Action ERROR 並跳過 assertion。
+
 ## 4. 建立嚴格的全域配置
 
 ```yaml
@@ -175,6 +191,8 @@ toolGroups:
   - config/tools/orders-db.yaml
 dbhelpers:
   - config/dbhelpers/orders.yaml
+mqhelpers:
+  - config/mqhelpers/orders.yaml
 tools:
   invokePaymentApi:
     name: Invoke Payment API
@@ -249,6 +267,59 @@ checkCount:
 ```
 
 `params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
+
+### 4.1 配置 IBM MQ helper
+
+在 `config/mqhelpers/orders.yaml` 建立一個 `att-mqhelper/v1.0` 實例，密碼建議使用完整的 `${ENV:NAME}` 引用：
+
+```yaml
+schemaVersion: att-mqhelper/v1.0
+id: orders
+name: Orders MQ
+description: Order request and reply queues
+connection:
+  queueManager: QM1
+  host: mq.example.internal
+  port: 1414
+  channel: APP.SVRCONN
+  username: att
+  password: "${ENV:MQ_PASSWORD}"
+message:
+  ccsid: 1208
+  format: MQSTR
+  persistence: asQueue
+requestReply:
+  waitMs: 10000
+evidence:
+  payload: metadata
+```
+
+MQ helper 只支援 TCP client 模式；IBM MQ client jar 不由預設 ATT build 內置。開發時可執行 `mvn -Pibm-mq package`，release package 則可用 `IBM_MQ_JAR=/path/to/com.ibm.mq.allclient-10.0.0.0.jar ./build.sh` 把 jar 放入 `lib/`。`send` 和 `request` 的 `file` 是原始 payload 文件；相對路徑相對當前 Case output，從 `renderAs: file` 的 `targetFiles` 直接傳入最安全。
+
+在 Template 中將 MQ 操作作為 Tool Action 的主要 call：
+
+```yaml
+sendOrder:
+  type: tool
+  call: >-
+    #{mq.orders.send(
+      queue='ORDER.REQUEST',
+      file=${ACTIONS.renderRequest.output.targetFiles[0]}
+    )}
+
+waitReply:
+  type: tool
+  call: >-
+    #{mq.orders.request(
+      requestQueue='ORDER.REQUEST',
+      replyQueue='ORDER.REPLY',
+      file=${ACTIONS.renderRequest.output.targetFiles[0]},
+      waitMs=5000
+    )}
+  assert: "${output.result.replyReceived} == true"
+```
+
+`request` 先 PUT，再以送出訊息的 MsgId 作為 GET CorrelId；回覆文件只寫入一次 `mq/<instance>/` 下的 Case output。等待逾時的 MQ reason 2033 會是成功但 `replyReceived: false`，需要回覆時才用 assertion 將它判定為 FAIL。MQ evidence 保留 queue、MsgId、CorrelId、bytes、status、reason 和 duration 等 metadata，不保存完整 payload，也不輸出密碼。
 
 若同一操作會重複出現，可新增 `config/tools/orders-db.yaml` 將它包裝成 typed Tool：
 
@@ -629,6 +700,8 @@ findTransactions:
 ```sh
 # Excel 修改後先生成同 basename 的語義 XML，並 review Git diff
 ./att.sh snapshot --suite testcase/支付回歸.xlsx
+# 未指定 selector 時，snapshot 預設遞迴處理所有 workbook；--all 仍可明確使用
+./att.sh snapshot
 # 或為 testcase.root 下所有 workbook 生成 snapshot
 ./att.sh snapshot --all
 
@@ -653,7 +726,7 @@ findTransactions:
 Windows 使用同一組命令與參數，只需將 `./att.sh` 換成 `att.bat`：
 
 ```bat
-att.bat snapshot --all
+att.bat snapshot
 att.bat validate --package
 att.bat docs
 att.bat run --all
@@ -681,7 +754,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.3.0",
+  "attVersion": "3.4.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -700,7 +773,9 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 
 每條 diagnostic 都包含穩定 code、severity、檔案、字段，並在適用時提供 sheet、row、column、template、action、詳細原因和修正建議。Human 格式以兩格縮排顯示 diagnostic header、四格縮排顯示後續資料，且各 diagnostic block 之間保留一個空行；JSON 格式不變。驗證會使用與 run 相同的 Context 與 `#{...}` parser，因而會在執行前拒絕未知 Context、錯誤 stage/action ID、未知 built-in/tool、錯誤參數，以及 render payload 內的錯誤調用；validation 不會真的執行 built-in 或外部 tool。
 
-一般 human run 只輸出最終統計及 report 路徑。需要逐步排查時加入 `--verbose`，ATT 會顯示 run/suite/Case/stage/action lifecycle，並將每個完整 Case-log block（包括模板內容、tool input/argv/stdout/stderr）鏡像到 console；這可能包含敏感案例資料，只應在合適的終端使用。`--quiet` 則抑制一般輸出，且不可與 `--verbose` 同用。
+Human `run` 預設顯示 run/suite/Case/stage/action lifecycle，並將每個完整 Case-log block（包括模板內容、tool input/argv/stdout/stderr）鏡像到 console。`--verbose` 仍接受但屬於相容性選項；`--quiet` 可抑制這個預設輸出，且明確同時指定 `--verbose --quiet` 仍會報錯。輸出可能包含敏感案例資料，只應在合適的終端使用。
+
+Context 引用可在整條路徑末尾加 `?`：`${CASE.response.body.missing?}`。只要任一 map、list、root-owned Context 或中間 segment 不存在，結果就是真正的 `null`；若路徑存在但最後值本身是 `null`，結果同樣是 `null`。`${path}` 仍是 strict；optional 不會抑制 ambiguous、malformed 或 scalar 上索引等 invalid traversal 錯誤，因此可安全用於 `is null`、`nvl`、`coalesce`、插值、Tool argument、assert 和 assign。
 
 不帶參數或使用 `--help` 顯示完整用法。
 
@@ -830,4 +905,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.3.0 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.4.0 Reference Manual](09_Reference_Manual_V3.md)。

@@ -143,15 +143,15 @@ public final class StageTemplateLoader {
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
                     current
-                            ? new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
-                    : modern
-                            ? new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update"}
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
+                            : modern
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update"}
                             : new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs"});
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
             if (!modern && actionMap.get("overwrite") != null && !(actionMap.get("overwrite") instanceof Boolean)) throw new IllegalArgumentException("actions." + actionKey + ".overwrite must be a boolean");
-            for (String mapping : current ? new String[]{"retry", "fields", "saveAs", "query", "update"}
-                    : modern ? new String[]{"retry", "fields", "saveAs", "query", "update"} : new String[]{"retry", "fields"}) {
+            for (String mapping : current ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"}
+                    : modern ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"} : new String[]{"retry", "fields"}) {
                 if (actionMap.get(mapping) != null && !(actionMap.get(mapping) instanceof Map)) throw new IllegalArgumentException("actions." + actionKey + "." + mapping + " must be a map");
             }
             if (current && "flow".equals(String.valueOf(actionMap.get("type")))

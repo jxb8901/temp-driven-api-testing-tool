@@ -93,6 +93,40 @@ class UnifiedTemplateEngineTest {
         engine.validateExpressionBlockSyntax("#{(${CASE.amount} + 2) * 3 >= 42 and ${CASE.status} in ${CASE.allowed}}");
     }
 
+    @Test void optionalContextReferencesWorkInTypedExpressionsAndInterpolation() throws Exception {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("text", "READY");
+        result.put("amount", 7);
+        result.put("enabled", Boolean.TRUE);
+        result.put("actualNull", null);
+        result.put("scalar", "text");
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("result", result);
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), data,
+                        Collections.emptyMap(), null),
+                tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
+
+        assertEquals("READY", engine.evaluate("${CASE.result.text?}", context, null));
+        assertEquals(Integer.valueOf(7), engine.evaluate("${CASE.result.amount?}", context, null));
+        assertEquals(Boolean.TRUE, engine.evaluate("${CASE.result.enabled?}", context, null));
+        assertNull(engine.evaluate("${CASE.result.actualNull?}", context, null));
+        assertNull(engine.evaluate("${CASE.result.missing.child?}", context, null));
+        assertEquals(Boolean.TRUE, engine.evaluate("#{${CASE.result.missing?} is null}", context, null));
+        assertEquals("fallback", engine.render("#{nvl(${CASE.result.missing?}, 'fallback')}", context));
+        assertEquals("fallback", engine.render("#{coalesce(${CASE.result.missing?}, 'fallback')}", context));
+        assertEquals("missing=; present=READY", engine.render("missing=${CASE.result.missing?}; present=${CASE.result.text?}", context));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> engine.evaluate("${CASE.result.missing}", context, null));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> engine.evaluate("#{${CASE.result.scalar.child?} is null}", context, null));
+        assertThrows(ExpressionSyntaxException.class,
+                () -> engine.validateExpressionBlockSyntax("#{${CASE..value?} is null}"));
+        assertThrows(ExpressionSyntaxException.class,
+                () -> engine.validateValueSyntax("${CASE.result.value??}"));
+    }
+
     @Test void syntaxDiagnosticIdentifiesMalformedPathArgument() {
         String expression = "#{fpp.loghelper(logFiles=[/fpp/log/FPPCommon.log, /fpp/log/FPPCommon.log.*])}";
         ExpressionSyntaxException syntax = assertThrows(ExpressionSyntaxException.class,
@@ -200,6 +234,25 @@ class UnifiedTemplateEngineTest {
         assertEquals("ok", new UnifiedTemplateEngine(invoker).executeCall("#{echoOne('hello world')}", context, new CaseExecutionLog(tempDir.resolve("case.log")), "single"));
         assertEquals(Arrays.asList("echo", "hello world"), runner.calls.get(0));
         assertNull(context.resolve("ACTIONS.single"));
+    }
+
+    @Test void optionalContextReferenceCanSupplyNullToToolArgumentResolution() throws Exception {
+        Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
+        arguments.put("message", new ToolArgumentConfig("message", "Message", "Text", false, ""));
+        Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
+        tools.put("echoOne", new ToolConfig("echoOne", "Echo one", "Echo one value", "echo ${message}", "txt", arguments));
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir,
+                new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tools,null,null), runner);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payment","sheet","TC001",
+                Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),
+                tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
+        context.beginStage(new att.core.StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+
+        assertEquals("ok", new UnifiedTemplateEngine(invoker).executeCall(
+                "#{echoOne(message=${CASE.missing?})}", context,
+                new CaseExecutionLog(tempDir.resolve("case.log")), "optional"));
+        assertEquals(Arrays.asList("echo"), runner.calls.get(0));
     }
 
     @Test void toolCommandArgumentsUseUnifiedBuiltInRendering() throws Exception {

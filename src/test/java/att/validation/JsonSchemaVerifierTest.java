@@ -129,4 +129,16 @@ class JsonSchemaVerifierTest {
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group,
                 "{\"schemaVersion\":\"att-tool-group/v2.6\",\"id\":\"orders\",\"name\":\"Orders\",\"description\":\"Orders\",\"tools\":{\"find\":{\"name\":\"Find\",\"description\":\"Find\",\"call\":\"#{db.orders.scalar(sql='select 1')}\"}}}"));
     }
+
+    @Test void v34SchemasAcceptEvidenceAndMqHelperContracts() throws Exception {
+        Path root = Paths.get("");
+        String template = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{sample()}\",\"evidence\":{\"snapshot\":{\"call\":\"#{capture(value=${output.result})}\",\"timeoutMs\":3000,\"onFailure\":\"continue\"}},\"assert\":\"${output.result} != null\"}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v3.0.schema.json"), template));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v3.0.schema.json"), template.replace("\"type\":\"tool\"", "\"type\":\"log\"")));
+
+        String mq = "{\"schemaVersion\":\"att-mqhelper/v1.0\",\"id\":\"broker\",\"name\":\"Broker\",\"description\":\"MQ\",\"connection\":{\"queueManager\":\"QM1\",\"host\":\"localhost\",\"port\":1414,\"channel\":\"APP.SVRCONN\"},\"message\":{\"ccsid\":1208,\"format\":\"MQSTR\",\"persistence\":\"asQueue\"},\"requestReply\":{\"waitMs\":1000},\"evidence\":{\"payload\":\"metadata\"}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), mq));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), mq.replace("\"port\":1414", "\"port\":0")));
+    }
 }

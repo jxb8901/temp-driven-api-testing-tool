@@ -32,7 +32,7 @@ class SnapshotCommandTest {
         writeSuite("one", "ONE"); writeSuite("nested/two", "TWO");
         FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.emptyMap(), null, null);
-        List<Path> all = new SnapshotCommand().generate(projectRoot, global, ExecutionOptions.parse(new String[]{"snapshot", "--all"}));
+        List<Path> all = new SnapshotCommand().generate(projectRoot, global, ExecutionOptions.parse(new String[]{"snapshot"}));
         assertEquals(2, all.size());
         assertTrue(Files.isRegularFile(projectRoot.resolve("testcase/one.xml")));
         assertTrue(Files.isRegularFile(projectRoot.resolve("testcase/nested/two.xml")));

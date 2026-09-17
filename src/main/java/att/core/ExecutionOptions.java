@@ -92,7 +92,7 @@ public final class ExecutionOptions {
         Set<String> excludeTags = new LinkedHashSet<String>();
         String runId = "";
         boolean all = false, rerun = false, dry = false, failFast = false, updateSnapshot = false, profile = false;
-        boolean quiet = false, verbose = false, packageScope = false, selectedScope = false;
+        boolean quiet = false, verbose = "run".equals(command), explicitVerbose = false, packageScope = false, selectedScope = false;
         String format = "human";
         String concurrencyMode = "reject";
         Path output = null;
@@ -121,13 +121,14 @@ public final class ExecutionOptions {
             else if ("--update-snapshot".equals(arg)) updateSnapshot = true;
             else if ("--profile".equals(arg)) profile = true;
             else if ("--quiet".equals(arg)) quiet = true;
-            else if ("--verbose".equals(arg)) verbose = true;
+            else if ("--verbose".equals(arg)) { verbose = true; explicitVerbose = true; }
             else if ("--package".equals(arg)) packageScope = true;
             else if ("--selected".equals(arg)) selectedScope = true;
             else if ("--help".equals(arg)) return empty("help");
             else throw new IllegalArgumentException("Unsupported option: " + arg);
         }
         if ("validate".equals(command)) dry = true;
+        if ("snapshot".equals(command) && !all && suites.isEmpty() && suiteDir == null) all = true;
         if (packageScope && selectedScope) throw new IllegalArgumentException("--package and --selected are mutually exclusive");
         if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
         String validationScope = packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
@@ -141,7 +142,8 @@ public final class ExecutionOptions {
         if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
         if (seenOptions.contains("--queue") && (seenOptions.contains("--parallel") || seenOptions.contains("--allow-parallel-runs"))) throw new IllegalArgumentException("--queue and --allow-parallel-runs are mutually exclusive");
         if (seenOptions.contains("--parallel") && seenOptions.contains("--allow-parallel-runs")) throw new IllegalArgumentException("Use only one of --allow-parallel-runs or its deprecated --parallel alias");
-        if (quiet && verbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
+        if (quiet && explicitVerbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
+        if (quiet) verbose = false;
         validateAllowed(command, seenOptions);
         return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile);
     }

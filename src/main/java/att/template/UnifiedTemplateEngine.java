@@ -9,6 +9,8 @@ import att.core.CaseExecutionLog;
 import att.exec.ToolInvoker;
 import att.exec.DbHelperExecutor;
 import att.exec.DbInvocationResult;
+import att.exec.MqHelperExecutor;
+import att.exec.MqInvocationResult;
 import att.config.ToolConfig;
 
 import java.util.LinkedHashMap;
@@ -23,6 +25,7 @@ public class UnifiedTemplateEngine {
     private static final Pattern VALUE = Pattern.compile("\\$\\{((?:[^}'\"]|'(?:\\\\.|[^'])*'|\"(?:\\\\.|[^\"])*\")+)}");
     private final ToolInvoker toolInvoker;
     private final DbHelperExecutor dbHelperExecutor;
+    private final MqHelperExecutor mqHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
     private final ExpressionBlockEvaluator expressionBlocks = new ExpressionBlockEvaluator();
     private final BuiltInProvider builtIns;
@@ -36,20 +39,31 @@ public class UnifiedTemplateEngine {
     });
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker) {
-        this(toolInvoker, null, new DefaultBuiltInProvider());
+        this(toolInvoker, null, null, new DefaultBuiltInProvider());
     }
 
     UnifiedTemplateEngine(ToolInvoker toolInvoker, BuiltInProvider builtIns) {
-        this(toolInvoker, null, builtIns);
+        this(toolInvoker, null, null, builtIns);
     }
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor) {
-        this(toolInvoker, dbHelperExecutor, new DefaultBuiltInProvider());
+        this(toolInvoker, dbHelperExecutor, null, new DefaultBuiltInProvider());
     }
 
     UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor, BuiltInProvider builtIns) {
+        this(toolInvoker, dbHelperExecutor, null, builtIns);
+    }
+
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                 MqHelperExecutor mqHelperExecutor) {
+        this(toolInvoker, dbHelperExecutor, mqHelperExecutor, new DefaultBuiltInProvider());
+    }
+
+    UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                          MqHelperExecutor mqHelperExecutor, BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
         this.dbHelperExecutor = dbHelperExecutor;
+        this.mqHelperExecutor = mqHelperExecutor;
         this.builtIns = builtIns;
     }
 
@@ -63,6 +77,7 @@ public class UnifiedTemplateEngine {
     public String callKind(String call) {
         ToolCallParser.ParsedCall parsed = callParser.parse(call);
         if (parsed.name().startsWith("db.")) return "db";
+        if (parsed.name().startsWith("mq.")) return "mq";
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return "builtin";
         ToolConfig tool = toolInvoker == null ? null : toolInvoker.tool(parsed.name());
         return tool != null && tool.callBacked() ? "call-tool" : "tool";
@@ -111,23 +126,25 @@ public class UnifiedTemplateEngine {
         StringBuffer output = new StringBuffer();
         while (matcher.find()) {
             String expression = matcher.group(1);
-            boolean validationValueAvailable = expression.startsWith("CASE.")
-                    && !expression.startsWith("CASE.STAGES.")
-                    && !"CASE.outputDirectory".equals(expression);
+            String path = CaseRuntimeContext.requiredReferencePath(expression);
+            boolean optional = CaseRuntimeContext.isOptionalReference(expression);
+            boolean validationValueAvailable = path.startsWith("CASE.")
+                    && !path.startsWith("CASE.STAGES.")
+                    && !"CASE.outputDirectory".equals(path);
             Object value;
             if (validationOnly) {
-                boolean runtimeDependent = "CASE.outputDirectory".equals(expression) || expression.startsWith("CASE.STAGES.") || expression.startsWith("ACTIONS.")
-                        || expression.startsWith("TOOL.") || expression.startsWith("DB.")
-                        || expression.equals("output") || expression.startsWith("output.");
-                if (context.isValidationDeferred(expression)) value = null;
-                else if (validationValueAvailable) value = context.require(expression);
+                boolean runtimeDependent = "CASE.outputDirectory".equals(path) || path.startsWith("CASE.STAGES.") || path.startsWith("ACTIONS.")
+                        || path.startsWith("TOOL.") || path.startsWith("DB.")
+                        || path.equals("output") || path.startsWith("output.");
+                if (context.isValidationDeferred(path)) value = null;
+                else if (validationValueAvailable) value = optional ? context.requireOptional(path) : context.require(path);
                 else if (runtimeDependent) value = null;
-                else if (context.contains(expression)) value = context.require(expression);
-                else if (!explicitContextRoot(expression)) value = null; // A dynamic unique suffix is checked structurally and completed at runtime.
-                else value = context.require(expression);
+                else if (context.contains(path)) value = optional ? context.requireOptional(path) : context.require(path);
+                else if (!explicitContextRoot(path)) value = null; // A dynamic unique suffix is checked structurally and completed at runtime.
+                else value = optional ? context.requireOptional(path) : context.require(path);
             }
-            else if (preserveMissing) value = context.resolve(expression);
-            else value = context.require(expression);
+            else if (preserveMissing) value = optional ? context.resolveOptional(path) : context.resolve(path);
+            else value = optional ? context.requireOptional(path) : context.require(path);
             String replacement = value == null && preserveMissing ? matcher.group(0) : (value == null ? "" : String.valueOf(value));
             matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
         }
@@ -148,7 +165,10 @@ public class UnifiedTemplateEngine {
     public Object evaluate(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         String value = expression == null ? "" : expression.trim();
         Matcher exact = VALUE.matcher(value);
-        if (exact.matches()) return context.require(exact.group(1));
+        if (exact.matches()) {
+            String path = CaseRuntimeContext.requiredReferencePath(exact.group(1));
+            return CaseRuntimeContext.isOptionalReference(exact.group(1)) ? context.requireOptional(path) : context.require(path);
+        }
         if (value.startsWith("#{") && findToolEnd(value, 2) == value.length() - 1) {
             return evaluateBlock(value, context, log);
         }
@@ -158,6 +178,7 @@ public class UnifiedTemplateEngine {
     public Object evaluateBlock(String expression, final CaseRuntimeContext context, final CaseExecutionLog log) throws Exception {
         return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
             @Override public Object context(String path) { return context.require(path); }
+            @Override public Object contextOptional(String path) { return context.requireOptional(path); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
@@ -188,6 +209,8 @@ public class UnifiedTemplateEngine {
             if (!matcher.lookingAt()) throw new ExpressionSyntaxException(start, text.length(), "'}' to close Context expression", "end of text");
             String path = matcher.group(1);
             if (path.trim().isEmpty() || !path.equals(path.trim())) throw new ExpressionSyntaxException(start, matcher.end(), "a non-blank Context path", "invalid Context path");
+            try { CaseRuntimeContext.validateReferencePath(path); }
+            catch (IllegalArgumentException error) { throw new ExpressionSyntaxException(start, matcher.end(), "a valid Context path", error.getMessage()); }
             position = matcher.end();
         }
     }
@@ -273,6 +296,10 @@ public class UnifiedTemplateEngine {
             if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
             return executeDbResolvedCall(name, input, context, log, invocationId);
         }
+        if (name.startsWith("mq.")) {
+            if (!attempt) throw new IllegalArgumentException("An MQ operation must be the primary call of a type: tool Action");
+            return executeMqResolvedCall(name, input, context, timeoutMs, invocationId);
+        }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             long started = System.nanoTime();
             long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
@@ -292,6 +319,29 @@ public class UnifiedTemplateEngine {
                 ? toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite)
                 : toolInvoker.invokeAttempt(invocationId, name, input, context, log, null, "", false);
         return attempt ? result : result.output();
+    }
+
+    private att.exec.ToolInvocationResult executeMqResolvedCall(String name, Map<String, Object> input,
+                                                                  CaseRuntimeContext context, Long timeoutMs,
+                                                                  String requestedId) {
+        if (mqHelperExecutor == null) throw new IllegalStateException("MQ invocation is unavailable: " + name);
+        String[] parts = name.split("\\.", -1);
+        if (parts.length != 3) throw new IllegalArgumentException("MQ call must be mq.<instance>.send|receive|request: " + name);
+        String id = requestedId == null || requestedId.trim().isEmpty()
+                ? context.nextInvocationId(name) : requestedId;
+        MqInvocationResult result = mqHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id);
+        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation.put("id", id);
+        invocation.put("type", "mq");
+        invocation.put("name", name);
+        invocation.put("status", result.success() ? "PASS" : "ERROR");
+        Object duration = result.evidence().get("durationMs");
+        if (duration != null) invocation.put("durationMs", duration);
+        invocation.put("timeoutMs", timeoutMs);
+        invocation.put("input", input);
+        invocation.put("output", result.result());
+        invocation.put("MQ", result.evidence());
+        return new att.exec.ToolInvocationResult(name, id, result.result(), invocation, result.success());
     }
 
     private Object executeCallBackedTool(ToolConfig tool, Map<String, Object> supplied,
@@ -779,6 +829,7 @@ public class UnifiedTemplateEngine {
         if (legacyInterpolatedPath(expression)) return render(expression, context, log);
         return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
             @Override public Object context(String path) { return context.require(path); }
+            @Override public Object contextOptional(String path) { return context.requireOptional(path); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
@@ -799,6 +850,7 @@ public class UnifiedTemplateEngine {
             if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close function call", "end of text");
             Object value = expressionBlocks.evaluate(text.substring(start, end + 1), new ExpressionBlockEvaluator.Resolver() {
                 @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
+                @Override public Object contextOptional(String path) { return requireScoped(values, path, true); }
                 @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                     if (!builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
                         throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + name);
@@ -827,6 +879,7 @@ public class UnifiedTemplateEngine {
         if (legacyInterpolatedPath(expression)) return renderScoped(expression, values, missingAsEmpty);
         return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
             @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
+            @Override public Object contextOptional(String path) { return requireScoped(values, path, true); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 if (!builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
                     throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + name);
@@ -873,11 +926,13 @@ public class UnifiedTemplateEngine {
 
     @SuppressWarnings("unchecked")
     private Object requireScoped(Map<String, ?> values, String path, boolean missingAsEmpty) {
-        if (values.containsKey(path)) return values.get(path);
+        String requiredPath = CaseRuntimeContext.requiredReferencePath(path);
+        boolean optional = CaseRuntimeContext.isOptionalReference(path);
+        if (values.containsKey(requiredPath)) return values.get(requiredPath);
         Object current = values;
-        for (String part : path.split("\\.")) {
+        for (String part : requiredPath.split("\\.")) {
             if (!(current instanceof Map) || !((Map<?, ?>) current).containsKey(part)) {
-                if (missingAsEmpty) return null;
+                if (missingAsEmpty || optional) return null;
                 throw new IllegalArgumentException("Unknown expression value in this scope: ${" + path + "}");
             }
             current = ((Map<String, ?>) current).get(part);
@@ -888,9 +943,10 @@ public class UnifiedTemplateEngine {
     @SuppressWarnings("unchecked")
     private boolean hasScopedPath(Map<String, ?> values, String path) {
         if (path == null || path.isEmpty() || quoted(path)) return false;
-        if (values.containsKey(path)) return true;
+        String requiredPath = CaseRuntimeContext.requiredReferencePath(path);
+        if (values.containsKey(requiredPath)) return true;
         Object current = values;
-        for (String part : path.split("\\.")) {
+        for (String part : requiredPath.split("\\.")) {
             if (!(current instanceof Map) || !((Map<?, ?>) current).containsKey(part)) return false;
             current = ((Map<String, ?>) current).get(part);
         }

@@ -1,13 +1,13 @@
-# ATT V3.3.0 System Design
+# ATT V3.4.0 System Design
 
 **Document Status:** Implemented
 
-**Target Version:** ATT 3.3.0
-**Last Updated:** 2026-07-30
+**Target Version:** ATT 3.4.0
+**Last Updated:** 2026-09-17
 
 ## 1. Purpose
 
-ATT V3.3.0 retains the reusable, shared-Context Flow model and improves expression, database, and Case-log authoring without adding another Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context.
+ATT V3.4.0 retains the reusable, shared-Context Flow model and adds post-invocation evidence collection and IBM MQ integration without adding another Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
@@ -37,6 +37,14 @@ V3.3 additionally provides:
 - raw multiline Log Action and process output in the Case log;
 - `saveAs.path: console`; and
 - no persistent `process-output` artifacts.
+
+V3.4 additionally provides:
+
+- Tool Action evidence collectors that run after the primary result and before assertion;
+- per-attempt collector evidence, timeout, failure policy, and collector invocation identity; and
+- invocation-scoped IBM MQ send, receive, and request/reply operations using exact file payload bytes;
+- verbose human `run` output by default, with `--verbose` retained as a compatibility spelling and `--quiet` as the explicit suppression; and
+- all-workbook `snapshot` generation by default when no selector is supplied, with `--all` retained as an explicit spelling.
 
 V3.3 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
 
@@ -185,9 +193,9 @@ Earlier isolated V3 Flow packages must be migrated:
 
 This is intentionally a breaking reinterpretation of `att-flow/v3.0` and `att-template/v3.0`. No compatibility mode is provided. Non-Flow V2 Templates remain compatible.
 
-## 10. Expression, DB, and logging extensions
+## 10. Expression, DB, logging, and integration extensions
 
-`${...}` remains the only Context-reference and text-interpolation syntax. `#{...}` is a complete typed expression block. It supports nested calls, list literals, parentheses, unary `+`, unary `-`, `not`, arithmetic `+ - * /`, comparisons, `like`, `in`, `is [not] null`, `and`, and `or`. Arithmetic is numeric, division by zero is an error, and `in` requires a list, array, or Iterable right operand. Bare Context-looking identifiers remain invalid.
+`${...}` remains the only Context-reference and text-interpolation syntax. `#{...}` is a complete typed expression block. It supports nested calls, list literals, parentheses, unary `+`, unary `-`, `not`, arithmetic `+ - * /`, comparisons, `like`, `in`, `is [not] null`, `and`, and `or`. Arithmetic is numeric, division by zero is an error, and `in` requires a list, array, or Iterable right operand. Append `?` to a complete reference, as in `${CASE.response.body.missing?}`, to return a real null when any map, list entry, root-owned value, or intermediate segment is missing; an existing final null remains null. Strict `${path}` lookup is unchanged, and optional lookup still rejects ambiguity, malformed syntax, and invalid traversal. Bare Context-looking identifiers remain invalid.
 
 Direct DB Actions may use either positional `params` with JDBC `?` placeholders or named `parameters` with `:name` placeholders, never both. Named placeholders are replaced by `?` before preparing the statement; values are never interpolated into SQL. The scanner ignores placeholders in quoted strings and comments and preserves PostgreSQL-style `::` casts. Missing and unused names fail validation. Parameter evidence defaults to resolved values; connection credentials are never included, and package owners may explicitly select `masked` or `types`.
 
@@ -195,9 +203,37 @@ Log Action messages and process stdout/stderr are written as raw UTF-8 Case-log 
 
 `prettyPrint(value)` and `format.pretty(value)` format maps, lists, arrays, scalars, and null deterministically with two-space indentation, cycle/depth protection, and the existing built-in output bound. They do not mutate the supplied value.
 
+### 10.1 Tool evidence collectors
+
+A `type: tool` Action may declare an `evidence` map keyed by collector ID. Each collector has a `call`, optional independent `timeoutMs`, and `onFailure: continue|stop`. The primary Tool attempt completes first; collectors then execute in declaration order while `${output.result}` points to that primary result. Collector results are stored at `output.attempts[n].evidence.<collectorId>` and never replace the primary result. Assertion evaluation follows the collectors. A primary `ASSERTION` retry reruns the primary and all collectors, while a collector failure with `continue` is recorded and does not change the primary assertion outcome. `stop` makes the Action ERROR and skips assertion evaluation.
+
+```yaml
+invoke:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=${CASE.requestFile})}"
+  evidence:
+    queueState:
+      call: "#{readQueueState(queue=${CASE.queue})}"
+      timeoutMs: 3000
+      onFailure: continue
+  assert: "${output.result.status} == 'SUCCESS'"
+```
+
+### 10.2 IBM MQ helper
+
+MQ helper files use `att-mqhelper/v1.0`, are listed under global `mqhelpers`, and are loaded before package validation. The Java adapter uses IBM MQ client classes in TCP mode; the default ATT build keeps those classes optional and resolves them from the runtime `lib/` directory. Calls are restricted to primary Tool Actions:
+
+```text
+#{mq.<instance>.send(queue='QUEUE.IN', file='request.bin')}
+#{mq.<instance>.receive(queue='QUEUE.OUT', waitMs=5000)}
+#{mq.<instance>.request(requestQueue='QUEUE.IN', replyQueue='QUEUE.OUT', file='request.bin')}
+```
+
+Send and request read file bytes without text conversion. Request captures the PUT MsgId and uses it as the GET CorrelId; receive/request with reason 2033 is a successful no-message result. Connections and queues are invocation-scoped, syncpoint is disabled, reply bytes are written once below the Case output directory, and MQ evidence contains metadata and reason/status fields but not credentials or full payload bytes.
+
 ## 11. Acceptance criteria
 
-V3.3 is complete when:
+V3.4 is complete when:
 
 - schema validation rejects `inputs`, `outputs`, and `with`;
 - the same Action configuration runs inline or in a Flow without expression changes;
@@ -210,4 +246,6 @@ V3.3 is complete when:
 - multiline Excel and Action values remain physical Case-log lines;
 - no default process-output artifact exists and console `saveAs` produces no file;
 - arithmetic, `in`, named DB binding, visible parameter evidence, and `prettyPrint` pass validation and runtime tests; and
+- evidence collectors run after primary output, repeat with assertion retries, and honor independent failure policy; and
+- MQ configuration, validation, exact-byte send/receive/request behavior, correlation matching, no-message semantics, and safe evidence pass tests; and
 - source, package, documentation, build, and unpacked-package validation gates pass.

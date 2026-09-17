@@ -1,0 +1,45 @@
+/* Author: Jeffrey + ChatGPT */
+package att.config;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class MqHelperConfigLoaderTest {
+    @TempDir Path tempDir;
+
+    @Test void loadsV26MqHelperWithoutExposingPasswordInMetadata() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        Path helper = directory.resolve("broker.yaml");
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+                "id: broker\nname: Broker\ndescription: Test broker\n" +
+                "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN, username: att, password: secret}\n" +
+                "requestReply: {waitMs: 2500}\n").getBytes("UTF-8"));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
+        MqHelperConfig broker = loaded.mqHelper("BROKER");
+        assertNotNull(broker);
+        assertEquals(1414, broker.port());
+        assertEquals(2500, broker.requestReplyWaitMs());
+        assertTrue(broker.credentialsConfigured());
+        assertFalse(broker.metadata().toString().contains("secret"));
+        assertFalse(broker.toString().contains("secret"));
+    }
+
+    @Test void rejectsDuplicateMqHelperIdsIgnoringCase() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        String content = "schemaVersion: att-mqhelper/v1.0\nid: %s\nname: Broker\ndescription: Test broker\n" +
+                "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n";
+        Files.write(directory.resolve("one.yaml"), String.format(content, "broker").getBytes("UTF-8"));
+        Files.write(directory.resolve("two.yaml"), String.format(content, "BROKER").getBytes("UTF-8"));
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/one.yaml, config/mqhelpers/two.yaml]\n").getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
+    }
+}

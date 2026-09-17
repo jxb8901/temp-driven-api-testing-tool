@@ -25,6 +25,7 @@ public final class Version {
     public static final String RUN_SCHEMA = "att-run/v2.1";
     public static final String VALIDATION_SCHEMA = "att-validation/v2.1";
     public static final String CI_SUMMARY_SCHEMA = "att-ci-summary/v2.1";
+    public static final String MQHELPER_SCHEMA = "att-mqhelper/v1.0";
 
     private Version() {}
 

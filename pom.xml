@@ -6,7 +6,7 @@
 
     <groupId>att</groupId>
     <artifactId>template-driven-api-testing-tool</artifactId>
-    <version>3.3.0</version>
+    <version>3.4.0</version>
     <name>Template-driven API Test Framework</name>
 
     <properties>
@@ -54,6 +54,22 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>ibm-mq</id>
+            <properties>
+                <ibm.mq.version>10.0.0.0</ibm.mq.version>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>com.ibm.mq</groupId>
+                    <artifactId>com.ibm.mq.allclient</artifactId>
+                    <version>${ibm.mq.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 
     <build>
         <resources>
