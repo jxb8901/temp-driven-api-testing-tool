@@ -41,4 +41,16 @@ class ExecutionOptionsTest {
         ExecutionOptions narrowed = ExecutionOptions.parse(new String[]{"run","--rerun-failed","--tag","payment"});
         assertTrue(narrowed.tags().contains("payment"));
     }
+
+    @Test void parsesStandaloneDebugTargetAndInput() {
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"debug", "flow", "common.compose.v1",
+                "--input", "templates/flows/common/compose/debug.yaml", "--output-dir", "out", "--verbose"});
+        assertEquals("debug", options.command());
+        assertEquals("flow", options.debugTargetType());
+        assertEquals("common.compose.v1", options.debugTargetId());
+        assertEquals(java.nio.file.Paths.get("templates/flows/common/compose/debug.yaml"), options.debugInput());
+        assertEquals("debug", options.validationScope());
+        assertTrue(options.verbose());
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"debug", "template", "X", "--all"}));
+    }
 }

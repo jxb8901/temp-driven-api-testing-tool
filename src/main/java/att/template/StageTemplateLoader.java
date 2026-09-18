@@ -29,12 +29,21 @@ public final class StageTemplateLoader {
     private final Map<String, Path> byName = new LinkedHashMap<String, Path>();
 
     public StageTemplateLoader(Path projectRoot, Path templatesRoot) throws Exception {
+        this(projectRoot, templatesRoot, true);
+    }
+
+    /**
+     * Creates a loader that can index only static descriptors.  Debugging uses
+     * this mode so an unrelated broken template cannot prevent a selected
+     * target from being inspected and executed.
+     */
+    public StageTemplateLoader(Path projectRoot, Path templatesRoot, boolean validateAll) throws Exception {
         this.projectRoot = projectRoot;
         Path canonicalProject = att.core.IdentifierValidator.canonicalPath(projectRoot, "package root");
         Path configured = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
         this.root = att.core.IdentifierValidator.canonicalPath(configured, "templates root");
         if (!root.startsWith(canonicalProject)) throw new IllegalArgumentException("Templates root escapes package root: " + templatesRoot);
-        index();
+        index(validateAll);
     }
 
     public StageTemplate load(String reference) throws Exception {
@@ -61,6 +70,10 @@ public final class StageTemplateLoader {
         }
     }
 
+    public StageTemplate loadSelected(String reference) throws Exception {
+        return load(reference);
+    }
+
     public List<StageTemplate> all() throws Exception {
         List<String> paths = new ArrayList<String>(byPath.keySet());
         java.util.Collections.sort(paths);
@@ -76,7 +89,7 @@ public final class StageTemplateLoader {
         return java.util.Collections.unmodifiableList(paths);
     }
 
-    private void index() throws Exception {
+    private void index(boolean validateAll) throws Exception {
         if (!Files.isDirectory(root)) throw new IllegalArgumentException("Templates root does not exist: " + root);
         try (Stream<Path> paths = Files.walk(root)) {
             java.util.Iterator<Path> iterator = paths.filter(Files::isDirectory).iterator();
@@ -86,6 +99,14 @@ public final class StageTemplateLoader {
                 if (!Files.isRegularFile(descriptor) || Files.isSymbolicLink(descriptor)) continue;
                 String relative = root.relativize(directory).toString().replace('\\', '/');
                 byPath.put(relative, directory);
+                if (!validateAll) {
+                    String symbolic = staticName(descriptor);
+                    if (!symbolic.isEmpty()) {
+                        Path previous = byName.put(symbolic, directory);
+                        if (previous != null) throw new IllegalArgumentException("Duplicate template name '" + symbolic + "': " + previous + ", " + directory);
+                    }
+                    continue;
+                }
                 Map<String, Object> yaml;
                 try {
                     yaml = yaml(descriptor);
@@ -108,6 +129,14 @@ public final class StageTemplateLoader {
                 }
             }
         }
+    }
+
+    private String staticName(Path descriptor) throws Exception {
+        String text = new String(Files.readAllBytes(descriptor), java.nio.charset.StandardCharsets.UTF_8);
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(?m)^name:[ \\t]*(?:[\\\"']([^\\\"']+)[\\\"']|([^#\\r\\n]+?))[ \\t]*(?:#.*)?$").matcher(text);
+        if (!matcher.find()) return "";
+        String value = matcher.group(1) == null ? matcher.group(2) : matcher.group(1);
+        return value == null ? "" : value.trim();
     }
 
     private StageTemplate loadDirectory(String reference, Path directory) throws Exception {

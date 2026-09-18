@@ -18,5 +18,6 @@ public final class DiagnosticCodes {
     public static final String RUN_FAILED = "ATT-RUN-001";
     public static final String PACKAGE_INVALID = "ATT-PKG-001";
     public static final String SELECTED_SCOPE = "ATT-PKG-SELECTED";
+    public static final String DEBUG_INVALID = "ATT-DEBUG-001";
     private DiagnosticCodes() {}
 }

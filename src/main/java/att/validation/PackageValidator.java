@@ -48,6 +48,28 @@ public final class PackageValidator {
         this.projectRoot = projectRoot; this.global = global; this.windows = windows;
     }
 
+    /** Validates only the selected debug target and its Flow dependency closure. */
+    public void validateDebugTarget(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                    att.flow.FlowRegistry selectedFlows, Path debugInput) throws Exception {
+        this.flows = selectedFlows;
+        validateTemplate(template, global);
+        validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
+        validateTemplateValues(template, testCase, stage, global, debugInput, new LinkedHashSet<String>());
+    }
+
+    private void validateReferencedToolsClosure(StageTemplate template, FrameworkConfig config, Set<String> visitedFlows) {
+        validateReferencedTools(template, config);
+        for (TemplateAction action : template.actions()) {
+            if (!"flow".equalsIgnoreCase(action.type())) continue;
+            if (!visitedFlows.add(action.use())) continue;
+            att.flow.FlowDefinition flow = flows.get(action.use());
+            if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA,
+                    flow.directory().resolve("flow.yaml"));
+            validateReferencedToolsClosure(body, config, visitedFlows);
+        }
+    }
+
     public ValidationSummary validate(ExecutionOptions options) throws Exception {
         skippedWindowsShellExecutableChecks.clear();
         try {

@@ -45,6 +45,26 @@ public final class FrameworkRunner {
                         "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
             }
             profile.end("configLoadMs", profilePhase);
+            if ("debug".equals(options.command())) {
+                att.debug.DebugEngine.Result debug = new att.debug.DebugEngine(root, config).run(options);
+                if (!options.quiet()) {
+                    if ("json".equals(options.format())) {
+                        java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
+                        output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
+                        output.put("durationMs", debug.durationMs()); output.put("log", debug.logPath().toString());
+                        output.put("result", debug.resultPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
+                    } else {
+                        String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
+                        System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
+                                + " | Duration: " + debug.durationMs() + "ms");
+                        System.out.println("Log: " + debug.logPath());
+                        System.out.println("Result: " + debug.resultPath());
+                        if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
+                    }
+                }
+                if (debug.exitCode() != 0) System.exit(debug.exitCode());
+                return;
+            }
             if ("docs".equals(options.command())) {
                 System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
                 return;
@@ -139,6 +159,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
+        System.out.println("Debug: ./att.sh debug template|flow|tool <id> [--config <file>] [--input <debug.yaml>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
         System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 

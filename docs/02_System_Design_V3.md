@@ -1,13 +1,13 @@
-# ATT V3.4.0 System Design
+# ATT V3.4.1 System Design
 
 **Document Status:** Implemented
 
-**Target Version:** ATT 3.4.0
-**Last Updated:** 2026-09-17
+**Target Version:** ATT 3.4.1
+**Last Updated:** 2026-09-19
 
 ## 1. Purpose
 
-ATT V3.4.0 retains the reusable, shared-Context Flow model and adds post-invocation evidence collection and IBM MQ integration without adding another Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context.
+ATT V3.4.1 retains the reusable, shared-Context Flow model and adds standalone debug execution, while preserving post-invocation evidence collection and IBM MQ integration without adding another normal-run Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context; debug invokes the same runtime with a synthetic Case.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
@@ -93,6 +93,24 @@ actions:
 ```
 
 `with` is invalid. A Flow Action exposes only the normal Action outcome fields such as `status`, `success`, `durationMs`, and `exception`. Business results are read from the internal Action that produced them; ATT does not create `output.outputs` or forward the last Action result.
+
+### 3.3 Standalone debug command
+
+`debug template <id>`, `debug flow <id>`, and `debug tool <id>` construct one synthetic Case and pass it through the same `StageTemplateRunner`, `UnifiedTemplateEngine`, Tool invoker, DB lifecycle, Flow registry, Context validation, and Case-log writer used by ordinary execution. Debug does not iterate over Excel and does not create a normal Run manifest or `latest-run.yaml`.
+
+Debug inputs use `att-debug/v1.0`:
+
+```yaml
+schemaVersion: att-debug/v1.0
+case: {RefNo: REF001, Amount: 1000}
+stage: {key: DEBUG, values: {SrcRefNo: SRC001}}
+inputs: {SrcRefNo: SRC001}
+arguments: {requestId: REF001}
+```
+
+The sidecar is discovered beside the selected Template or Flow, or as `config/tools/<group>.debug.yaml` for a grouped Tool. `--input` overrides discovery. Validation is target-scoped: only the selected Template/Flow closure or Tool contract is loaded, so unrelated workbook artifacts and unrelated malformed Template descriptors do not block a debug session. Framework-owned Case, Run, Action, Tool, DB, stage, and output fields are written after user Case data and therefore cannot be replaced.
+
+Each debug run writes `output/debug/<debugId>/case.log`, `result.yaml`, and `artifacts/`. `result.yaml` records target, synthetic Case ID, input source, status, duration, action results, diagnostics, and artifact locations. PASS, FAIL, invalid input/validation, and runtime error map to exit codes 0, 1, 2, and 3 respectively.
 
 ## 4. Context and assignment semantics
 

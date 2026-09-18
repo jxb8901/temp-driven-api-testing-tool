@@ -1,6 +1,6 @@
-# ATT 3.4.0 - Automated Testing Tool
+# ATT 3.4.1 - Automated Testing Tool
 
-ATT V3.4.0 keeps the shared-Context Flow model and adds post-invocation evidence collectors plus a built-in IBM MQ helper while retaining the V3.3 diagnostics and Case-log behavior.
+ATT V3.4.1 keeps the shared-Context Flow model and adds standalone debug execution for one Template, Flow, or Tool while retaining the V3.4 evidence, MQ, diagnostics, and Case-log behavior.
 
 V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternative to Tool `command`. A call-backed Tool can wrap a DB query/scalar/update or pure built-in while direct DB Actions and expressions remain available.
 
@@ -12,6 +12,7 @@ V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternati
 ./att.sh snapshot
 ./att.sh validate --package
 ./att.sh run --all
+./att.sh debug template PAYMENT_INVOKE
 ```
 
 On Windows, run the same commands through `att.bat`:
@@ -117,6 +118,18 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - Tool command templates are normalized before declared arguments are injected as atomic argv values; resolved values are never tokenized again. Local tools do not use a shell. Prefer `${argument}` or `${input.argument}` with exact case-sensitive argument keys. Tools write results to stdout and diagnostics to stderr; ATT records logical/executed argv, input/stdout/stderr in case evidence and creates a dedicated raw-stdout artifact only when the action sets `saveAs`.
 - In Tool-call expressions, expression quotes delimit strings rather than shell words: the opposite quote is literal, a matching quote may be backslash-escaped, and `${...}` may be interpolated inside a quoted value. Prefer a YAML block scalar for calls mixing apostrophes, double quotes, and Context values; the Reference Manual contains copyable examples.
 
+## Standalone debug
+
+Run one real target through the ordinary Template/Flow/Tool runtime:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE
+./att.sh debug flow common.compose.v1
+./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml
+```
+
+Without `--input`, ATT looks for `debug.yaml` beside a Template or Flow, or `config/tools/<group>.debug.yaml` for a grouped Tool. Debug inputs use `schemaVersion: att-debug/v1.0` and may contain `case`, `stage`, `inputs`, `arguments`, or grouped `tools.<localKey>.arguments`. Results are isolated under `output/debug/<debugId>/` with `case.log`, `result.yaml`, and `artifacts/`. Exit codes are `0` PASS, `1` FAIL, `2` invalid CLI/config/input, and `3` runtime error. Framework-owned `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` values cannot be overwritten by debug data.
+
 ## V3 Model
 
 ```text
@@ -135,4 +148,4 @@ test case --1:n stage--> template --1:n action--> tool
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See the [V3 System Design](docs/02_System_Design_V3.md), [V2.6.2 Tool System Design](docs/02_System_Design_V2.6.2.md), and [V2.5 Database Helper System Design](docs/history/02_System_Design_V2.5.md) for normative specifications.
-See the [ATT V3.4.0 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.4.0 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.
+See the [ATT V3.4.1 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.4.1 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.

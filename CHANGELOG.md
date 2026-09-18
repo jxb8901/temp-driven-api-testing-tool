@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.4.1 - 2026-09-19
+
+- Added standalone `debug template|flow|tool <id>` execution with `att-debug/v1.0` sidecars, explicit `--input` overrides, synthetic protected Case/Context values, target-scoped validation, isolated debug artifacts, `case.log`, and machine-readable `result.yaml`.
+- Added debug sidecar auto-discovery for Template directories, Flow directories, and grouped Tool configuration, while preserving ordinary run behavior.
+
 ## 3.4.0 - 2026-09-17
 
 - Changed CLI defaults so human `run` output is verbose by default and `snapshot` without a selector generates all discovered workbook snapshots; `--verbose` and `--all` remain accepted for compatibility, while explicit selectors retain their existing narrowing behavior.

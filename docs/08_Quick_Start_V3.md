@@ -1,8 +1,8 @@
-# ATT V3.4.0 新手入門
+# ATT V3.4.1 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.4.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V3.4.1 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.4.0 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.4.1 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
@@ -12,6 +12,186 @@ test case --1:n stage--> template --1:n action--> tool
 ```
 
 Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
+
+## 1.1 不經 Excel 的 standalone debug
+
+需要快速檢查一個 Template、Flow 或 Tool 時，可直接執行其正常 runtime：
+
+```sh
+./att.sh debug template PAYMENT_INVOKE
+./att.sh debug flow common.compose.v1
+./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml
+```
+
+未指定 `--input` 時，ATT 依次使用 Template 或 Flow 目錄下的 `debug.yaml`；Tool group 則使用 `config/tools/<group>.debug.yaml`。輸入檔的根節點必須包含：
+
+```yaml
+schemaVersion: att-debug/v1.0
+case:
+  RefNo: REF001
+  Amount: 1000
+stage:
+  key: DEBUG
+  values:
+    SrcRefNo: SRC001
+inputs:
+  SrcRefNo: SRC001
+arguments:
+  requestId: REF001
+tools:
+  invokeApi:
+    arguments:
+      requestFile: /tmp/request.xml
+```
+
+Template 使用 `case` 和 `stage`；Flow 可用 `case`、`stage`、`inputs`；Tool 使用根 `arguments` 或所選 group 下 `tools.<localKey>.arguments`。`--input` 會覆蓋自動發現的 sidecar。ATT 會建立合成 Case，例如 `DEBUG.template.PAYMENT_INVOKE`，但不會讓輸入檔改寫框架擁有的 `CASE.caseId`、`CASE.outputDirectory`、`CASE.STAGES`、`RUN`、`ACTIONS`、`TOOL` 或 `DB` 欄位。
+
+結果只寫入 `output/debug/<debugId>/`（可由 `--output-dir` 覆蓋）：`case.log` 是人可讀執行記錄，`result.yaml` 是機器可讀總結果，`artifacts/` 保存 payload、saveAs 及 `case.yaml`。Exit code 為 `0 PASS`、`1 FAIL`、`2` 輸入／驗證錯誤、`3` runtime 錯誤；debug 不會建立或更新普通 run 的 `latest-run.yaml`。
+
+### 1.2 Debug 配置例子
+
+以下例子都使用 `att-debug/v1.0`。可把檔案命名為 `debug.yaml` 放在目標旁邊，讓 ATT 自動發現；也可放在任意位置，再用 `--input` 指定。
+
+#### Template：提供 Case 和 Stage 資料
+
+建立 `templates/PAYMENT_INVOKE/debug.yaml`：
+
+```yaml
+schemaVersion: att-debug/v1.0
+case:
+  caseName: PAYMENT debug
+  amount: 100
+  environment: SIT
+stage:
+  key: invoke
+  values:
+    channel: WEB
+    sourceRef: SRC-001
+```
+
+執行：
+
+```sh
+./att.sh debug template PAYMENT_INVOKE
+```
+
+Template 內可照普通執行一樣讀取 `${CASE.amount}`、`${CASE.environment}`、`${CASE.STAGES.invoke.channel}`。沒有 `inputs` 時，`case` 和 `stage.values` 已足夠建立一個可執行的合成 Case。
+
+#### Flow：用 `inputs` 提供 Flow 測試值
+
+建立 `templates/flows/common/compose/debug.yaml`：
+
+```yaml
+schemaVersion: att-debug/v1.0
+case:
+  caseName: Compose debug
+  traceId: TRACE-001
+stage:
+  key: DEBUG
+  values:
+    mode: SIT
+inputs:
+  source: payment
+  suffix: -debug
+```
+
+執行：
+
+```sh
+./att.sh debug flow common.compose.v1
+```
+
+`inputs.source` 可用 `${CASE.inputs.source}` 讀取；若沒有同名 Case 欄位，也可用 `${CASE.source}` 讀取。`stage.key` 及 `stage.values` 會建立 Flow 執行時使用的唯一 Debug Stage。
+
+#### Group Tool：在 `tools.<localKey>.arguments` 傳入參數
+
+對 `config/tools/fpp.yaml` 內的 `invokeApi`，建立 `config/tools/fpp.debug.yaml`：
+
+```yaml
+schemaVersion: att-debug/v1.0
+case:
+  RefNo: REF001
+tools:
+  invokeApi:
+    arguments:
+      requestId: REF001
+      requestType: PAYMENT
+      requestFile: /tmp/payment-request.xml
+      apiLogPath: /tmp/payment-api.log
+```
+
+執行：
+
+```sh
+./att.sh debug tool fpp.invokeApi
+```
+
+工具組內的 local key 是 `invokeApi`；命令列可使用完整 ID `fpp.invokeApi`。Tool debug arguments 應提供已在 Tool descriptor 宣告的 scalar 或 list 值，不能用 map literal 代替普通 Tool 參數。
+
+#### Ungrouped Tool：使用根 `arguments`
+
+對 `config/config.yaml` 根 `tools.invokePaymentApi`，可以建立 `config/tools/invokePaymentApi.debug.yaml`：
+
+```yaml
+schemaVersion: att-debug/v1.0
+arguments:
+  requestFile: /tmp/payment-request.xml
+  environment: SIT
+```
+
+執行：
+
+```sh
+./att.sh debug tool invokePaymentApi
+```
+
+未分組 Tool 不需要 `tools.invokePaymentApi.arguments` 包裝；根 `arguments` 會直接成為本次 Tool call 的具名參數。
+
+#### 用 `--input` 覆蓋 sidecar
+
+當只想臨時改一組值，不要修改版本控制中的 `debug.yaml`，建立 `/tmp/payment-debug.yaml`：
+
+```yaml
+schemaVersion: att-debug/v1.0
+case:
+  amount: 999
+  environment: UAT
+stage:
+  key: invoke
+  values:
+    channel: MOBILE
+```
+
+執行：
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml
+```
+
+明確指定的 `--input` 優先於自動發現的 sidecar；若檔案不存在、schema 不正確或缺少必需的 Tool 參數，命令會以 exit code `2` 結束，並在結果中保留 `Debug input: ...` 診斷來源。
+
+#### 檢查保護欄位和失敗診斷
+
+即使輸入檔包含下列欄位，框架仍會使用真正的合成值：
+
+```yaml
+schemaVersion: att-debug/v1.0
+case:
+  caseId: pretend-id
+  outputDirectory: /tmp/pretend-output
+  VARS: {shouldNotReplace: true}
+  STAGES: {shouldNotReplace: true}
+```
+
+Debug 的 `CASE.caseId`、`CASE.outputDirectory`、`CASE.VARS` 和 `CASE.STAGES` 等框架欄位不可由配置覆蓋。診斷時查看：
+
+```text
+output/debug/<debugId>/case.log
+output/debug/<debugId>/result.yaml
+output/debug/<debugId>/artifacts/case.yaml
+```
+
+`result.yaml` 會記錄目標、合成 Case ID、輸入檔、status、exit code、diagnostic 及證據位置；因此可以先用 debug 反覆調整輸入，再用普通 Excel run 做完整回歸。
 
 ## 2. 先理解執行方式
 
@@ -27,7 +207,7 @@ validate + plan
 
 只有具有 `COMPLETE` manifest 的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 保留在 `output/<RunID>` 供除錯，但不會成為 latest；重試同一 Run ID 前需先移走或清理該未完成目錄。
 
-V3.4.0 沿用既有狀態及聚合契約，不可混淆：
+V3.4.1 沿用既有狀態及聚合契約，不可混淆：
 
 | 狀態 | 意義 | 例子 |
 |---|---|---|
@@ -99,7 +279,7 @@ Flow 不再有 `inputs`、`outputs` 或調用端 `with`。內部 Action 完成�
 
 同一 Template 及其全部巢狀 Flow 共用一個 Action ID namespace；任何重名或同一 Flow 的重複調用都會在 validate 時失敗。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
 
-V3.4.0 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
+V3.4.1 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
 
 ### 3.2 使用 V3.4 expression、evidence、console 及命名 SQL
 
@@ -754,7 +934,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.4.0",
+  "attVersion": "3.4.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -905,4 +1085,4 @@ assert: "${ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.4.0 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.4.1 Reference Manual](09_Reference_Manual_V3.md)。

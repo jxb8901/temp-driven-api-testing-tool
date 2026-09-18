@@ -16,3 +16,4 @@ codes:
   ATT-RUN-001: Runtime or run lifecycle failure
   ATT-PKG-001: Package integrity, build, or archive failure
   ATT-PKG-SELECTED: Validation covered only the selected dependency closure
+  ATT-DEBUG-001: Invalid standalone debug target, input, or sidecar

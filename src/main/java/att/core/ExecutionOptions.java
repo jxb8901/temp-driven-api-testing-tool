@@ -32,6 +32,9 @@ public final class ExecutionOptions {
     private final String concurrencyMode;
     private final boolean updateSnapshot;
     private final boolean profile;
+    private final String debugTargetType;
+    private final String debugTargetId;
+    private final Path debugInput;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -54,6 +57,16 @@ public final class ExecutionOptions {
                              boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
                              String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
                              boolean updateSnapshot, boolean profile) {
+        this(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId, all, rerunFailed, dryRun,
+                failFast, outputDirectory, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
+                updateSnapshot, profile, "", "", null);
+    }
+
+    private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
+                             Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
+                             boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
+                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
+                             boolean updateSnapshot, boolean profile, String debugTargetType, String debugTargetId, Path debugInput) {
         this.command = command;
         this.configPath = configPath;
         this.suitePaths = new ArrayList<Path>(suitePaths);
@@ -75,14 +88,28 @@ public final class ExecutionOptions {
         this.concurrencyMode = concurrencyMode;
         this.updateSnapshot = updateSnapshot;
         this.profile = profile;
+        this.debugTargetType = debugTargetType == null ? "" : debugTargetType;
+        this.debugTargetId = debugTargetId == null ? "" : debugTargetId;
+        this.debugInput = debugInput;
     }
 
     public static ExecutionOptions parse(String[] args) {
         if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
         String command = args[0].startsWith("--") ? "run" : args[0];
         int start = args[0].startsWith("--") ? 0 : 1;
-        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command))) {
+        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command) || "debug".equals(command))) {
             throw new IllegalArgumentException("Unknown command: " + command);
+        }
+        String debugTargetType = "";
+        String debugTargetId = "";
+        if ("debug".equals(command)) {
+            if (args.length < 3) throw new IllegalArgumentException("debug requires template|flow|tool and a target id");
+            debugTargetType = args[1].toLowerCase(java.util.Locale.ROOT);
+            if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
+                throw new IllegalArgumentException("debug target must be template, flow, or tool");
+            debugTargetId = args[2];
+            if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("debug target id must not be blank");
+            start = 3;
         }
         Path config = Paths.get("config/config.yaml");
         List<Path> suites = new ArrayList<Path>();
@@ -96,6 +123,7 @@ public final class ExecutionOptions {
         String format = "human";
         String concurrencyMode = "reject";
         Path output = null;
+        Path debugInput = null;
         Set<String> ciOutputs = defaultCiOutputs();
         Set<String> seenOptions = new LinkedHashSet<String>();
         for (int i = start; i < args.length; i++) {
@@ -109,6 +137,7 @@ public final class ExecutionOptions {
             else if ("--exclude-tag".equals(arg)) excludeTags.add(value(args, ++i, arg));
             else if ("--run-id".equals(arg)) runId = value(args, ++i, arg);
             else if ("--output-dir".equals(arg)) output = Paths.get(value(args, ++i, arg));
+            else if ("--input".equals(arg)) debugInput = Paths.get(value(args, ++i, arg));
             else if ("--format".equals(arg)) format = value(args, ++i, arg);
             else if ("--ci-output".equals(arg)) ciOutputs = parseCiOutputs(value(args, ++i, arg));
             else if ("--queue".equals(arg)) concurrencyMode = "queue";
@@ -130,8 +159,9 @@ public final class ExecutionOptions {
         if ("validate".equals(command)) dry = true;
         if ("snapshot".equals(command) && !all && suites.isEmpty() && suiteDir == null) all = true;
         if (packageScope && selectedScope) throw new IllegalArgumentException("--package and --selected are mutually exclusive");
+        if ("debug".equals(command) && (packageScope || selectedScope)) throw new IllegalArgumentException("--package/--selected are not valid for debug");
         if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
-        String validationScope = packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
+        String validationScope = "debug".equals(command) ? "debug" : packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
         if ("run".equals(command) && !rerun && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) {
             throw new IllegalArgumentException(command + " requires --all, --suite, --case, or --tag");
         }
@@ -145,7 +175,7 @@ public final class ExecutionOptions {
         if (quiet && explicitVerbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         if (quiet) verbose = false;
         validateAllowed(command, seenOptions);
-        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile);
+        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput);
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
@@ -155,6 +185,7 @@ public final class ExecutionOptions {
         else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--output-dir", "--format", "--quiet", "--verbose"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
 
@@ -185,6 +216,9 @@ public final class ExecutionOptions {
     public String concurrencyMode() { return concurrencyMode; }
     public boolean updateSnapshot() { return updateSnapshot; }
     public boolean profile() { return profile; }
+    public String debugTargetType() { return debugTargetType; }
+    public String debugTargetId() { return debugTargetId; }
+    public Path debugInput() { return debugInput; }
 
     public boolean matches(TestCase testCase) {
         boolean caseMatches = caseIds.isEmpty() || caseIds.contains(testCase.caseId());

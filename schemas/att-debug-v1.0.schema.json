@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:debug:v1.0",
+  "title": "ATT standalone debug input",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": "att-debug/v1.0" },
+    "case": { "type": "object", "additionalProperties": true },
+    "stage": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "values": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "inputs": { "type": "object", "additionalProperties": true },
+    "arguments": { "type": "object", "additionalProperties": true },
+    "tools": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "arguments": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -34,10 +34,15 @@ public final class CaseRuntimeContext {
         caseNode.put("rowNumber", testCase.rowNumber());
         caseNode.put("tags", testCase.tags());
         caseNode.put("status", "RUNNING");
-        caseNode.put("startedAt", java.time.Instant.now().toString());
+        String caseStartedAt = java.time.Instant.now().toString();
+        caseNode.put("startedAt", caseStartedAt);
         caseNode.putAll(testCase.caseData());
         // Framework-owned runtime metadata must not be replaceable by a
         // same-named workbook column/case-data alias.
+        caseNode.put("caseId", testCase.caseId());
+        caseNode.put("workbookId", testCase.workbookId());
+        caseNode.put("groupId", testCase.groupId());
+        caseNode.put("rowCaseId", testCase.rowCaseId());
         caseNode.put("outputDirectory", this.caseOutputDir.toString());
         caseNode.put("VARS", new LinkedHashMap<String, Object>());
         caseNode.put("DB", new LinkedHashMap<String, Object>());
@@ -65,6 +70,8 @@ public final class CaseRuntimeContext {
         stageNode.put("status", "RUNNING");
         stageNode.put("startedAt", java.time.Instant.now().toString());
         stageNode.putAll(stage.values());
+        stageNode.put("key", stage.key());
+        stageNode.put("status", "RUNNING");
         Map<String, Object> template = new LinkedHashMap<String, Object>();
         template.put("name", templateName);
         template.put("path", templatePath.toString());
