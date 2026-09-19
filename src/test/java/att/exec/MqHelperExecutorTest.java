@@ -34,6 +34,9 @@ class MqHelperExecutorTest {
         assertEquals("", factory.putRequest == null ? null : factory.putRequest.replyQueue());
         assertEquals(bytes.length, result.result().get("bytes"));
         assertFalse(result.evidence().containsKey("payload"));
+        assertSame(result.evidence(), result.actionResult().evidence().get("mq"));
+        assertEquals("broker", result.actionResult().evidence().get("mq") instanceof Map
+                ? ((Map<?, ?>) result.actionResult().evidence().get("mq")).get("helperId") : null);
         assertEquals(1, factory.disconnects);
         assertEquals(1, factory.queueCloses);
     }

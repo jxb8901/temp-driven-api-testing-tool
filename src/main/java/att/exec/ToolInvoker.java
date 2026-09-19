@@ -155,6 +155,8 @@ public class ToolInvoker {
         } catch (Exception e) { parseFailure = e; }
 
         Map<String, Object> toolInvocation = new LinkedHashMap<String, Object>();
+        toolInvocation.put("id", id);
+        toolInvocation.put("type", "tool");
         toolInvocation.put("name", toolName);
         toolInvocation.put("input", resolvedInput);
         toolInvocation.put("output", parsed);
@@ -259,7 +261,8 @@ public class ToolInvoker {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
-        return new ToolInvocationResult(toolName, id, parsed, invocation);
+        return new ToolInvocationResult(toolName, id, parsed, invocation, true,
+                ActionExecutionResult.evidence("tool", toolInvocation));
         } finally {
             String cleanupWarning = cleanupCapture(commandResult);
             if (cleanupWarning != null && invocation != null) {

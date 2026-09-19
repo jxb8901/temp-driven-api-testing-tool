@@ -7,7 +7,7 @@
 
 ## 1. Purpose
 
-ATT V3.4.2 defines one execution-neutral expression Context for ordinary TestCase and standalone debug execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug invokes the same runtime with a synthetic Case.
+ATT V3.4.2 defines one execution-neutral expression Context for ordinary TestCase and standalone debug execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. Tool, DB, and MQ executors adapt their native outcomes to one common Action result/evidence envelope. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug invokes the same runtime with a synthetic Case.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
@@ -45,6 +45,14 @@ V3.4 additionally provides:
 - invocation-scoped IBM MQ send, receive, and request/reply operations using exact file payload bytes;
 - verbose human `run` output by default, with `--verbose` retained as a compatibility spelling and `--quiet` as the explicit suppression; and
 - all-workbook `snapshot` generation by default when no selector is supplied, with `--all` retained as an explicit spelling.
+
+V3.4.2 additionally provides:
+
+- one executor-neutral Action result/evidence publication boundary for generic Tools, DB operations, MQ operations, and future helpers;
+- helper-native evidence under `output.evidence.<kind>` while the Action is active and under `EXEC.ACTIONS.<id>.output.evidence.<kind>` after publication;
+- call-backed Tools as the preferred extension model for framework-native/reusable capabilities, with typed arguments preserved;
+- command-backed Tools as a supported external-process extension mechanism, with deterministic argv, process evidence, SSH, and script use cases preserved; and
+- DB transaction/connection state kept internal to the resource scope, with legacy `CASE.DB` finalization retained separately from operation evidence.
 
 V3.3 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
 
@@ -165,6 +173,48 @@ stays limited to the seven nodes shown above.
 | `output.*` | Current Action outcome during supported post-execution fields |
 
 Existing unique-suffix shorthand remains unchanged. Removed Flow-only roots are invalid rather than treated as aliases.
+
+### 4.1 Common Action result and evidence lifecycle
+
+Every observable operation converges at the Action boundary without forcing its
+executor to share a low-level implementation or parameter contract:
+
+```text
+generic Tool / DB helper / MQ helper
+              |
+      ActionExecutionResult
+      | result | evidence | diagnostic | attempts
+              |
+   local output while active
+              |
+   EXEC.ACTIONS.<actionId> after publication
+```
+
+The common envelope is intentionally additive. `result` contains the typed
+business/operation value; `evidence` contains safe helper or process metadata;
+`diagnostic` is present for typed failures; and `attempts` is used where retry
+or collector semantics apply. DB SQL/parameter metadata is stored as
+`output.evidence.db`, MQ metadata as `output.evidence.mq`, and Tool/process
+metadata as `output.evidence.tool`. Post-invoke collectors remain under the
+same Action's evidence/attempt structure. A DB connection, transaction,
+Hikari lease, MQ connection/queue handle, process handle, or retry frame is
+resource state, not Action evidence and is never a canonical Context root.
+
+The two Tool backends converge only at this boundary:
+
+| | call-backed | command-backed |
+|---|---|---|
+| Invocation | typed native/helper call | OS process, script, CLI, or SSH |
+| Preferred role | normal framework-native/reusable Tool | supported special-case external-process extension |
+| Arguments | String, Number, Boolean, null, List, Context value, nested call | deterministic argv items; flat List may expand |
+| `argName` / `argNameMode` | not applicable | supported for process shaping |
+| stdout/stderr and exit code | no process contract | process evidence contract |
+| cache | supported where valid | no process cache |
+| Action publication | common `ActionExecutionResult` | common `ActionExecutionResult` |
+
+New framework-native capabilities should use `call`. Existing and new
+command-backed Tools remain supported when an external process is the natural
+boundary; they are not deprecated and do not need migration.
 
 Visibility follows explicit scope boundaries:
 

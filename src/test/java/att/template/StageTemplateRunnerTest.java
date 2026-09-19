@@ -54,6 +54,8 @@ class StageTemplateRunnerTest {
         assertEquals(0, context.resolve("ACTIONS.normalize.output.exitCode"));
         assertEquals("builtin", context.resolve("ACTIONS.normalize.output.attempts[0].type"));
         assertEquals("upper", context.resolve("ACTIONS.normalize.output.attempts[0].name"));
+        assertEquals("upper", context.resolve("ACTIONS.normalize.output.evidence.tool.name"));
+        assertEquals("builtin", context.resolve("ACTIONS.normalize.output.evidence.tool.type"));
         assertEquals("ABC", new String(Files.readAllBytes(caseDir.resolve("normalized.txt")), "UTF-8"));
         assertNull(context.resolve("ACTIONS.normalize.TOOL"));
     }
@@ -97,6 +99,9 @@ class StageTemplateRunnerTest {
         assertEquals(ResultStatus.PASS, results.get(0).status());
         assertEquals("ok", builtIns.last.get("value"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.result"));
+        assertEquals("sample", context.resolve("ACTIONS.call.output.evidence.tool.name"));
+        assertEquals("tool", context.resolve("ACTIONS.call.output.evidence.tool.type"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.evidence.collectors.snapshot.result"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.result"));
         assertEquals("PASS", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.status"));
         String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");

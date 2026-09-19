@@ -7,6 +7,7 @@ package att.template;
 import att.core.CaseRuntimeContext;
 import att.core.CaseExecutionLog;
 import att.exec.ToolInvoker;
+import att.exec.ActionExecutionResult;
 import att.exec.DbHelperExecutor;
 import att.exec.DbInvocationResult;
 import att.exec.MqHelperExecutor;
@@ -338,7 +339,8 @@ public class UnifiedTemplateEngine {
         invocation.put("input", input);
         invocation.put("output", result.result());
         invocation.put("MQ", result.evidence());
-        return new att.exec.ToolInvocationResult(name, id, result.result(), invocation, result.success());
+        return new att.exec.ToolInvocationResult(name, id, result.result(), invocation, result.success(),
+                result.actionResult().evidence());
     }
 
     private Object executeCallBackedTool(ToolConfig tool, Map<String, Object> supplied,
@@ -361,6 +363,7 @@ public class UnifiedTemplateEngine {
         Object output;
         boolean success = true;
         Map<String, Object> dbEvidence = new LinkedHashMap<String, Object>();
+        Map<String, Object> commonDbEvidence = null;
         if (cacheHit) {
             output = tool.caseCached() ? context.callToolCache(cacheKey)
                     : dbHelperExecutor.cached(dbInstance, cacheKey);
@@ -371,6 +374,7 @@ public class UnifiedTemplateEngine {
             Map<String, Object> calls = new LinkedHashMap<String, Object>();
             calls.put(result.invocationId, result.evidence);
             dbEvidence.put(result.instance, calls);
+            commonDbEvidence = result.evidence;
         } else {
             output = invokeBuiltInWithTimeout(target.name(), resolveDefinitionArguments(target, input), timeoutMs, id, started);
         }
@@ -419,7 +423,11 @@ public class UnifiedTemplateEngine {
         invocation.put("output", output);
         invocation.put("TOOL", toolNode);
         if (!dbEvidence.isEmpty()) invocation.put("DB", dbEvidence);
-        att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult(tool.key(), id, output, invocation, success);
+        Map<String, Object> actionEvidence = new LinkedHashMap<String, Object>();
+        actionEvidence.put("tool", toolEvidence);
+        if (commonDbEvidence != null) actionEvidence.put("db", commonDbEvidence);
+        att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult(tool.key(), id, output, invocation,
+                success, actionEvidence);
         if (attempt && !success && dbTimeout(output)) {
             throw new att.exec.ToolExecutionException("TIMEOUT", "Tool timed out: " + tool.key(), invocation, null, null);
         }
@@ -498,7 +506,7 @@ public class UnifiedTemplateEngine {
         String invocationId = context.nextDbInvocationId(parts[1]);
         String operation = "update".equals(parts[2]) ? "update" : "query";
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs);
-        context.recordDbInvocation(parts[1], invocationId, result.evidence());
+        context.recordActionEvidence(result.actionResult().evidence());
         if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         Object output = result.result();
@@ -615,7 +623,7 @@ public class UnifiedTemplateEngine {
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextDbInvocationId(parts[1]) : requestedId;
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id);
-        context.recordDbInvocation(parts[1], id, result.evidence());
+        context.recordActionEvidence(result.actionResult().evidence());
         if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         if (!result.success()) {
@@ -685,7 +693,8 @@ public class UnifiedTemplateEngine {
             else java.nio.file.Files.write(outputFile, bytes, java.nio.file.StandardOpenOption.CREATE_NEW);
             invocation.put("outputFile", outputFile.toString());
         }
-        return new att.exec.ToolInvocationResult(name, id, output, invocation);
+        return new att.exec.ToolInvocationResult(name, id, output, invocation, true,
+                ActionExecutionResult.evidence("tool", invocation));
     }
 
     private Object invokeBuiltInWithTimeout(final String name, final Map<String, Object> input, long timeoutMs,

@@ -436,6 +436,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         evidence.put("id", invocationId);
         evidence.put("type", "db");
         evidence.put("db", config.id());
+        evidence.put("helperId", config.id());
         evidence.put("operation", operation);
         evidence.put("status", Boolean.TRUE.equals(result.get("success")) ? "PASS" : "ERROR");
         evidence.put("durationMs", durationMs);

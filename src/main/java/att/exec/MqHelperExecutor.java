@@ -46,7 +46,7 @@ public final class MqHelperExecutor {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         result.put("instance", instance); result.put("queueManager", helper.queueManager());
-        evidence.put("instance", instance); evidence.put("operation", operation);
+        evidence.put("instance", instance); evidence.put("helperId", helper.id()); evidence.put("operation", operation);
         evidence.put("queueManager", helper.queueManager());
         evidence.put("host", helper.host()); evidence.put("port", helper.port()); evidence.put("channel", helper.channel());
         evidence.put("ccsid", helper.ccsid()); evidence.put("format", helper.format());

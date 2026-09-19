@@ -2,6 +2,11 @@
 
 ## 3.4.2 - 2026-09-19
 
+- Implemented Issue #32: Tool, DB, and MQ operations now converge on one Action result/evidence envelope. Current Action data remains available through local `output`, completed data through `EXEC.ACTIONS`, and helper-specific evidence is nested under `output.evidence`.
+- Removed DB operation-result publication through `recordDbInvocation()` / `drainDbInvocations()`; DB transaction finalization remains an internal resource lifecycle result exposed through the existing compatibility `CASE.DB` view.
+- Preserved typed call-backed Tool arguments, deterministic command-backed argv semantics, MQ 2033/no-reply behavior, retry/attempt evidence, legacy action evidence views, and redaction rules.
+- Documented call-backed Tools as the preferred model for new framework-native/reusable capabilities and command-backed Tools as supported external-process extensions in English and Chinese maintained documentation.
+
 - Unified normal TestCase and standalone debug expressions under canonical `EXEC` and curated immutable `META` roots. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are shared execution state; Action `output` remains local to the current Action.
 - Mapped current Stage caller/input values into the active `EXEC.INPUT` with deterministic Stage-over-Case precedence, kept completed Actions in `EXEC.ACTIONS`, and deliberately left Stage status/timing/history in the execution/evidence model and legacy `CASE.STAGES` view; `EXEC.STAGES` is not a 3.4.2 node.
 - Preserved `CASE.*`, `RUN.*`, and `ACTIONS.*` compatibility aliases, protected framework-owned canonical fields from input overwrite, and documented canonical/legacy resolution and optional references.

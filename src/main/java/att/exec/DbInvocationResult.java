@@ -1,7 +1,6 @@
 /* Author: Jeffrey + ChatGPT */
 package att.exec;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -9,15 +8,23 @@ import java.util.Map;
 public final class DbInvocationResult {
     private final Object result;
     private final Map<String, Object> evidence;
+    private final ActionExecutionResult actionResult;
 
     public DbInvocationResult(Object result, Map<String, Object> evidence) {
         this.result = result;
-        this.evidence = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(evidence));
+        this.evidence = new LinkedHashMap<String, Object>(evidence);
+        this.actionResult = new ActionExecutionResult(result,
+                ActionExecutionResult.evidence("db", this.evidence), successValue(result));
     }
 
     public Object result() { return result; }
     public Map<String, Object> evidence() { return evidence; }
+    public ActionExecutionResult actionResult() { return actionResult; }
     public boolean success() {
-        return result instanceof Map && Boolean.TRUE.equals(((Map<?, ?>) result).get("success"));
+        return actionResult.success();
+    }
+
+    private static boolean successValue(Object value) {
+        return value instanceof Map && Boolean.TRUE.equals(((Map<?, ?>) value).get("success"));
     }
 }

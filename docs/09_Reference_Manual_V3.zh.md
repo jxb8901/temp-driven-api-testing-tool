@@ -525,6 +525,43 @@ printOrders:
 
 工具是一个外部能力，可以在全局 `config.yaml` 中配置，也可以位于独立的工具组文件中，并由模板动作通过命名参数调用。
 
+#### Tool backend 选择与共同 Action envelope
+
+对于新的 framework-native 或可重用能力，call-backed Tool 是首选／默认扩展模型。它在 ATT typed runtime 中执行，保留 String、Number、Boolean、null、List、Context value 及 nested built-in/helper call 的原生类型。Command-backed Tool 仍然完整支持，但应作为脚本、第三方 CLI、SSH、操作系统命令或其它外部 process 边界的特殊扩展机制；它没有被 deprecated。
+
+两种 backend 的底层 invocation contract 有意不同，但 observable outcome 会在同一个 Action boundary 汇合：
+
+| | call-backed | command-backed |
+|---|---|---|
+| Invocation | typed native/helper call | OS process、script、CLI 或 SSH |
+| 首选角色 | 普通 framework-native/reusable Tool | 支持的 external-process escape hatch |
+| 参数 | typed values 和 nested calls | deterministic argv；scalar 是一个 item，flat List 可展开 |
+| `argName` / `argNameMode` | 不适用 | 只支持 process 参数塑形 |
+| stdout/stderr 与 exit code | 没有 process contract | process evidence contract |
+| cache | 在适用时支持 | 不提供 process cache |
+| 发布 | 共同 Action result/evidence | 共同 Action result/evidence |
+
+每个 primary Tool、直接 DB operation 和 MQ helper operation 都发布同一个
+Action result/evidence envelope。Action 执行期间使用 `${output.result}` 和
+`${output.evidence}`；发布后使用 `${EXEC.ACTIONS.<actionId>.output.result}`
+和 `${EXEC.ACTIONS.<actionId>.output.evidence}`。按实际能力，envelope 可包含
+`status`／`success`、`durationMs`、typed `result`、`diagnostic`、helper-native
+`evidence` 以及 retry／collector `attempts`：
+
+```text
+output.evidence.tool        # Tool、command 或 built-in metadata
+output.evidence.db          # SQL、parameter、row/update 和 timing metadata
+output.evidence.mq          # queue、MsgId/CorrelId、reason 和 timing metadata
+output.attempts[n].evidence # post-invoke collector evidence
+```
+
+JDBC connection/transaction、MQ connection/queue、process handle 和 cache
+lease 都是 internal resource lifecycle state，不会成为 `EXEC.DB`、
+`EXEC.MQ`、`EXEC.TOOL` 或其它 helper-specific canonical Context root。
+现有 root `TOOL.*`／`DB.*` 及 Action-level 大写 helper node 只属于兼容 view；
+完成 Case 后的 `${CASE.DB.<instance>}` 表示 transaction finalization state，
+不是 DB operation result/evidence。
+
 ```yaml
 tools:
   invokePaymentApi:
@@ -578,7 +615,7 @@ tools:
       caseId: {name: Case ID, description: Full Case ID, required: true}
 ```
 
-调用方式为 `#{database.selectPayment(caseId=${EXEC.INPUT.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。持久化的分组证据可在 `TOOL.database.selectPayment` 下访问。
+调用方式为 `#{database.selectPayment(caseId=${EXEC.INPUT.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。规范的结果／证据路径是当前 Action 的 `output.result`／`output.evidence.tool`；`TOOL.database.selectPayment` 只作为现有包的兼容 view。
 
 以下两个参考 helper 会明确提供 pathname expansion，但不会改变普通 process-backed Tool 的契约：
 
@@ -1038,7 +1075,7 @@ Evidence 记录 `cache.scope`、SHA-256 `cache.key` 与 `cache.hit`。Cache miss
 
 Call-backed DB Tool 保留目标 dbhelper 的 read-only、transaction、result limits、Connection 与 Case lifecycle 规则，并与 command-backed Tool 共用 Action `timeoutMs` 和 ASSERTION/TIMEOUT retry。JDBC query timeout 取 Tool attempt timeout 与 `statement.timeoutSeconds` 中较短者；配置 retry 的 Action 会绕过 call-backed cache，避免轮询旧值。
 
-Action 保留正常 `TOOL` wrapper，含 `implementation: call`、input、typed output、status、duration 与 cache evidence；DB miss 也写入 Action `DB`。`command`、`argv`、`stdout`、`stderr`、`rawOutput`、`exitCode` 等 process-only 字段不存在。
+Action 通过共同 envelope 保存 `output.result`、`output.evidence.tool` 和适用的 `output.evidence.db`；`TOOL`／`DB` wrapper 只作兼容 view。`command`、`argv`、`stdout`、`stderr`、`rawOutput`、`exitCode` 等 process-only 字段不存在于 call-backed Tool 的 typed contract。
 
 选择建议：一次性 SQL 用 `type: db`；一次性表达式读取用直接 `db.*`；稳定、重复、有业务名称或需要 cache 的操作用 call-backed Tool；需要 executable、SSH、argv、stdout parser 或 exit-code retry 时继续用 command-backed Tool。
 

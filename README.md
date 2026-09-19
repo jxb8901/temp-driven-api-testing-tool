@@ -1,6 +1,6 @@
 # ATT 3.4.2 - Automated Testing Tool
 
-ATT V3.4.2 uses one execution-neutral Context for ordinary TestCase execution and standalone debug, with canonical `EXEC`, `META`, and Action-local `output` scopes while retaining legacy aliases and the V3.4 evidence, MQ, diagnostics, and Case-log behavior.
+ATT V3.4.2 uses one execution-neutral Context for ordinary TestCase execution and standalone debug, with canonical `EXEC`, `META`, and Action-local `output` scopes. Tool, DB, and MQ operations publish through one common Action result/evidence envelope while retaining legacy aliases and the V3.4 evidence, MQ, diagnostics, and Case-log behavior.
 
 V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternative to Tool `command`. A call-backed Tool can wrap a DB query/scalar/update or pure built-in while direct DB Actions and expressions remain available.
 
@@ -76,6 +76,8 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 
 - Current configuration uses `att-config/v2.6`; call-backed groups use `att-tool-group/v2.6`. Existing V2.1/V2.2/V2.5 configuration and V2.2 command-backed groups remain readable.
 - A Tool declares exactly one of `command` or `call`. `call` may target one DB query/scalar/update or pure built-in and keeps typed results. DB update façades work only as the primary call of a Tool Action; READ façades also work in expressions.
+- Prefer call-backed Tools for new framework-native or reusable capabilities. Use command-backed Tools when the capability genuinely requires an external process, script, CLI, SSH transport, or third-party executable; command-backed Tools remain supported and are not deprecated.
+- Both Tool backends publish the same observable Action envelope: `${output.result}` while active and `${EXEC.ACTIONS.<id>.output.result}` after publication, with helper/process evidence under `${output.evidence}`. Call arguments remain typed values; command arguments remain deterministic argv items, including command-only `argName`/`argNameMode` shaping.
 - Call-backed Tools may opt into `{cache: {scope: case|db}}`. DB update, commit, rollback, and reconnect never invalidate cache; `db` scope can intentionally return stale data and is for stable/reference lookups only.
 - Configure each DB helper in its own `att-dbhelper/v2.5` YAML file and reference those files with the global `dbhelpers` list. DB helpers are first-class runtime services, not Tool implementations.
 - Use `type: db` with exactly one `query` or `update` block. Read queries are also available inside Case-runtime expressions as `#{db.<instance>.query(...)}` and `#{db.<instance>.scalar(...)}`. Results remain typed at `EXEC.ACTIONS.<id>.output.result` or in an exact assign expression.

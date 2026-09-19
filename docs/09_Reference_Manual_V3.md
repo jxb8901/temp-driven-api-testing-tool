@@ -524,6 +524,58 @@ printOrders:
 
 A Tool is a named capability configured either globally under `config.yaml` or inside an independent tool-group file. A command-backed Tool launches an external process; a V2.6 call-backed Tool invokes one typed DB operation or pure built-in. Both use the same outer call syntax and named-argument contract.
 
+#### Tool backend selection and the common Action envelope
+
+Call-backed Tools are the preferred/default extension model for new
+framework-native and reusable capabilities. They execute through ATT's typed
+runtime and preserve String, Number, Boolean, null, List, Context-derived
+values, and nested built-in/helper calls. Command-backed Tools remain fully
+supported, but are the special-case external-process extension mechanism for
+scripts, third-party CLIs, SSH, operating-system utilities, and other process
+boundaries. They are not deprecated.
+
+The backend-specific invocation contracts intentionally remain distinct while
+their observable outcome converges at the Action boundary:
+
+| | call-backed | command-backed |
+|---|---|---|
+| Invocation | typed native/helper call | OS process, script, CLI, or SSH |
+| Preferred role | normal Tool model | supported external-process escape hatch |
+| Arguments | typed values and nested calls | deterministic argv; scalar is one item and a flat List may expand |
+| `argName` / `argNameMode` | invalid/not applicable | supported process-only shaping |
+| stdout/stderr and exit code | no process contract | captured process evidence |
+| cache | supported where valid | no process cache |
+| publication | common Action result/evidence | common Action result/evidence |
+
+Every primary Tool, direct DB operation, and MQ helper operation publishes one
+common Action result/evidence model. While the Action is active, use
+`${output.result}` and `${output.evidence}`. After publication, use
+`${EXEC.ACTIONS.<actionId>.output.result}` and
+`${EXEC.ACTIONS.<actionId>.output.evidence}`. The envelope may contain
+`status`/`success`, `durationMs`, `result`, typed `diagnostic`, helper-native
+`evidence`, and retry/collector `attempts` as applicable:
+
+```yaml
+# call-backed: typed result, preferred for a reusable native capability
+lookupOrder:
+  type: tool
+  call: "#{orders.find(customerId=${EXEC.INPUT.customerId})}"
+
+# command-backed: legitimate external process use case
+invokeApi:
+  type: tool
+  call: "#{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile})}"
+```
+
+The standard evidence keys are `tool`, `db`, and `mq`; post-invoke collectors
+remain under the Action's attempt evidence. DB connection/transaction state,
+MQ connection/queue handles, process handles, and cache leases are resource
+lifecycle state and never become `EXEC.DB`, `EXEC.MQ`, `EXEC.TOOL`, or another
+helper-specific canonical Context root. Existing root `TOOL.*`/`DB.*` and
+Action-level uppercase helper nodes are compatibility views only. The
+completed Case `${CASE.DB.<instance>}` view contains transaction finalization
+state, not the DB operation result/evidence.
+
 ```yaml
 tools:
   invokePaymentApi:

@@ -13,6 +13,40 @@ test case --1:n stage--> template --1:n action--> tool
 
 Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
 
+### V3.4.2 Tool 選擇與共同 Action 結果
+
+新增 framework-native 或可重用能力時，先使用 call-backed Tool：它在 ATT typed runtime 中執行，保留 String、Number、Boolean、null、List、Context value 及 nested call 的原生型別。
+
+```yaml
+# preferred: typed call-backed Tool
+lookupOrder:
+  type: tool
+  call: "#{orders.find(customerId=${EXEC.INPUT.customerId}, status='OPEN')}"
+  assert: "${output.result.rowCount} > 0"
+```
+
+只有在能力天然需要外部 executable、script、CLI、SSH 或第三方 process 時，才使用 command-backed Tool。它仍是完整支援的 extension mechanism，並沒有 deprecated；`command` 的每一項保持 deterministic argv，`argName`／`argNameMode` 也只適用於這一類。
+
+```yaml
+# supported: external-process Tool
+invokePayment:
+  type: tool
+  call: >-
+    #{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile},
+                       environment=${EXEC.INPUT.environment})}
+```
+
+兩者的 observable result 使用同一個 Action lifecycle：Action 執行時讀 `${output.result}`，完成後讀 `${EXEC.ACTIONS.<id>.output.result}`；Tool／DB／MQ／collector 的安全證據則在 `${output.evidence}` 及發布後的 `EXEC.ACTIONS` 下保存。
+
+```text
+output.evidence.tool        # command/call/built-in Tool metadata
+output.evidence.db          # SQL, parameter, row/update and timing metadata
+output.evidence.mq          # queue, MsgId/CorrelId, reason and timing metadata
+output.attempts[n].evidence # post-invoke collector evidence
+```
+
+call-backed 與 command-backed 的低層參數契約刻意不同，但在 `result`／`evidence`／`diagnostic`／`attempts` 的 Action envelope 匯合。JDBC connection、transaction、MQ connection/queue、process handle 和 cache lease 都是 internal resource state；不會建立 `EXEC.DB`、`EXEC.MQ` 或其他 helper-specific canonical root。DB transaction finalization 的舊 `${CASE.DB.<instance>}` 只表示 Case 收尾狀態，不是 DB operation result。
+
 ## 1.1 不經 Excel 的 standalone debug
 
 需要快速檢查一個 Template、Flow 或 Tool 時，可直接執行其正常 runtime：
@@ -446,7 +480,7 @@ checkCount:
     )} > 0
 ```
 
-`params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
+`params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB operation result 位於 `${output.result}`，SQL、parameters、row/update、status 和 timing evidence 位於 `${output.evidence.db}`，Action 發布後使用對應的 `${EXEC.ACTIONS.<id>.output...}`。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`，這只表示 resource finalization，不是 operation evidence。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
 
 ### 4.1 配置 IBM MQ helper
 
@@ -499,7 +533,7 @@ waitReply:
   assert: "${output.result.replyReceived} == true"
 ```
 
-`request` 先 PUT，再以送出訊息的 MsgId 作為 GET CorrelId；回覆文件只寫入一次 `mq/<instance>/` 下的 Case output。等待逾時的 MQ reason 2033 會是成功但 `replyReceived: false`，需要回覆時才用 assertion 將它判定為 FAIL。MQ evidence 保留 queue、MsgId、CorrelId、bytes、status、reason 和 duration 等 metadata，不保存完整 payload，也不輸出密碼。
+`request` 先 PUT，再以送出訊息的 MsgId 作為 GET CorrelId；回覆文件只寫入一次 `mq/<instance>/` 下的 Case output。等待逾時的 MQ reason 2033 會是成功但 `replyReceived: false`，需要回覆時才用 assertion 將它判定為 FAIL。MQ evidence 保留 queue、MsgId、CorrelId、bytes、status、reason 和 duration 等 metadata，並在 primary Action 的 `${output.evidence.mq}` 發布；不保存完整 payload，也不輸出密碼。
 
 若同一操作會重複出現，可新增 `config/tools/orders-db.yaml` 將它包裝成 typed Tool：
 

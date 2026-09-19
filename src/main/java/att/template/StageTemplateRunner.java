@@ -5,6 +5,7 @@ import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
 import att.core.ResultStatus;
 import att.core.ValidationResult;
+import att.exec.ActionExecutionResult;
 import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 
@@ -53,6 +54,7 @@ public class StageTemplateRunner {
             String expected = "", actual = "";
             String executionField = "runWhen";
             try {
+                context.beginAction(output);
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
                 if (!action.runWhen().trim().isEmpty() && !evaluateCondition(action.runWhen(), context, log)) {
                     output.put("status", "SKIPPED"); output.put("success", true);
@@ -105,8 +107,7 @@ public class StageTemplateRunner {
                 output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
                 executionField = "description";
                 node.put("description", normalizeLines(templateEngine.render(description, context, log)));
-                try { mergeDbEvidence(node, context.drainDbInvocations()); }
-                catch (Exception evidenceError) { recordEvidenceError(node, evidenceError); }
+                publishLegacyActionViews(node, output);
                 context.updateAction(action.id(), node);
                 appendActionLog(log, "ACTION " + action.id(), node);
                 String reportExpected = assertionReport ? joinLines(String.valueOf(node.get("description")), expected) : "";
@@ -128,12 +129,13 @@ public class StageTemplateRunner {
                 exception.put("suggestion", typed.suggestion());
                 exception.put("message", message);
                 node.put("diagnostic", typed.toDiagnostic().toMap());
+                output.put("diagnostic", typed.toDiagnostic().toMap());
                 exception.put("context", typed.context().toMap());
                 output.put("exception", exception);
                 context.setActionOutput(output);
                 node.put("description", normalizeLines(templateEngine.renderValuesPreserving(description, context)));
                 try {
-                    mergeDbEvidence(node, context.drainDbInvocations());
+                    publishLegacyActionViews(node, output);
                     if (recorded) context.updateAction(action.id(), node); else context.addAction(action.id(), node);
                     appendActionLog(log, "ACTION " + action.id() + " ERROR", node);
                 } catch (Exception evidenceError) { recordEvidenceError(node, evidenceError); }
@@ -142,6 +144,7 @@ public class StageTemplateRunner {
                         ResultStatus.ERROR, reportExpected, actual, message, typed.toDiagnostic()));
                 if (stopOnFailure(action)) break;
             } finally {
+                context.endAction();
                 context.clearActionOutput();
             }
         }
@@ -343,7 +346,7 @@ public class StageTemplateRunner {
         att.exec.DbInvocationResult result = parameterNames.isEmpty()
                 ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
                 : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
-        context.recordDbInvocation(action.db(), invocationId, result.evidence());
+        context.recordActionEvidence(result.actionResult().evidence());
         try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
         catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
         output.put("result", result.result());
@@ -400,6 +403,8 @@ public class StageTemplateRunner {
                 }
                 attempts.add(invocation);
                 output.put("result", result.output());
+                mergeActionResult(output, result.actionResult());
+                invocation.put("actionResult", result.actionResult().evidence());
                 copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 Object saved = invocation.get("outputFile");
                 if (saved != null && !targets.contains(String.valueOf(saved))) targets.add(String.valueOf(saved));
@@ -433,6 +438,9 @@ public class StageTemplateRunner {
                 attempts.add(evidence);
                 copy(evidence, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 if (evidence.containsKey("output")) output.put("result", evidence.get("output"));
+                Map<String, Object> failedEvidence = ActionExecutionResult.evidence("tool", evidence);
+                context.recordActionEvidence(failedEvidence);
+                mergeActionEvidence(output, failedEvidence);
                 if (evidence.get("outputFile") != null && !targets.contains(String.valueOf(evidence.get("outputFile")))) targets.add(String.valueOf(evidence.get("outputFile")));
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
@@ -474,6 +482,7 @@ public class StageTemplateRunner {
                 record.put("result", result.output());
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 evidence.put(collector.id(), record);
+                mergeActionEvidence(output, ActionExecutionResult.evidence("collectors", evidence));
                 if (!passed) {
                     record.put("error", collectorError(result.invocation(), "Evidence collector did not complete successfully"));
                     throw new EvidenceCollectorFailure(collector, record);
@@ -491,6 +500,7 @@ public class StageTemplateRunner {
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 record.put("error", collectorError(error));
                 evidence.put(collector.id(), record);
+                mergeActionEvidence(output, ActionExecutionResult.evidence("collectors", evidence));
                 appendEvidenceLog(log, action, attempt, collector, record);
                 if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, error);
             }
@@ -632,18 +642,50 @@ public class StageTemplateRunner {
 
     private void copy(Map<String, Object> from, Map<String, Object> to, String... keys) { for (String key : keys) if (from.containsKey(key)) to.put(key, from.get(key)); }
     @SuppressWarnings("unchecked")
-    private void mergeDbEvidence(Map<String, Object> node, Map<String, Object> additions) {
+    private void mergeActionResult(Map<String, Object> output, ActionExecutionResult result) {
+        if (result == null) return;
+        mergeActionEvidence(output, result.evidence());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mergeActionEvidence(Map<String, Object> output, Map<String, Object> additions) {
         if (additions == null || additions.isEmpty()) return;
-        Map<String, Object> existing = node.get("DB") instanceof Map
-                ? (Map<String, Object>) node.get("DB") : new LinkedHashMap<String, Object>();
+        Map<String, Object> evidence = output.get("evidence") instanceof Map
+                ? (Map<String, Object>) output.get("evidence") : new LinkedHashMap<String, Object>();
         for (Map.Entry<String, Object> entry : additions.entrySet()) {
-            if (!(entry.getValue() instanceof Map) || !(existing.get(entry.getKey()) instanceof Map)) {
-                existing.put(entry.getKey(), entry.getValue());
+            Object existing = evidence.get(entry.getKey());
+            if (existing == null || existing == entry.getValue() || (existing != null && existing.equals(entry.getValue()))) {
+                evidence.put(entry.getKey(), entry.getValue());
+            } else if (existing instanceof Map && entry.getValue() instanceof Map) {
+                List<Object> values = new ArrayList<Object>();
+                values.add(existing); values.add(entry.getValue());
+                Map<String, Object> grouped = new LinkedHashMap<String, Object>();
+                grouped.put("invocations", values);
+                evidence.put(entry.getKey(), grouped);
             } else {
-                ((Map<String, Object>) existing.get(entry.getKey())).putAll((Map<String, Object>) entry.getValue());
+                List<Object> values = new ArrayList<Object>();
+                values.add(existing); values.add(entry.getValue());
+                evidence.put(entry.getKey(), values);
             }
         }
-        node.put("DB", existing);
+        output.put("evidence", evidence);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void publishLegacyActionViews(Map<String, Object> node, Map<String, Object> output) {
+        Object evidence = output.get("evidence");
+        if (!(evidence instanceof Map)) return;
+        Object db = ((Map<?, ?>) evidence).get("db");
+        if (!(db instanceof Map)) return;
+        Map<?, ?> dbEvidence = (Map<?, ?>) db;
+        Object helper = dbEvidence.get("db");
+        Object invocation = dbEvidence.get("id");
+        if (helper == null || invocation == null) return;
+        Map<String, Object> calls = new LinkedHashMap<String, Object>();
+        calls.put(String.valueOf(invocation), db);
+        Map<String, Object> legacy = new LinkedHashMap<String, Object>();
+        legacy.put(String.valueOf(helper), calls);
+        node.put("DB", legacy);
     }
     private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
     private java.util.Set<String> strings(Object value) { java.util.Set<String> result = new java.util.LinkedHashSet<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
