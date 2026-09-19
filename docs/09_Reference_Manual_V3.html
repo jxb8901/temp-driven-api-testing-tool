@@ -4435,17 +4435,83 @@ after the Stage. Framework-owned fields such as <code>EXEC.ID</code>,
 <code>EXEC.ACTIONS</code> cannot be overwritten by Case or sidecar
 input. There is intentionally no <code>EXEC.TOOL</code>,
 <code>EXEC.DB</code>, <code>EXEC.MQ</code>, <code>EXEC.OUTPUT</code>,
-<code>EXEC.LOAD</code>, <code>EXEC.CALL</code>,
-<code>EXEC.INVOCATION</code>, <code>EXEC.STAGE</code>, or
-<code>EXEC.STAGES</code>: helper/resource state remains internal,
-root-level <code>TOOL.*</code> / <code>DB.*</code> may remain only in
-internal or persisted historical/result compatibility views and are not
-supported general expression APIs, and Action result/evidence is
-consumed through local <code>output</code> while active and
-<code>EXEC.ACTIONS</code> after publication. Stage/Template status,
-timing, and history remain in the execution result/evidence model and
-legacy <code>CASE.STAGES</code>. Load-specific state is outside this
-3.4.2 contract.</p>
+<code>EXEC.CALL</code>, <code>EXEC.INVOCATION</code>,
+<code>EXEC.STAGE</code>, or <code>EXEC.STAGES</code>: helper/resource
+state remains internal, root-level <code>TOOL.*</code> /
+<code>DB.*</code> remain compatibility or transient views, and Action
+result/evidence is consumed through local <code>output</code> while
+active and <code>EXEC.ACTIONS</code> after publication. Stage/Template
+status, timing, and history remain in the execution result/evidence
+model and legacy <code>CASE.STAGES</code>. Ordinary 3.4.2 TestCase and
+debug execution has no <code>EXEC.LOAD</code>; the 3.5.0
+<code>att-load/v1.0</code> adapter adds the load-only
+<code>EXEC.LOAD</code> namespace described below.</p>
+<h3 id="load-v1-context-3.5.0">Load V1 Context (3.5.0)</h3>
+<p>Each load iteration uses the same <code>EXEC</code>/<code>META</code>
+tree and action-local <code>output</code> as normal execution.
+<code>EXEC.MODE</code> is <code>load</code>; <code>EXEC.ID</code> and
+<code>EXEC.LOAD.ITERATION_ID</code> are the same iteration identity;
+<code>EXEC.STARTED_AT</code> is the iteration start; and
+<code>EXEC.OUTPUT_DIR</code>, <code>EXEC.INPUT</code>,
+<code>EXEC.VARS</code>, <code>EXEC.ACTIONS</code>, and local
+<code>output</code> are isolated per iteration. The scheduler-owned
+fields are:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>EXEC.LOAD.RUN_ID</code></td>
+<td>Enclosing load run identity shared by its iterations.</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.MODEL</code></td>
+<td><code>closed</code> or <code>arrivalRate</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.USER_ID</code></td>
+<td>Stable closed-model Virtual User identity; <code>null</code> or
+absent for arrival-rate.</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.ITERATION_ID</code></td>
+<td>Globally unique iteration identity within the load run.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.ITERATION</code></td>
+<td>Scheduler sequence number.</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.PHASE</code></td>
+<td><code>WARMUP</code>, <code>RAMP_UP</code>, <code>STEADY</code>, or
+<code>RAMP_DOWN</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.RUN_STARTED_AT</code></td>
+<td>Optional enclosing load-run start timestamp.</td>
+</tr>
+</tbody>
+</table>
+<p>Scenario <code>inputs</code> are copied into
+<code>EXEC.INPUT.*</code>; reusable Templates, Flows, and Tools must use
+that canonical input tree, <code>EXEC.VARS.*</code>,
+<code>EXEC.ACTIONS.*</code>, and current <code>output.*</code>.
+<code>META.SOURCE</code> identifies the load scenario and
+<code>META.TARGET</code> identifies the selected Template/Flow/Tool
+without exposing the full configuration or secrets. Root-level
+<code>LOAD.*</code>, <code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
+and <code>EXEC.INVOCATION</code> are not public load APIs. See <a
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>
+for complete closed/arrival-rate configurations, CLI overrides, target
+forms, thresholds, evidence, and validation examples.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>

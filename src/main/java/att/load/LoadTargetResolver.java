@@ -31,7 +31,7 @@ public final class LoadTargetResolver {
             FlowRegistry flows = new FlowRegistry(projectRoot, config.templatesRoot(), false);
             String type = scenario.targetType();
             String id = scenario.targetId();
-            if ("template".equals(type)) return new LoadTarget(type, id, templates.loadSelected(id), flows, config.templatesRoot());
+            if ("template".equals(type)) return new LoadTarget(type, id, templates.loadSelected(id), flows, config.templatesRoot(), scenario.source());
             if ("flow".equals(type)) {
                 FlowDefinition flow = flows.get(id);
                 if (flow == null) throw new IllegalArgumentException("Unknown Flow '" + id + "'");
@@ -40,7 +40,7 @@ public final class LoadTargetResolver {
                 StageTemplate wrapper = new StageTemplate(flow.name(), flow.directory(),
                         Collections.singletonList(new TemplateAction("loadFlow", action, Version.TEMPLATE_SCHEMA)),
                         Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
-                return new LoadTarget(type, id, wrapper, flows, config.templatesRoot());
+                return new LoadTarget(type, id, wrapper, flows, config.templatesRoot(), scenario.source());
             }
             if ("tool".equals(type)) {
                 ToolConfig tool = findTool(id);
@@ -51,7 +51,7 @@ public final class LoadTargetResolver {
                 StageTemplate wrapper = new StageTemplate(tool.name(), source.getParent(),
                         Collections.singletonList(new TemplateAction("loadTool", action, Version.TEMPLATE_SCHEMA)),
                         Version.TEMPLATE_SCHEMA, source);
-                return new LoadTarget(type, id, wrapper, flows, config.templatesRoot());
+                return new LoadTarget(type, id, wrapper, flows, config.templatesRoot(), scenario.source());
             }
             throw new IllegalArgumentException("target.type must be template, flow, or tool");
         } catch (DiagnosticException e) {

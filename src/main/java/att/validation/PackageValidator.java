@@ -1044,6 +1044,11 @@ public final class PackageValidator {
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
             String root = firstPathSegment(referencePath);
+            if ("LOAD".equals(root)) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                        "Root-level LOAD is a pre-release compatibility spelling, not a public Context namespace.",
+                        "Use the canonical EXEC.LOAD.* path inside a load iteration.");
+            }
             if (referencePath.equals("CASE.STAGES") || referencePath.startsWith("CASE.STAGES.")
                     || referencePath.startsWith("CASE.STAGES[")) {
                 throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_CROSS_SCOPE,
@@ -1157,7 +1162,7 @@ public final class PackageValidator {
         if ("EXEC".equals(root)) {
             String child = firstChildSegment(referencePath, "EXEC");
             if (child.isEmpty()) throw invalidCanonicalPath(originalPath,
-                    "EXEC must be followed by one of ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, or ACTIONS.");
+                    "EXEC must be followed by one of ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, ACTIONS, or LOAD.");
             String execPath = referencePath.substring("EXEC.".length());
             if (att.core.ContextPathPolicy.isUnsupportedExecPath(execPath)) {
                 throw invalidCanonicalPath(originalPath,
@@ -1167,7 +1172,14 @@ public final class PackageValidator {
             }
             if (!att.core.ContextPathPolicy.isCanonicalExecField(child)) {
                 throw invalidCanonicalPath(originalPath,
-                        "Unknown EXEC field '" + child + "'; the public tree contains only ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, and ACTIONS.");
+                        "Unknown EXEC field '" + child + "'; the public tree contains only ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, ACTIONS, and load-only LOAD.");
+            }
+            if ("LOAD".equals(child)) {
+                String loadField = firstChildSegment(referencePath, "EXEC.LOAD");
+                if (!loadField.isEmpty() && !att.core.ContextPathPolicy.isCanonicalLoadField(loadField)) {
+                    throw invalidCanonicalPath(originalPath,
+                            "Unknown EXEC.LOAD field '" + loadField + "'; use RUN_ID, MODEL, USER_ID, ITERATION_ID, ITERATION, PHASE, or optional RUN_STARTED_AT.");
+                }
             }
             return;
         }
@@ -1229,6 +1241,12 @@ public final class PackageValidator {
         att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
         context.setProject(projectRoot);
         context.put("CASE.environment", config.environment());
+        // Load-only fields are scheduler-owned. Their names and nested paths
+        // are validated here, while values remain deferred until a load
+        // iteration creates EXEC.LOAD.
+        for (String field : new String[] {"RUN_ID", "MODEL", "USER_ID", "ITERATION_ID", "ITERATION", "PHASE", "RUN_STARTED_AT"}) {
+            context.putValidationPlaceholder("EXEC.LOAD." + field);
+        }
         for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
@@ -1447,6 +1465,11 @@ public final class PackageValidator {
                         "Use EXEC.INPUT for the current Stage caller values or EXEC.ACTIONS.<actionId> only when that Action belongs to the current scope. Do not read another Stage's history.");
             }
             String rootBeforeCanonical = firstPathSegment(referencePath);
+            if ("LOAD".equals(rootBeforeCanonical)) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                        "Root-level LOAD is a pre-release compatibility spelling, not a public Context namespace.",
+                        "Use the canonical EXEC.LOAD.* path inside a load iteration.");
+            }
             if ("TOOL".equals(rootBeforeCanonical) || "DB".equals(rootBeforeCanonical)) {
                 throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_LEGACY_PATH,
                         "TOOL.* and DB.* are transient helper/runtime views and cannot be used as general 3.4.2 Context APIs.",

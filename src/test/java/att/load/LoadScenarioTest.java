@@ -78,25 +78,37 @@ class LoadScenarioTest {
         LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
         new LoadTargetValidator(project, config).validate(scenario, target);
         final IterationExecutor executor = new IterationExecutor(project, config, target);
+        final Instant iterationStarted = Instant.parse("2026-09-19T09:00:00Z");
 
         ExecutorService pool = Executors.newFixedThreadPool(4);
         try {
-            Future<IterationResult> first = pool.submit(() -> executor.execute(IterationRequest.closed("i-1", 1, "STEADY", Instant.now(), "VU-1", Collections.singletonMap("input", "one"))));
-            Future<IterationResult> second = pool.submit(() -> executor.execute(IterationRequest.closed("i-2", 2, "STEADY", Instant.now(), "VU-2", Collections.singletonMap("input", "two"))));
+            Future<IterationResult> first = pool.submit(() -> executor.execute(IterationRequest.closed("run-29", "i-1", 1, "STEADY", iterationStarted, "VU-1", Collections.singletonMap("input", "one"))));
+            Future<IterationResult> second = pool.submit(() -> executor.execute(IterationRequest.closed("run-29", "i-2", 2, "STEADY", iterationStarted, "VU-2", Collections.singletonMap("input", "two"))));
             IterationResult a = first.get(); IterationResult b = second.get();
             assertEquals(ResultStatus.PASS, a.status()); assertEquals(ResultStatus.PASS, b.status());
-            assertEquals("i-1", a.context().resolve("LOAD.iterationId"));
-            assertEquals("i-2", b.context().resolve("LOAD.iterationId"));
-            assertEquals("VU-1", a.context().resolve("LOAD.userId"));
-            assertEquals("VU-2", b.context().resolve("LOAD.userId"));
-            assertEquals("one", a.context().resolve("CASE.inputs.input"));
+            assertEquals("i-1", a.context().resolve("EXEC.ID"));
+            assertEquals(iterationStarted.toString(), a.context().resolve("EXEC.STARTED_AT"));
+            assertEquals("i-1", a.context().resolve("EXEC.LOAD.ITERATION_ID"));
+            assertEquals("i-2", b.context().resolve("EXEC.LOAD.ITERATION_ID"));
+            assertEquals("run-29", a.context().resolve("EXEC.LOAD.RUN_ID"));
+            assertEquals("run-29", b.context().resolve("EXEC.LOAD.RUN_ID"));
+            assertEquals("load", a.context().resolve("EXEC.MODE"));
+            assertEquals("VU-1", a.context().resolve("EXEC.LOAD.USER_ID"));
+            assertEquals("VU-2", b.context().resolve("EXEC.LOAD.USER_ID"));
+            assertEquals("one", a.context().resolve("EXEC.INPUT.input"));
+            assertEquals("LOAD_TEMPLATE", a.context().resolve("META.TARGET.id"));
+            assertEquals("load", a.context().resolve("META.SOURCE.type"));
+            assertEquals("closed", a.context().resolve("META.SOURCE.scenario"));
+            assertEquals("closed", a.context().resolve("EXEC.LOAD.MODEL"));
+            assertNull(a.context().resolve("LOAD.model"));
+            assertThrows(IllegalArgumentException.class, () -> a.context().put("EXEC.LOAD.MODEL", "arrivalRate"));
             assertEquals("i-1", a.context().resolve("CASE.VARS.iteration"));
             assertEquals("i-2", b.context().resolve("CASE.VARS.iteration"));
 
-            IterationResult arrival = executor.execute(IterationRequest.arrivalRate("arrival-1", 3, "RAMP_UP", Instant.now(), Collections.singletonMap("input", "arrival")));
+            IterationResult arrival = executor.execute(IterationRequest.arrivalRate("run-29", "arrival-1", 3, "RAMP_UP", Instant.now(), Collections.singletonMap("input", "arrival")));
             assertEquals(ResultStatus.PASS, arrival.status());
-            assertEquals("arrivalRate", arrival.context().resolve("LOAD.model"));
-            assertNull(arrival.context().resolve("LOAD.userId"));
+            assertEquals("arrivalRate", arrival.context().resolve("EXEC.LOAD.MODEL"));
+            assertNull(arrival.context().resolve("EXEC.LOAD.USER_ID"));
         } finally { pool.shutdownNow(); }
     }
 
@@ -112,7 +124,7 @@ class LoadScenarioTest {
         IterationResult result = new IterationExecutor(project, config, target).execute(
                 IterationRequest.closed("tool-1", 1, "STEADY", Instant.now(), "VU-1", Collections.emptyMap()));
         assertEquals(ResultStatus.PASS, result.status());
-        assertEquals("closed", result.context().resolve("LOAD.model"));
+        assertEquals("closed", result.context().resolve("EXEC.LOAD.MODEL"));
     }
 
     @Test void cliRecognizesLoadAndRejectsMissingScenario() {
@@ -134,11 +146,11 @@ class LoadScenarioTest {
         Files.copy(Paths.get("schemas/att-flow-v3.0.schema.json"), project.resolve("schemas/att-flow-v3.0.schema.json"));
         Files.write(project.resolve("templates/LOAD_TEMPLATE/template.yaml"), (
                 "schemaVersion: att-template/v3.0\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
-                + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${LOAD.iterationId}\"\n"
-                + "  phase:\n    type: log\n    message: \"${LOAD.model}/${LOAD.phase}/${CASE.input}\"\n").getBytes(StandardCharsets.UTF_8));
+                + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.LOAD.ITERATION_ID}\"\n"
+                + "  phase:\n    type: log\n    message: \"${EXEC.LOAD.MODEL}/${EXEC.LOAD.PHASE}/${EXEC.INPUT.input}\"\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/load/echo/flow.yaml"), (
                 "schemaVersion: att-flow/v3.0\nid: load.echo.v1\nname: Load Echo\ndescription: load flow\nactions:\n"
-                + "  echo:\n    type: log\n    message: \"${LOAD.iterationId}\"\n").getBytes(StandardCharsets.UTF_8));
+                + "  echo:\n    type: log\n    message: \"${EXEC.LOAD.ITERATION_ID}\"\n").getBytes(StandardCharsets.UTF_8));
         return project;
     }
 

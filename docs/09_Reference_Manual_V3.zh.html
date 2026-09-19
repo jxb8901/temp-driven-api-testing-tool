@@ -3361,7 +3361,7 @@ values 适配到 <code>EXEC.INPUT</code>；同名时 Stage value 在该 Stage
 value。<code>EXEC.ID</code>、<code>EXEC.MODE</code>、<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>
 和 <code>EXEC.ACTIONS</code> 等框架字段不能被 Case 或 sidecar input
 覆盖。不存在
-<code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.LOAD</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>
+<code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>
 或 <code>EXEC.STAGES</code>：helper/resource state 保持 internal，根层
 <code>TOOL.*</code>／<code>DB.*</code> 只可作为 internal 或 persisted
 historical/result compatibility view，不是受支持的 general expression
@@ -3369,8 +3369,75 @@ API；当前 Action 使用 local <code>output</code>，完成后只在其所属 
 通过 <code>EXEC.ACTIONS</code> 发布。Flow 返回后 parent scope 会恢复，跨
 scope 值必须写入 <code>EXEC.VARS</code>。Stage/template 的
 status、timing 和 history 属于 execution result/evidence model，并由旧的
-<code>CASE.STAGES</code> view 提供读取。Load-specific state 不属于本
-3.4.2 contract。</p>
+<code>CASE.STAGES</code> view 提供读取。普通 3.4.2 TestCase 和 debug
+执行没有 <code>EXEC.LOAD</code>；3.5.0 的 <code>att-load/v1.0</code>
+adapter 会按下述 contract 增加 load-only 的 <code>EXEC.LOAD</code>。</p>
+<h3 id="load-v1-context3.5.0">Load V1 Context（3.5.0）</h3>
+<p>每个 load iteration 使用与普通执行相同的
+<code>EXEC</code>／<code>META</code> tree 和 Action 局部
+<code>output</code>。<code>EXEC.MODE</code> 是
+<code>load</code>；<code>EXEC.ID</code> 与
+<code>EXEC.LOAD.ITERATION_ID</code> 相同；<code>EXEC.STARTED_AT</code>
+是本 iteration
+的开始时间；<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>
+和 local <code>output</code> 均按 iteration 隔离。scheduler-owned fields
+如下：</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>路径</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>EXEC.LOAD.RUN_ID</code></td>
+<td>enclosing load run identity，同一 load run 的 iterations 共用。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.MODEL</code></td>
+<td><code>closed</code> 或 <code>arrivalRate</code>。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.USER_ID</code></td>
+<td>closed model 的稳定 Virtual User identity；arrival-rate 为
+<code>null</code> 或 absent。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.ITERATION_ID</code></td>
+<td>load run 内全局唯一的 iteration identity。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.ITERATION</code></td>
+<td>scheduler sequence number。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.PHASE</code></td>
+<td><code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code> 或
+<code>RAMP_DOWN</code>。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.RUN_STARTED_AT</code></td>
+<td>可选的 enclosing load-run start timestamp。</td>
+</tr>
+</tbody>
+</table>
+<p>Scenario <code>inputs</code> 会复制到
+<code>EXEC.INPUT.*</code>；可复用的 Template、Flow 和 Tool 必须使用
+canonical input
+tree、<code>EXEC.VARS.*</code>、<code>EXEC.ACTIONS.*</code> 及当前
+<code>output.*</code>。<code>META.SOURCE</code> 标识 load
+scenario，<code>META.TARGET</code> 标识选中的
+Template／Flow／Tool，同时不暴露完整配置或 secrets。根层
+<code>LOAD.*</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code> 和
+<code>EXEC.INVOCATION</code> 不是公开的 load API。完整的
+closed／arrival-rate 配置、CLI override、target
+形式、threshold、evidence 和 validation 例子见 <a
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
 <p>常见作用域包括：</p>
 <table>
 <colgroup>

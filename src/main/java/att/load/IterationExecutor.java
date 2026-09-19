@@ -45,7 +45,7 @@ public final class IterationExecutor {
 
     public IterationResult execute(IterationRequest request) {
         if (!iterationIds.add(request.iterationId()))
-            throw new IllegalArgumentException("Duplicate LOAD.iterationId within this load run: " + request.iterationId());
+            throw new IllegalArgumentException("Duplicate EXEC.LOAD.ITERATION_ID within this load run: " + request.iterationId());
         Instant started = Instant.now();
         Path iterationDirectory = null;
         boolean temporary = request.outputDirectory() == null;
@@ -61,9 +61,14 @@ public final class IterationExecutor {
             Path logPath = iterationDirectory.resolve("case.log");
             TestCase testCase = testCase(request);
             StageCaseData stage = new StageCaseData("LOAD", target.template().name(), Collections.<String, Object>emptyMap());
-            context = new CaseRuntimeContext(testCase, iterationDirectory, "LOAD-" + request.iterationId(), iterationDirectory, logPath);
+            context = new CaseRuntimeContext(testCase, iterationDirectory, request.iterationId(), iterationDirectory, logPath,
+                    "load", request.startedAt().toString());
+            context.setProject(projectRoot);
+            context.setSourceMetadata("load", target.scenarioSource(), request.iterationId(), target.scenarioName());
+            context.setTargetMetadata(target.type(), target.id());
             context.put("CASE.environment", config.environment());
-            context.setLoad(request.model(), request.iterationId(), request.iteration(), request.phase(), request.startedAt().toString(), request.userId());
+            context.setLoad(request.runId(), request.model(), request.iterationId(), request.iteration(), request.phase(),
+                    request.startedAt().toString(), request.userId(), request.runStartedAt().toString());
             log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors());
             context.beginStage(stage, target.template().name(), target.template().directory());
             db = new DbHelperExecutor(projectRoot, config);

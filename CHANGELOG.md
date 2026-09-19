@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.0 - in development
+
+- Added `att-load/v1.0` scenario examples and configuration guidance for closed and arrival-rate workloads, Template/Flow/Tool targets, CLI overrides, thresholds, evidence, and diagnostics.
+- Unified load iterations with the 3.4.2 `EXEC`/`META` runtime contract. Load-only scheduler state is exposed as `EXEC.LOAD`; iteration inputs use `EXEC.INPUT`, `EXEC.ID` matches `EXEC.LOAD.ITERATION_ID`, and concurrent iteration state/output remains isolated.
+
 ## 3.4.2 - 2026-09-19
 
 - Implemented Issue #32: Tool, DB, and MQ operations now converge on one Action result/evidence envelope. Current Action data remains available through local `output`, completed data through `EXEC.ACTIONS`, and helper-specific evidence is nested under `output.evidence`.
