@@ -65,6 +65,24 @@ public final class FrameworkRunner {
                 if (debug.exitCode() != 0) System.exit(debug.exitCode());
                 return;
             }
+            if ("load".equals(options.command())) {
+                att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(root).load(options.loadScenario(),
+                        att.load.LoadOverrides.from(options));
+                att.load.LoadTarget target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
+                new att.load.LoadTargetValidator(root, config).validate(scenario, target);
+                if ("json".equals(options.format())) {
+                    java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
+                    output.put("status", "VALID");
+                    output.put("scenario", scenario.toMap());
+                    output.put("target", target.toMap());
+                    System.out.println(att.validation.JsonSupport.write(output));
+                } else if (!options.quiet()) {
+                    System.out.println("LOAD VALIDATION PASS | model=" + scenario.model().wireName()
+                            + " | target=" + scenario.targetType() + " " + scenario.targetId());
+                    System.out.println("Scenario: " + scenario.source());
+                }
+                return;
+            }
             if ("docs".equals(options.command())) {
                 System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
                 return;
@@ -160,7 +178,8 @@ public final class FrameworkRunner {
 
     private static void help() {
         System.out.println("Debug: ./att.sh debug template|flow|tool <id> [--config <file>] [--input <debug.yaml>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
+        System.out.println("Load: ./att.sh load <scenario.yaml> [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Validate a load scenario and its Template/Flow/Tool target\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {

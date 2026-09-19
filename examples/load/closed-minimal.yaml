@@ -1,0 +1,7 @@
+schemaVersion: att-load/v1.0
+target:
+  type: template
+  id: V3_FLOW_EXAMPLE
+load:
+  users: 20
+  duration: 5m

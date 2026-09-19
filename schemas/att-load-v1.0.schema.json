@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:load:v1.0",
+  "title": "ATT load scenario",
+  "type": "object",
+  "required": ["schemaVersion", "target", "load"],
+  "properties": {
+    "schemaVersion": {"const": "att-load/v1.0"},
+    "target": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"enum": ["template", "flow", "tool"]},
+        "id": {"type": "string", "minLength": 1},
+        "arguments": {"type": "object", "additionalProperties": true}
+      },
+      "additionalProperties": false
+    },
+    "inputs": {"type": "object", "additionalProperties": true},
+    "load": {
+      "type": "object",
+      "required": ["duration"],
+      "properties": {
+        "users": {"type": "integer", "minimum": 1},
+        "arrivalRate": {"type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]+)?/(s|m)$"},
+        "warmup": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+        "rampUp": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+        "duration": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"},
+        "rampDown": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+        "maxConcurrent": {"type": "integer", "minimum": 1},
+        "overloadPolicy": {"const": "drop"}
+      },
+      "oneOf": [
+        {"required": ["users"], "not": {"anyOf": [{"required": ["arrivalRate"]}, {"required": ["maxConcurrent"]}, {"required": ["overloadPolicy"]}]}},
+        {"required": ["arrivalRate", "maxConcurrent", "overloadPolicy"], "not": {"required": ["users"]}}
+      ],
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "thinkTime": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"}
+      },
+      "additionalProperties": false
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "errorRate": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$"},
+        "p95": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?ms$"},
+        "p99": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?ms$"},
+        "minThroughput": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?/(s|m)$"},
+        "droppedRate": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$"},
+        "achievedArrivalRate": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?/(s|m)$"}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "mode": {"enum": ["metrics", "failures", "samples", "all"]},
+        "sampleRate": {"type": "number", "minimum": 0, "maximum": 1},
+        "maxSamples": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false
+}

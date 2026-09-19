@@ -35,6 +35,16 @@ public final class ExecutionOptions {
     private final String debugTargetType;
     private final String debugTargetId;
     private final Path debugInput;
+    private final Path loadScenario;
+    private final String loadUsers;
+    private final String loadArrivalRate;
+    private final String loadWarmup;
+    private final String loadRampUp;
+    private final String loadDuration;
+    private final String loadRampDown;
+    private final String loadThinkTime;
+    private final String loadMaxConcurrent;
+    private final String loadOverloadPolicy;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -67,6 +77,20 @@ public final class ExecutionOptions {
                              boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
                              String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
                              boolean updateSnapshot, boolean profile, String debugTargetType, String debugTargetId, Path debugInput) {
+        this(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId, all, rerunFailed,
+                dryRun, failFast, outputDirectory, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
+                updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, null, null, null, null, null,
+                null, null, null, null, null);
+    }
+
+    private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
+                             Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
+                             boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
+                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
+                             boolean updateSnapshot, boolean profile, String debugTargetType, String debugTargetId, Path debugInput,
+                             Path loadScenario, String loadUsers, String loadArrivalRate, String loadWarmup, String loadRampUp,
+                             String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
+                             String loadOverloadPolicy) {
         this.command = command;
         this.configPath = configPath;
         this.suitePaths = new ArrayList<Path>(suitePaths);
@@ -91,13 +115,23 @@ public final class ExecutionOptions {
         this.debugTargetType = debugTargetType == null ? "" : debugTargetType;
         this.debugTargetId = debugTargetId == null ? "" : debugTargetId;
         this.debugInput = debugInput;
+        this.loadScenario = loadScenario;
+        this.loadUsers = loadUsers;
+        this.loadArrivalRate = loadArrivalRate;
+        this.loadWarmup = loadWarmup;
+        this.loadRampUp = loadRampUp;
+        this.loadDuration = loadDuration;
+        this.loadRampDown = loadRampDown;
+        this.loadThinkTime = loadThinkTime;
+        this.loadMaxConcurrent = loadMaxConcurrent;
+        this.loadOverloadPolicy = loadOverloadPolicy;
     }
 
     public static ExecutionOptions parse(String[] args) {
         if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
         String command = args[0].startsWith("--") ? "run" : args[0];
         int start = args[0].startsWith("--") ? 0 : 1;
-        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command) || "debug".equals(command))) {
+        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command) || "debug".equals(command) || "load".equals(command))) {
             throw new IllegalArgumentException("Unknown command: " + command);
         }
         String debugTargetType = "";
@@ -110,6 +144,13 @@ public final class ExecutionOptions {
             debugTargetId = args[2];
             if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("debug target id must not be blank");
             start = 3;
+        }
+        Path loadScenario = null;
+        if ("load".equals(command)) {
+            if (args.length < 2 || args[1].startsWith("--") || args[1].trim().isEmpty())
+                throw new IllegalArgumentException("load requires a scenario path");
+            loadScenario = Paths.get(args[1]);
+            start = 2;
         }
         Path config = Paths.get("config/config.yaml");
         List<Path> suites = new ArrayList<Path>();
@@ -124,6 +165,9 @@ public final class ExecutionOptions {
         String concurrencyMode = "reject";
         Path output = null;
         Path debugInput = null;
+        String loadUsers = null, loadArrivalRate = null, loadWarmup = null, loadRampUp = null,
+                loadDuration = null, loadRampDown = null, loadThinkTime = null, loadMaxConcurrent = null,
+                loadOverloadPolicy = null;
         Set<String> ciOutputs = defaultCiOutputs();
         Set<String> seenOptions = new LinkedHashSet<String>();
         for (int i = start; i < args.length; i++) {
@@ -151,6 +195,15 @@ public final class ExecutionOptions {
             else if ("--profile".equals(arg)) profile = true;
             else if ("--quiet".equals(arg)) quiet = true;
             else if ("--verbose".equals(arg)) { verbose = true; explicitVerbose = true; }
+            else if ("--users".equals(arg)) loadUsers = value(args, ++i, arg);
+            else if ("--arrival-rate".equals(arg)) loadArrivalRate = value(args, ++i, arg);
+            else if ("--warmup".equals(arg)) loadWarmup = value(args, ++i, arg);
+            else if ("--ramp-up".equals(arg)) loadRampUp = value(args, ++i, arg);
+            else if ("--duration".equals(arg)) loadDuration = value(args, ++i, arg);
+            else if ("--ramp-down".equals(arg)) loadRampDown = value(args, ++i, arg);
+            else if ("--think-time".equals(arg)) loadThinkTime = value(args, ++i, arg);
+            else if ("--max-concurrent".equals(arg)) loadMaxConcurrent = value(args, ++i, arg);
+            else if ("--overload-policy".equals(arg)) loadOverloadPolicy = value(args, ++i, arg);
             else if ("--package".equals(arg)) packageScope = true;
             else if ("--selected".equals(arg)) selectedScope = true;
             else if ("--help".equals(arg)) return empty("help");
@@ -175,7 +228,10 @@ public final class ExecutionOptions {
         if (quiet && explicitVerbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         if (quiet) verbose = false;
         validateAllowed(command, seenOptions);
-        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput);
+        ExecutionOptions parsed = new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput);
+        return "load".equals(command)
+                ? new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy)
+                : parsed;
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
@@ -186,6 +242,7 @@ public final class ExecutionOptions {
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
         else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--output-dir", "--format", "--quiet", "--verbose"));
+        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--format", "--quiet", "--verbose", "--profile", "--output-dir", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
 
@@ -219,6 +276,16 @@ public final class ExecutionOptions {
     public String debugTargetType() { return debugTargetType; }
     public String debugTargetId() { return debugTargetId; }
     public Path debugInput() { return debugInput; }
+    public Path loadScenario() { return loadScenario; }
+    public String loadUsers() { return loadUsers; }
+    public String loadArrivalRate() { return loadArrivalRate; }
+    public String loadWarmup() { return loadWarmup; }
+    public String loadRampUp() { return loadRampUp; }
+    public String loadDuration() { return loadDuration; }
+    public String loadRampDown() { return loadRampDown; }
+    public String loadThinkTime() { return loadThinkTime; }
+    public String loadMaxConcurrent() { return loadMaxConcurrent; }
+    public String loadOverloadPolicy() { return loadOverloadPolicy; }
 
     public boolean matches(TestCase testCase) {
         boolean caseMatches = caseIds.isEmpty() || caseIds.contains(testCase.caseId());
