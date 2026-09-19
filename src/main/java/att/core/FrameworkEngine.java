@@ -187,6 +187,7 @@ public class FrameworkEngine {
                         ? new java.util.function.Consumer<String>() { @Override public void accept(String text) { System.out.print(text); } }
                         : null);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, runId, runDirectory, caseLogPath);
+        context.setProject(projectRoot);
         context.put("CASE.environment", suiteConfig.environment());
         caseLog.append("CASE", context.caseTree());
         List<ValidationResult> validations = new ArrayList<ValidationResult>();
@@ -242,6 +243,10 @@ public class FrameworkEngine {
             String errorMessage = typed == null ? message(e) : typed.format();
             try { caseLog.append("ERROR", errorMessage); }
             catch (Exception logError) { errorMessage += "; Case-log write failed: " + message(logError); }
+            if (context.hasActiveStage()) {
+                try { context.finishStage(ResultStatus.ERROR.name(), Duration.between(started, Instant.now()).toMillis()); }
+                catch (Exception stageError) { errorMessage += "; Stage finalization failed: " + message(stageError); }
+            }
             context.put("CASE.status", ResultStatus.ERROR.name());
             context.put("CASE.error", errorMessage);
             if (typed != null) context.put("CASE.errorDiagnostic", typed.toDiagnostic().toMap());

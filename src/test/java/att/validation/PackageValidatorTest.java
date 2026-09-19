@@ -169,6 +169,49 @@ class PackageValidatorTest {
         assertDoesNotThrow(() -> { try { method.invoke(validator, "#{send('hello, world')}", config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
     }
 
+    @Test void warnsForDeclaredToolLocalShorthandAndAcceptsCanonicalInputPath() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("customerId",
+                new ToolArgumentConfig("customerId", "Customer ID", "Customer identifier", true, ""));
+        ToolConfig legacy = new ToolConfig("legacy", "Legacy", "Legacy", "echo ${customerId}", "txt", arguments);
+        ToolConfig canonical = new ToolConfig("canonical", "Canonical", "Canonical", "echo ${input.customerId}", "txt", arguments);
+        ToolConfig call = new ToolConfig("call", "call", "", "Call", "Call",
+                Collections.<String>emptyList(), "#{upper(${customerId})}", "",
+                Collections.<String>emptyList(), "", arguments, null, null);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put(legacy.key(), legacy); tools.put(canonical.key(), canonical); tools.put(call.key(), call);
+        PackageValidator validator = new PackageValidator(tempDir,
+                new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir, tools, null, null));
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod(
+                "addToolInputShorthandWarnings", List.class, Map.class);
+        method.setAccessible(true);
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        method.invoke(validator, diagnostics, tools);
+        assertEquals(2, diagnostics.size());
+        for (Diagnostic diagnostic : diagnostics) {
+            assertEquals(DiagnosticCodes.CONTEXT_TOOL_INPUT_SHORTHAND, diagnostic.code());
+            assertEquals(Diagnostic.Severity.WARNING, diagnostic.severity());
+            assertTrue(diagnostic.message().contains("${customerId}"));
+            assertTrue(diagnostic.message().contains("${input.customerId}"));
+        }
+    }
+
+    @Test void warnsForRootlessTemplateShorthandWithCanonicalSuggestion() throws Exception {
+        PackageValidator validator = new PackageValidator(tempDir,
+                new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
+                        Collections.<String, ToolConfig>emptyMap(), null, null));
+        TemplateAction log = new TemplateAction("show", map("type", "log", "message", "customer=${customerId}"));
+        StageTemplate template = new StageTemplate("T", tempDir, Collections.singletonList(log));
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod(
+                "addContextMigrationWarnings", List.class, StageTemplate.class);
+        method.setAccessible(true);
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        method.invoke(validator, diagnostics, template);
+        assertEquals(1, diagnostics.size());
+        assertEquals(DiagnosticCodes.CONTEXT_LEGACY_PATH, diagnostics.get(0).code());
+        assertEquals(Diagnostic.Severity.WARNING, diagnostics.get(0).severity());
+        assertTrue(diagnostics.get(0).message().contains("${EXEC.INPUT.customerId}"));
+    }
+
     @Test void validatorAcceptsMissingOptionalContextButRejectsMalformedOptionalPath() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
                 Collections.<String,ToolConfig>emptyMap(), null, null);
@@ -347,7 +390,7 @@ class PackageValidatorTest {
         DiagnosticException contextError = DiagnosticException.find(typo.getCause());
         assertNotNull(contextError);
         assertEquals(DiagnosticCodes.CONTEXT_INVALID, contextError.code());
-        assertTrue(contextError.format().contains("CASE.caseId"));
+        assertTrue(contextError.format().contains("META.SOURCE.caseId"));
     }
 
     @Test void validateRejectsUnknownRunStageAndFutureActionContextBeforeRun() throws Exception {
@@ -373,7 +416,8 @@ class PackageValidatorTest {
                     () -> values.invoke(validator, template, testCase, stage, config), invalid);
             DiagnosticException error = DiagnosticException.find(thrown.getCause());
             assertNotNull(error, invalid);
-            assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code(), invalid);
+            assertEquals(invalid.contains("CASE.STAGES") ? DiagnosticCodes.CONTEXT_CROSS_SCOPE : DiagnosticCodes.CONTEXT_INVALID,
+                    error.code(), invalid);
         }
     }
 
@@ -405,8 +449,8 @@ class PackageValidatorTest {
         DiagnosticException error = DiagnosticException.find(thrown.getCause());
         assertNotNull(error);
         assertEquals(DiagnosticCodes.CONTEXT_AMBIGUOUS, error.code());
-        assertTrue(error.format().contains("CASE.payment.response.resultCode"));
-        assertTrue(error.format().contains("CASE.refund.response.resultCode"));
+        assertTrue(error.format().contains("EXEC.INPUT.payment.response.resultCode"));
+        assertTrue(error.format().contains("EXEC.INPUT.refund.response.resultCode"));
     }
 
     @Test void packageTemplateValidationChecksContextScopesWithoutAnyCaseReference() throws Exception {
@@ -435,7 +479,7 @@ class PackageValidatorTest {
         assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code());
         assertEquals("UNREFERENCED", error.template());
         assertEquals("invokePrecheck", error.action());
-        assertTrue(error.suggestion().contains("${ACTIONS.renderPrecheckRequest.output.targetFiles[0]}"));
+        assertTrue(error.suggestion().contains("${EXEC.ACTIONS.renderPrecheckRequest.output.targetFiles[0]}"));
 
         Map<String,Object> validCall = new LinkedHashMap<String,Object>(invalidCall);
         validCall.put("call", "#{fpp.invokeApi(requestFile=${ACTIONS.renderPrecheckRequest.output.targetFiles[0]})}");
@@ -592,7 +636,7 @@ class PackageValidatorTest {
         assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(nullError.getCause()).code());
     }
 
-    @Test void validateRejectsEveryExpandedActionIdCollision() throws Exception {
+    @Test void validateAllowsRepeatedFlowActionIdsButRejectsSameScopeDuplicates() throws Exception {
         Path flowA = tempDir.resolve("flows/a");
         Path flowB = tempDir.resolve("flows/b");
         Files.createDirectories(flowA); Files.createDirectories(flowB);
@@ -614,22 +658,27 @@ class PackageValidatorTest {
 
         StageTemplate templateVsFlow = new StageTemplate("T", tempDir, Collections.singletonList(
                 new TemplateAction("shared", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0")), "att-template/v3.0");
-        assertExpandedCollision(contract, validator, templateVsFlow, config);
+        assertDoesNotThrow(() -> contract.invoke(validator, templateVsFlow, config));
 
         StageTemplate flowVsFlow = new StageTemplate("T", tempDir, Arrays.asList(
                 new TemplateAction("callA", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0"),
                 new TemplateAction("callB", map("type", "flow", "use", "common.b.v1"), "att-template/v3.0")), "att-template/v3.0");
-        assertExpandedCollision(contract, validator, flowVsFlow, config);
+        assertDoesNotThrow(() -> contract.invoke(validator, flowVsFlow, config));
 
         StageTemplate repeated = new StageTemplate("T", tempDir, Arrays.asList(
                 new TemplateAction("first", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0"),
                 new TemplateAction("second", map("type", "flow", "use", "common.a.v1"), "att-template/v3.0")), "att-template/v3.0");
-        assertExpandedCollision(contract, validator, repeated, config);
+        assertDoesNotThrow(() -> contract.invoke(validator, repeated, config));
 
         StageTemplate nested = new StageTemplate("T", tempDir, Arrays.asList(
                 new TemplateAction("shared", map("type", "log", "message", "template"), "att-template/v3.0"),
                 new TemplateAction("callC", map("type", "flow", "use", "common.c.v1"), "att-template/v3.0")), "att-template/v3.0");
-        assertExpandedCollision(contract, validator, nested, config);
+        assertDoesNotThrow(() -> contract.invoke(validator, nested, config));
+
+        StageTemplate sameScope = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("shared", map("type", "log", "message", "first"), "att-template/v3.0"),
+                new TemplateAction("shared", map("type", "log", "message", "second"), "att-template/v3.0")), "att-template/v3.0");
+        assertExpandedCollision(contract, validator, sameScope, config);
     }
 
     @Test void validateRejectsCaseVariableAssignmentCollisionInsideFlow() throws Exception {
@@ -650,7 +699,7 @@ class PackageValidatorTest {
 
         java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
                 () -> contract.invoke(validator, template, config));
-        assertTrue(String.valueOf(error.getCause().getMessage()).contains("Duplicate CASE.VARS assignment"));
+        assertTrue(String.valueOf(error.getCause().getMessage()).contains("Duplicate EXEC.VARS assignment"));
     }
 
     private void assertExpandedCollision(java.lang.reflect.Method contract, PackageValidator validator,

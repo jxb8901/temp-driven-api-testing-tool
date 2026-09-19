@@ -4,5 +4,5 @@
   <CreditAccount>${CASE.creditAccount}</CreditAccount>
   <Amount>${CASE.amount}</Amount>
   <Currency>${CASE.currency}</Currency>
-  <Channel>${CASE.STAGES.invoke.channel}</Channel>
+  <Channel>${EXEC.INPUT.channel?}</Channel>
 </PaymentTransferRequest>

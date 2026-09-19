@@ -1,19 +1,19 @@
-# ATT V3.4.1 System Design
+# ATT V3.4.2 System Design
 
 **Document Status:** Implemented
 
-**Target Version:** ATT 3.4.1
+**Target Version:** ATT 3.4.2
 **Last Updated:** 2026-09-19
 
 ## 1. Purpose
 
-ATT V3.4.1 retains the reusable, shared-Context Flow model and adds standalone debug execution, while preserving post-invocation evidence collection and IBM MQ integration without adding another normal-run Context root or workflow construct. A Flow is called only from a Template and executes within that Template's existing Context; debug invokes the same runtime with a synthetic Case.
+ATT V3.4.2 defines one execution-neutral expression Context for ordinary TestCase and standalone debug execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug invokes the same runtime with a synthetic Case.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
 ```
 
-The V3.1 removal of the isolated-function model remains normative. A Flow does not declare inputs or outputs and does not create separate `input`, lowercase `actions`, `runtime`, or `flow` Context roots. This keeps Action expressions unchanged when Actions are moved between a Template and a Flow.
+The V3.1 removal of the isolated-function model remains normative. A Flow does not declare inputs or outputs and does not create separate `input`, lowercase `actions`, `runtime`, or `flow` Context roots. Its Action namespace is nevertheless isolated from the caller and nested Flows; data that must cross that boundary is assigned explicitly to `EXEC.VARS`.
 
 The existing Excel, Stage, V2 Template, Tool, DB, run, report, and CI contracts remain unchanged.
 
@@ -22,11 +22,11 @@ The existing Excel, Stage, V2 Template, Tool, DB, run, report, and CI contracts 
 V3.3 provides:
 
 - one Expression Engine and Context contract for Template and Flow Actions;
-- direct access to `CASE`, `RUN`, prior `ACTIONS`, `TOOL`, `DB`, and current `output`;
+- canonical `EXEC`/`META` roots, Action-local `output`, and narrowly scoped legacy views;
 - static Flow composition and nesting to depth 3;
 - validation of the complete expanded Action order before run output is created;
-- one Action-ID namespace for a Template and its nested Flow closure;
-- Case-scoped `assign` behavior through `CASE.VARS`; and
+- explicit scope-local Action IDs for Template and nested Flow execution;
+- Case-scoped `assign` behavior through `EXEC.VARS`; and
 - nested evidence and qualified artifact paths without a Flow-specific expression API.
 
 V3.3 additionally provides:
@@ -70,8 +70,8 @@ actions:
     type: tool
     call: >-
       #{payment.invoke(
-        request=${ACTIONS.renderRequest.output.result},
-        reference=${CASE.SrcRefNo}
+        request=${EXEC.ACTIONS.renderRequest.output.result},
+        reference=${EXEC.INPUT.SrcRefNo}
       )}
 ```
 
@@ -89,7 +89,7 @@ actions:
 
   verify:
     type: assert
-    assert: "${ACTIONS.invokePayment.output.result.status} == 'SUCCESS'"
+    assert: "${EXEC.ACTIONS.invokePayment.output.result.status} == 'SUCCESS'"
 ```
 
 `with` is invalid. A Flow Action exposes only the normal Action outcome fields such as `status`, `success`, `durationMs`, and `exception`. Business results are read from the internal Action that produced them; ATT does not create `output.outputs` or forward the last Action result.
@@ -114,33 +114,72 @@ Each debug run writes `output/debug/<debugId>/case.log`, `result.yaml`, and `art
 
 ## 4. Context and assignment semantics
 
-Flow Actions use exactly the same readable logical Context as inline Template Actions:
+Flow Actions use the same canonical roots and expression engine as inline Template Actions, but each Stage/Template and Flow invocation owns an explicit Action scope:
+
+The canonical execution contract is:
+
+```text
+EXEC
+├── ID, MODE, STARTED_AT, OUTPUT_DIR
+├── INPUT   (TestCase data plus the current Stage caller/input values)
+├── VARS    (mutable assigned variables)
+└── ACTIONS (current Stage's completed/published Action results)
+META
+├── PROJECT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL
+└── DBHELPER, MQHELPER (curated safe component metadata)
+output
+└── current Action/attempt-local result
+```
+
+`EXEC` deliberately has no `TOOL`, `DB`, `MQ`, `OUTPUT`, `LOAD`, `CALL`,
+`INVOCATION`, `STAGE`, or `STAGES` child. Helper/resource state remains
+internal; existing root-level `TOOL.*` and `DB.*` paths are compatibility or
+transient views only and never define canonical storage. Helper identity may be
+exposed through curated `META.TOOL`, `META.DBHELPER`, and `META.MQHELPER`
+metadata where there is a concrete expression use case.
+
+`EXEC.MODE` is `testcase` or `debug`. A TestCase adapter prepares the current
+Stage's `EXEC.INPUT` from Case-level input and current-Stage values; when the
+same key exists at both levels, the current Stage value wins only while that
+Stage is active. There is intentionally no canonical `EXEC.STAGES` or
+`EXEC.STAGE`. Stage/Template status, timing, and execution history remain in
+the execution result/evidence model; `CASE.STAGES.*` is a persisted result view,
+not an expression namespace. `EXEC.ACTIONS` is the current Action scope and is
+cleared when the next Stage starts; the legacy `ACTIONS.*` alias is only the
+compatibility spelling for that same current scope.
 
 | Root | Meaning |
 |---|---|
-| `CASE.*` | Current Case data, stages, DB finalization data, and `CASE.VARS` |
+| `EXEC.*` | Canonical execution identity, input, variables, and completed Actions |
+| `META.*` | Curated immutable project/source/target/component metadata |
+| `CASE.*` | Legacy Case/input/lifecycle aliases; `CASE.STAGES` is result/evidence data, not a supported expression root |
 | `RUN.*` | Current Run metadata |
-| `ACTIONS.*` | Earlier completed Actions in the expanded Template plan |
-| `TOOL.*` | Current Tool invocation data where available |
-| `DB.*` | Current DB invocation evidence where available |
+| `ACTIONS.*` | Current-scope completed Actions, compatibility spelling of `EXEC.ACTIONS` |
+| `TOOL.*` | Legacy/transient Tool view where available; not canonical storage |
+| `DB.*` | Legacy/transient DB view where available; not canonical storage |
 | `output.*` | Current Action outcome during supported post-execution fields |
 
 Existing unique-suffix shorthand remains unchanged. Removed Flow-only roots are invalid rather than treated as aliases.
 
-Visibility follows execution order:
+Visibility follows explicit scope boundaries:
 
-1. a Flow sees Actions completed before its invocation;
-2. each internal Action sees all earlier completed Actions in the same expanded plan;
-3. a nested Flow inherits the same visible Action sequence; and
-4. Actions after the Flow may read its completed internal Actions directly.
+1. a Stage/Template starts with a fresh `EXEC.ACTIONS` scope;
+2. each internal Action sees only earlier completed Actions in that same scope;
+3. a Flow enters a fresh scope, and a nested Flow enters another fresh scope; and
+4. returning from a Flow restores the parent scope, so parent Actions cannot read the Flow's internal Action IDs directly.
 
-`assign` always publishes to `CASE.VARS`, including inside a Flow. Assignments never overwrite an existing name and persist across later Actions, Templates, and Stages in the same Case.
+Use a unique Case-scoped `EXEC.VARS` assignment when a value must cross a Flow
+boundary. The Flow invocation itself remains visible in the parent scope with
+its standard status outcome, and its detailed hierarchy is retained as result
+evidence rather than promoted to the parent's Action namespace.
+
+`assign` always publishes to `EXEC.VARS`, including inside a Flow. Assignments never overwrite an existing name and persist across later Actions, Templates, and Stages in the same Case.
 
 ## 5. Static expansion and identity
 
 Every selected Template is validated as one statically expanded Action plan. Flow invocation Actions remain nodes in the plan, while their internal Actions execute before the invocation Action publishes its aggregate outcome.
 
-All Action IDs in the expanded Template closure must be unique, including:
+Action IDs must be unique within each Action scope, including:
 
 - inline Template Actions;
 - Flow invocation Actions;
@@ -148,7 +187,10 @@ All Action IDs in the expanded Template closure must be unique, including:
 - nested Flow invocation Actions; and
 - nested internal Actions.
 
-Consequently, two used Flows cannot contribute the same Action ID, and the same Flow cannot be called twice in one Template. Different Templates or Stages may reuse the same IDs because `ACTIONS` is reset at each Stage Template execution.
+Separate Flow invocations and separate nested scopes may reuse internal IDs.
+Duplicate IDs in one Template, one Flow body, or one other single scope remain
+validation errors. This permits repeated/nested Flow calls without collisions;
+`EXEC.VARS` assignment names remain Case-scoped and must still be unique.
 
 Flow IDs remain path-independent canonical IDs ending in `.vN`. References are static. Direct and indirect cycles are invalid, and maximum nesting depth remains 3.
 
@@ -163,13 +205,17 @@ The registry performs package-level structural checks:
 - `template.yaml`/`flow.yaml` conflicts; and
 - symlink and package-root escapes.
 
-The execution-plan validator recursively validates each Flow at its actual Template call site. It carries the same completed-Action set and `CASE.VARS` assignment set through the complete closure, and applies the ordinary Action validation rules to Flow render payloads, Tool calls, DB blocks, assertions, logs, assignments, descriptions, and `runWhen` expressions.
+The execution-plan validator recursively validates each Flow at its actual Template call site. It creates a fresh completed-Action set for every Flow scope while retaining the Case-scoped `EXEC.VARS` assignment set, and applies the ordinary Action validation rules to Flow render payloads, Tool calls, DB blocks, assertions, logs, assignments, descriptions, and `runWhen` expressions.
 
 An unused Flow receives structural validation. Context references that depend on a caller or a concrete Case are validated for every actual invocation. Invalid plans are rejected before a Run directory is created.
 
 ## 7. Runtime and evidence
 
-The runtime does not replace the logical Context when entering a Flow. Each completed internal Action is published to the shared `ACTIONS` view and remains readable after the Flow returns.
+The runtime pushes an Action-scope frame when entering a Flow. Completed internal
+Actions are published only to that Flow's `EXEC.ACTIONS` view while it runs.
+When the Flow returns, the parent `EXEC.ACTIONS` view is restored; internal IDs
+are retained under the Flow invocation's result/evidence tree and are not
+published as parent-scope Actions.
 
 A Flow frame is retained only for:
 
@@ -184,7 +230,7 @@ Artifacts retain paths such as:
 <case>/<stage>/flows/<invocation>/actions/<action>/...
 ```
 
-Nested Flow evidence remains below the calling Flow Action. Evidence paths such as `ACTIONS.<flowCall>.flow.actions...` are diagnostic data and are not a supported expression contract; expressions use the directly published `ACTIONS.<internalActionId>` path.
+Nested Flow evidence remains below the calling Flow Action. Evidence paths such as `CASE.STAGES.<stage>.TEMPLATE.ACTIONS.<flowCall>.flow.actions...` are diagnostic data and are not a supported expression contract. Use `${EXEC.ACTIONS.<internalActionId>...}` only inside the scope that owns that Action; publish cross-scope values explicitly through `${EXEC.VARS.<name>}`.
 
 ## 8. Control and result semantics
 
@@ -204,16 +250,19 @@ Earlier isolated V3 Flow packages must be migrated:
 
 - remove Flow `inputs` and `outputs`;
 - remove invocation `with`;
-- replace `${input.x}` with the existing `${CASE...}` or `${ACTIONS...}` source;
-- replace `${actions.x...}` with `${ACTIONS.x...}`;
-- replace `${runtime.x}` with `${CASE.VARS.x}`; and
-- replace `${ACTIONS.<flowCall>.output.outputs.x}` with the internal Action that produces the value.
+- replace `${input.x}` with the canonical `${EXEC.INPUT.x}` source;
+- replace `${actions.x...}` with `${EXEC.ACTIONS.x...}`;
+- replace `${runtime.x}` with `${EXEC.VARS.x}`; and
+- replace `${ACTIONS.<flowCall>.output.outputs.x}` with an explicit `assign` to `EXEC.VARS` when the value must cross a Flow boundary;
+- replace CASE business aliases, `CASE.VARS`, `ACTIONS`, `RUN`, and `CASE.outputDirectory` with their canonical paths. `att validate` reports these as `CONTEXT_LEGACY_PATH` warnings with exact replacements;
+- remove direct `CASE.STAGES` expression reads and cross-scope `EXEC.ACTIONS` reads. These are errors (`CONTEXT_CROSS_SCOPE`) because Stage/Flow history is evidence, not reusable input;
+- replace Tool-local `${argument}` shorthand with `${input.argument}`. The shorthand remains compatible only for a uniquely declared Tool argument and produces `CONTEXT_TOOL_INPUT_SHORTHAND`.
 
 This is intentionally a breaking reinterpretation of `att-flow/v3.0` and `att-template/v3.0`. No compatibility mode is provided. Non-Flow V2 Templates remain compatible.
 
 ## 10. Expression, DB, logging, and integration extensions
 
-`${...}` remains the only Context-reference and text-interpolation syntax. `#{...}` is a complete typed expression block. It supports nested calls, list literals, parentheses, unary `+`, unary `-`, `not`, arithmetic `+ - * /`, comparisons, `like`, `in`, `is [not] null`, `and`, and `or`. Arithmetic is numeric, division by zero is an error, and `in` requires a list, array, or Iterable right operand. Append `?` to a complete reference, as in `${CASE.response.body.missing?}`, to return a real null when any map, list entry, root-owned value, or intermediate segment is missing; an existing final null remains null. Strict `${path}` lookup is unchanged, and optional lookup still rejects ambiguity, malformed syntax, and invalid traversal. Bare Context-looking identifiers remain invalid.
+`${...}` remains the only Context-reference and text-interpolation syntax. `#{...}` is a complete typed expression block. It supports nested calls, list literals, parentheses, unary `+`, unary `-`, `not`, arithmetic `+ - * /`, comparisons, `like`, `in`, `is [not] null`, `and`, and `or`. Arithmetic is numeric, division by zero is an error, and `in` requires a list, array, or Iterable right operand. Append `?` to a complete reference, as in `${EXEC.INPUT.response.body.missing?}`, to return a real null when any map, list entry, root-owned value, or intermediate segment is missing; an existing final null remains null. Strict `${path}` lookup is unchanged, and optional lookup still rejects ambiguity, malformed syntax, and invalid traversal. Bare Context-looking identifiers remain invalid.
 
 Direct DB Actions may use either positional `params` with JDBC `?` placeholders or named `parameters` with `:name` placeholders, never both. Named placeholders are replaced by `?` before preparing the statement; values are never interpolated into SQL. The scanner ignores placeholders in quoted strings and comments and preserves PostgreSQL-style `::` casts. Missing and unused names fail validation. Parameter evidence defaults to resolved values; connection credentials are never included, and package owners may explicitly select `masked` or `types`.
 
@@ -228,10 +277,10 @@ A `type: tool` Action may declare an `evidence` map keyed by collector ID. Each 
 ```yaml
 invoke:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${CASE.requestFile})}"
+  call: "#{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile})}"
   evidence:
     queueState:
-      call: "#{readQueueState(queue=${CASE.queue})}"
+      call: "#{readQueueState(queue=${EXEC.INPUT.queue})}"
       timeoutMs: 3000
       onFailure: continue
   assert: "${output.result.status} == 'SUCCESS'"
@@ -257,7 +306,7 @@ V3.4 is complete when:
 - the same Action configuration runs inline or in a Flow without expression changes;
 - Flow render payloads read Case data directly;
 - caller, internal, nested, and following Actions share one ordered `ACTIONS` view;
-- all expanded ID and `CASE.VARS` collisions fail before execution;
+- all expanded ID and `EXEC.VARS` collisions fail before execution;
 - Flow Actions expose no `output.outputs`;
 - nested evidence and qualified artifacts remain intact;
 - all V2 compatibility tests pass; and

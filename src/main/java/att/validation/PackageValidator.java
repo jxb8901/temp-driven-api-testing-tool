@@ -82,6 +82,10 @@ public final class PackageValidator {
         int cases = 0;
         Set<String> templates = new LinkedHashSet<String>();
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        // Tool definitions are loaded before package/template validation.  Keep
+        // the legacy Tool-local placeholder readable, but make its migration
+        // visible even when no TestCase happens to call that Tool.
+        addToolInputShorthandWarnings(diagnostics, global.tools());
         Map<String, Path> workbookIds = new LinkedHashMap<String, Path>();
         Map<String, CaseLocation> fullCaseIds = new LinkedHashMap<String, CaseLocation>();
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, global);
@@ -92,10 +96,16 @@ public final class PackageValidator {
         catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot().resolve("flows")))); }
         if ("package".equals(options.validationScope())) {
             validatePackageLayout(diagnostics);
-            for (String reference : loader.paths()) try { templates.add(reference); StageTemplate template = loader.load(reference); validateTemplate(template, global); }
+            for (String reference : loader.paths()) try {
+                templates.add(reference);
+                StageTemplate template = loader.load(reference);
+                addContextMigrationWarnings(diagnostics, template);
+                validateTemplate(template, global);
+            }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, projectRoot.resolve(global.templatesRoot()).resolve(reference).resolve("template.yaml"))); }
             for (att.flow.FlowDefinition flow : flows.all()) try {
                 StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
+                addContextMigrationWarnings(diagnostics, body);
                 validateReferencedTools(body, global);
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
             validatePackageTools(diagnostics);
@@ -125,6 +135,7 @@ public final class PackageValidator {
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
                             StageTemplate template = loader.load(stage.templateName());
+                            if (!"package".equals(options.validationScope())) addContextMigrationWarnings(diagnostics, template);
                             validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables);
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
@@ -231,6 +242,137 @@ public final class PackageValidator {
         }
     }
 
+    /** Emits actionable 3.4.2 warnings for deterministic legacy aliases. */
+    private void addContextMigrationWarnings(List<Diagnostic> diagnostics, StageTemplate template) {
+        att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(null);
+        for (TemplateAction action : template.actions()) {
+            String prefix = "actions." + action.id();
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.description(), prefix + ".description", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.expected(), prefix + ".expected", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.actual(), prefix + ".actual", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.assertion(), prefix + ".assert", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.runWhen(), prefix + ".runWhen", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.expression(), prefix + ".expression", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.message(), prefix + ".message", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.file(), prefix + ".file", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.saveAs(), prefix + ".saveAs", template.sourceFile());
+            addContextMigrationWarnings(diagnostics, engine, template, action, action.call(), prefix + ".call", template.sourceFile());
+            for (Map.Entry<String, Object> field : action.fields().entrySet())
+                addContextMigrationWarnings(diagnostics, engine, template, action, String.valueOf(field.getValue()), prefix + ".fields." + field.getKey(), template.sourceFile());
+            for (EvidenceCollector collector : action.evidence().values())
+                addContextMigrationWarnings(diagnostics, engine, template, action, collector.call(), prefix + ".evidence." + collector.id() + ".call", template.sourceFile());
+            if ("db".equalsIgnoreCase(action.type())) {
+                Map<String, Object> operation = action.query().isEmpty() ? action.update() : action.query();
+                String operationName = action.query().isEmpty() ? "update" : "query";
+                if (operation.get("sql") != null) addContextMigrationWarnings(diagnostics, engine, template, action,
+                        String.valueOf(operation.get("sql")), prefix + "." + operationName + ".sql", template.sourceFile());
+                Object params = operation.get("params");
+                if (params instanceof Iterable) {
+                    int index = 0;
+                    for (Object value : (Iterable<?>) params) {
+                        if (value instanceof String) addContextMigrationWarnings(diagnostics, engine, template, action,
+                                (String) value, prefix + "." + operationName + ".params[" + index + "]", template.sourceFile());
+                        index++;
+                    }
+                } else if (params instanceof String) addContextMigrationWarnings(diagnostics, engine, template, action,
+                        (String) params, prefix + "." + operationName + ".params", template.sourceFile());
+                Object parameters = operation.get("parameters");
+                if (parameters instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) parameters).entrySet())
+                    if (field.getValue() instanceof String) addContextMigrationWarnings(diagnostics, engine, template, action,
+                            (String) field.getValue(), prefix + "." + operationName + ".parameters." + field.getKey(), template.sourceFile());
+            }
+            if ("render".equalsIgnoreCase(action.type())) try {
+                for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload()))
+                    addContextMigrationWarnings(diagnostics, engine, template, action,
+                            att.template.PayloadCache.readUtf8(payload), prefix + ".payload", payload);
+            } catch (Exception ignored) {
+                // The normal validator reports payload discovery/read errors;
+                // migration scanning must not replace that diagnostic.
+            }
+        }
+    }
+
+    private void addContextMigrationWarnings(List<Diagnostic> diagnostics,
+                                              att.template.UnifiedTemplateEngine engine,
+                                              StageTemplate template, TemplateAction action,
+                                              String text, String field, Path sourceFile) {
+        if (text == null || text.trim().isEmpty()) return;
+        java.util.List<String> paths;
+        try { paths = engine.parseContextPaths(text); }
+        catch (Exception ignored) { return; }
+        for (String original : paths) {
+            String path = att.core.CaseRuntimeContext.requiredReferencePath(original);
+            String replacement = legacyReplacement(path);
+            if (replacement == null && isRootlessReference(path)) {
+                replacement = rootlessReplacement(path, template);
+                if (replacement != null) {
+                    String legacy = "${" + original + "}";
+                    String message = "Rootless Context shorthand: " + legacy
+                            + "\nCanonical replacement: ${" + replacement + "}"
+                            + "\nThe shorthand remains compatible only when it resolves to one unique current-scope path."
+                            + "\nMigrate new definitions to the canonical path.";
+                    diagnostics.add(new Diagnostic(DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                            Diagnostic.Severity.WARNING, message,
+                            sourceFile == null ? null : sourceFile.toString(), field,
+                            null, null, null, template.name(), action.id(),
+                            "Replace " + legacy + " with ${" + replacement + "}.", null, null, null, null));
+                }
+                continue;
+            }
+            if (replacement == null) continue;
+            String legacy = "${" + original + "}";
+            String message = "Legacy Context path: " + legacy
+                    + "\nCanonical replacement: ${" + replacement + "}"
+                    + "\nThe legacy spelling remains compatible in 3.4.2 when it maps deterministically to the current scope."
+                    + "\nMigrate new definitions to the canonical path.";
+            diagnostics.add(new Diagnostic(DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                    Diagnostic.Severity.WARNING, message,
+                    sourceFile == null ? null : sourceFile.toString(), field,
+                    null, null, null, template.name(), action.id(),
+                    "Replace " + legacy + " with ${" + replacement + "}.", null, null, null, null));
+        }
+    }
+
+    private boolean isRootlessReference(String path) {
+        if (path == null || path.isEmpty()) return false;
+        String root = att.core.ContextPathPolicy.firstSegment(path);
+        if (att.core.ContextPathPolicy.isExplicitRoot(root)) return false;
+        // These names are removed/invalid Flow-only roots, not migration-safe
+        // unique suffixes. Let the ordinary validator report them as errors.
+        return !("input".equals(root) || "actions".equals(root) || "runtime".equals(root)
+                || "flow".equals(root) || "stage".equals(root) || "stages".equals(root)
+                || root.indexOf(':') >= 0);
+    }
+
+    private String rootlessReplacement(String path, StageTemplate template) {
+        String root = att.core.ContextPathPolicy.firstSegment(path);
+        for (TemplateAction action : template.actions()) {
+            if (action.id().equals(root)) return "EXEC.ACTIONS." + path;
+        }
+        if ("caseId".equals(root) || "workbookId".equals(root) || "groupId".equals(root)
+                || "rowCaseId".equals(root)) return "META.SOURCE." + path;
+        return "EXEC.INPUT." + path;
+    }
+
+    private String legacyReplacement(String path) {
+        if (path == null) return null;
+        if (path.startsWith("CASE.STAGES") || path.startsWith("TOOL") || path.startsWith("DB")) return null;
+        if (path.startsWith("CASE.VARS.")) return "EXEC.VARS." + path.substring("CASE.VARS.".length());
+        if ("CASE.VARS".equals(path)) return "EXEC.VARS";
+        if ("CASE.outputDirectory".equals(path)) return "EXEC.OUTPUT_DIR";
+        if (path.startsWith("ACTIONS.")) return "EXEC.ACTIONS." + path.substring("ACTIONS.".length());
+        if ("ACTIONS".equals(path)) return "EXEC.ACTIONS";
+        if ("RUN.id".equals(path) || "RUN.runId".equals(path)) return "EXEC.ID";
+        if (path.startsWith("CASE.")) {
+            String field = path.substring("CASE.".length());
+            if (field.startsWith("caseId") || field.startsWith("workbookId") || field.startsWith("groupId")
+                    || field.startsWith("rowCaseId")) return "META.SOURCE." + field;
+            if (!field.isEmpty() && !field.startsWith("status") && !field.startsWith("durationMs")
+                    && !field.startsWith("environment") && !field.startsWith("error")) return "EXEC.INPUT." + field;
+        }
+        return null;
+    }
+
     private DiagnosticException locateReferencedError(Exception error, StageTemplate template,
                                                       TemplateAction action, String field, Path sourceFile) {
         DiagnosticException typed = DiagnosticException.find(error);
@@ -311,6 +453,53 @@ public final class PackageValidator {
                 else validateCallBackedDefinition(tool, global);
             }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TOOL_INVALID, e, null)); }
+        }
+    }
+
+    /**
+     * Reports only the deprecated Tool-local spelling ${argument}.  This is
+     * deliberately narrower than general rootless Context shorthand: a bare
+     * reference is a Tool input only when it is exactly one declared argument.
+     */
+    private void addToolInputShorthandWarnings(List<Diagnostic> diagnostics,
+                                                Map<String, ToolConfig> tools) {
+        java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\$\\{([^}]+)}");
+        for (ToolConfig tool : tools.values()) {
+            if (tool.commandBacked()) {
+                for (int index = 0; index < tool.commandArgv().size(); index++) {
+                    String token = tool.commandArgv().get(index);
+                    addToolInputShorthandWarnings(diagnostics, tool, token,
+                            "tools." + tool.key() + ".command[" + index + "]", placeholder);
+                }
+            } else {
+                addToolInputShorthandWarnings(diagnostics, tool, tool.call(),
+                        "tools." + tool.key() + ".call", placeholder);
+            }
+        }
+    }
+
+    private void addToolInputShorthandWarnings(List<Diagnostic> diagnostics, ToolConfig tool,
+                                                String text, String field,
+                                                java.util.regex.Pattern placeholder) {
+        if (text == null || text.isEmpty()) return;
+        java.util.regex.Matcher matcher = placeholder.matcher(text);
+        while (matcher.find()) {
+            String path = matcher.group(1).trim();
+            if (!tool.arguments().containsKey(path)) continue;
+            // ${input.x} and ${TOOL.input.x} are already the explicit form.
+            if (path.startsWith("input.") || path.startsWith("TOOL.input.")) continue;
+            if (!path.matches("[A-Za-z_][A-Za-z0-9_]*")) continue;
+            String legacy = "${" + path + "}";
+            String canonical = "${input." + path + "}";
+            String message = "Legacy Tool argument reference: " + legacy
+                    + "\nCanonical Tool argument reference: " + canonical
+                    + "\nThe shorthand remains compatible in 3.4.2 when it resolves unambiguously to a declared Tool-local argument."
+                    + "\nTool: " + tool.key() + "\nField: " + field;
+            diagnostics.add(new Diagnostic(DiagnosticCodes.CONTEXT_TOOL_INPUT_SHORTHAND,
+                    Diagnostic.Severity.WARNING, message,
+                    tool.sourceFile() == null ? null : tool.sourceFile().toString(), field,
+                    null, null, null, null, null,
+                    "Migrate to the explicit Tool-local input form " + canonical + "."));
         }
     }
 
@@ -479,7 +668,7 @@ public final class PackageValidator {
                 require(action.expression(), "expression is required for assign action " + action.id());
                 if (!action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Assign name must match [A-Za-z_][A-Za-z0-9_]*: " + action.name());
                 if (!assignmentNames.add(action.name())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
-                        "Duplicate CASE.VARS assignment '${CASE.VARS." + action.name() + "}'",
+                        "Duplicate EXEC.VARS assignment '${EXEC.VARS." + action.name() + "}'",
                         "The same variable name is assigned more than once in template '" + template.name() + "'.",
                         null, "name", null, null, null, template.name(), action.id(),
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
@@ -534,7 +723,11 @@ public final class PackageValidator {
             if ("flow".equals(type)) {
                 att.flow.FlowDefinition target = flows.get(action.use());
                 StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
-                validateTemplateActions(body, config, actionIds, completedActions, assignmentNames);
+                // A Flow invocation owns a fresh Action namespace.  Its
+                // internal IDs are intentionally not compared with the parent
+                // Template or with another Flow invocation.
+                validateTemplateActions(body, config, new LinkedHashSet<String>(),
+                        new LinkedHashSet<String>(), assignmentNames);
             }
           } catch (DiagnosticException e) { throw att.config.YamlSupport.locate(e, template.sourceFile(), "actions." + action.id())
                   .withLocation(null, null, null, null, null, template.name(), action.id()); }
@@ -688,7 +881,18 @@ public final class PackageValidator {
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
             String root = firstPathSegment(referencePath);
-            if ("CASE".equals(root) || "TOOL".equals(root) || "DB".equals(root)) continue;
+            if (referencePath.equals("CASE.STAGES") || referencePath.startsWith("CASE.STAGES.")
+                    || referencePath.startsWith("CASE.STAGES[")) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_CROSS_SCOPE,
+                        "CASE.STAGES is retained only as execution-result/report evidence; it is not an expression data API.",
+                        "Use EXEC.INPUT for current Stage caller values or EXEC.ACTIONS for an Action in the current scope. Cross-Stage history reads require a dedicated data-passing contract.");
+            }
+            if ("TOOL".equals(root) || "DB".equals(root)) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                        "TOOL.* and DB.* are transient helper/runtime views, not general 3.4.2 expression roots.",
+                        "Use local output during the current Action or EXEC.ACTIONS.<actionId> after publication; helper identity belongs in curated META metadata.");
+            }
+            if ("CASE".equals(root)) continue;
             if ("RUN".equals(root)) {
                 String field = firstChildSegment(referencePath, "RUN");
                 if (field.isEmpty() || java.util.Arrays.asList("runId", "id", "runDirectory", "caseLog").contains(field)) continue;
@@ -710,7 +914,7 @@ public final class PackageValidator {
                                 "Flow internals are not a stable Context contract '${" + path + "}'",
                                 "Flow evidence is diagnostic-only; completed internal Actions are published directly in ACTIONS.", null, path,
                                 null, null, null, null, null,
-                                "Use ACTIONS.<internalActionId>.output.<field> instead.", null);
+                                "Use EXEC.ACTIONS.<internalActionId>.output.<field> instead.", null);
                     }
                     continue;
                 }
@@ -722,7 +926,7 @@ public final class PackageValidator {
                         "Current action output is not available at '${" + path + "}'",
                         "This field is rendered before the current action outcome is created.", null, path,
                         null, null, null, null, null,
-                        "Use CASE data or an earlier ACTIONS.<id> result in this field.", null);
+                        "Use Case input or an earlier EXEC.ACTIONS.<id> result in this field.", null);
             }
 
             String nearest = nearestAction(root, availableActions);
@@ -735,7 +939,7 @@ public final class PackageValidator {
                     null, null, null, null, null,
                     nearest == null
                             ? "Use an uppercase Context scope and an exact case-sensitive field/action name."
-                            : "Use '${ACTIONS." + nearest + suffix + "}' if that completed action is intended.", null);
+                            : "Use '${EXEC.ACTIONS." + nearest + suffix + "}' if that completed action is intended.", null);
         }
     }
 
@@ -745,6 +949,12 @@ public final class PackageValidator {
                 "Action '" + id + "' has not completed at the point where this value is rendered. Available actions: " + String.join(", ", availableActions),
                 null, path, null, null, null, null, null,
                 "Reference an earlier action ID, or move this reference to a field rendered after that action completes.", null);
+    }
+
+    private DiagnosticException incompatibleContextPath(String path, String code, String detail, String suggestion) {
+        return new DiagnosticException(code,
+                "Unsupported legacy Context expression '${" + path + "}'", detail,
+                null, path, null, null, null, null, null, suggestion, null);
     }
 
     private String firstChildSegment(String path, String root) {
@@ -783,8 +993,9 @@ public final class PackageValidator {
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
                                         FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables) {
         att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
+        context.setProject(projectRoot);
         context.put("CASE.environment", config.environment());
-        for (String name : assignedCaseVariables) context.putValidationPlaceholder("CASE.VARS." + name);
+        for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
         Set<String> completedActions = new LinkedHashSet<String>();
@@ -829,7 +1040,7 @@ public final class PackageValidator {
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
-                    context.putValidationPlaceholder("CASE.VARS." + action.name());
+                    context.putValidationPlaceholder("EXEC.VARS." + action.name());
                 }
 
                 sourceField = "actions." + action.id() + ".assert";
@@ -933,7 +1144,7 @@ public final class PackageValidator {
                     att.flow.FlowDefinition target = flows.get(action.use());
                     StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
                     validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
-                            context, engine, actionIds, completedActions);
+                            context, engine, new LinkedHashSet<String>(), new LinkedHashSet<String>());
                 }
             } catch (Exception e) {
                 DiagnosticException typed = DiagnosticException.find(e);
@@ -970,11 +1181,27 @@ public final class PackageValidator {
 
     private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                           att.core.CaseRuntimeContext context, TestCase testCase,
-        Set<String> availableActions) {
+                                          Set<String> availableActions) {
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
+            if (referencePath.equals("CASE.STAGES") || referencePath.startsWith("CASE.STAGES.")
+                    || referencePath.startsWith("CASE.STAGES[")) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_CROSS_SCOPE,
+                        "CASE.STAGES contains Stage/Template history and evidence, not a supported cross-scope expression namespace.",
+                        "Use EXEC.INPUT for the current Stage caller values or EXEC.ACTIONS.<actionId> only when that Action belongs to the current scope. Do not read another Stage's history.");
+            }
+            String rootBeforeCanonical = firstPathSegment(referencePath);
+            if ("TOOL".equals(rootBeforeCanonical) || "DB".equals(rootBeforeCanonical)) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                        "TOOL.* and DB.* are transient helper/runtime views and cannot be used as general 3.4.2 Context APIs.",
+                        "Use ${output...} while the Action is active or ${EXEC.ACTIONS.<actionId>...} after publication; use curated META helper identity only for static metadata.");
+            }
             if (referencePath.startsWith("ACTIONS.")) {
                 String id = firstPathSegment(referencePath.substring("ACTIONS.".length()));
+                if (!availableActions.contains(id)) throw unavailableActionContext(path, id, availableActions);
+            }
+            if (referencePath.startsWith("EXEC.ACTIONS.")) {
+                String id = firstPathSegment(referencePath.substring("EXEC.ACTIONS.".length()));
                 if (!availableActions.contains(id)) throw unavailableActionContext(path, id, availableActions);
             }
             if (referencePath.startsWith("CASE.STAGES.")) {
@@ -986,6 +1213,46 @@ public final class PackageValidator {
                         "Use a stage key declared by this Case sidecar selector/data mapping.", null);
             }
             String root = firstPathSegment(referencePath);
+            if ("EXEC".equals(root)) {
+                String field = firstChildSegment(referencePath, "EXEC");
+                String execPath = referencePath.substring("EXEC.".length());
+                if (att.core.ContextPathPolicy.isUnsupportedExecPath(execPath)) {
+                    String detail = att.core.ContextPathPolicy.isUnsupportedStagePath(execPath)
+                            ? "3.4.2 does not define EXEC.STAGE or EXEC.STAGES. Current Stage input is exposed through EXEC.INPUT; Stage history remains in CASE.STAGES."
+                            : "3.4.2 does not define helper, resource, output, load, call, invocation, or orchestration namespaces below EXEC."
+                            ;
+                    String suggestion = att.core.ContextPathPolicy.isUnsupportedStagePath(execPath)
+                            ? "Use EXEC.INPUT for current Stage values or CASE.STAGES for legacy execution evidence."
+                            : "Use local output during the current Action, EXEC.ACTIONS for completed Actions, or META helper identity where applicable.";
+                    throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                            "Unsupported canonical Context path '${" + path + "}'", detail,
+                            null, path, null, null, null, null, null, suggestion, null);
+                }
+                if (!"ACTIONS".equals(field)) {
+                    try {
+                        if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                        else context.require(referencePath);
+                    } catch (DiagnosticException e) {
+                        if (context.isValidationDeferred(referencePath)) continue;
+                        throw e;
+                    }
+                }
+                continue;
+            }
+            if ("META".equals(root)) {
+                String field = firstChildSegment(referencePath, "META");
+                if (!("TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
+                        || "DBHELPER".equals(field) || "MQHELPER".equals(field))) {
+                    try {
+                        if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                        else context.require(referencePath);
+                    } catch (DiagnosticException e) {
+                        if (context.isValidationDeferred(referencePath)) continue;
+                        throw e;
+                    }
+                }
+                continue;
+            }
             if (!("CASE".equals(root) || "RUN".equals(root) || "ACTIONS".equals(root)
                     || "TOOL".equals(root) || "DB".equals(root) || "output".equals(root))) {
                 try {

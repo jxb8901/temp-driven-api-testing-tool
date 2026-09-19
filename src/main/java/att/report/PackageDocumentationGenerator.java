@@ -103,7 +103,7 @@ public final class PackageDocumentationGenerator {
             att.template.StageTemplate template = loader.load(stage.templateName());
             context.beginStage(stage, template.name(), template.directory());
             for (TemplateAction action : template.actions()) {
-                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("CASE.VARS." + action.name());
+                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
                 if ("assert".equalsIgnoreCase(action.type())) {
                     appendLine(result, engine.renderValidationValues(action.description(), context));
                     appendLine(result, engine.renderValidationValues(action.expected(), context));

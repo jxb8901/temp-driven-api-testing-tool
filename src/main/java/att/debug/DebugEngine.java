@@ -95,7 +95,10 @@ public final class DebugEngine {
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                     resolved.flows, input.path);
 
-            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath);
+            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
+            context.setProject(projectRoot);
+            context.setSourceMetadata("debug", input.path, testCase.caseId());
+            context.setTargetMetadata(targetType, targetId);
             context.put("CASE.environment", config.environment());
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();

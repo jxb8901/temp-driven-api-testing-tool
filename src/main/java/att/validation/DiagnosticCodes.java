@@ -10,6 +10,10 @@ public final class DiagnosticCodes {
     public static final String TEMPLATE_INVALID = "ATT-TPL-001";
     public static final String CONTEXT_INVALID = "ATT-CTX-001";
     public static final String CONTEXT_AMBIGUOUS = "ATT-CTX-002";
+    /** Migration diagnostics introduced by the 3.4.2 Context contract. */
+    public static final String CONTEXT_LEGACY_PATH = "CONTEXT_LEGACY_PATH";
+    public static final String CONTEXT_CROSS_SCOPE = "CONTEXT_CROSS_SCOPE";
+    public static final String CONTEXT_TOOL_INPUT_SHORTHAND = "CONTEXT_TOOL_INPUT_SHORTHAND";
     public static final String BUILTIN_INVALID = "ATT-BUILTIN-001";
     public static final String ASSERTION_FAILED = "ATT-ASSERT-001";
     public static final String TOOL_INVALID = "ATT-TOOL-001";

@@ -6,7 +6,7 @@ tools:
   invokeApi:
     name: Invoke FPP API
     description: Reference API invocation skeleton returning an XML result envelope
-    command: [./tools/fpp_invoke_api.sh, "${requestId}", "${requestType}", "${requestFile}", "${apiLogPath}"]
+    command: [./tools/fpp_invoke_api.sh, "${input.requestId}", "${input.requestType}", "${input.requestFile}", "${input.apiLogPath}"]
     output: xml
     arguments:
       requestId:
@@ -28,7 +28,7 @@ tools:
   sqlplusToXml:
     name: Convert SQLPlus output to XML
     description: Convert pipe-delimited SQLPlus rows into XML using safe column names as element names
-    command: [./tools/fpp_sqlplus_to_xml.sh, "${inputFile}"]
+    command: [./tools/fpp_sqlplus_to_xml.sh, "${input.inputFile}"]
     output: xml
     arguments:
       inputFile:
@@ -38,7 +38,7 @@ tools:
   exehelper:
     name: Execute command and capture streams
     description: Execute one command with optional atomic argument arrays, expanding pathname wildcards per argument, optionally persist streams, and return a YAML outcome
-    command: [./tools/exehelper.sh, "${stdoutPath}", "${stderrPath}", --, "${command}", "${arguments}"]
+    command: [./tools/exehelper.sh, "${input.stdoutPath}", "${input.stderrPath}", --, "${input.command}", "${input.arguments}"]
     output: yaml
     arguments:
       command:
@@ -62,7 +62,7 @@ tools:
   moveFiles:
     name: Move matching files
     description: Move regular files matching one filename glob between directories after collision preflight
-    command: [./tools/fpp_move_files.sh, "${sourceDirectory}", "${pattern}", "${targetDirectory}", "${overwrite}"]
+    command: [./tools/fpp_move_files.sh, "${input.sourceDirectory}", "${input.pattern}", "${input.targetDirectory}", "${input.overwrite}"]
     output: yaml
     arguments:
       sourceDirectory:
@@ -84,7 +84,7 @@ tools:
   inspectFiles:
     name: Inspect matching files
     description: Return matching regular files, count, line counts, and an optional all-files line-count comparison
-    command: [./tools/fpp_inspect_files.sh, "${directory}", "${pattern}", "${expectedLineCount}"]
+    command: [./tools/fpp_inspect_files.sh, "${input.directory}", "${input.pattern}", "${input.expectedLineCount}"]
     output: yaml
     arguments:
       directory:
@@ -102,7 +102,7 @@ tools:
   searchText:
     name: Search fixed text
     description: Count lines containing one literal keyword in a regular text file
-    command: [./tools/fpp_search_text.sh, "${file}", "${keyword}"]
+    command: [./tools/fpp_search_text.sh, "${input.file}", "${input.keyword}"]
     output: yaml
     arguments:
       file:
@@ -116,7 +116,7 @@ tools:
   loghelper:
     name: Search transaction logs
     description: Search recent local transaction logs for TIDs containing every keyword, with optional SSH fallback
-    command: [./tools/loghelper.sh, "${maxTidFiles}", "${minTidFiles}", "${outputPrefix}", "${logFiles}", "${keywords}", "${recentLogCount}", "${sshOption}"]
+    command: [./tools/loghelper.sh, "${input.maxTidFiles}", "${input.minTidFiles}", "${input.outputPrefix}", "${input.logFiles}", "${input.keywords}", "${input.recentLogCount}", "${input.sshOption}"]
     output: yaml
     arguments:
       maxTidFiles:
@@ -156,7 +156,7 @@ tools:
   querySqlplus:
     name: Query SQLPlus and return XML
     description: Execute one SQL file through SQLPlus, save raw streams, and convert pipe-delimited stdout to XML
-    command: [./tools/fpp_query_sqlplus.sh, "${sqlFile}", "${outputFile}", "${stderrPath}"]
+    command: [./tools/fpp_query_sqlplus.sh, "${input.sqlFile}", "${input.outputFile}", "${input.stderrPath}"]
     output: xml
     arguments:
       sqlFile:

@@ -298,10 +298,11 @@ public final class FrameworkConfigLoader {
 
     private static void validateCallInputReference(String tool, String path,
                                                    Map<String, ToolArgumentConfig> arguments) {
+        boolean explicitInput = path.startsWith("TOOL.input.") || path.startsWith("input.");
         String value = path.startsWith("TOOL.input.") ? path.substring(11)
-                : path.startsWith("input.") ? path.substring(6) : null;
-        if (value == null || value.isEmpty()) {
-            throw new IllegalArgumentException("Tool definition call placeholders must reference input.<argument>: " + tool + "." + path);
+                : path.startsWith("input.") ? path.substring(6) : path;
+        if (value.isEmpty() || (!explicitInput && !value.matches("[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"))) {
+            throw new IllegalArgumentException("Tool definition call placeholders must reference a declared Tool argument: " + tool + "." + path);
         }
         String root = value.split("\\.", 2)[0];
         if (!arguments.containsKey(root)) {

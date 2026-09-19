@@ -128,14 +128,10 @@ public class UnifiedTemplateEngine {
             String expression = matcher.group(1);
             String path = CaseRuntimeContext.requiredReferencePath(expression);
             boolean optional = CaseRuntimeContext.isOptionalReference(expression);
-            boolean validationValueAvailable = path.startsWith("CASE.")
-                    && !path.startsWith("CASE.STAGES.")
-                    && !"CASE.outputDirectory".equals(path);
+            boolean validationValueAvailable = att.core.ContextPathPolicy.isValidationValueAvailable(path);
             Object value;
             if (validationOnly) {
-                boolean runtimeDependent = "CASE.outputDirectory".equals(path) || path.startsWith("CASE.STAGES.") || path.startsWith("ACTIONS.")
-                        || path.startsWith("TOOL.") || path.startsWith("DB.")
-                        || path.equals("output") || path.startsWith("output.");
+                boolean runtimeDependent = att.core.ContextPathPolicy.isRuntimeDependent(path);
                 if (context.isValidationDeferred(path)) value = null;
                 else if (validationValueAvailable) value = optional ? context.requireOptional(path) : context.require(path);
                 else if (runtimeDependent) value = null;
@@ -153,12 +149,9 @@ public class UnifiedTemplateEngine {
     }
 
     private boolean explicitContextRoot(String expression) {
-        return expression.equals("CASE") || expression.startsWith("CASE.") || expression.startsWith("CASE[")
-                || expression.equals("RUN") || expression.startsWith("RUN.") || expression.startsWith("RUN[")
-                || expression.equals("ACTIONS") || expression.startsWith("ACTIONS.") || expression.startsWith("ACTIONS[")
-                || expression.equals("TOOL") || expression.startsWith("TOOL.") || expression.startsWith("TOOL[")
-                || expression.equals("DB") || expression.startsWith("DB.") || expression.startsWith("DB[")
-                || expression.equals("output") || expression.startsWith("output.") || expression.startsWith("output[");
+        if (expression == null || expression.isEmpty()) return false;
+        String root = att.core.ContextPathPolicy.firstSegment(expression);
+        return att.core.ContextPathPolicy.isExplicitRoot(root);
     }
 
     /** Preserves a complete typed Context/call expression; otherwise returns rendered text. */
@@ -293,14 +286,17 @@ public class UnifiedTemplateEngine {
                                        CaseExecutionLog log, String invocationId, boolean attempt,
                                        Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
         if (name.startsWith("db.")) {
+            context.setDbHelperMetadata(name.split("\\.", -1)[1]);
             if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
             return executeDbResolvedCall(name, input, context, log, invocationId);
         }
         if (name.startsWith("mq.")) {
+            context.setMqHelperMetadata(name.split("\\.", -1)[1]);
             if (!attempt) throw new IllegalArgumentException("An MQ operation must be the primary call of a type: tool Action");
             return executeMqResolvedCall(name, input, context, timeoutMs, invocationId);
         }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
+            context.setToolMetadata(name);
             long started = System.nanoTime();
             long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
             Object output = attempt ? invokeBuiltInWithTimeout(name, input, effectiveTimeout, invocationId, started) : builtIns.invoke(name, input);
@@ -308,6 +304,7 @@ public class UnifiedTemplateEngine {
         }
         if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + name);
         ToolConfig configured = toolInvoker.tool(name);
+        context.setToolMetadata(name);
         if (configured != null && configured.callBacked()) {
             long effectiveTimeout = toolInvoker.effectiveTimeoutMs(configured.key(), timeoutMs);
             return executeCallBackedTool(configured, input, context, log, invocationId, attempt, effectiveTimeout, bypassCache);
@@ -479,6 +476,7 @@ public class UnifiedTemplateEngine {
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
             throw new IllegalArgumentException("call-backed Tool DB target must be db.<instance>.query|scalar|update: " + call.name());
         }
+        context.setDbHelperMetadata(parts[1]);
         Map<String, Object> arguments = resolveDefinitionDbArguments(call, input);
         boolean hasSql = arguments.containsKey("sql");
         boolean hasFile = arguments.containsKey("sqlFile");
@@ -596,6 +594,7 @@ public class UnifiedTemplateEngine {
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]))) {
             throw new IllegalArgumentException("DB expression must be db.<instance>.query(...) or db.<instance>.scalar(...): " + callName);
         }
+        context.setDbHelperMetadata(parts[1]);
         boolean hasSql = input.containsKey("sql");
         boolean hasFile = input.containsKey("sqlFile");
         if (hasSql == hasFile) throw new IllegalArgumentException(callName + " requires exactly one of sql or sqlFile");

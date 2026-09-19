@@ -1,8 +1,8 @@
 schemaVersion: att-flow/v3.0
 id: common.identity.v1
 name: Identity
-description: V3.2 Flow reading Case data through the same Context used by Template Actions.
+description: V3.4.2 Flow reading canonical source metadata in its own Action scope.
 actions:
   identityValue:
     type: tool
-    call: "#{misc.string(value=${CASE.caseId})}"
+    call: "#{misc.string(value=${META.SOURCE.caseId})}"

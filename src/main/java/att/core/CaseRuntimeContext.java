@@ -2,29 +2,91 @@
 package att.core;
 
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Authoritative V2 CASE tree plus transient ACTIONS, TOOL, and DB invocation views. */
+/**
+ * Execution-neutral expression Context.
+ *
+ * <p>{@code EXEC} and {@code META} are the canonical roots.  The historical
+ * {@code CASE}, {@code RUN}, and {@code ACTIONS} roots are generated views of
+ * the same maps so old definitions do not get a second mutable copy of the
+ * execution state.  {@code output} is held separately as an Action-local
+ * binding and is deliberately absent from the canonical tree.</p>
+ */
 public final class CaseRuntimeContext {
     /** Marker used only by validation/documentation contexts for values whose runtime shape is unknown. */
     private static final Object DEFERRED_VALIDATION_VALUE = new Object();
+    /** Transient legacy TOOL/DB views; these are not promoted into EXEC. */
     private final Map<String, Object> root = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> execNode = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> inputNode = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> varsNode = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> metaNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> runNode = new LinkedHashMap<String, Object>();
+    /** Current Stage's published Action results; history is retained below CASE.STAGES. */
     private final Map<String, Object> actionsView = new LinkedHashMap<String, Object>();
+    private final Map<String, Object> caseDbNode = new LinkedHashMap<String, Object>();
+    /**
+     * Previous values temporarily hidden by the current Stage's input overlay.
+     * The overlay is an adapter view, not a second public Context store.
+     */
+    private final Map<String, Object> activeStageInputPrevious = new LinkedHashMap<String, Object>();
+    private final java.util.Set<String> activeStageInputKeys = new java.util.LinkedHashSet<String>();
+    private final java.util.Set<String> activeStageInputHadPrevious = new java.util.LinkedHashSet<String>();
     private final Path caseOutputDir;
     private final Path caseLogPath;
+    private final String mode;
     private String currentStage;
     private Map<String, Object> currentActions;
+    /** Current Action/attempt-local output; never published as EXEC.OUTPUT. */
+    private Map<String, Object> actionOutput;
+    private boolean statusPublished;
     private int toolSequence;
     private int dbSequence;
     private final Map<String, Object> callToolCache = new LinkedHashMap<String, Object>();
     private final java.util.Deque<FlowFrame> flowScopes = new java.util.ArrayDeque<FlowFrame>();
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
+        this(testCase, caseOutputDir, runId, runDirectory, caseLog, "testcase");
+    }
+
+    /** Creates a Context for the normal testcase or standalone debug adapter. */
+    public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog,
+                              String mode) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
         this.caseLogPath = caseLog.toAbsolutePath().normalize();
+        this.mode = normalizeMode(mode);
+        String startedAt = java.time.Instant.now().toString();
+
+        execNode.put("ID", runId);
+        execNode.put("MODE", this.mode);
+        execNode.put("STARTED_AT", startedAt);
+        execNode.put("OUTPUT_DIR", this.caseOutputDir.toString());
+        execNode.put("INPUT", inputNode);
+        execNode.put("VARS", varsNode);
+        execNode.put("ACTIONS", actionsView);
+        execNode.put("STATUS", "RUNNING");
+
+        inputNode.putAll(testCase.caseData());
+
+        Map<String, Object> source = new LinkedHashMap<String, Object>();
+        source.put("type", "testcase");
+        source.put("caseId", testCase.caseId());
+        source.put("workbookId", testCase.workbookId());
+        source.put("groupId", testCase.groupId());
+        source.put("rowCaseId", testCase.rowCaseId());
+        source.put("sheet", testCase.sheetName());
+        source.put("row", Integer.valueOf(testCase.rowNumber()));
+        if (testCase.caseData().get("workbook") != null) source.put("workbook", testCase.caseData().get("workbook"));
+        metaNode.put("SOURCE", source);
+        metaNode.put("TARGET", mapOf("type", "testcase", "id", testCase.caseId()));
+
+        // The legacy Case view retains framework-owned identity and evidence
+        // fields, but business data itself lives only in EXEC.INPUT.
         caseNode.put("caseId", testCase.caseId());
         caseNode.put("workbookId", testCase.workbookId());
         caseNode.put("groupId", testCase.groupId());
@@ -34,21 +96,11 @@ public final class CaseRuntimeContext {
         caseNode.put("rowNumber", testCase.rowNumber());
         caseNode.put("tags", testCase.tags());
         caseNode.put("status", "RUNNING");
-        String caseStartedAt = java.time.Instant.now().toString();
-        caseNode.put("startedAt", caseStartedAt);
-        caseNode.putAll(testCase.caseData());
-        // Framework-owned runtime metadata must not be replaceable by a
-        // same-named workbook column/case-data alias.
-        caseNode.put("caseId", testCase.caseId());
-        caseNode.put("workbookId", testCase.workbookId());
-        caseNode.put("groupId", testCase.groupId());
-        caseNode.put("rowCaseId", testCase.rowCaseId());
+        caseNode.put("startedAt", startedAt);
         caseNode.put("outputDirectory", this.caseOutputDir.toString());
-        caseNode.put("VARS", new LinkedHashMap<String, Object>());
-        caseNode.put("DB", new LinkedHashMap<String, Object>());
-        caseNode.put("STAGES", new LinkedHashMap<String, Object>());
-        root.put("CASE", caseNode);
-        root.put("ACTIONS", actionsView);
+        caseNode.put("VARS", varsNode);
+        caseNode.put("DB", caseDbNode);
+        caseNode.put("STAGES", stagesNode);
         // TOOL is a reserved transient scope. Persisted tool results live below
         // ACTIONS.<actionId>; later actions must not depend on case-wide latest state.
         root.put("TOOL", new LinkedHashMap<String, Object>());
@@ -59,12 +111,17 @@ public final class CaseRuntimeContext {
         runNode.put("id", runId);
         runNode.put("runDirectory", runDirectory.toString());
         runNode.put("caseLog", caseLog.toString());
-        root.put("RUN", runNode);
     }
 
     @SuppressWarnings("unchecked")
     public void beginStage(StageCaseData stage, String templateName, Path templatePath) {
+        clearActiveStageInput();
         currentStage = stage.key();
+        // The current Stage caller/input values are adapted into the one
+        // canonical EXEC.INPUT map.  Stage values win over Case-level values
+        // for the duration of that Stage; the original values are restored
+        // when the Stage ends or another Stage starts.
+        applyActiveStageInput(stage.values());
         Map<String, Object> stageNode = new LinkedHashMap<String, Object>();
         stageNode.put("key", stage.key());
         stageNode.put("status", "RUNNING");
@@ -74,25 +131,60 @@ public final class CaseRuntimeContext {
         stageNode.put("status", "RUNNING");
         Map<String, Object> template = new LinkedHashMap<String, Object>();
         template.put("name", templateName);
+        template.put("id", templateName);
         template.put("path", templatePath.toString());
         template.put("status", "RUNNING");
         template.put("startedAt", java.time.Instant.now().toString());
         currentActions = new LinkedHashMap<String, Object>();
         template.put("ACTIONS", currentActions);
         stageNode.put("TEMPLATE", template);
-        ((Map<String, Object>) caseNode.get("STAGES")).put(stage.key(), stageNode);
+        stagesNode.put(stage.key(), stageNode);
+        setComponentMetadata("TEMPLATE", templateMetadata(templateName, templatePath));
         actionsView.clear();
     }
 
     @SuppressWarnings("unchecked")
     public void finishStage(String status, long durationMs) {
-        Map<String, Object> stages = (Map<String, Object>) caseNode.get("STAGES");
+        if (currentStage == null) return;
+        Map<String, Object> stages = stagesNode;
         Map<String, Object> stage = (Map<String, Object>) stages.get(currentStage);
-        stage.put("status", status);
-        stage.put("durationMs", durationMs);
-        Map<String, Object> template = (Map<String, Object>) stage.get("TEMPLATE");
-        template.put("status", status);
-        template.put("durationMs", durationMs);
+        try {
+            stage.put("status", status);
+            stage.put("durationMs", durationMs);
+            Map<String, Object> template = (Map<String, Object>) stage.get("TEMPLATE");
+            template.put("status", status);
+            template.put("durationMs", durationMs);
+        } finally {
+            clearActiveStageInput();
+            currentStage = null;
+            currentActions = null;
+            clearActionOutput();
+        }
+    }
+
+    public boolean hasActiveStage() { return currentStage != null; }
+
+    private void applyActiveStageInput(Map<String, Object> values) {
+        if (values == null) return;
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            String key = entry.getKey();
+            if (inputNode.containsKey(key)) {
+                activeStageInputHadPrevious.add(key);
+                activeStageInputPrevious.put(key, inputNode.get(key));
+            }
+            activeStageInputKeys.add(key);
+            inputNode.put(key, entry.getValue());
+        }
+    }
+
+    private void clearActiveStageInput() {
+        for (String key : activeStageInputKeys) {
+            if (activeStageInputHadPrevious.contains(key)) inputNode.put(key, activeStageInputPrevious.get(key));
+            else inputNode.remove(key);
+        }
+        activeStageInputKeys.clear();
+        activeStageInputHadPrevious.clear();
+        activeStageInputPrevious.clear();
     }
 
     public Object resolve(String path) {
@@ -195,9 +287,9 @@ public final class CaseRuntimeContext {
         catch (Exception error) { return Resolution.invalidPath("<root>", error.getMessage()); }
         if (requested.isEmpty()) return Resolution.missing("<root>", "<empty>");
         String first = requested.get(0).key;
-        if (first != null && explicitRoots().contains(first)) return traverse(logicalRoot(), requested);
+        if (first != null && ContextPathPolicy.isExplicitRoot(first)) return traverse(logicalRoot(), requested);
 
-        java.util.Map<String, Object> candidates = canonicalPaths();
+        java.util.Map<String, Object> candidates = readablePaths();
         java.util.List<String> matches = new java.util.ArrayList<String>();
         for (String candidate : candidates.keySet()) {
             java.util.List<Segment> segments = parsePath(candidate);
@@ -205,7 +297,11 @@ public final class CaseRuntimeContext {
         }
         java.util.Collections.sort(matches);
         if (matches.size() == 1) return candidateResolution(candidates.get(matches.get(0)), matches.get(0));
-        if (matches.size() > 1) return Resolution.ambiguous(matches);
+        if (matches.size() > 1) {
+            java.util.List<String> display = new java.util.ArrayList<String>();
+            for (String match : matches) display.add(displayPath(match));
+            return Resolution.ambiguous(display);
+        }
         Resolution deferred = deferredSuffixResolution(requested, candidates);
         if (deferred != null) return deferred;
         return partialResolution(requested, candidates);
@@ -238,37 +334,60 @@ public final class CaseRuntimeContext {
         java.util.List<String> ordered = new java.util.ArrayList<String>(matches);
         java.util.Collections.sort(ordered);
         if (ordered.size() == 1) return Resolution.deferred(ordered.get(0));
-        if (ordered.size() > 1) return Resolution.ambiguous(ordered);
+        if (ordered.size() > 1) {
+            java.util.List<String> display = new java.util.ArrayList<String>();
+            for (String path : ordered) display.add(displayPath(path));
+            return Resolution.ambiguous(display);
+        }
         return null;
-    }
-
-    private java.util.Set<String> explicitRoots() {
-        return new java.util.LinkedHashSet<String>(java.util.Arrays.asList("CASE", "RUN", "ACTIONS", "TOOL", "DB", "output"));
     }
 
     private Map<String, Object> logicalRoot() {
         Map<String, Object> logical = new LinkedHashMap<String, Object>();
-        logical.put("CASE", caseNode);
+        logical.put("EXEC", execNode);
+        logical.put("META", immutable(metaNode));
+        // CASE.STAGES remains persisted result/evidence, but is deliberately
+        // absent from the expression view so history cannot be used as a
+        // cross-Stage or cross-Flow Context namespace.
+        logical.put("CASE", expressionCaseView());
         logical.put("RUN", runNode);
         logical.put("ACTIONS", actionsView);
-        if (root.containsKey("output")) logical.put("output", root.get("output"));
+        if (actionOutput != null) logical.put("output", actionOutput);
         logical.put("TOOL", root.get("TOOL"));
         logical.put("DB", root.get("DB"));
         return logical;
     }
 
-    private Map<String, Object> canonicalRoot() {
+    /** The two canonical expression roots. Transient TOOL/DB scopes are separate. */
+    private Map<String, Object> canonicalContextRoot() {
         Map<String, Object> canonical = new LinkedHashMap<String, Object>();
-        canonical.put("CASE", caseNode);
-        canonical.put("RUN", runNode);
-        canonical.put("TOOL", root.get("TOOL"));
-        canonical.put("DB", root.get("DB"));
+        canonical.put("EXEC", execNode);
+        canonical.put("META", immutable(metaNode));
         return canonical;
     }
 
+    private Map<String, Object> transientRoot() {
+        Map<String, Object> transientScopes = new LinkedHashMap<String, Object>();
+        transientScopes.put("TOOL", root.get("TOOL"));
+        transientScopes.put("DB", root.get("DB"));
+        return transientScopes;
+    }
+
+    /**
+     * Publishes a runtime value. New framework code should use canonical
+     * {@code EXEC.*} paths; {@code CASE.<businessField>} writes remain a
+     * deliberate compatibility adapter into {@code EXEC.INPUT}.
+     */
     public void put(String key, Object value) {
-        if (key.startsWith("CASE.")) putPath(caseNode, key.substring(5), value);
-        else if (key.startsWith("RUN.")) putPath(runNode, key.substring(4), value);
+        if (key.startsWith("EXEC.")) putExecutionPath(key.substring(5), value, false);
+        else if (key.startsWith("META.")) throw new IllegalArgumentException("META is immutable after Context construction");
+        else if (key.startsWith("CASE.")) putLegacyCase(key.substring(5), value);
+        else if (key.startsWith("RUN.")) putLegacyRun(key.substring(4), value);
+        else if (key.startsWith("ACTIONS.")) putPath(actionsView, key.substring(8), value);
+        else if (key.startsWith("output.")) {
+            if (actionOutput == null) throw new IllegalArgumentException("Action-local output is not visible outside an Action scope");
+            putPath(actionOutput, key.substring(7), value);
+        }
         else if (key.startsWith("TOOL.")) {
             @SuppressWarnings("unchecked")
             Map<String, Object> tool = (Map<String, Object>) root.get("TOOL");
@@ -277,24 +396,205 @@ public final class CaseRuntimeContext {
             @SuppressWarnings("unchecked")
             Map<String, Object> db = (Map<String, Object>) root.get("DB");
             putPath(db, key.substring(3), value);
+        } else if ("EXEC".equals(key) || "META".equals(key)) {
+            throw new IllegalArgumentException("Framework-owned Context root cannot be overwritten: " + key);
         } else root.put(key, value);
     }
 
+    private void putExecutionPath(String path, Object value, boolean internal) {
+        if (path == null || path.isEmpty()) throw new IllegalArgumentException("EXEC path must contain a field");
+        String first = firstSegment(path);
+        if (ContextPathPolicy.isUnsupportedExecPath(path)) {
+            if (ContextPathPolicy.isUnsupportedStagePath(path)) {
+                throw new IllegalArgumentException("EXEC." + first + " is not a canonical Context node in 3.4.2; use EXEC.INPUT for current Stage input or CASE.STAGES for legacy execution evidence");
+            }
+            throw new IllegalArgumentException("EXEC." + first + " is not a canonical Context node in 3.4.2; use transient/helper compatibility views or META helper identity where applicable");
+        }
+        if (!internal && ContextPathPolicy.isFrameworkOwnedExecField(first)) {
+            throw new IllegalArgumentException("Framework-owned EXEC field cannot be overwritten: EXEC." + first);
+        }
+        if ("INPUT".equals(first)) putPath(inputNode, suffix(path, first), value);
+        else if ("VARS".equals(first)) putPath(varsNode, suffix(path, first), value);
+        else if ("ACTIONS".equals(first)) putPath(actionsView, suffix(path, first), value);
+        else putPath(execNode, path, value);
+    }
+
+    private void putLegacyCase(String path, Object value) {
+        String first = firstSegment(path);
+        if ("VARS".equals(first)) {
+            putPath(varsNode, suffix(path, first), value);
+        } else if ("DB".equals(first)) {
+            if (path.equals("DB")) {
+                caseDbNode.clear();
+                if (value instanceof Map) caseDbNode.putAll((Map<String, Object>) value);
+                else throw new IllegalArgumentException("CASE.DB must be a map");
+            } else putPath(caseDbNode, suffix(path, first), value);
+        } else if ("STAGES".equals(first)) {
+            putPath(stagesNode, suffix(path, first), value);
+        } else if ("outputDirectory".equals(path)) {
+            throw new IllegalArgumentException("Framework-owned CASE.outputDirectory cannot be overwritten");
+        } else if ("caseId".equals(path) || "workbookId".equals(path) || "groupId".equals(path)
+                || "rowCaseId".equals(path) || "startedAt".equals(path)) {
+            throw new IllegalArgumentException("Framework-owned CASE field cannot be overwritten: CASE." + path);
+        } else if ("status".equals(path) || "durationMs".equals(path) || "error".equals(path)
+                || "errorDiagnostic".equals(path) || "environment".equals(path) || "debugInput".equals(path)) {
+            if ("status".equals(path)) statusPublished = true;
+            putExecutionPath(legacyExecutionField(path), value, true);
+        } else {
+            // Legacy business-field writes are retained for existing adapters.
+            // They update the canonical input map, but cannot replace any
+            // framework-owned identity, lifecycle, VARS, DB, or Stage fields.
+            putPath(inputNode, path, value);
+        }
+    }
+
+    private void putLegacyRun(String path, Object value) {
+        if ("id".equals(path) || "runId".equals(path))
+            throw new IllegalArgumentException("Framework-owned RUN identity cannot be overwritten");
+        putPath(runNode, path, value);
+    }
+
+    private String legacyExecutionField(String path) {
+        if ("environment".equals(path)) return "ENVIRONMENT";
+        if ("debugInput".equals(path)) return "DEBUG_INPUT";
+        if ("durationMs".equals(path)) return "DURATION_MS";
+        if ("errorDiagnostic".equals(path)) return "ERROR_DIAGNOSTIC";
+        return path.toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private static String firstSegment(String path) {
+        int dot = path.indexOf('.');
+        int bracket = path.indexOf('[');
+        int end = dot < 0 ? path.length() : dot;
+        if (bracket >= 0 && bracket < end) end = bracket;
+        return path.substring(0, end);
+    }
+
+    private static String suffix(String path, String first) {
+        return path.length() == first.length() ? "" : path.substring(first.length() + 1);
+    }
+
+    private Map<String, Object> legacyCaseView() {
+        return legacyCaseView(true);
+    }
+
+    private Map<String, Object> expressionCaseView() {
+        return legacyCaseView(false);
+    }
+
+    private Map<String, Object> legacyCaseView(boolean includeStageHistory) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.putAll(inputNode);
+        result.putAll(caseNode);
+        if (!includeStageHistory) result.remove("STAGES");
+        result.put("status", statusPublished || !inputNode.containsKey("status")
+                ? execNode.get("STATUS") : inputNode.get("status"));
+        result.put("startedAt", execNode.get("STARTED_AT"));
+        result.put("outputDirectory", execNode.get("OUTPUT_DIR"));
+        result.put("durationMs", execNode.get("DURATION_MS"));
+        if (execNode.containsKey("ENVIRONMENT")) result.put("environment", execNode.get("ENVIRONMENT"));
+        if (execNode.containsKey("DEBUG_INPUT")) result.put("debugInput", execNode.get("DEBUG_INPUT"));
+        if (execNode.containsKey("ERROR")) result.put("error", execNode.get("ERROR"));
+        if (execNode.containsKey("ERROR_DIAGNOSTIC")) result.put("errorDiagnostic", execNode.get("ERROR_DIAGNOSTIC"));
+        result.put("VARS", varsNode);
+        result.put("DB", caseDbNode);
+        if (includeStageHistory) result.put("STAGES", stagesNode);
+        return result;
+    }
+
+    private static Map<String, Object> mapOf(String key1, Object value1, String key2, Object value2) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put(key1, value1); result.put(key2, value2); return result;
+    }
+
+    private static String normalizeMode(String value) {
+        String mode = value == null ? "testcase" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (mode.isEmpty()) mode = "testcase";
+        if (!"testcase".equals(mode) && !"debug".equals(mode))
+            throw new IllegalArgumentException("Unsupported execution Context mode: " + value);
+        return mode;
+    }
+
+    private Map<String, Object> templateMetadata(String id, Path path) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", id); result.put("path", path.toString()); return result;
+    }
+
+    /** Adds only curated component metadata; credentials/config objects never enter META. */
+    public void setProject(Path projectRoot) {
+        setComponentMetadata("PROJECT", mapOf("root", projectRoot.toAbsolutePath().normalize().toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
+    }
+
+    public void setTargetMetadata(String type, String id) {
+        setComponentMetadata("TARGET", mapOf("type", type, "id", id));
+    }
+
+    public void setSourceMetadata(String type, Path source, String caseId) {
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("type", type);
+        values.put("caseId", caseId);
+        if (source != null) values.put("path", source.toAbsolutePath().normalize().toString());
+        setComponentMetadata("SOURCE", values);
+    }
+
+    public void setComponentMetadata(String key, Map<String, Object> values) {
+        if (key == null || values == null) throw new IllegalArgumentException("META component cannot be null");
+        Map<String, Object> safe = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            String name = entry.getKey().toLowerCase(java.util.Locale.ROOT);
+            if (name.contains("password") || name.contains("credential") || name.contains("secret") || name.contains("token")) continue;
+            if (entry.getValue() instanceof Map || entry.getValue() instanceof Iterable || entry.getValue() == null
+                    || entry.getValue() instanceof String || entry.getValue() instanceof Number || entry.getValue() instanceof Boolean)
+                safe.put(entry.getKey(), entry.getValue());
+        }
+        metaNode.put(key, safe);
+    }
+
+    public void setToolMetadata(String id) { setComponentMetadata("TOOL", mapOf("id", id, "type", "tool")); }
+    public void setDbHelperMetadata(String id) { setComponentMetadata("DBHELPER", mapOf("id", id, "type", "dbhelper")); }
+    public void setMqHelperMetadata(String id) { setComponentMetadata("MQHELPER", mapOf("id", id, "type", "mqhelper")); }
+
+    private static Map<String, Object> immutable(Map<String, Object> source) {
+        return Collections.unmodifiableMap(deepImmutable(source, new java.util.IdentityHashMap<Object, Boolean>()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> deepImmutable(Map<String, Object> source, java.util.IdentityHashMap<Object, Boolean> seen) {
+        if (seen.put(source, Boolean.TRUE) != null) return source;
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : source.entrySet()) result.put(entry.getKey(), immutableValue(entry.getValue(), seen));
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object immutableValue(Object value, java.util.IdentityHashMap<Object, Boolean> seen) {
+        if (value instanceof Map) return Collections.unmodifiableMap(deepImmutable((Map<String, Object>) value, seen));
+        if (value instanceof java.util.List) {
+            java.util.List<Object> result = new java.util.ArrayList<Object>();
+            for (Object item : (java.util.List<?>) value) result.add(immutableValue(item, seen));
+            return Collections.unmodifiableList(result);
+        }
+        return value;
+    }
+
     /** Declares a validation-only value whose existence is known but whose nested runtime shape is not. */
-    public void putValidationPlaceholder(String key) { put(key, DEFERRED_VALIDATION_VALUE); }
+    public void putValidationPlaceholder(String key) {
+        if (key != null && key.startsWith("EXEC.")) putExecutionPath(key.substring("EXEC.".length()), DEFERRED_VALIDATION_VALUE, true);
+        else put(key, DEFERRED_VALIDATION_VALUE);
+    }
 
     @SuppressWarnings("unchecked")
     public void requireCaseVariableAvailable(String name) {
         if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    "Invalid CASE.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
+                    "Invalid EXEC.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
                     null, "name", null, null, null, null, null,
                     "Use a simple case-sensitive identifier such as txnSeq.", null);
         }
-        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
+        Map<String, Object> variables = varsNode;
         if (variables.containsKey(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    "Duplicate CASE.VARS assignment '${CASE.VARS." + name + "}'",
+                    "Duplicate EXEC.VARS assignment '${EXEC.VARS." + name + "}'",
                     "The variable was already assigned earlier in this Test Case.", null, "name",
                     null, null, null, null, null,
                     "Use a unique name; assign does not overwrite scoped variables.", null);
@@ -304,16 +604,25 @@ public final class CaseRuntimeContext {
     @SuppressWarnings("unchecked")
     public void assignCaseVariable(String name, Object value) {
         requireCaseVariableAvailable(name);
-        Map<String, Object> variables = (Map<String, Object>) caseNode.get("VARS");
+        Map<String, Object> variables = varsNode;
         variables.put(name, value);
     }
 
-    public Map<String, Object> values() { return root; }
-    public Map<String, Object> caseTree() { return caseNode; }
+    /** Expression-visible roots, including legacy aliases and current local bindings. */
+    public Map<String, Object> values() { return logicalRoot(); }
+
+    /** Canonical execution data, exposed read-only for adapters and diagnostics. */
+    public Map<String, Object> executionTree() { return immutable(execNode); }
+
+    /** Curated, secret-safe metadata, exposed read-only. */
+    public Map<String, Object> metadataTree() { return immutable(metaNode); }
+
+    /** Persisted legacy Case evidence view; its mutable state is backed by EXEC. */
+    public Map<String, Object> caseTree() { return legacyCaseView(); }
     public Path caseOutputDirectory() { return caseOutputDir; }
 
-    public void setActionOutput(Map<String, Object> output) { root.put("output", output); }
-    public void clearActionOutput() { root.remove("output"); }
+    public void setActionOutput(Map<String, Object> output) { actionOutput = output; }
+    public void clearActionOutput() { actionOutput = null; }
 
     public int nextToolSequence(String ignored) { return ++toolSequence; }
     public String nextInvocationId(String base) { return base + "_" + String.format("%03d", nextToolSequence(base)); }
@@ -357,7 +666,13 @@ public final class CaseRuntimeContext {
     }
 
     private Map<String, Object> actionView(Map<String, Object> action) {
-        return new LinkedHashMap<String, Object>(action);
+        Map<String, Object> view = new LinkedHashMap<String, Object>(action);
+        // Flow internals are retained in the persisted evidence node, but the
+        // parent/current Action namespace exposes only the Flow invocation's
+        // standard outcome.  This prevents a caller from reaching through a
+        // completed Flow into its private Action scope.
+        if ("flow".equalsIgnoreCase(String.valueOf(action.get("type")))) view.remove("flow");
+        return view;
     }
 
     @SuppressWarnings("unchecked")
@@ -401,13 +716,30 @@ public final class CaseRuntimeContext {
     }
 
     public void beginFlow(String flowId, String invocationId) {
-        flowScopes.push(new FlowFrame(flowId, invocationId, flowScopes.size() + 1));
+        Map<String, Object> previous = metaNode.get("FLOW") instanceof Map
+                ? new LinkedHashMap<String, Object>((Map<String, Object>) metaNode.get("FLOW")) : null;
+        // EXEC.ACTIONS is a scope-local namespace.  Keep the parent map as the
+        // owner of its published Actions, but expose only a fresh Flow map while
+        // the Flow is executing.  The same internal Action IDs can therefore be
+        // reused by repeated or nested Flow invocations without collision.
+        FlowFrame frame = new FlowFrame(flowId, invocationId, flowScopes.size() + 1,
+                previous, currentActions, new LinkedHashMap<String, Object>(actionsView));
+        flowScopes.push(frame);
+        actionsView.clear();
+        currentActions = frame.actions;
+        setComponentMetadata("FLOW", mapOf("id", flowId, "invocationId", invocationId));
     }
 
     public FlowEvidence finishFlow() {
         if (flowScopes.isEmpty()) throw new IllegalStateException("No active Flow scope");
         FlowFrame frame = flowScopes.pop();
-        return new FlowEvidence(frame.flow, frame.actions);
+        Map<String, Object> actions = new LinkedHashMap<String, Object>(frame.actions);
+        actionsView.clear();
+        actionsView.putAll(frame.previousVisibleActions);
+        currentActions = frame.previousActions;
+        if (frame.previousFlow == null) metaNode.remove("FLOW");
+        else metaNode.put("FLOW", frame.previousFlow);
+        return new FlowEvidence(frame.flow, actions);
     }
 
     public boolean inFlow() { return !flowScopes.isEmpty(); }
@@ -444,10 +776,18 @@ public final class CaseRuntimeContext {
 
     private static final class FlowFrame {
         private final String invocationId;
+        private final Map<String, Object> previousFlow;
+        private final Map<String, Object> previousActions;
+        private final Map<String, Object> previousVisibleActions;
         private final Map<String, Object> actions = new LinkedHashMap<String, Object>();
         private final Map<String, Object> flow = new LinkedHashMap<String, Object>();
-        private FlowFrame(String flowId, String invocationId, int depth) {
+        private FlowFrame(String flowId, String invocationId, int depth, Map<String, Object> previousFlow,
+                          Map<String, Object> previousActions,
+                          Map<String, Object> previousVisibleActions) {
             this.invocationId = invocationId;
+            this.previousFlow = previousFlow;
+            this.previousActions = previousActions;
+            this.previousVisibleActions = previousVisibleActions;
             flow.put("id", flowId); flow.put("invocationId", invocationId); flow.put("depth", Integer.valueOf(depth));
         }
     }
@@ -499,15 +839,73 @@ public final class CaseRuntimeContext {
     }
 
     private java.util.List<String> availablePaths() {
-        java.util.List<String> result = new java.util.ArrayList<String>(canonicalPaths().keySet());
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<String>();
+        for (String path : readablePaths().keySet()) paths.add(displayPath(path));
+        java.util.List<String> result = new java.util.ArrayList<String>(paths);
         java.util.Collections.sort(result);
         return result;
     }
 
     private Map<String, Object> canonicalPaths() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        collectCanonical(canonicalRoot(), "", result, new java.util.IdentityHashMap<Object, Boolean>());
+        collectCanonical(canonicalContextRoot(), "", result, new java.util.IdentityHashMap<Object, Boolean>());
         return result;
+    }
+
+    private Map<String, Object> transientPaths() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        collectCanonical(transientRoot(), "", result, new java.util.IdentityHashMap<Object, Boolean>());
+        return result;
+    }
+
+    private Map<String, Object> legacyEvidencePaths() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        // Preserve rootless shorthand for the historical CASE.STAGES evidence
+        // view without making that history a canonical node or copying any of
+        // its mutable state.
+        result.put("CASE.STAGES", stagesNode);
+        collectLegacyStageShorthand(stagesNode, "CASE.STAGES", result,
+                new java.util.IdentityHashMap<Object, Boolean>());
+        return result;
+    }
+
+    /** All paths available to rootless shorthand resolution, grouped by contract. */
+    private Map<String, Object> readablePaths() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.putAll(canonicalPaths());
+        result.putAll(transientPaths());
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void collectLegacyStageShorthand(Object value, String prefix, Map<String, Object> output,
+                                                    java.util.IdentityHashMap<Object, Boolean> active) {
+        if (active.put(value, Boolean.TRUE) != null) return;
+        try {
+            if (!(value instanceof Map) && !(value instanceof java.util.List)) return;
+            if (value instanceof Map) {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    String key = String.valueOf(entry.getKey());
+                    // Completed Action evidence is already canonical under
+                    // EXEC.ACTIONS. Keep the explicit CASE.STAGES history
+                    // path, but do not make the same Action look like a
+                    // second rootless shorthand candidate.
+                    if ("ACTIONS".equals(key) && prefix.endsWith(".TEMPLATE")) continue;
+                    String path = appendPath(prefix, Segment.key(key));
+                    output.put(path, entry.getValue());
+                    collectLegacyStageShorthand(entry.getValue(), path, output, active);
+                }
+            } else {
+                java.util.List<?> list = (java.util.List<?>) value;
+                for (int index = 0; index < list.size(); index++) {
+                    String path = appendPath(prefix, Segment.index(index));
+                    output.put(path, list.get(index));
+                    collectLegacyStageShorthand(list.get(index), path, output, active);
+                }
+            }
+        } finally {
+            active.remove(value);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -565,7 +963,7 @@ public final class CaseRuntimeContext {
                 while (matched < requested.size() && start + matched < full.size()
                         && full.get(start + matched).equals(requested.get(matched))) matched++;
                 if (matched == 0 || matched >= requested.size()) continue;
-                String node = renderPath(full.subList(0, start + matched));
+                String node = displayPath(renderPath(full.subList(0, start + matched)));
                 if (matched > best) { best = matched; currentNodes.clear(); }
                 if (matched == best) currentNodes.add(node);
             }
@@ -620,6 +1018,11 @@ public final class CaseRuntimeContext {
         return path;
     }
 
+    /** Canonical spelling for diagnostics and suggestions. Legacy paths remain explicit. */
+    private static String displayPath(String path) {
+        return path;
+    }
+
     private static String appendPath(String prefix, Segment segment) {
         if (segment == null) return prefix;
         if (segment.index != null) return prefix + "[" + segment.index + "]";
@@ -668,10 +1071,27 @@ public final class CaseRuntimeContext {
         String best = null; int distance = Integer.MAX_VALUE;
         for (String candidate : candidates) {
             int current = levenshtein(requested, candidate);
+            String legacy = legacySuggestionPath(candidate);
+            if (legacy != null) {
+                int legacyDistance = levenshtein(requested, legacy);
+                if (legacyDistance < current) current = legacyDistance;
+            }
             if (current < distance) { distance = current; best = candidate; }
         }
         int threshold = Math.max(2, requested == null ? 2 : requested.length() / 4);
         return distance <= threshold ? best : null;
+    }
+
+    /** Matches old explicit roots for typo hints while returning the canonical path. */
+    private static String legacySuggestionPath(String canonical) {
+        if (canonical == null) return null;
+        if (canonical.startsWith("META.SOURCE.")) return "CASE" + canonical.substring("META.SOURCE".length());
+        if (canonical.startsWith("EXEC.INPUT.")) return "CASE" + canonical.substring("EXEC.INPUT".length());
+        if (canonical.startsWith("EXEC.VARS.")) return "CASE.VARS" + canonical.substring("EXEC.VARS".length());
+        if (canonical.startsWith("EXEC.ACTIONS.")) return "ACTIONS" + canonical.substring("EXEC.ACTIONS".length());
+        if ("EXEC.ID".equals(canonical)) return "RUN.id";
+        if ("EXEC.OUTPUT_DIR".equals(canonical)) return "CASE.outputDirectory";
+        return null;
     }
 
     private static int levenshtein(String left, String right) {

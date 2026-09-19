@@ -46,7 +46,8 @@ class FlowRuntimeTest {
             assertEquals(Arrays.asList("outer -> common.outer-error.v1", "nested -> common.inner-error.v1"),
                     result.diagnostic().context().toMap().get("callChain"));
             assertNotNull(context.resolve("ACTIONS.outer.output.exception"));
-            assertNotNull(context.resolve("ACTIONS.outer.flow.actions.nested.flow.actions.bad.diagnostic"));
+            assertNotNull(CaseRuntimeContext.getPath(context.caseTree(),
+                    "STAGES.verify.TEMPLATE.ACTIONS.outer.flow.actions.nested.flow.actions.bad.diagnostic"));
             assertNull(context.resolve("ACTIONS.outer.output.outputs"));
         }
     }
@@ -69,9 +70,10 @@ class FlowRuntimeTest {
         assertEquals(2, results.size());
         assertEquals(ResultStatus.PASS, results.get(0).status());
         assertEquals(ResultStatus.PASS, results.get(1).status());
-        assertEquals("book.group.TC1-done", context.resolve("ACTIONS.decoratedValue.output.result"));
-        assertEquals("book.group.TC1-done", context.resolve("CASE.VARS.decoratedResult"));
-        assertNotNull(context.resolve("ACTIONS.compose.flow.actions.identityFlow.flow.actions.identityValue"));
+        assertEquals("book.group.TC1-done", context.resolve("EXEC.VARS.decoratedResult"));
+        assertNull(context.resolve("ACTIONS.decoratedValue.output.result"));
+        assertNotNull(CaseRuntimeContext.getPath(context.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.compose.flow.actions.identityFlow.flow.actions.identityValue"));
         assertNull(context.resolve("ACTIONS.compose.output.outputs"));
         assertEquals(new LinkedHashSet<String>(Arrays.asList("status", "success", "exception", "durationMs")),
                 ((Map<?,?>) context.resolve("ACTIONS.compose.output")).keySet());
@@ -90,7 +92,9 @@ class FlowRuntimeTest {
             results = new StageTemplateRunner(new UnifiedTemplateEngine(null), flows).execute("verify", template, context, log);
         }
         assertEquals(ResultStatus.PASS, results.get(0).status());
-        assertEquals("SKIPPED", context.resolve("ACTIONS.optional.output.status"));
+        assertNull(context.resolve("ACTIONS.optional.output.status"));
+        assertEquals("SKIPPED", CaseRuntimeContext.getPath(context.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.skipFlow.flow.actions.optional.output.status"));
         assertEquals(ResultStatus.FAIL, results.get(1).status());
         assertNull(context.resolve("ACTIONS.failFlow.output.outputs"));
     }
@@ -122,7 +126,9 @@ class FlowRuntimeTest {
             assertEquals(ResultStatus.PASS, new StageTemplateRunner(new UnifiedTemplateEngine(null), flows)
                     .execute("verify", template, context, log).get(0).status());
         }
-        assertEquals("BOOK.GROUP.TC1", context.resolve("ACTIONS.saveValue.output.result"));
+        assertNull(context.resolve("ACTIONS.saveValue.output.result"));
+        assertEquals("BOOK.GROUP.TC1", CaseRuntimeContext.getPath(context.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.saveFlow.flow.actions.saveValue.output.result"));
         assertEquals("BOOK.GROUP.TC1", new String(Files.readAllBytes(
                 tempDir.resolve("verify/flows/saveFlow/actions/saveValue/value.txt")), StandardCharsets.UTF_8));
     }
@@ -140,13 +146,15 @@ class FlowRuntimeTest {
             results = new StageTemplateRunner(new UnifiedTemplateEngine(null), flows).execute("verify", template, context, log);
         }
         assertEquals(ResultStatus.FAIL, results.get(0).status());
-        assertNotNull(context.resolve("ACTIONS.afterContinue"));
+        assertNull(context.resolve("ACTIONS.afterContinue"));
+        assertNotNull(CaseRuntimeContext.getPath(context.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.continues.flow.actions.afterContinue"));
         assertEquals(ResultStatus.FAIL, results.get(1).status());
         assertNull(context.resolve("ACTIONS.afterStop"));
     }
 
     @Test void flowReadsPriorTemplateActionsAndAssignsCaseVariables() throws Exception {
-        writeFlow("copy", "schemaVersion: att-flow/v3.0\nid: common.copy.v1\nname: Copy\ndescription: Copy\nactions:\n  copyReference: {type: assign, name: copiedRef, expression: '${ACTIONS.seed.output.result}'}\n  auditReference: {type: log, message: '${CASE.VARS.copiedRef}'}\n");
+        writeFlow("copy", "schemaVersion: att-flow/v3.0\nid: common.copy.v1\nname: Copy\ndescription: Copy\nactions:\n  copyReference: {type: assign, name: copiedRef, expression: '${EXEC.VARS.SrcRefNo}'}\n  auditReference: {type: log, message: '${EXEC.VARS.copiedRef}'}\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         Map<String,Object> seed = new LinkedHashMap<String,Object>();
         seed.put("type", "assign"); seed.put("name", "SrcRefNo"); seed.put("expression", "REF-001");
@@ -159,8 +167,8 @@ class FlowRuntimeTest {
             assertEquals(ResultStatus.PASS, results.get(0).status());
             assertEquals(ResultStatus.PASS, results.get(1).status());
         }
-        assertEquals("REF-001", context.resolve("ACTIONS.copyReference.output.result"));
-        assertEquals("REF-001", context.resolve("CASE.VARS.copiedRef"));
+        assertNull(context.resolve("ACTIONS.copyReference.output.result"));
+        assertEquals("REF-001", context.resolve("EXEC.VARS.copiedRef"));
     }
 
     @Test void movingRenderActionIntoFlowKeepsCaseExpressionsAndResultUnchanged() throws Exception {
@@ -194,7 +202,8 @@ class FlowRuntimeTest {
         }
 
         assertEquals(expected, inlineContext.resolve("ACTIONS.renderRequest.output.result"));
-        assertEquals(expected, flowContext.resolve("ACTIONS.renderRequest.output.result"));
+        assertEquals(expected, CaseRuntimeContext.getPath(flowContext.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.renderFlow.flow.actions.renderRequest.output.result"));
     }
 
     private CaseRuntimeContext context() {

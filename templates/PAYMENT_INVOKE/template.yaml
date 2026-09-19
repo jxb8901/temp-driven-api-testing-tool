@@ -18,3 +18,13 @@ actions:
   callApi:
     type: tool
     call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
+
+  publishApiStatus:
+    type: assign
+    name: lastApiStatus
+    expression: "${EXEC.ACTIONS.callApi.output.result.Status}"
+
+  publishApiRejectCode:
+    type: assign
+    name: lastApiRejectCode
+    expression: "${EXEC.ACTIONS.callApi.output.result.RejectCode?}"

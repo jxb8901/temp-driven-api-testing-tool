@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.4.2 - 2026-09-19
+
+- Unified normal TestCase and standalone debug expressions under canonical `EXEC` and curated immutable `META` roots. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are shared execution state; Action `output` remains local to the current Action.
+- Mapped current Stage caller/input values into the active `EXEC.INPUT` with deterministic Stage-over-Case precedence, kept completed Actions in `EXEC.ACTIONS`, and deliberately left Stage status/timing/history in the execution/evidence model and legacy `CASE.STAGES` view; `EXEC.STAGES` is not a 3.4.2 node.
+- Preserved `CASE.*`, `RUN.*`, and `ACTIONS.*` compatibility aliases, protected framework-owned canonical fields from input overwrite, and documented canonical/legacy resolution and optional references.
+
 ## 3.4.1 - 2026-09-19
 
 - Added standalone `debug template|flow|tool <id>` execution with `att-debug/v1.0` sidecars, explicit `--input` overrides, synthetic protected Case/Context values, target-scoped validation, isolated debug artifacts, `case.log`, and machine-readable `result.yaml`.

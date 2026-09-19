@@ -1,13 +1,13 @@
 schemaVersion: att-flow/v3.0
 id: common.decorate.v1
 name: Decorate Value
-description: V3.2 CASE.VARS assignment and conditional skipping inside a Flow.
+description: V3.4.2 scope-local Flow assignment and explicit variable publication.
 actions:
   decoratedValue:
     type: assign
     name: decoratedResult
-    expression: "${ACTIONS.identityValue.output.result}-done"
+    expression: "${META.SOURCE.caseId}-done"
   auditDecoration:
     type: log
-    message: "Decorated ${CASE.VARS.decoratedResult}"
+    message: "Decorated ${EXEC.VARS.decoratedResult}"
     runWhen: "false"

@@ -302,6 +302,7 @@ public class StageTemplateRunner {
                               Map<String, Object> output, List<String> targets) throws Exception {
         att.exec.DbHelperExecutor executor = templateEngine.dbHelperExecutor();
         if (executor == null) throw new IllegalStateException("DB action execution is unavailable");
+        context.setDbHelperMetadata(action.db());
         boolean query = !action.query().isEmpty();
         Map<String, Object> operation = query ? action.query() : action.update();
         String source = "inline";

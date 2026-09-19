@@ -447,7 +447,9 @@ public final class ExpressionBlockEvaluator {
     }
 
     private static boolean explicitContextRoot(String value) {
-        return value.equals("CASE") || value.startsWith("CASE.")
+        return value.equals("EXEC") || value.startsWith("EXEC.")
+                || value.equals("META") || value.startsWith("META.")
+                || value.equals("CASE") || value.startsWith("CASE.")
                 || value.equals("RUN") || value.startsWith("RUN.")
                 || value.equals("ACTIONS") || value.startsWith("ACTIONS.")
                 || value.equals("TOOL") || value.startsWith("TOOL.")

@@ -40,14 +40,14 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
                 "schemaVersion: att-template/v3.0\nname: PAYMENT_INVOKE\ndescription: V3.2 shared Context\nactions:\n"
                         + "  compose: {type: flow, use: common.outer.v1}\n"
-                        + "  verify: {type: assert, assert: \"${ACTIONS.finish.output.result} == '${CASE.caseId}-done'\"}\n");
+                        + "  verify: {type: assert, assert: \"${EXEC.VARS.seedReference} == '${META.SOURCE.caseId}'\"}\n");
         writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
                 "schemaVersion: att-flow/v3.0\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
-                        + "  seed: {type: assign, name: seedReference, expression: '${CASE.caseId}'}\n");
+                        + "  seed: {type: assign, name: seedReference, expression: '${META.SOURCE.caseId}'}\n");
         writeText(projectRoot.resolve("templates/flows/outer/flow.yaml"),
                 "schemaVersion: att-flow/v3.0\nid: common.outer.v1\nname: Outer\ndescription: Outer\nactions:\n"
                         + "  innerFlow: {type: flow, use: common.inner.v1}\n"
-                        + "  finish: {type: assign, name: finalReference, expression: '${ACTIONS.seed.output.result}-done'}\n");
+                        + "  finish: {type: assign, name: finalReference, expression: '${EXEC.VARS.seedReference}-done'}\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
                 "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");

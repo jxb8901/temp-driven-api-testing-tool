@@ -11,6 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,15 +35,19 @@ class ContextsTest {
         context.beginStage(stage, "PAYMENT_INVOKE", tempDir.resolve("templates/PAYMENT_INVOKE"));
 
         assertEquals("payments.payment.TC001", context.resolve("CASE.caseId"));
+        assertEquals("payments.payment.TC001", context.resolve("META.SOURCE.caseId"));
         Map<String,Object> namespaced = new LinkedHashMap<String,Object>();
         namespaced.put("{urn:payment}Status", "SUCCESS");
         context.put("CASE.response", namespaced);
         assertEquals("SUCCESS", context.resolve("CASE.response['{urn:payment}Status']"));
+        assertEquals("SUCCESS", context.resolve("EXEC.INPUT.response['{urn:payment}Status']"));
         assertEquals("payments", context.resolve("CASE.workbookId"));
         assertEquals("100", context.resolve("CASE.amount"));
         assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("CASE.outputDirectory"));
         assertEquals(tempDir.toAbsolutePath().normalize(), context.caseOutputDirectory());
-        assertEquals("MOBILE", context.resolve("CASE.STAGES.invoke.channel"));
+        assertNull(context.resolve("CASE.STAGES.invoke.channel"));
+        assertNull(context.resolve("STAGES.invoke.channel"));
+        assertEquals("MOBILE", CaseRuntimeContext.getPath(context.caseTree(), "STAGES.invoke.channel"));
         assertTrue(context.resolve("CASE.DB") instanceof Map);
         assertTrue(((Map<?, ?>) context.resolve("CASE.DB")).isEmpty());
         assertTrue(context.resolve("DB") instanceof Map);
@@ -84,6 +90,27 @@ class ContextsTest {
         assertEquals(7, context.resolve("TOOL.input.value"));
     }
 
+    @Test void helperViewsStayTransientAndSafeIdentityUsesMeta() {
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.<String, StageCaseData>emptyMap(), null),
+                tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
+
+        context.setToolMetadata("orders.find");
+        context.setDbHelperMetadata("orders");
+        context.setMqHelperMetadata("orders");
+
+        assertEquals("orders.find", context.resolve("META.TOOL.id"));
+        assertEquals("orders", context.resolve("META.DBHELPER.id"));
+        assertEquals("orders", context.resolve("META.MQHELPER.id"));
+        assertTrue(!context.executionTree().containsKey("TOOL"));
+        assertTrue(!context.executionTree().containsKey("DB"));
+        assertTrue(!context.executionTree().containsKey("MQ"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.TOOL.orders.find", "bad"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.DB.orders.query", "bad"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.MQ.orders.send", "bad"));
+    }
+
     @Test void requiredContextReportsCaseSensitiveTypoAndNearestField() {
         CaseRuntimeContext context = new CaseRuntimeContext(
                 new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
@@ -92,8 +119,35 @@ class ContextsTest {
         att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
                 () -> context.require("CASE.csaeId"));
         assertEquals(att.validation.DiagnosticCodes.CONTEXT_INVALID, error.code());
-        assertTrue(error.format().contains("CASE.caseId"));
+        assertTrue(error.format().contains("META.SOURCE.caseId"));
         assertTrue(error.format().contains("case-sensitive"));
+    }
+
+    @Test void stageOverlayIsRestoredAfterErrorAndActionsAreScopedToTheCurrentStage() {
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        input.put("channel", "CASE");
+        StageCaseData first = new StageCaseData("first", "T1",
+                Collections.<String, Object>singletonMap("channel", "STAGE-1"));
+        StageCaseData second = new StageCaseData("second", "T2",
+                Collections.<String, Object>singletonMap("channel", "STAGE-2"));
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), input,
+                        Collections.<String, StageCaseData>emptyMap(), null),
+                tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
+
+        context.beginStage(first, "T1", tempDir);
+        context.addAction("firstAction", Collections.<String, Object>singletonMap("status", "PASS"));
+        assertEquals("STAGE-1", context.resolve("EXEC.INPUT.channel"));
+        assertEquals("PASS", context.resolve("EXEC.ACTIONS.firstAction.status"));
+        context.finishStage("ERROR", 1L);
+        assertFalse(context.hasActiveStage());
+        assertEquals("CASE", context.resolve("EXEC.INPUT.channel"));
+
+        context.beginStage(second, "T2", tempDir);
+        assertEquals("STAGE-2", context.resolve("EXEC.INPUT.channel"));
+        assertNull(context.resolve("EXEC.ACTIONS.firstAction.status"));
+        context.finishStage("PASS", 1L);
+        assertEquals("CASE", context.resolve("EXEC.INPUT.channel"));
     }
 
     @Test void resolvesOnlyUniqueCaseSensitivePathSuffixes() {
@@ -115,8 +169,8 @@ class ContextsTest {
         att.validation.DiagnosticException ambiguous = assertThrows(att.validation.DiagnosticException.class,
                 () -> context.require("response.resultCode"));
         assertEquals(att.validation.DiagnosticCodes.CONTEXT_AMBIGUOUS, ambiguous.code());
-        assertTrue(ambiguous.format().contains("CASE.payment.response.resultCode"));
-        assertTrue(ambiguous.format().contains("CASE.refund.response.resultCode"));
+        assertTrue(ambiguous.format().contains("EXEC.INPUT.payment.response.resultCode"));
+        assertTrue(ambiguous.format().contains("EXEC.INPUT.refund.response.resultCode"));
     }
 
     @Test void missingContextReportsTraversalBoundaryWithoutDumpingTheContextTree() {
@@ -231,5 +285,75 @@ class ContextsTest {
                 () -> context.assignCaseVariable("txnSeq", "ATT002"));
         assertEquals(att.validation.DiagnosticCodes.CONTEXT_INVALID, duplicate.code());
         assertEquals("ATT001", context.resolve("CASE.VARS.txnSeq"));
+    }
+
+    @Test void canonicalExecMetaRootsShareStateAndKeepLocalOutputOutOfContext() {
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        input.put("RefNo", "REF-001");
+        input.put("channel", "CASE");
+        input.put("ID", "EVIL");
+        input.put("MODE", "EVIL");
+        input.put("OUTPUT_DIR", "EVIL");
+        input.put("VARS", "EVIL");
+        input.put("secretToken", "must remain caller input, not metadata");
+        Map<String, Object> stageValues = new LinkedHashMap<String, Object>();
+        stageValues.put("channel", "STAGE");
+        stageValues.put("stageOnly", "stage-value");
+        StageCaseData stage = new StageCaseData("invoke", "PAYMENT", stageValues);
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(), input,
+                        Collections.singletonMap("invoke", stage), null),
+                tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        context.beginStage(stage, "PAYMENT", tempDir.resolve("templates/PAYMENT"));
+
+        assertEquals("testcase", context.resolve("EXEC.MODE"));
+        assertEquals("REF-001", context.resolve("EXEC.INPUT.RefNo"));
+        assertEquals("STAGE", context.resolve("EXEC.INPUT.channel"));
+        assertEquals("STAGE", context.resolve("CASE.channel"));
+        assertEquals("stage-value", context.resolve("EXEC.INPUT.stageOnly"));
+        assertEquals("REF-001", context.resolve("CASE.RefNo"));
+        assertEquals(context.resolve("EXEC.ID"), context.resolve("RUN.id"));
+        assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("EXEC.OUTPUT_DIR"));
+        assertEquals(context.resolve("EXEC.OUTPUT_DIR"), context.resolve("CASE.outputDirectory"));
+        assertEquals("PAYMENT", context.resolve("META.TEMPLATE.id"));
+        assertNull(context.resolve("META.TEMPLATE.missing"));
+        assertNull(context.resolve("EXEC.STAGES.invoke.channel"));
+        assertFalse(context.executionTree().containsKey("STAGES"));
+        assertFalse(String.valueOf(context.metadataTree()).contains("secretToken"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.ID", "EVIL"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.STATUS", "PASS"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.STAGES.invoke", "EVIL"));
+        assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.STAGE.invoke", "EVIL"));
+
+        context.finishStage("PASS", 1L);
+        assertEquals("CASE", context.resolve("EXEC.INPUT.channel"));
+        assertNull(context.resolve("EXEC.INPUT.stageOnly"));
+        assertNull(context.resolve("CASE.STAGES.invoke.channel"));
+        assertEquals("STAGE", CaseRuntimeContext.getPath(context.caseTree(), "STAGES.invoke.channel"));
+
+        context.assignCaseVariable("txnId", "TX-1");
+        assertSame(context.resolve("EXEC.VARS"), context.resolve("CASE.VARS"));
+        assertEquals("TX-1", context.resolve("EXEC.VARS.txnId"));
+        assertEquals("TX-1", context.resolve("CASE.VARS.txnId"));
+
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("result", Collections.singletonMap("status", "PASS"));
+        context.setActionOutput(output);
+        assertEquals("PASS", context.resolve("output.result.status"));
+        assertNull(context.resolve("EXEC.OUTPUT"));
+        context.clearActionOutput();
+        assertNull(context.resolve("output.result.status"));
+        assertThrows(att.validation.DiagnosticException.class, () -> context.require("output.result.status"));
+        assertThrows(UnsupportedOperationException.class, () -> context.metadataTree().put("SECRET", "x"));
+
+        CaseRuntimeContext debug = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "DEBUG.template.PAYMENT", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.singletonMap("invoke", stage), null),
+                tempDir, "DEBUG-1", tempDir, tempDir.resolve("debug.log"), "debug");
+        debug.setSourceMetadata("debug", tempDir.resolve("debug.yaml"), "DEBUG.template.PAYMENT");
+        assertEquals("debug", debug.resolve("EXEC.MODE"));
+        assertEquals("debug", debug.resolve("META.SOURCE.type"));
+        assertEquals(tempDir.resolve("debug.yaml").toAbsolutePath().normalize().toString(),
+                debug.resolve("META.SOURCE.path"));
     }
 }

@@ -68,6 +68,10 @@ class FrameworkConfigLoaderTest {
 
     @Test void rejectsAmbiguousAndProcessOnlyCallBackedToolFields() throws Exception {
         String prefix = "schemaVersion: att-config/v2.6\ntools:\n  bad:\n    name: Bad\n    description: Bad\n";
+        FrameworkConfig shorthand = new FrameworkConfigLoader().load(write("call-shorthand.yaml",
+                prefix + "    call: '#{upper(${value})}'\n" +
+                        "    arguments:\n      value: {name: Value, description: Value, required: true}\n"));
+        assertTrue(shorthand.tool("bad").callBacked());
         IllegalArgumentException bareInput = assertThrows(IllegalArgumentException.class,
                 () -> new FrameworkConfigLoader().load(write("bare-input.yaml",
                         prefix + "    call: '#{upper(input.value)}'\n" +

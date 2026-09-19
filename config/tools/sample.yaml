@@ -15,7 +15,7 @@ tools:
   getSeq:
     name: Get sequence
     description: Generate a new sequence value
-    command: [./tools/get_seq.sh, "${seqLen}"]
+    command: [./tools/get_seq.sh, "${input.seqLen}"]
     output: txt
     arguments:
       seqLen:

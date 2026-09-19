@@ -1,7 +1,7 @@
-# ATT V3.4.1 中文用户手册与参考手册
+# ATT V3.4.2 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.4.1
+版本：3.4.2
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -48,7 +48,7 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 | 测试用例 | 一行工作簿数据、用例级数据、标签和有序阶段 |
 | 阶段 | 模板选择、阶段私有数据、执行条件和失败处理 |
 | 模板 | 由有序动作组成的完整测试场景 |
-| Flow | 与调用者共用 Context 的可复用 Template Action 组 |
+| Flow | 拥有独立 Action scope、通过 `EXEC.VARS` 显式发布值的可复用 Template Action 组 |
 | 工具 | 一个具有命名输入的能力；可启动外部命令，也可通过 V2.6 `call` 包装 typed DB 操作或纯 built-in |
 | Dbhelper | 一个独立配置的 JDBC 连接、SQL timeout、transaction、结果限制与 evidence 策略 |
 
@@ -61,7 +61,7 @@ Flow → 在调用 Template Context 中执行的可复用有序动作 → Tool /
 - `CASE.DB` 是固定、区分大小写、由框架拥有的 Case 交易收尾节点，不能由 Excel 或侧车数据覆盖。
 - 每个工作簿都有一个同名的 YAML 侧车文件和生成的语义 XML 快照。
 - 每个模板都是包含 `template.yaml` 的目录。
-- 每个 Flow 位于 `templates/flows/**/flow.yaml`，使用静态 `.vN` ID、共用调用 Template 的 Context，并且最大嵌套深度为 3。
+- 每个 Flow 位于 `templates/flows/**/flow.yaml`，使用静态 `.vN` ID、使用 canonical caller input/metadata roots 但拥有新的 Action scope，并且最大嵌套深度为 3。
 - `validate --package` 会检查整个包；`validate --selected` 只检查所选依赖闭包。
 - Run ID 和 Case ID 会先被校验，然后直接用作输出目录名。
 - 运行在执行前直接保留最终 Run ID 目录，执行期间即可查看 Case 日志和证据；只有完成 manifest 与 `latest-run.yaml` 会在成功最终化后发布。
@@ -118,11 +118,11 @@ actions:
   decorate:
     type: assign
     name: decoratedResult
-    expression: "${CASE.caseId}-done"
+    expression: "${EXEC.INPUT.caseId}-done"
   audit:
     type: log
-    message: "Decorated ${CASE.VARS.decoratedResult}"
-    runWhen: "${CASE.auditEnabled} == true"
+    message: "Decorated ${EXEC.VARS.decoratedResult}"
+    runWhen: "${EXEC.INPUT.auditEnabled} == true"
 ```
 
 V3 Template 使用固定 canonical ID 调用 Flow：
@@ -137,14 +137,14 @@ actions:
     use: common.decorate.v1
   verify:
     type: assert
-    assert: "${ACTIONS.decorate.output.result} == '${CASE.caseId}-done'"
+    assert: "${EXEC.VARS.decoratedResult} == '${META.SOURCE.caseId}-done'"
 ```
 
-Flow 和内联 Template Action 使用相同的 `CASE`、`RUN`、`ACTIONS`、`TOOL`、`DB`、当前 `output` 及唯一后缀 Context 语义。`${...}` 读取 Context；`#{...}` 在 Action 允许的位置调用 Tool、DB facade 或 built-in。Action 只能读取展开后执行计划中已经完成的 Action。
+Flow 和内联 Template Action 使用相同的 expression engine 与 canonical `EXEC`／`META` roots，但每个 Stage／Template 及 Flow invocation 都拥有明确的 Action scope。`output` 是 Action-local。`CASE`、`RUN` 与 `ACTIONS` root 只在可确定映射时作为兼容 alias 保留。`${...}` 读取 Context；`#{...}` 在 Action 允许的位置调用 Tool、DB facade 或 built-in。Action 只能读取当前 scope 中已经完成的 Action。
 
-Flow `inputs`、`outputs`、调用端 `with` 以及专用的 `input`、小写 `actions`、`runtime` 和 `flow` root 均为非法。Flow 内的 `assign` 与内联 assign 一样写入 `CASE.VARS`。内部 Action 完成后可直接通过 `${ACTIONS.<internalActionId>.output...}` 读取；Flow 调用 Action 本身只提供标准状态结果，不会创建 `output.outputs`。
+Flow `inputs`、`outputs`、调用端 `with` 以及专用的 `input`、小写 `actions`、`runtime` 和 `flow` root 均为非法。Flow 内的 `assign` 与内联 assign 一样写入 `EXEC.VARS`。Flow 内部 Action 只可在该 Flow scope 内通过 `${EXEC.ACTIONS.<internalActionId>.output...}` 读取；返回后 parent scope 会恢复。调用端需要的值必须显式发布到 `${EXEC.VARS.<name>}`。Flow 调用 Action 本身只提供标准状态结果，不会创建 `output.outputs`。
 
-Template 与所有嵌套 Flow 共用一个 Action ID namespace。Template／Flow 冲突、多个 Flow 冲突、间接嵌套冲突以及在同一 Template 中重复调用同一 Flow都会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
+Action ID 只须在同一个 Stage／Template／Flow scope 内唯一。不同或重复的 Flow invocation 拥有新的 scope，因此可以复用内部 ID；同一 scope 内的重复 ID 仍会验证失败。内部 Action 全部跳过的已调用 Flow 为 PASS；Flow Action 自身 `runWhen` 为 false 时才是 SKIPPED。
 
 Flow `use` 不支持动态选择。`runAlways`、warning impact、Flow timeout/retry、loop、动态 dispatch 和并行分支都不是 V3.4.0 能力。聚合优先级保持 `ERROR > INVALID > FAIL > PASS > SKIPPED`。
 
@@ -172,7 +172,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Send a rendered payment request
-    command: ["./tools/invoke_payment_api.sh", "${requestFile}", "${environment}"]
+    command: ["./tools/invoke_payment_api.sh", "${input.requestFile}", "${input.environment}"]
     output: json
     arguments:
       requestFile:
@@ -185,7 +185,7 @@ tools:
         required: true
 ```
 
-argv 列表形式的 `command` 会保留每一项为一个独立进程参数。旧式的标量命令会被 token 化一次并进入相同的内部列表。已声明的参数可直接引用，例如 `${requestFile}`。
+argv 列表形式的 `command` 会保留每一项为一个独立进程参数。旧式的标量命令会被 token 化一次并进入相同的内部列表。新配置应使用 canonical `${input.requestFile}`；`${requestFile}` 只在唯一对应已声明参数时兼容，并由 validate 发出迁移 warning。
 
 ### 第 2 步：创建工作簿与侧车
 
@@ -229,21 +229,21 @@ actions:
     renderAs: file
   callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
+    call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}"
   assertStatus:
     type: assert
     description: Payment API status matches the expected status
-    assert: "${ACTIONS.callApi.output.result.status} == ${CASE.expectedStatus}"
-    expected: "${CASE.expectedStatus}"
-    actual: "${ACTIONS.callApi.output.result.status}"
+    assert: "${EXEC.ACTIONS.callApi.output.result.status} == ${EXEC.INPUT.expectedStatus}"
+    expected: "${EXEC.INPUT.expectedStatus}"
+    actual: "${EXEC.ACTIONS.callApi.output.result.status}"
 ```
 
 创建 `templates/payment/request.tmp.json`：
 
 ```json
 {
-  "caseId": "${CASE.caseId}",
-  "amount": "${CASE.amount}"
+  "caseId": "${EXEC.INPUT.caseId}",
+  "amount": "${EXEC.INPUT.amount}"
 }
 ```
 
@@ -451,23 +451,23 @@ actions:
     expression: "PAY-#{sysdate('yyyyMMdd')}-#{sample.getSeq(10)}"
   renderRequest:
     type: render
-    description: "Render request for ${CASE.caseId}; status=${output.status}"
+    description: "Render request for ${EXEC.INPUT.caseId}; status=${output.status}"
     payload: requests/*.xml
     renderAs: file
     assert: "${output.targetFiles[0]} != null"
   callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
+    call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
     saveAs:
-      path: "${CASE.caseId}-response.json"
+      path: "${EXEC.INPUT.caseId}-response.json"
       format: json
       overwrite: false
     assert: "${output.result.status} == 'SUCCESS'"
   recordResult:
     type: log
     level: INFO
-    message: "Payment ${CASE.caseId} completed"
-    file: "${ACTIONS.callApi.output.targetFiles[0]}"
+    message: "Payment ${EXEC.INPUT.caseId} completed"
+    file: "${EXEC.ACTIONS.callApi.output.targetFiles[0]}"
 ```
 
 `schemaVersion`、`description` 和非空有序 `actions` 是必需的。`name` 在模板总是通过完整路径选择时可以省略；可复用模板应使用全局唯一的符号名。
@@ -481,7 +481,7 @@ actions:
 | `db` | 查询或更新已配置数据库 | `type`、`db`，以及恰好一个 `query`／`update` block | 稳定类型化 DB 结果与交易证据 |
 | `assert` | 计算布尔表达式 | `type`、`assert` | PASS/FAIL 或求值 ERROR；可选 Expected/Actual |
 | `log` | 写入渲染后的消息和/或 UTF-8 Case 输出文件 | `type`，至少包含 `message` 或 `file` | 合并内容、源路径和渲染字段 |
-| `assign` | 求值文本并发布 Case 级变量 | `type`、`name`、`expression` | `${CASE.VARS.<name>}`、`output.name`、`output.result` |
+| `assign` | 求值文本并发布 Case 级变量 | `type`、`name`、`expression` | `${EXEC.VARS.<name>}`、`output.name`、`output.result` |
 
 动作按 YAML 顺序执行。动作 ID 在模板内唯一，且不能包含点号。每个动作都可以定义 `description` 和 `onFailure: stop|continue`。
 
@@ -491,7 +491,7 @@ actions:
 
 每个动作都支持表达式型 `description`。验证时会检查 `${...}` 引用和 `#{...}` 调用而不执行它们，尽量解析可知的静态 Case 值，并保留运行时相关引用。执行成功后，ATT 会在当前动作局部 `${output...}` 作用域下对两种表达式形式进行求值，然后再持久化最终 description。
 
-assign 动作使用常规 Context、内建函数、配置 Tool 与只读 DB expression 语法求值 `expression`。其 `name` 必须符合 `[A-Za-z_][A-Za-z0-9_]*`，大小写敏感，并且在当前 Case 的 `CASE.VARS` 下不能已存在。`CASE.VARS` 会在每个 Test Case 中创建一次，跨阶段和模板保持存在，并将运行时赋值与 Excel 及框架自有 Case 字段区分开。完整的类型化表达式（例如 `#{db.orders.query(...)}`）保留 Java object，不会转成字符串。成功赋值后，后续动作和阶段可通过 `${CASE.VARS.<name>}` 读取；同一值也保存在 `${ACTIONS.<assignActionId>.output.result}`。Assign 支持可选 `description`、`assert` 和 `onFailure`，但不支持 render、tool-action、log、report-only、retry、timeout 或 `saveAs`。断言 FAIL/ERROR 不会回滚已成功求值的变量；表达式失败则不会创建变量。
+assign 动作使用常规 Context、内建函数、配置 Tool 与只读 DB expression 语法求值 `expression`。其 `name` 必须符合 `[A-Za-z_][A-Za-z0-9_]*`，大小写敏感，并且在当前 Case 的 `EXEC.VARS` 下不能已存在。`EXEC.VARS` 会在每个 Test Case 中创建一次，跨阶段和模板保持存在，并将运行时赋值与 Excel 及框架自有 Case 字段区分开。完整的类型化表达式（例如 `#{db.orders.query(...)}`）保留 Java object，不会转成字符串。成功赋值后，后续动作和阶段可通过 `${EXEC.VARS.<name>}` 读取；同一值也保存在 `${EXEC.ACTIONS.<assignActionId>.output.result}`。Assign 支持可选 `description`、`assert` 和 `onFailure`，但不支持 render、tool-action、log、report-only、retry、timeout 或 `saveAs`。断言 FAIL/ERROR 不会回滚已成功求值的变量；表达式失败则不会创建变量。
 
 Render 负载路径必须保持在模板根目录下。glob 匹配会取模板相对路径排序后的普通非符号链接文件。`renderAs: file` 会把渲染结果写入 Case 输出目录中对应的相对路径；冲突会报 ERROR。其他渲染模式不会写文件，而是把一个类型化值，或多个匹配项对应的“相对路径→值”有序映射，写入 `output.result`。
 
@@ -501,20 +501,20 @@ log 动作可以输出渲染后的 `message`、一个 `file` 的完整内容，�
 logResponse:
   type: log
   level: DEBUG
-  message: "API response for ${CASE.caseId}:"
-  file: "${ACTIONS.callApi.output.targetFiles[0]}"
+  message: "API response for ${EXEC.INPUT.caseId}:"
+  file: "${EXEC.ACTIONS.callApi.output.targetFiles[0]}"
   fields:
     action: callApi
 ```
 
-`message` 与 `file` 都支持统一的 `${...}` / `#{...}` 表达式引擎，并在 log 动作发布自身输出前进行求值。两者合并后的内容会以原始文本写入 Case 日志，并将 CRLF/CR 统一为 LF，因此多行内容会保留为物理行，而不是显示为 YAML escape 后的 `\\n`。相对 `file` 路径会解析到 `${CASE.outputDirectory}` 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前 Case 日志，都会报 ERROR。
+`message` 与 `file` 都支持统一的 `${...}` / `#{...}` 表达式引擎，并在 log 动作发布自身输出前进行求值。两者合并后的内容会以原始文本写入 Case 日志，并将 CRLF/CR 统一为 LF，因此多行内容会保留为物理行，而不是显示为 YAML escape 后的 `\\n`。相对 `file` 路径会解析到 `${EXEC.OUTPUT_DIR}` 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前 Case 日志，都会报 ERROR。
 
 若要用与 DB Action `saveAs.format: text` 相同的 SQL*Plus 风格输出打印类型化 DB 结果，可在 message 中使用纯内建函数 `dbText(...)`：
 
 ```yaml
 printOrders:
   type: log
-  message: "#{dbText(${ACTIONS.queryOrders.output.result})}"
+  message: "#{dbText(${EXEC.ACTIONS.queryOrders.output.result})}"
 ```
 
 `dbText(...)` 只格式化传入值，不执行 JDBC、不改变交易，也不清除 cache。也可以传入巢状只读 DB 表达式，但引用前一个 DB Action 可避免重复查询。
@@ -530,7 +530,7 @@ tools:
   invokePaymentApi:
     name: Invoke Payment API
     description: Invoke a rendered request
-    command: ["./tools/invoke_payment_api.sh", "${requestFile}", "${environment}"]
+    command: ["./tools/invoke_payment_api.sh", "${input.requestFile}", "${input.environment}"]
     output: json
     arguments:
       requestFile:
@@ -548,10 +548,10 @@ tools:
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
+  call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}"
 ```
 
-未知、重复或缺失必需参数都会在验证时失败。参数元数据用于记录和验证契约，不会自动注入值。如果且仅如果工具恰好声明一个参数，调用时可以省略参数名：`#{getAppLogs(${CASE.caseId})}` 等价于 `#{getAppLogs(caseId=${CASE.caseId})}`。零参数工具仍然使用 `#{tool()}`；多参数工具则拒绝位置参数。
+未知、重复或缺失必需参数都会在验证时失败。参数元数据用于记录和验证契约，不会自动注入值。如果且仅如果工具恰好声明一个参数，调用时可以省略参数名：`#{getAppLogs(${EXEC.INPUT.caseId})}` 等价于 `#{getAppLogs(caseId=${EXEC.INPUT.caseId})}`。零参数工具仍然使用 `#{tool()}`；多参数工具则拒绝位置参数。
 
 全局工具保留无前缀名称。V2.2 的 tool group 可通过全局配置中的 `toolGroups` 列出：
 
@@ -578,7 +578,7 @@ tools:
       caseId: {name: Case ID, description: Full Case ID, required: true}
 ```
 
-调用方式为 `#{database.selectPayment(caseId=${CASE.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。持久化的分组证据可在 `TOOL.database.selectPayment` 下访问。
+调用方式为 `#{database.selectPayment(caseId=${EXEC.INPUT.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。持久化的分组证据可在 `TOOL.database.selectPayment` 下访问。
 
 以下两个参考 helper 会明确提供 pathname expansion，但不会改变普通 process-backed Tool 的契约：
 
@@ -588,8 +588,8 @@ runChecks:
   call: >-
     #{fpp.exehelper(
         command='wc',
-        arguments=['-l', '${CASE.outputDirectory}/requests/*.xml'],
-        stdoutPath='${CASE.outputDirectory}/request-counts.txt'
+        arguments=['-l', '${EXEC.OUTPUT_DIR}/requests/*.xml'],
+        stdoutPath='${EXEC.OUTPUT_DIR}/request-counts.txt'
     )}
 
 findTransactions:
@@ -598,9 +598,9 @@ findTransactions:
     #{fpp.loghelper(
         maxTidFiles=10,
         minTidFiles=2,
-        outputPrefix='${CASE.outputDirectory}/transaction',
+        outputPrefix='${EXEC.OUTPUT_DIR}/transaction',
         logFiles=['/var/log/payment/app*.log', '/archive/payment/app-2026-07-2?.log'],
-        keywords=[${CASE.caseId}, 'SUCCESS'],
+        keywords=[${EXEC.INPUT.caseId}, 'SUCCESS'],
         recentLogCount=0,
         sshOption='--ssh'
     )}
@@ -724,7 +724,7 @@ queryOrder:
       from orders
       where customer_id = :customerId and status = :status
     parameters:
-      customerId: "${CASE.customerId}"
+      customerId: "${EXEC.INPUT.customerId}"
       status: OPEN
   assert: "${output.result.rowCount} > 0"
   saveAs:
@@ -741,7 +741,7 @@ closeOrder:
   db: orders
   update:
     sql: "update orders set status = ? where id = ?"
-    params: [CLOSED, "${CASE.orderId}"]
+    params: [CLOSED, "${EXEC.INPUT.orderId}"]
   assert: "${output.result.affectedRows} == 1"
 ```
 
@@ -768,8 +768,8 @@ inline SQL 在 JDBC prepare 前使用当前 Context 渲染。前置 render Actio
 
 ```yaml
 query:
-  sql: "${ACTIONS.renderSql.output.result}"
-  params: "${CASE.queryParams}"
+  sql: "${EXEC.ACTIONS.renderSql.output.result}"
+  params: "${EXEC.INPUT.queryParams}"
 ```
 
 也可引用静态、包内 UTF-8 文件：
@@ -777,7 +777,7 @@ query:
 ```yaml
 query:
   sqlFile: sql/orders/find-by-customer.sql
-  params: ["${CASE.customerId}", OPEN]
+  params: ["${EXEC.INPUT.customerId}", OPEN]
 ```
 
 validate 会确认 `sqlFile` 是包内普通非符号链接文件。ATT 对文件内容使用与 inline SQL 相同的渲染规则，并记录 source path 与 SQL hash／全文；路径本身不渲染。SQL source 只允许 Context 与 pure built-in，不允许配置 Tool 或巢状 DB 调用。外部准备应在前一 Action 完成，再引用其结果。
@@ -792,7 +792,7 @@ validate 会确认 `sqlFile` 是包内普通非符号链接文件。ATT 对文�
 assert: >-
   #{db.orders.scalar(
       sql='select count(*) from orders where customer_id = ?',
-      params=${CASE.customerParams}
+      params=${EXEC.INPUT.customerParams}
   )} == 1
 ```
 
@@ -801,7 +801,7 @@ assert: >-
 ```yaml
 #{db.orders.query(
     sql='select id from orders where customer_id = ? and status = ? and amount >= ?',
-    params=[${CASE.customerId}, 'OPEN', ${CASE.minimumAmount}]
+    params=[${EXEC.INPUT.customerId}, 'OPEN', ${EXEC.INPUT.minimumAmount}]
 )}
 ```
 
@@ -817,11 +817,11 @@ loadOrders:
   expression: >-
     #{db.orders.query(
         sql='select id, status from orders where customer_id = ?',
-        params=${CASE.customerParams}
+        params=${EXEC.INPUT.customerParams}
     )}
 ```
 
-后续可读取 `${CASE.VARS.customerOrders.rows[0].STATUS}`。非 scalar 的 query object 不能插入周围文字；请用 assign 或 DB Action。expression update、DDL、callable statement 与 generic execute 一律拒绝。查询失败会使所在 Action 与 Case 成为 ERROR；inline evidence 保存在 `ACTIONS.<action>.DB.<instance>.<callId>`。
+后续可读取 `${EXEC.VARS.customerOrders.rows[0].STATUS}`。非 scalar 的 query object 不能插入周围文字；请用 assign 或 DB Action。expression update、DDL、callable statement 与 generic execute 一律拒绝。查询失败会使所在 Action 与 Case 成为 ERROR；inline evidence 保存在 `EXEC.ACTIONS.<action>.DB.<instance>.<callId>`。
 
 ##### 结果与连接生命周期
 
@@ -870,7 +870,7 @@ CASE:
 | `${CASE.DB.orders.state}` | 固定 Case Context 路径，包含 Case 完成后的交易收尾结果 |
 | `${DB...}` | 单次调用内部 evidence scope；不是 Case 级“最近一次 DB 调用”API |
 
-ATT 在 Case 初始化时创建空 `CASE.DB`，所有 Action 完成并执行交易收尾后，才为已使用实例加入 entry。因此同一 Case 的 Action 不能依赖 `${CASE.DB.orders.state}` 作执行决策。单次操作结果请读 `${ACTIONS.<actionId>.output.result}`；`CASE.DB` 用于持久化 Context、Case log、报告或其他 post-Case 处理。
+ATT 在 Case 初始化时创建空 `CASE.DB`，所有 Action 完成并执行交易收尾后，才为已使用实例加入 entry。因此同一 Case 的 Action 不能依赖 `${CASE.DB.orders.state}` 作执行决策。单次操作结果请读 `${EXEC.ACTIONS.<actionId>.output.result}`；`CASE.DB` 用于持久化 Context、Case log、报告或其他 post-Case 处理。
 
 ATT 不内置特定 JDBC driver。将 driver 与全部依赖放入包根 `lib/`，更改后重启 ATT。默认使用 JDBC service discovery；旧式 driver 可配置 `connection.driverClass`。V2.5 使用 flat shared classpath，不支持动态 reload 或 driver 依赖隔离。
 
@@ -950,25 +950,25 @@ loadOrders:
   name: customerOrders
   expression: >-
     #{orders.find(
-        customerId=${CASE.customerId},
+        customerId=${EXEC.INPUT.customerId},
         status='OPEN'
     )}
 
 checkOrders:
   type: assert
-  assert: "${CASE.VARS.customerOrders.rowCount} > 0"
+  assert: "${EXEC.VARS.customerOrders.rowCount} > 0"
   expected: 至少一个 OPEN order
-  actual: "${CASE.VARS.customerOrders.rowCount}"
+  actual: "${EXEC.VARS.customerOrders.rowCount}"
 ```
 
-精确调用直接返回与 `db.orders.query` 相同的 Java object，不经过文本序列化；后续可读取 `${CASE.VARS.customerOrders.rows[0].STATUS}`。
+精确调用直接返回与 `db.orders.query` 相同的 Java object，不经过文本序列化；后续可读取 `${EXEC.VARS.customerOrders.rows[0].STATUS}`。
 
 Scalar 也可直接放入断言：
 
 ```yaml
 checkOrderCount:
   type: assert
-  assert: "#{orders.count(customerId=${CASE.customerId})} >= 1"
+  assert: "#{orders.count(customerId=${EXEC.INPUT.customerId})} >= 1"
 ```
 
 `scalar` 仍要求正好一行一列，否则是 ERROR。
@@ -980,7 +980,7 @@ READ façade 可作为主要 Tool Action，并保存 typed result：
 ```yaml
 queryOrders:
   type: tool
-  call: "#{orders.find(customerId=${CASE.customerId}, status='OPEN')}"
+  call: "#{orders.find(customerId=${EXEC.INPUT.customerId}, status='OPEN')}"
   saveAs:
     path: db/open-orders.json
     format: json
@@ -994,7 +994,7 @@ WRITE façade 只能是 `type: tool` 的主要调用：
 ```yaml
 closeOrder:
   type: tool
-  call: "#{orders.updateStatus(orderId=${CASE.orderId}, status='CLOSED')}"
+  call: "#{orders.updateStatus(orderId=${EXEC.INPUT.orderId}, status='CLOSED')}"
   assert: "${output.result.affectedRows} == 1"
 ```
 
@@ -1014,7 +1014,7 @@ tools:
       value: {name: Value, description: 状态文字, required: true}
 ```
 
-调用方式为 `#{normalizeStatus(value=${CASE.status})}`。Pure built-in façade 可用 Case cache，但不能用 DB cache。
+调用方式为 `#{normalizeStatus(value=${EXEC.INPUT.status})}`。Pure built-in façade 可用 Case cache，但不能用 DB cache。
 
 ##### Cache scope 与 stale-read 契约
 
@@ -1048,14 +1048,14 @@ Action 保留正常 `TOOL` wrapper，含 `implementation: call`、input、typed 
 
 ATT 会把每个命令归一化为 argv 模板列表。标量命令会用旧式 token 化器处理一次。YAML 列表已经是归一化形式：每一项恰好是一个 argv 值，不再被 token 化。普通声明标量参数因此保持原子化，不管值中包含空格、引号、反斜杠、前导短横线还是 shell 类字符。Tool call 传入的 typed List 只会在完整 token 占位符位置扩展为零个或多个 argv 值。解析后的值不会再次被 token 化。ATT 不会调用本地 shell。
 
-V2.3.2 会以 `${CASE.outputDirectory}` 作为当前工作目录启动每个本地工具进程。以 `./` 或 `../` 开头的已配置可执行文件仍保持 package 相对路径：ATT 会在启动前把第一个 argv 值相对于包根解析。裸可执行文件名仍使用 `PATH`。其它相对路径会被工具从 Case 输出目录解释。这使得相对工具产物成为 Case 输出的一部分，而不要求每个动作都构造绝对路径。
+V2.3.2 会以 `${EXEC.OUTPUT_DIR}` 作为当前工作目录启动每个本地工具进程。以 `./` 或 `../` 开头的已配置可执行文件仍保持 package 相对路径：ATT 会在启动前把第一个 argv 值相对于包根解析。裸可执行文件名仍使用 `PATH`。其它相对路径会被工具从 Case 输出目录解释。这使得相对工具产物成为 Case 输出的一部分，而不要求每个动作都构造绝对路径。
 
 ATT 会注入并持有这些本地进程环境变量：
 
 | 变量 | 契约 |
 |---|---|
 | `ATT_ROOT_DIR` | 规范化绝对 ATT 包根目录 |
-| `ATT_CASE_OUTPUT_DIR` | 规范化绝对当前 Case 输出目录；在进程启动时与 `${CASE.outputDirectory}` 相同 |
+| `ATT_CASE_OUTPUT_DIR` | 规范化绝对当前 Case 输出目录；在进程启动时与 `${EXEC.OUTPUT_DIR}` 相同 |
 
 具有这些名称的继承值会被替换。POSIX 脚本可使用 `$ATT_CASE_OUTPUT_DIR`；Windows batch 脚本使用 `%ATT_CASE_OUTPUT_DIR%`。
 
@@ -1072,7 +1072,7 @@ ATT 会注入并持有这些本地进程环境变量：
 这份配置：
 
 ```yaml
-command: "./tools/send.sh '${requestFile}' --label 'Payment regression'"
+command: "./tools/send.sh '${input.requestFile}' --label 'Payment regression'"
 ```
 
 会产生这些逻辑参数：
@@ -1091,7 +1091,7 @@ Payment regression
 ```yaml
 command:
   - ./tools/send.sh
-  - "${requestFile}"
+  - "${input.requestFile}"
   - --label
   - Payment regression
 ```
@@ -1101,8 +1101,8 @@ command:
 ```yaml
 command:
   - ./tools/send.sh
-  - "${requestFile}"
-  - "${reference}"
+  - "${input.requestFile}"
+  - "${input.reference}"
 arguments:
   requestFile: {name: Request File, description: Input file, required: true}
   reference: {name: Reference, description: Optional reference, required: false, argName: --reference}
@@ -1110,9 +1110,9 @@ arguments:
 
 当 `reference='REF 123'` 时，逻辑 argv 的最后一部分为 `--reference`、`REF 123`；该值仍是一个原子参数。如果可选值缺失或归一化为空白，则这两个 token 都不会输出。省略 `argName` 或将 `argName: ''` 设为空，会使该参数变成位置参数：一个完整 token 占位符只输出其值，或在可选值为空白时输出空。嵌入式占位符如 `--reference=${reference}` 仍然是一个普通渲染 token，不能接收 List。对于 typed List，`argNameMode` 控制名称是 `once`（默认值，出现在整个列表前）还是 `repeat`（每个值前都重复）；对位置参数没有输出影响。
 
-优先使用最短的声明参数占位符，如 `${keywords}`；只有在需要明确命名空间时才使用 `${input.keywords}`。两者都是大小写敏感，且必须精确匹配参数名。`${TOOL.input.keywords}` 仍然支持，但不是首选写法。工具会把原始结果写到 stdout，把诊断写到 stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。
+优先使用 canonical 声明参数占位符 `${input.keywords}`。`${TOOL.input.keywords}` 仍然支持作为显式 alias；`${keywords}` 只在唯一对应已声明参数时兼容，并产生 `CONTEXT_TOOL_INPUT_SHORTHAND`。工具会把原始结果写到 stdout，把诊断写到 stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。
 
-全局工具命令只能引用其声明参数，不能引用 `${CASE...}`、`${ACTIONS...}` 或其它运行时 Context 作用域。需要把运行时数据显式传递到动作调用中，然后再在命令中引用对应声明参数。这使全局工具保持独立，并使依赖可静态校验。
+全局工具命令只能引用其声明参数，不能引用 `${EXEC.INPUT...}`、`${EXEC.ACTIONS...}` 或其它运行时 Context 作用域。需要把运行时数据显式传递到动作调用中，然后再在命令中引用对应声明参数。这使全局工具保持独立，并使依赖可静态校验。
 
 #### SSH 执行
 
@@ -1128,7 +1128,7 @@ ssh:
 
 根 `ssh` 仅适用于内联全局工具；工具组仅使用其自身 `ssh`，不会继承根配置。host/user 是必需的，port 默认为 22，key 是可选的。密码字段不受支持。ATT 优先使用本地 OpenSSH，带 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`。如果 `PATH` 中不存在可执行 `ssh`，ATT 会警告将使用捆绑的 mwiede/jsch Java 库。后者使用严格的 `~/.ssh/known_hosts`，不会继承 OpenSSH agent 或 `~/.ssh/config`，通常需要 `identityFile`。两种传输都会把逻辑 argv 安全地单引号封装为一个 POSIX 远程命令字符串。远程连接性和可执行文件存在性无法通过包验证证明。SSH 的 stdout/stderr/status/timeout/retry/assert/saveAs 行为与本地工具一致，证据中会记录 `transport: openssh|mwiede/jsch`。
 
-Case 输出工作目录以及两个环境变量规则仅适用于本地工具进程。ATT 不会为 SSH 远程命令预先 `cd`，也不会注入本地文件系统路径，因为 `${CASE.outputDirectory}` 和包根在远端没有定义映射。远程进程会使用 SSH 账户的默认目录。需要共享文件系统或远端目录时，须通过显式声明的工具参数传递。
+Case 输出工作目录以及两个环境变量规则仅适用于本地工具进程。ATT 不会为 SSH 远程命令预先 `cd`，也不会注入本地文件系统路径，因为 `${EXEC.OUTPUT_DIR}` 和包根在远端没有定义映射。远程进程会使用 SSH 账户的默认目录。需要共享文件系统或远端目录时，须通过显式声明的工具参数传递。
 
 #### 输入、输出、超时和状态
 
@@ -1170,10 +1170,10 @@ Tool Action 可声明以 collector ID 为 key 的 `evidence` map。每个 collec
 ```yaml
 invokeApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${CASE.requestFile})}"
+  call: "#{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile})}"
   evidence:
     queueState:
-      call: "#{readQueueState(queue=${CASE.queue})}"
+      call: "#{readQueueState(queue=${EXEC.INPUT.queue})}"
       timeoutMs: 3000
       onFailure: continue
   assert: "${output.result.status} == 'SUCCESS'"
@@ -1318,9 +1318,9 @@ report:
 assertStatus:
   type: assert
   description: API status is successful
-  assert: "${ACTIONS.callApi.output.result.status} == 'SUCCESS'"
+  assert: "${EXEC.ACTIONS.callApi.output.result.status} == 'SUCCESS'"
   expected: SUCCESS
-  actual: "${ACTIONS.callApi.output.result.status}"
+  actual: "${EXEC.ACTIONS.callApi.output.result.status}"
 ```
 
 JSON 重复对象键、格式错误，或声明为 JSON 但无法解析的输出，都会在进程退出码为 0 时仍然报 ERROR。
@@ -1368,8 +1368,8 @@ tools:
     command:
       - ./tools/grep_from_app_logs.sh
       - "${logFile}"
-      - "${keywords}"
-      - "${levels}"
+      - "${input.keywords}"
+      - "${input.levels}"
     output: yaml
     arguments:
       logFile: {name: Log File, description: Source log, required: true}
@@ -1380,7 +1380,7 @@ tools:
 ```yaml
 grepLogs:
   type: tool
-  call: "#{grepFromAppLogs(logFile=${ACTIONS.getLogs.output.targetFiles[0]}, keywords=['PAYMENT', 'POSTED'], levels=['ERROR', 'WARN'])}"
+  call: "#{grepFromAppLogs(logFile=${EXEC.ACTIONS.getLogs.output.targetFiles[0]}, keywords=['PAYMENT', 'POSTED'], levels=['ERROR', 'WARN'])}"
 ```
 
 结果尾部逻辑 argv 为 `--keyword`、`PAYMENT`、`--keyword`、`POSTED`、`--levels`、`ERROR`、`WARN`。`repeat` 会对每个关键词重复 `--keyword`；`once` 是默认值，可以省略，它只在整个列表前发出一次 `--levels`。每个 typed List 都在各自的完整命令占位符位置独立扩展。V2.6 schema 拒绝 `delimit`；旧 schema 只保留历史读取兼容性。
@@ -1396,7 +1396,7 @@ grepLogs:
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]})}"
+  call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
   timeoutMs: 30000
   assert: "${output.result.status} == 'COMPLETED'"
   retry:
@@ -1493,7 +1493,7 @@ stage:
 ./att.sh debug template PAYMENT_INVOKE
 ```
 
-Template 表达式可以读取 `${CASE.amount}`、`${CASE.environment}` 和 `${CASE.STAGES.invoke.channel}`。
+Template 表达式应优先读取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和当前 Stage 的 `${EXEC.INPUT.channel}`；当前 Stage 的 `values` 会在该 Stage 期间覆盖同名 Case-level input，Stage 结束后恢复。对应的 `CASE.*` 路径仍是兼容 aliases，`CASE.STAGES.*` 只保留为旧的执行／证据视图。
 
 Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
 
@@ -1517,7 +1517,7 @@ inputs:
 ./att.sh debug flow common.compose.v1
 ```
 
-Flow 可用 `${CASE.inputs.source}` 读取 `inputs`；如果没有同名 Case 字段，也可以用 `${CASE.source}` 读取。
+Flow 可用 `${EXEC.INPUT.source}` 读取 `inputs`；如果没有同名 Case 字段，也可以用兼容 alias `${EXEC.INPUT.source}` 读取。
 
 分组 Tool sidecar（`fpp.invokeApi` 对应 `config/tools/fpp.debug.yaml`）：
 
@@ -1580,7 +1580,7 @@ case:
   STAGES: {shouldNotReplace: true}
 ```
 
-即使输入包含这些字段，`CASE.caseId`、`CASE.outputDirectory`、`CASE.VARS`、`CASE.STAGES`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` 仍由框架生成。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
+即使输入包含这些字段，`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及对应的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。`EXEC.STAGES` 不是 3.4.2 Context 节点；Stage 历史仍由旧的 `CASE.STAGES` 证据视图保存。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
 
 ### 退出码
 
@@ -1640,7 +1640,7 @@ tools: {}
 |---|---|---|
 | `schemaVersion` | 必填 | 当前为 `att-config/v2.6`；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool |
 | `outputDirectory` | `output` | 非空包相对输出根 |
-| `environment` | `SIT` | 非空值暴露为 `${CASE.environment}`；它不会单独选择端点 |
+| `environment` | `SIT` | 非空值暴露为 `${EXEC.INPUT.environment}`；它不会单独选择端点 |
 | `timeoutMs` | `10000` | 整数 1–3600000 毫秒 |
 | `caseLog.yamlAnchors` | `false` | 布尔值；false 会完全展开重复的 YAML 结构，true 允许锚点/别名 |
 | `templates.root` | `templates` | 非空包相对模板根 |
@@ -1704,14 +1704,14 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | db | 需要 `db` 与恰好一个 `query`／`update`；block 内恰好一个 `sql`／`sqlFile`；可选位置 `params` 或具名 `parameters`、object `saveAs`、`assert`；不允许同时使用两种 parameter 形式，也不允许 retry 或 Action timeout |
 | assert | 需要 `assert`；可选 `expected`、`actual`；不允许 expression/render/tool/log-only 字段、timeout 或 retry |
 | log | 至少需要 `message` 或 `file`；可选 `level`、`fields`、`assert`；不允许 render/tool/assert-action-only 字段、timeout 或 retry |
-| assign | 需要 `name`、`expression`；可选 `assert`；`name` 在整个 Case 的 `CASE.VARS` 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry、saveAs 或 overwrite |
+| assign | 需要 `name`、`expression`；可选 `assert`；`name` 在整个 Case 的 `EXEC.VARS` 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry、saveAs 或 overwrite |
 | retry | 必填 `maxAttempts`、`intervalMs`、`retryOn`；category 仅 `ASSERTION`、`TIMEOUT` |
 
 `renderAs` 允许 `file`、`text`、`json`、`yaml`、`xml`。retry `maxAttempts` 为 2–10，`intervalMs` 为 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
 
 #### Assign 变量唯一性与生命周期
 
-assign 动作会在 `CASE.VARS` 下创建一个不可变、Case 作用域的条目。一个 Case 内每个变量名必须唯一。重复声明会导致校验失败。
+assign 动作会在 `EXEC.VARS` 下创建一个不可变、Case 作用域的条目。一个 Case 内每个变量名必须唯一。重复声明会导致校验失败。
 
 #### Action `saveAs`
 
@@ -1764,7 +1764,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.4.1",
+  "attVersion": "3.4.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1805,23 +1805,23 @@ ATT 3.3.0 可另外提供 `summary`、`detail`、`source`、`context` 和 `schem
 
 V3.4 使用一个表达式引擎，但保留两种刻意分开的角色：
 
-- `${path}` 读取一个 Context 值并插入周围文字，例如 `Reference=${CASE.VARS.SrcRefNo}`。
+- `${path}` 读取一个 Context 值并插入周围文字，例如 `Reference=${EXEC.VARS.SrcRefNo}`。
 - `#{expression}` 计算一个 typed expression block。block 可包含 Context operand、调用、list literal、括号、unary operator、算术、比较、`like`、`in`、null 判断与布尔逻辑。
 
-Context 引用在 block 内仍必须明确使用 `${...}`；应写 `${CASE.amount}`，不可写裸 `CASE.amount`。可在整条引用路径末尾加 `?`，例如 `${CASE.response.body.missing?}`。只要任一 map、list、root-owned Context 值或中间 segment 不存在，结果就是真正的 `null`；路径存在但最后值本身为 `null` 时也保持 `null`。`${path}` 仍然 strict。Optional lookup 不会抑制歧义、错误语法或在 scalar 上索引等 invalid traversal，因此这些 authoring 错误仍会失败。精确 block 保留 Java 结果类型；嵌入周围文字的 block 才会转换为文字。
+Context 引用在 block 内仍必须明确使用 `${...}`；应写 `${EXEC.INPUT.amount}`，不可写裸 `CASE.amount`。可在整条引用路径末尾加 `?`，例如 `${EXEC.INPUT.response.body.missing?}`。只要任一 map、list、root-owned Context 值或中间 segment 不存在，结果就是真正的 `null`；路径存在但最后值本身为 `null` 时也保持 `null`。`${path}` 仍然 strict。Optional lookup 不会抑制歧义、错误语法或在 scalar 上索引等 invalid traversal，因此这些 authoring 错误仍会失败。精确 block 保留 Java 结果类型；嵌入周围文字的 block 才会转换为文字。
 
 ```yaml
-assert: "#{${CASE.response.body.missing?} is null}"
-actual: "#{nvl(${CASE.response.body.missing?}, 'not supplied')}"
-description: "status=${CASE.response.body.status?}; fallback=#{coalesce(${CASE.response.body.missing?}, 'N/A')}"
+assert: "#{${EXEC.INPUT.response.body.missing?} is null}"
+actual: "#{nvl(${EXEC.INPUT.response.body.missing?}, 'not supplied')}"
+description: "status=${EXEC.INPUT.response.body.status?}; fallback=#{coalesce(${EXEC.INPUT.response.body.missing?}, 'N/A')}"
 ```
 
 ```yaml
 assert: >-
-  #{(${CASE.amount} * ${CASE.rate}) >= 100
-    and ${CASE.status} in ['PENDING', 'POSTED']}
-description: "Reference length: #{length(${CASE.VARS.SrcRefNo})}"
-expression: "#{${ACTIONS.query.output.result.rowCount} + 1}"
+  #{(${EXEC.INPUT.amount} * ${EXEC.INPUT.rate}) >= 100
+    and ${EXEC.INPUT.status} in ['PENDING', 'POSTED']}
+description: "Reference length: #{length(${EXEC.VARS.SrcRefNo})}"
+expression: "#{${EXEC.ACTIONS.query.output.result.rowCount} + 1}"
 ```
 
 运算优先级由高至低：
@@ -1834,13 +1834,13 @@ expression: "#{${ACTIONS.query.output.result.rowCount} + 1}"
 6. `and`；
 7. `or`。
 
-算术 operand 必须为数值，除以零是错误。`in` 的右 operand 必须是 List、array 或 Iterable；`['A', 'B']` 这样的 literal list 与 `${CASE.allowedStatuses}` 这样的 typed Context list 都合法。旧的非 block assertion grammar 也接受 literal-list `in`，但算术与 typed list membership 应使用 `#{...}`。
+算术 operand 必须为数值，除以零是错误。`in` 的右 operand 必须是 List、array 或 Iterable；`['A', 'B']` 这样的 literal list 与 `${EXEC.INPUT.allowedStatuses}` 这样的 typed Context list 都合法。旧的非 block assertion grammar 也接受 literal-list `in`，但算术与 typed list membership 应使用 `#{...}`。
 
-调用参数本身可以是任何 expression。可直接嵌套调用，例如 `#{upper(trim(${CASE.name}))}`；旧写法 `#{upper(#{trim(${CASE.name})})}` 继续兼容。ASCII 单／双引号及成对弯引号可界定字符串；数字、布尔和 null literal 保留其类型。其他无引号 token 是 literal string，除非它看起来像保留 Context path 或当前可见变量，此时 ATT 会要求使用 `${...}`。
+调用参数本身可以是任何 expression。可直接嵌套调用，例如 `#{upper(trim(${EXEC.INPUT.name}))}`；旧写法 `#{upper(#{trim(${EXEC.INPUT.name})})}` 继续兼容。ASCII 单／双引号及成对弯引号可界定字符串；数字、布尔和 null literal 保留其类型。其他无引号 token 是 literal string，除非它看起来像保留 Context path 或当前可见变量，此时 ATT 会要求使用 `${...}`。
 
-周围文字中的 Context interpolation 仍使用 `${...}`，例如 `prefix-${CASE.caseId}` 或 `#{concat('prefix-', ${CASE.caseId})}`。唯一后缀查找只在 `${...}` 中使用，建议优先写 canonical path，例如 `${CASE.VARS.SrcRefNo}`。
+周围文字中的 Context interpolation 仍使用 `${...}`，例如 `prefix-${EXEC.INPUT.caseId}` 或 `#{concat('prefix-', ${EXEC.INPUT.caseId})}`。唯一后缀查找只在 `${...}` 中使用，建议优先写 canonical path，例如 `${EXEC.VARS.SrcRefNo}`。
 
-为保持兼容，`${directory}/file.name` 这种无引号 Tool-call 参数继续按文字插值处理，不会误判为数字除法；`${CASE.amount}/2` 仍是算术。新配置中的路径值建议在可行时明确加引号。
+为保持兼容，`${directory}/file.name` 这种无引号 Tool-call 参数继续按文字插值处理，不会误判为数字除法；`${EXEC.INPUT.amount}/2` 仍是算术。新配置中的路径值建议在可行时明确加引号。
 
 可用值与可调用能力取决于表达式所在位置。普通 Case-runtime 字段可使用 built-in、配置 Tool 与只读 DB query；`report.fileNamePattern`、Tool `command` 与 DB SQL source 是受限 scope，不允许隐藏或递归 external execution。Tool/DB `saveAs.path`、DB `params`／`parameters` 在主调用前求值；DB SQL 内容只允许 Context 和 pure built-in。
 
@@ -1848,49 +1848,58 @@ expression: "#{${ACTIONS.query.output.result.rowCount} + 1}"
 
 ### Runtime Context
 
-ATT 的持久化运行时树有一个权威根：
+执行中立的 Context 有两个规范根和一个 Action 局部 binding：
 
 ```text
-CASE
-├── caseId, workbookId, groupId, rowCaseId, workbook, sheet, rowNumber, tags
-├── outputDirectory
-├── environment, status, startedAt, durationMs, error
-├── <case data aliases>
-├── VARS
-│   └── <assignName> (typed runtime value shared by later stages/templates)
-├── DB (fixed framework-owned Case-finalization map)
-│   └── <dbhelperId> (transaction finalization state and sanitized error)
-└── STAGES
-    └── <stageKey>
-        ├── name and stage-private data
-        └── TEMPLATE
-            └── ACTIONS
-                └── <actionId>
-                    ├── id, type, description
-                    ├── output
-                    ├── TOOL
-                    │   └── <toolName>
-                    └── DB
-                        └── <dbhelperId>
-                            └── <callId> (inline query evidence)
+EXEC
+├── ID、MODE、STARTED_AT、OUTPUT_DIR
+├── INPUT（TestCase 数据或 debug sidecar input）
+├── VARS（跨阶段／模板共享的 typed variables）
+└── ACTIONS（已完成／已发布的 Action results）
+META
+├── PROJECT、SOURCE、TARGET
+├── TEMPLATE、FLOW
+└── TOOL、DBHELPER、MQHELPER（curated invocation metadata）
+output
+└── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-关键字是大写：`CASE`、`VARS`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL`、`DB`。元数据保留 camelCase。没有 `CASE.fields`、`CASE.data` 或 `TOOLS` 节点。
+`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是两种执行模式共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.LOAD`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。Load-specific state 不属于本 3.4.2 contract。
 
 常见作用域包括：
 
 | 作用域 | 示例 |
 |---|---|
-| CASE | `caseId`、`workbookId`、`groupId`、`rowCaseId`、`workbook`、`sheet`、`rowNumber`、`tags`、`environment`、保留 `outputDirectory`、Case 数据别名、运行时 `VARS`、固定交易收尾 map `DB` |
-| STAGE | `key`、`name`、选择器映射数据、侧车阶段数据、状态、计时、错误 |
-| TEMPLATE | `name`、`path`、`description`、状态、计时、错误 |
-| ACTION | `id`、`type`、最终 `description`；嵌套 `output.status`、`success`、`durationMs`、`exception`、`targetFiles`、`result` 与断言/日志数据 |
-| TOOL | 配置工具的限定名称、可选 group ID/tool key、`input`、逻辑/执行 argv、可选 SSH 目标元数据、`stdout`、`stderr`、`rawOutput`、解析 `output`、状态、退出码、持续时间、重试证据，以及在 `saveAs` 使用时的 `outputFile` |
-| DB | dbhelper ID、call ID、按 evidence policy 保存的 SQL source/hash、masked/typed/value parameters、duration、typed result 与 sanitized error |
+| EXEC.INPUT | TestCase columns、debug `case`/`inputs` 及 stage input aliases |
+| EXEC.VARS | `assign` values；`CASE.VARS` 保持兼容 alias |
+| EXEC.ACTIONS | 当前 Stage 已完成／已发布的 Action results；下一个 Stage 开始时清空 |
+| CASE.STAGES | 持久化的 Stage/template status、timing 与嵌套 Action evidence；不是可用的 expression namespace |
+| META | 安全的 project/source/target/component identity；不是 config dump 或 credential store |
+| output | 当前 Action result、assertion actual value 与最终 description 输入 |
+| CASE / RUN / ACTIONS | canonical state 的生成式 legacy views；`ACTIONS` 只表示当前 scope |
+| CASE.DB / TOOL / DB | 既有 finalization 或 transient framework scope，与 `EXEC` 分开 |
 
-使用 `${output...}` 访问当前动作在求值 runtime assertion、actual 与最终 description 时的局部 scope。`${ACTIONS.<id>...}` 是当前模板已完成 Action 的便利视图；跨阶段使用规范 `${CASE.STAGES.<stage>.TEMPLATE.ACTIONS...}`。根 `${TOOL...}` 与 `${DB...}` 保留给调用内部，不是 Case 级“最近一次调用”API。Tool 与 inline DB evidence 保存在所在 Action 并写入 Case log；Case 级 DB 收尾只在完成后通过 `${CASE.DB.<instance>}` 提供。开头的 `CASE` 区分 `${CASE.DB...}` 与 invocation-local `${DB...}`。
+建议使用 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.channel}`、`${EXEC.VARS.txnSeq}`、`${EXEC.ACTIONS.callApi.output.result}` 和 `${META.TARGET.id}` 等 canonical paths。`${output...}` 只用于当前 Action，`${EXEC.ACTIONS.<id>...}` 只用于当前 scope 已完成的 Action。Stage／Template／Flow history（包括 `${CASE.STAGES...}`）属于持久化 result/evidence，不是可重用的 expression path；直接读取会产生 `CONTEXT_CROSS_SCOPE`。根 `${TOOL...}` 与 `${DB...}` 是 transient helper view，不是 Case 级“最近一次调用”API；普通 expression 读取会产生 `CONTEXT_LEGACY_PATH`。Tool 与 inline DB evidence 保存在所在 Action；Case 级 DB 收尾在完成后仍通过 `${CASE.DB.<instance>}` 提供。
 
-`${CASE.outputDirectory}` 是保留的标准化绝对路径。`CASE.VARS` 与 `CASE.DB` 也是固定 framework-owned map，因此 sidecar `excel.dataColumns` alias 或其他 Case-root alias 不能名为 `VARS`／`DB`。三者在第一个 stage 前已存在；`CASE.DB` 保持空值，直到 Case transaction finalization 发布已使用实例 outcome。同一 Case 的 Action 不可依赖该 post-Case state。
+现有 package 必须继续支持以下 aliases。新配置应使用右侧 canonical/local path；左侧只用于迁移或兼容说明：
+
+| Legacy path | Canonical/local path |
+|---|---|
+| `${CASE.<businessField>}` | `${EXEC.INPUT.<businessField>}` |
+| `${CASE.caseId}` / `${CASE.workbookId}` / `${CASE.groupId}` / `${CASE.rowCaseId}` | `${META.SOURCE.caseId}` / `${META.SOURCE.workbookId}` / `${META.SOURCE.groupId}` / `${META.SOURCE.rowCaseId}` |
+| `${CASE.VARS}` | `${EXEC.VARS}` |
+| `${ACTIONS}` | `${EXEC.ACTIONS}` |
+| `${RUN.id}` / `${RUN.runId}` | `${EXEC.ID}` |
+| `${CASE.outputDirectory}` | `${EXEC.OUTPUT_DIR}` |
+| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | `${EXEC.STATUS}` / `${EXEC.DURATION_MS}` / `${EXEC.ENVIRONMENT}` |
+| `${CASE.STAGES.<stage>...}` | 旧 execution/evidence data；runtime expression 读取会以 `CONTEXT_CROSS_SCOPE` 拒绝 |
+| `${output.*}` | 当前 Action-local `output.*` |
+
+为保持兼容，framework adapter 仍可写入 `${CASE.<businessField>}`；该写入会作用于同一份 `EXEC.INPUT` map，不会创建第二份 input store。新 expression 应读取 canonical path；只有 compatibility adapter 才应使用旧的写入形式。framework-owned identity、lifecycle、`VARS`、`DB` 与 Stage evidence 字段仍受保护。
+
+`META` 对 expression 是只读的，只包含 curated safe metadata，不包含 credential 或任意 config。Optional references 如 `${EXEC.INPUT.maybeMissing?}` 和 `${output.response?}` 使用同一 canonical/local resolver；缺失值返回 null，但 malformed、ambiguous 或 invalid traversal 仍然是错误。
+
+`${EXEC.OUTPUT_DIR}` 是保留的标准化绝对路径。`EXEC.VARS` 与 `CASE.DB` 也是固定 framework-owned map，因此 sidecar `excel.dataColumns` alias 或其他 Case-root alias 不能名为 `VARS`／`DB`。三者在第一个 stage 前已存在；`CASE.DB` 保持空值，直到 Case transaction finalization 发布已使用实例 outcome。同一 Case 的 Action 不可依赖该 post-Case state。`EXEC` 不会新增 `TOOL`／`DB`／`MQ`／`OUTPUT`／`STAGE(S)` 等 helper 或 orchestration 节点；可表达式读取的 helper identity 只在有明确用途时通过 curated `META.TOOL`、`META.DBHELPER`、`META.MQHELPER` 提供。
 
 ### `config.report.fileNamePattern`
 
@@ -1917,17 +1926,19 @@ fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
 fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
-但不支持如 `${runId}`、`${workbookId}`、`${environment}`、`${CASE.caseId}` 等运行时值引用。
+但不支持如 `${runId}`、`${workbookId}`、`${environment}`、`${EXEC.INPUT.caseId}` 等运行时值引用。
 
 ### Tool 定义中的 `command` 表达式
 
-Tool 的 `command` 也拥有独立的受限上下文，只能引用该工具 `arguments` 映射中声明的键。每个声明键允许三种等价占位形式：
+Tool 的 `command` 也拥有独立的受限上下文，只能引用该工具 `arguments` 映射中声明的键。canonical 文档及新配置应使用 `${input.<argument>}`：
 
 | 形式 | 含义 |
 |---|---|
-| `${requestFile}` | 首选直接参数引用 |
-| `${input.requestFile}` | 显式工具输入命名空间 |
+| `${input.requestFile}` | canonical 工具本地输入引用 |
 | `${TOOL.input.requestFile}` | 对同一工具输入的支持完整别名 |
+| `${requestFile}` | deprecated shorthand；仅在唯一对应已声明参数时兼容，并产生迁移 warning |
+
+`${argument}` 只有在名称恰好对应当前 Tool 一个已声明参数时才会接受。`att validate` 会以 `CONTEXT_TOOL_INPUT_SHORTHAND` 给出精确的 `${input.argument}` 替换；未声明或有歧义的 shorthand 会报错。command-backed 与 call-backed Tool 使用相同规则。
 
 例如：
 
@@ -1938,8 +1949,8 @@ tools:
     description: Invoke a rendered payment request
     command:
       - ./tools/invoke_payment_api.sh
-      - "${requestFile}"
-      - "${environment}"
+      - "${input.requestFile}"
+      - "${input.environment}"
     output: json
     arguments:
       requestFile:
@@ -1986,7 +1997,7 @@ singleQuote:
   call: >-
     #{writeAudit(
         message="Customer O'Reilly",
-        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
     )}
 
 doubleQuote:
@@ -1994,15 +2005,15 @@ doubleQuote:
   call: >-
     #{writeAudit(
         message='status="READY"',
-        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
     )}
 
 mixedQuotesAndContext:
   type: tool
   call: >-
     #{writeAudit(
-        message="O'Reilly said \"READY\" for ${CASE.caseId}",
-        sourceFile=${ACTIONS.renderRequest.output.targetFiles[0]}
+        message="O'Reilly said \"READY\" for ${EXEC.INPUT.caseId}",
+        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
     )}
 ```
 
@@ -2011,8 +2022,8 @@ Child process 收到的三条 message 分别是 `Customer O'Reilly`、`status="R
 如果坚持把 call 写成单行，还需额外处理独立的 YAML escaping 层：
 
 ```yaml
-call: "#{writeAudit(message='status=\"READY\"', sourceFile=${CASE.sourceFile})}"
-call: '#{writeAudit(message="O''Reilly", sourceFile=${CASE.sourceFile})}'
+call: "#{writeAudit(message='status=\"READY\"', sourceFile=${EXEC.INPUT.sourceFile})}"
+call: '#{writeAudit(message="O''Reilly", sourceFile=${EXEC.INPUT.sourceFile})}'
 ```
 
 第一行是为 YAML double-quoted scalar escape 双引号；第二行是为 YAML single-quoted scalar 把 apostrophe 写成两个。之后 expression engine 才会解析所得的 `#{...}`。
@@ -2053,27 +2064,27 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 
 | 函数 | 目的 | 示例 |
 |---|---|---|
-| `str.upper/lower/trim` | 大小写与首尾空白处理 | `#{str.upper(value=${CASE.currency})}` |
-| `str.ltrim/rtrim` | 去除前导／尾随空白 | `#{str.ltrim(${CASE.reference})}` |
-| `str.length` | 返回文本长度 | `#{str.length(value=${CASE.reference})}` |
-| `str.concat` | 拼接参数 | `#{str.concat(a='PAY-', b=${CASE.caseId})}` |
-| `str.substr/indexOf` | 截取子串／返回位置 | `#{str.substr(${CASE.reference}, 0, 8)}` |
-| `str.contains/startsWith/endsWith` | 测试字面包含、前缀、后缀 | `#{str.contains(${CASE.message}, 'SUCCESS')}` |
-| `str.replace` | 字面替换 | `#{str.replace(${CASE.reference}, '-', '')}` |
-| `str.lpad/rpad` | 左／右填充 | `#{str.lpad(${CASE.sequence}, 8, '0')}` |
+| `str.upper/lower/trim` | 大小写与首尾空白处理 | `#{str.upper(value=${EXEC.INPUT.currency})}` |
+| `str.ltrim/rtrim` | 去除前导／尾随空白 | `#{str.ltrim(${EXEC.INPUT.reference})}` |
+| `str.length` | 返回文本长度 | `#{str.length(value=${EXEC.INPUT.reference})}` |
+| `str.concat` | 拼接参数 | `#{str.concat(a='PAY-', b=${EXEC.INPUT.caseId})}` |
+| `str.substr/indexOf` | 截取子串／返回位置 | `#{str.substr(${EXEC.INPUT.reference}, 0, 8)}` |
+| `str.contains/startsWith/endsWith` | 测试字面包含、前缀、后缀 | `#{str.contains(${EXEC.INPUT.message}, 'SUCCESS')}` |
+| `str.replace` | 字面替换 | `#{str.replace(${EXEC.INPUT.reference}, '-', '')}` |
+| `str.lpad/rpad` | 左／右填充 | `#{str.lpad(${EXEC.INPUT.sequence}, 8, '0')}` |
 | `str.repeat` | 重复值 | `#{str.repeat(3, '9')}` |
 | `date.sysdate/systimestamp` | 返回系统日期／时间戳 | `#{date.sysdate('yyyyMMdd')}` |
-| `date.format` | 格式化 ISO 日期 | `#{date.format(${CASE.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
-| `date.add` | 日期增减 | `#{date.add(${CASE.businessDate}, 1, 'day')}` |
-| `file.exists/directoryExists` | 测试常规文件／目录 | `#{file.exists(${CASE.requestFile})}` |
-| `file.size/mkdirs` | 返回文件大小／创建目录树 | `#{file.size(${CASE.requestFile})}` |
-| `file.copy/move/delete` | 复制、移动、删除文件 | `#{file.move(${CASE.sourceFile}, ${CASE.targetFile})}` |
+| `date.format` | 格式化 ISO 日期 | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
+| `date.add` | 日期增减 | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
+| `file.exists/directoryExists` | 测试常规文件／目录 | `#{file.exists(${EXEC.INPUT.requestFile})}` |
+| `file.size/mkdirs` | 返回文件大小／创建目录树 | `#{file.size(${EXEC.INPUT.requestFile})}` |
+| `file.copy/move/delete` | 复制、移动、删除文件 | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
 | `misc.string/number/boolean` | 类型转换与归一化 | `#{misc.number(value='12.50')}` |
-| `misc.coalesce/nvl` | 返回非空值或默认值 | `#{misc.nvl(${CASE.optional}, 'N/A')}` |
-| `misc.iif` | 从布尔值选择两个值之一 | `#{misc.iif(${CASE.enabled}, 'Y', 'N')}` |
+| `misc.coalesce/nvl` | 返回非空值或默认值 | `#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}` |
+| `misc.iif` | 从布尔值选择两个值之一 | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
 | `misc.randomChoice` | 从输入中随机选择 | `#{misc.randomChoice('A', 'B', 'C')}` |
-| `misc.dbText` | 将稳定 typed DB result 格式化为 SQL*Plus 风格文字 | `#{misc.dbText(${ACTIONS.queryOrders.output.result})}` |
-| `misc.prettyPrint` | 将 Map/List/array/tree 确定性格式化为缩进文字 | `#{misc.prettyPrint(${ACTIONS.queryOrders.output.result})}` |
+| `misc.dbText` | 将稳定 typed DB result 格式化为 SQL*Plus 风格文字 | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
+| `misc.prettyPrint` | 将 Map/List/array/tree 确定性格式化为缩进文字 | `#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
 
 `misc.dbText` 只接受一个位置参数或具名 `value`。参数必须是直接 DB Action、DB expression 或 DB-backed Tool 返回的稳定 query／update result。它与直接 DB Action 的 `saveAs.format: text` 共用同一个确定性 formatter，并且没有 JDBC、transaction、connection 或 cache side effect。
 
@@ -2177,7 +2188,7 @@ ATT 会在数据映射和阶段选择前，把 `N/A`、`NA`、`NULL`、`NONE`、
 
 #### 为什么 Context 变量失败？
 
-ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空字符串。遵循 `ATT-CTX-001` 的 `requestedPath`、`currentNode`、`missingSegment` 和最近建议，检查大小写敏感的作用域、物理表头/别名、阶段 key、动作 ID，以及可用性时间点。后缀简写必须唯一识别一个可读逻辑路径；`ATT-CTX-002` 会列出所有冲突候选，以便你加长后缀或使用规范路径。声明的可选字段即使值为空白，仍然是有效空字符串。
+ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空字符串。遵循 `ATT-CTX-001` 的 `requestedPath`、`currentNode`、`missingSegment` 和最近建议，检查大小写敏感的作用域、物理表头/别名、阶段 key、动作 ID，以及可用性时间点。后缀简写必须唯一识别一个可读逻辑路径；当 validation 能识别 canonical current-scope replacement 时，会以 `CONTEXT_LEGACY_PATH` 发出迁移 warning。`ATT-CTX-002` 会列出所有冲突候选，以便你加长后缀或使用规范路径。声明的可选字段即使值为空白，仍然是有效空字符串。
 
 #### 为什么 FAIL 变成 ERROR？
 
