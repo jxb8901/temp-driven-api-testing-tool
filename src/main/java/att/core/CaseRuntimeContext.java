@@ -259,6 +259,20 @@ public final class CaseRuntimeContext {
         return status == ResolutionStatus.FOUND || status == ResolutionStatus.DEFERRED;
     }
 
+    /**
+     * Returns the unique canonical path selected by the rootless resolver.
+     *
+     * <p>This is intentionally narrower than {@link #resolve(String)}: a
+     * migration diagnostic may suggest a replacement only when the resolver
+     * has one concrete or validation-deferred candidate. Ambiguous, missing,
+     * and structurally invalid references return {@code null}.</p>
+     */
+    public String uniqueCanonicalPath(String path) {
+        Resolution resolved = resolution(requiredReferencePath(path));
+        if (resolved.status != ResolutionStatus.FOUND && resolved.status != ResolutionStatus.DEFERRED) return null;
+        return resolved.canonicalPath;
+    }
+
     /** True when validation knows the owning value exists but cannot know its runtime shape yet. */
     public boolean isValidationDeferred(String path) {
         return resolution(requiredReferencePath(path)).status == ResolutionStatus.DEFERRED;

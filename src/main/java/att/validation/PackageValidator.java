@@ -135,7 +135,8 @@ public final class PackageValidator {
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
                             StageTemplate template = loader.load(stage.templateName());
-                            if (!"package".equals(options.validationScope())) addContextMigrationWarnings(diagnostics, template);
+                            addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
+                                    resolved, assignedCaseVariables);
                             validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables);
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
@@ -269,49 +270,104 @@ public final class PackageValidator {
     /** Emits actionable 3.4.2 warnings for deterministic legacy aliases. */
     private void addContextMigrationWarnings(List<Diagnostic> diagnostics, StageTemplate template) {
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(null);
-        for (TemplateAction action : template.actions()) {
-            String prefix = "actions." + action.id();
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.description(), prefix + ".description", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.expected(), prefix + ".expected", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.actual(), prefix + ".actual", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.assertion(), prefix + ".assert", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.runWhen(), prefix + ".runWhen", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.expression(), prefix + ".expression", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.message(), prefix + ".message", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.file(), prefix + ".file", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.saveAs(), prefix + ".saveAs", template.sourceFile());
-            addContextMigrationWarnings(diagnostics, engine, template, action, action.call(), prefix + ".call", template.sourceFile());
+        for (TemplateAction action : template.actions())
+            addContextMigrationWarningsForAction(diagnostics, engine, template, action,
+                    MigrationPhase.STATIC, null);
+    }
+
+    /** Scans a concrete Case with the same Action publication phases as runtime. */
+    private void addCaseContextMigrationWarnings(List<Diagnostic> diagnostics, StageTemplate template,
+                                                 TestCase testCase, StageCaseData stage, FrameworkConfig config,
+                                                 Path caseFile, Set<String> assignedCaseVariables) {
+        try {
+            att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot,
+                    "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
+            context.setProject(projectRoot);
+            context.put("CASE.environment", config.environment());
+            for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
+            context.beginStage(stage, template.name(), template.directory());
+            att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(null);
+            for (TemplateAction action : template.actions()) {
+                addContextMigrationWarningsForAction(diagnostics, engine, template, action,
+                        MigrationPhase.PRE_PUBLICATION, context);
+                context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
+                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
+                addContextMigrationWarningsForAction(diagnostics, engine, template, action,
+                        MigrationPhase.POST_PUBLICATION, context);
+            }
+        } catch (Exception ignored) {
+            // The normal case-bound validator owns Context errors. Migration
+            // scanning must not replace its source-located diagnostic.
+        }
+    }
+
+    private enum MigrationPhase { STATIC, PRE_PUBLICATION, POST_PUBLICATION }
+
+    private void addContextMigrationWarningsForAction(List<Diagnostic> diagnostics,
+                                                       att.template.UnifiedTemplateEngine engine,
+                                                       StageTemplate template, TemplateAction action,
+                                                       MigrationPhase phase,
+                                                       att.core.CaseRuntimeContext context) {
+        String prefix = "actions." + action.id();
+        Path sourceFile = template.sourceFile();
+        boolean staticScan = phase == MigrationPhase.STATIC;
+        boolean pre = phase == MigrationPhase.PRE_PUBLICATION;
+        boolean post = phase == MigrationPhase.POST_PUBLICATION;
+        if (staticScan || post) addContextMigrationWarnings(diagnostics, engine, template, action,
+                action.description(), prefix + ".description", sourceFile, context);
+        if (staticScan || (pre && !"tool".equalsIgnoreCase(action.type())) || (post && "tool".equalsIgnoreCase(action.type())))
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.expected(), prefix + ".expected", sourceFile, context);
+        if (staticScan || post) addContextMigrationWarnings(diagnostics, engine, template, action,
+                action.actual(), prefix + ".actual", sourceFile, context);
+        if (staticScan || (pre && "tool".equalsIgnoreCase(action.type())) || (post && !"tool".equalsIgnoreCase(action.type())))
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.assertion(), prefix + ".assert", sourceFile, context);
+        if (staticScan || pre) {
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.runWhen(), prefix + ".runWhen", sourceFile, context);
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.expression(), prefix + ".expression", sourceFile, context);
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.message(), prefix + ".message", sourceFile, context);
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.file(), prefix + ".file", sourceFile, context);
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.saveAs(), prefix + ".saveAs", sourceFile, context);
+            addContextMigrationWarnings(diagnostics, engine, template, action,
+                    action.call(), prefix + ".call", sourceFile, context);
             for (Map.Entry<String, Object> field : action.fields().entrySet())
-                addContextMigrationWarnings(diagnostics, engine, template, action, String.valueOf(field.getValue()), prefix + ".fields." + field.getKey(), template.sourceFile());
+                addContextMigrationWarnings(diagnostics, engine, template, action,
+                        String.valueOf(field.getValue()), prefix + ".fields." + field.getKey(), sourceFile, context);
             for (EvidenceCollector collector : action.evidence().values())
-                addContextMigrationWarnings(diagnostics, engine, template, action, collector.call(), prefix + ".evidence." + collector.id() + ".call", template.sourceFile());
+                addContextMigrationWarnings(diagnostics, engine, template, action,
+                        collector.call(), prefix + ".evidence." + collector.id() + ".call", sourceFile, context);
             if ("db".equalsIgnoreCase(action.type())) {
                 Map<String, Object> operation = action.query().isEmpty() ? action.update() : action.query();
                 String operationName = action.query().isEmpty() ? "update" : "query";
                 if (operation.get("sql") != null) addContextMigrationWarnings(diagnostics, engine, template, action,
-                        String.valueOf(operation.get("sql")), prefix + "." + operationName + ".sql", template.sourceFile());
+                        String.valueOf(operation.get("sql")), prefix + "." + operationName + ".sql", sourceFile, context);
                 Object params = operation.get("params");
                 if (params instanceof Iterable) {
                     int index = 0;
                     for (Object value : (Iterable<?>) params) {
                         if (value instanceof String) addContextMigrationWarnings(diagnostics, engine, template, action,
-                                (String) value, prefix + "." + operationName + ".params[" + index + "]", template.sourceFile());
+                                (String) value, prefix + "." + operationName + ".params[" + index + "]", sourceFile, context);
                         index++;
                     }
                 } else if (params instanceof String) addContextMigrationWarnings(diagnostics, engine, template, action,
-                        (String) params, prefix + "." + operationName + ".params", template.sourceFile());
+                        (String) params, prefix + "." + operationName + ".params", sourceFile, context);
                 Object parameters = operation.get("parameters");
                 if (parameters instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) parameters).entrySet())
                     if (field.getValue() instanceof String) addContextMigrationWarnings(diagnostics, engine, template, action,
-                            (String) field.getValue(), prefix + "." + operationName + ".parameters." + field.getKey(), template.sourceFile());
+                            (String) field.getValue(), prefix + "." + operationName + ".parameters." + field.getKey(), sourceFile, context);
             }
             if ("render".equalsIgnoreCase(action.type())) try {
                 for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload()))
                     addContextMigrationWarnings(diagnostics, engine, template, action,
-                            att.template.PayloadCache.readUtf8(payload), prefix + ".payload", payload);
+                            att.template.PayloadCache.readUtf8(payload), prefix + ".payload", payload, context);
             } catch (Exception ignored) {
-                // The normal validator reports payload discovery/read errors;
-                // migration scanning must not replace that diagnostic.
+                // The normal validator reports payload discovery/read errors.
             }
         }
     }
@@ -320,6 +376,14 @@ public final class PackageValidator {
                                               att.template.UnifiedTemplateEngine engine,
                                               StageTemplate template, TemplateAction action,
                                               String text, String field, Path sourceFile) {
+        addContextMigrationWarnings(diagnostics, engine, template, action, text, field, sourceFile, null);
+    }
+
+    private void addContextMigrationWarnings(List<Diagnostic> diagnostics,
+                                              att.template.UnifiedTemplateEngine engine,
+                                              StageTemplate template, TemplateAction action,
+                                              String text, String field, Path sourceFile,
+                                              att.core.CaseRuntimeContext context) {
         if (text == null || text.trim().isEmpty()) return;
         java.util.List<String> paths;
         try { paths = engine.parseContextPaths(text); }
@@ -328,7 +392,7 @@ public final class PackageValidator {
             String path = att.core.CaseRuntimeContext.requiredReferencePath(original);
             String replacement = legacyReplacement(path);
             if (replacement == null && isRootlessReference(path)) {
-                replacement = rootlessReplacement(path, template);
+                replacement = rootlessReplacement(path, template, context);
                 String legacy = "${" + original + "}";
                 String message = "Rootless Context shorthand: " + legacy;
                 String suggestion;
@@ -336,7 +400,9 @@ public final class PackageValidator {
                     message += "\nCanonical replacement: ${" + replacement + "}";
                     suggestion = "Replace " + legacy + " with ${" + replacement + "}.";
                 } else {
-                    message += "\nThe validator cannot prove one unique canonical replacement from the static template alone.";
+                    message += context == null
+                            ? "\nThe validator cannot prove one unique canonical replacement from the static template alone."
+                            : "\nThe validator cannot prove one unique canonical replacement from the current scope.";
                     suggestion = "Resolve the shorthand against the current scope and replace it with the exact unique EXEC/META path; do not assume EXEC.INPUT.";
                 }
                 message += "\nThe shorthand remains compatible only when it resolves to one unique current-scope path."
@@ -373,12 +439,17 @@ public final class PackageValidator {
                 || root.indexOf(':') >= 0);
     }
 
-    private String rootlessReplacement(String path, StageTemplate template) {
+    private String rootlessReplacement(String path, StageTemplate template,
+                                       att.core.CaseRuntimeContext context) {
         // A static Template does not know the Case input columns or the
         // runtime shape of EXEC.VARS.  An Action/variable name can therefore
         // still collide with a Case input suffix.  Do not guess a canonical
         // replacement here; a case-bound resolver may supply an exact path
         // when it can prove uniqueness.
+        if (context != null) {
+            String canonical = context.uniqueCanonicalPath(path);
+            if (canonical != null && (canonical.startsWith("EXEC.") || canonical.startsWith("META."))) return canonical;
+        }
         return null;
     }
 
@@ -534,9 +605,31 @@ public final class PackageValidator {
             String key = diagnostic.code() + "\u0000" + String.valueOf(diagnostic.file()) + "\u0000"
                     + String.valueOf(diagnostic.field()) + "\u0000" + legacyPath;
             if (seen.add(key)) unique.add(diagnostic);
+            else {
+                for (int index = 0; index < unique.size(); index++) {
+                    Diagnostic existing = unique.get(index);
+                    if (!sameMigrationKey(existing, key)) continue;
+                    if (isGenericRootlessWarning(existing) && !isGenericRootlessWarning(diagnostic)) unique.set(index, diagnostic);
+                    break;
+                }
+            }
         }
         diagnostics.clear();
         diagnostics.addAll(unique);
+    }
+
+    private boolean sameMigrationKey(Diagnostic diagnostic, String key) {
+        String message = diagnostic.message() == null ? "" : diagnostic.message();
+        int newline = message.indexOf('\n');
+        String legacyPath = newline < 0 ? message : message.substring(0, newline);
+        String existingKey = diagnostic.code() + "\u0000" + String.valueOf(diagnostic.file()) + "\u0000"
+                + String.valueOf(diagnostic.field()) + "\u0000" + legacyPath;
+        return existingKey.equals(key);
+    }
+
+    private boolean isGenericRootlessWarning(Diagnostic diagnostic) {
+        return diagnostic.message() != null
+                && diagnostic.message().contains("cannot prove one unique canonical replacement");
     }
 
     private void addToolInputShorthandWarnings(List<Diagnostic> diagnostics, ToolConfig tool,
@@ -703,7 +796,7 @@ public final class PackageValidator {
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
-                        validateStaticContextStructure(content, syntaxEngine, completedActions, false);
+                        validateStaticContextStructure(content, syntaxEngine, completedActions, false, action.id());
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
                         if (!"file".equalsIgnoreCase(action.renderAs()) && !content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
                     } catch (Exception e) {
@@ -737,7 +830,7 @@ public final class PackageValidator {
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
                 forbid(action, "output", "payload", "renderAs", "saveAs", "overwrite", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 validateInlineExpressions(action.expression(), syntaxEngine, config);
-                validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false);
+            validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
             }
             if ("flow".equals(type)) {
                 if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) throw new IllegalArgumentException("Flow actions require " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
@@ -749,39 +842,42 @@ public final class PackageValidator {
 
             Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
             afterCurrentAction.add(action.id());
-            validateStaticContextStructure(action.description(), syntaxEngine, afterCurrentAction, true);
-            validateStaticContextStructure(action.assertion(), syntaxEngine, afterCurrentAction, true);
-            validateStaticContextStructure(action.actual(), syntaxEngine, afterCurrentAction, true);
-            validateStaticContextStructure(action.expected(), syntaxEngine, completedActions, false);
-            validateStaticContextStructure(action.runWhen(), syntaxEngine, completedActions, false);
+            validateStaticContextStructure(action.description(), syntaxEngine, afterCurrentAction, true, action.id());
+            Set<String> assertionActions = "tool".equals(type) ? completedActions : afterCurrentAction;
+            validateStaticContextStructure(action.assertion(), syntaxEngine, assertionActions, true, action.id());
+            validateStaticContextStructure(action.actual(), syntaxEngine, afterCurrentAction, true, action.id());
+            Set<String> expectedActions = "tool".equals(type) ? afterCurrentAction : completedActions;
+            boolean expectedOutputAvailable = "tool".equals(type);
+            validateStaticContextStructure(action.expected(), syntaxEngine, expectedActions, expectedOutputAvailable, action.id());
+            validateStaticContextStructure(action.runWhen(), syntaxEngine, completedActions, false, action.id());
             if ("tool".equals(type)) {
-                validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false);
-                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false);
+                validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false, action.id());
+                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false, action.id());
                 for (EvidenceCollector collector : action.evidence().values()) {
-                    validateStaticContextStructure(collector.call(), syntaxEngine, afterCurrentAction, true);
+                    validateStaticContextStructure(collector.call(), syntaxEngine, completedActions, true, action.id());
                 }
             }
             if ("db".equals(type)) {
-                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false);
+                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false, action.id());
                 Map<String, Object> operation = action.query().isEmpty() ? action.update() : action.query();
-                if (operation.get("sql") != null) validateStaticContextStructure(String.valueOf(operation.get("sql")), syntaxEngine, completedActions, false);
+                if (operation.get("sql") != null) validateStaticContextStructure(String.valueOf(operation.get("sql")), syntaxEngine, completedActions, false, action.id());
                 Object params = operation.get("params");
                 if (params instanceof Iterable) {
                     for (Object value : (Iterable<?>) params) if (value instanceof String) {
-                        validateStaticContextStructure((String) value, syntaxEngine, completedActions, false);
+                        validateStaticContextStructure((String) value, syntaxEngine, completedActions, false, action.id());
                     }
                 } else if (params instanceof String) {
-                    validateStaticContextStructure((String) params, syntaxEngine, completedActions, false);
+                    validateStaticContextStructure((String) params, syntaxEngine, completedActions, false, action.id());
                 }
                 Object parameters = operation.get("parameters");
                 if (parameters instanceof Map) for (Object value : ((Map<?, ?>) parameters).values()) {
-                    if (value instanceof String) validateStaticContextStructure((String) value, syntaxEngine, completedActions, false);
+                    if (value instanceof String) validateStaticContextStructure((String) value, syntaxEngine, completedActions, false, action.id());
                 }
             }
             if ("log".equals(type)) {
-                validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false);
-                validateStaticContextStructure(action.file(), syntaxEngine, completedActions, false);
-                for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false);
+                validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false, action.id());
+                validateStaticContextStructure(action.file(), syntaxEngine, completedActions, false, action.id());
+                for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false, action.id());
             }
             if ("flow".equals(type)) {
                 att.flow.FlowDefinition target = flows.get(action.use());
@@ -907,8 +1003,6 @@ public final class PackageValidator {
                                   att.template.UnifiedTemplateEngine syntaxEngine,
                                   FrameworkConfig config, Set<String> completedActions) {
         if (action.evidence().isEmpty()) return;
-        Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
-        afterCurrentAction.add(action.id());
         for (Map.Entry<String, EvidenceCollector> entry : action.evidence().entrySet()) {
             String id = entry.getKey();
             if (id == null || id.trim().isEmpty() || id.contains(".")) {
@@ -920,7 +1014,7 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("Evidence collector timeoutMs must be 1..3600000: " + id);
             }
             validateToolCall(collector.call(), config, false);
-            validateStaticContextStructure(collector.call(), syntaxEngine, afterCurrentAction, true);
+            validateStaticContextStructure(collector.call(), syntaxEngine, completedActions, true, action.id());
         }
     }
 
@@ -941,6 +1035,12 @@ public final class PackageValidator {
      */
     private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                                 Set<String> availableActions, boolean currentOutputAvailable) {
+        validateStaticContextStructure(text, engine, availableActions, currentOutputAvailable, null);
+    }
+
+    private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
+                                                Set<String> availableActions, boolean currentOutputAvailable,
+                                                String currentActionId) {
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
             String root = firstPathSegment(referencePath);
@@ -985,6 +1085,9 @@ public final class PackageValidator {
 
             String nearest = nearestAction(root, availableActions);
             String suffix = referencePath.length() > root.length() ? referencePath.substring(root.length()) : "";
+            if (currentActionId != null && currentActionId.equals(root) && !availableActions.contains(root)) {
+                throw unavailableActionContext(path, root, availableActions);
+            }
             if (availableActions.contains(root)) continue; // Unique action-id suffix; its dynamic output shape is checked at runtime.
             if (nearest == null) continue; // Potential CASE/data-column suffix requires a concrete Case binding.
             throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
@@ -1395,8 +1498,7 @@ public final class PackageValidator {
             }
             if (!("CASE".equals(root) || "RUN".equals(root) || "ACTIONS".equals(root)
                     || "TOOL".equals(root) || "DB".equals(root) || "output".equals(root))) {
-                if (currentActionId != null && currentActionId.equals(root) && !availableActions.contains(root)
-                        && !context.contains(referencePath)) {
+                if (currentActionId != null && currentActionId.equals(root) && !availableActions.contains(root)) {
                     throw unavailableActionContext(path, root, availableActions);
                 }
                 try {

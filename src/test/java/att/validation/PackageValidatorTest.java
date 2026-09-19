@@ -218,6 +218,36 @@ class PackageValidatorTest {
         assertFalse(diagnostics.get(0).message().contains("${EXEC.INPUT.customerId}"));
     }
 
+    @Test void caseBoundRootlessWarningUsesUniqueCanonicalReplacement() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        Map<String, Object> response = Collections.<String, Object>singletonMap("resultCode", "SUCCESS");
+        Map<String, Object> data = Collections.<String, Object>singletonMap("payment",
+                Collections.<String, Object>singletonMap("response", response));
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                data, Collections.singletonMap("invoke", new att.core.StageCaseData("invoke", "T", Collections.<String, Object>emptyMap())), null);
+        att.core.StageCaseData stage = testCase.stages().get("invoke");
+        att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, tempDir,
+                "VALIDATE", tempDir, tempDir.resolve("case.log"));
+        context.beginStage(stage, "T", tempDir);
+        assertEquals("EXEC.INPUT.payment.response.resultCode", context.uniqueCanonicalPath("resultCode"));
+        StageTemplate template = new StageTemplate("T", tempDir,
+                Collections.singletonList(new TemplateAction("show", map("type", "log", "message", "${resultCode}"))));
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod(
+                "addCaseContextMigrationWarnings", List.class, StageTemplate.class, att.core.TestCase.class,
+                att.core.StageCaseData.class, FrameworkConfig.class, Path.class, Set.class);
+        method.setAccessible(true);
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        method.invoke(validator, diagnostics, template, testCase, stage, config,
+                tempDir.resolve("payment.xlsx"), new LinkedHashSet<String>());
+        assertEquals(1, diagnostics.size());
+        assertTrue(diagnostics.get(0).message().contains(
+                "Canonical replacement: ${EXEC.INPUT.payment.response.resultCode}"));
+        assertTrue(diagnostics.get(0).suggestion().contains(
+                "${EXEC.INPUT.payment.response.resultCode}"));
+    }
+
     @Test void validatorAcceptsMissingOptionalContextButRejectsMalformedOptionalPath() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
                 Collections.<String,ToolConfig>emptyMap(), null, null);
@@ -482,6 +512,49 @@ class PackageValidatorTest {
             assertNotNull(error, reference);
             assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code(), reference);
         }
+    }
+
+    @Test void toolValidationUsesPrePublicationScopeForAssertEvidenceAndPostPublicationScopeForExpected() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "TOOL", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+
+        TemplateAction currentAssert = new TemplateAction("invoke", map("type", "tool", "call", "#{upper('ok')}",
+                "assert", "#{${invoke.output.result?} is not null}"), "att-template/v3.0");
+        StageTemplate assertTemplate = new StageTemplate("TOOL", tempDir,
+                Collections.singletonList(currentAssert), "att-template/v3.0");
+        java.lang.reflect.InvocationTargetException staticAssert = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, assertTemplate, config));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(staticAssert.getCause()).code());
+        java.lang.reflect.InvocationTargetException caseAssert = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, assertTemplate, testCase, stage, config));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(caseAssert.getCause()).code());
+
+        TemplateAction currentEvidence = new TemplateAction("invoke", map("type", "tool", "call", "#{upper('ok')}",
+                "evidence", map("check", map("call", "#{upper(${EXEC.ACTIONS.invoke.output.result})}"))), "att-template/v3.0");
+        StageTemplate evidenceTemplate = new StageTemplate("TOOL", tempDir,
+                Collections.singletonList(currentEvidence), "att-template/v3.0");
+        java.lang.reflect.InvocationTargetException staticEvidence = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, evidenceTemplate, config));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(staticEvidence.getCause()).code());
+        java.lang.reflect.InvocationTargetException caseEvidence = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, evidenceTemplate, testCase, stage, config));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(caseEvidence.getCause()).code());
+
+        TemplateAction currentExpected = new TemplateAction("invoke", map("type", "tool", "call", "#{upper('ok')}",
+                "expected", "${invoke.output.result?}"), "att-template/v3.0");
+        assertDoesNotThrow(() -> contract.invoke(validator, new StageTemplate("TOOL", tempDir,
+                Collections.singletonList(currentExpected), "att-template/v3.0"), config));
+        assertDoesNotThrow(() -> values.invoke(validator, new StageTemplate("TOOL", tempDir,
+                Collections.singletonList(currentExpected), "att-template/v3.0"), testCase, stage, config));
     }
 
     @Test void caseBoundValidationUsesTheRuntimeUniqueSuffixResolver() throws Exception {
