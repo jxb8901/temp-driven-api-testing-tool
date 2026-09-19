@@ -175,7 +175,7 @@ class PackageValidatorTest {
         ToolConfig legacy = new ToolConfig("legacy", "Legacy", "Legacy", "echo ${customerId}", "txt", arguments);
         ToolConfig canonical = new ToolConfig("canonical", "Canonical", "Canonical", "echo ${input.customerId}", "txt", arguments);
         ToolConfig call = new ToolConfig("call", "call", "", "Call", "Call",
-                Collections.<String>emptyList(), "#{upper(${customerId})}", "",
+                Collections.<String>emptyList(), "#{upper(${TOOL.input.customerId})}", "",
                 Collections.<String>emptyList(), "", arguments, null, null);
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
         tools.put(legacy.key(), legacy); tools.put(canonical.key(), canonical); tools.put(call.key(), call);
@@ -187,15 +187,20 @@ class PackageValidatorTest {
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
         method.invoke(validator, diagnostics, tools);
         assertEquals(2, diagnostics.size());
+        boolean sawBare = false;
+        boolean sawToolAlias = false;
         for (Diagnostic diagnostic : diagnostics) {
             assertEquals(DiagnosticCodes.CONTEXT_TOOL_INPUT_SHORTHAND, diagnostic.code());
             assertEquals(Diagnostic.Severity.WARNING, diagnostic.severity());
-            assertTrue(diagnostic.message().contains("${customerId}"));
             assertTrue(diagnostic.message().contains("${input.customerId}"));
+            sawBare |= diagnostic.message().contains("${customerId}");
+            sawToolAlias |= diagnostic.message().contains("${TOOL.input.customerId}");
         }
+        assertTrue(sawBare);
+        assertTrue(sawToolAlias);
     }
 
-    @Test void warnsForRootlessTemplateShorthandWithCanonicalSuggestion() throws Exception {
+    @Test void warnsForRootlessTemplateShorthandWithoutGuessingInputReplacement() throws Exception {
         PackageValidator validator = new PackageValidator(tempDir,
                 new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
                         Collections.<String, ToolConfig>emptyMap(), null, null));
@@ -209,7 +214,8 @@ class PackageValidatorTest {
         assertEquals(1, diagnostics.size());
         assertEquals(DiagnosticCodes.CONTEXT_LEGACY_PATH, diagnostics.get(0).code());
         assertEquals(Diagnostic.Severity.WARNING, diagnostics.get(0).severity());
-        assertTrue(diagnostics.get(0).message().contains("${EXEC.INPUT.customerId}"));
+        assertTrue(diagnostics.get(0).message().contains("cannot prove one unique canonical replacement"));
+        assertFalse(diagnostics.get(0).message().contains("${EXEC.INPUT.customerId}"));
     }
 
     @Test void validatorAcceptsMissingOptionalContextButRejectsMalformedOptionalPath() throws Exception {
@@ -421,6 +427,63 @@ class PackageValidatorTest {
         }
     }
 
+    @Test void rejectsCanonicalAndLegacyFlowEvidenceTraversalIncludingOptionalReferences() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "PAYMENT", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+
+        for (String reference : Arrays.asList(
+                "${EXEC.ACTIONS.check1.flow.actions.prepare.output.result}",
+                "${ACTIONS.check1.flow.actions.prepare.output.result}",
+                "${EXEC.ACTIONS.check1.flow.actions.prepare?}")) {
+            StageTemplate template = new StageTemplate("FLOW", tempDir, Arrays.asList(
+                    new TemplateAction("check1", map("type", "log", "message", "done")),
+                    new TemplateAction("read", map("type", "log", "message", reference))), "att-template/v3.0");
+            java.lang.reflect.InvocationTargetException staticError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> contract.invoke(validator, template, config), reference);
+            DiagnosticException staticDiagnostic = DiagnosticException.find(staticError.getCause());
+            assertNotNull(staticDiagnostic, reference);
+            assertEquals(DiagnosticCodes.CONTEXT_CROSS_SCOPE, staticDiagnostic.code(), reference);
+
+            java.lang.reflect.InvocationTargetException caseError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> values.invoke(validator, template, testCase, stage, config), reference);
+            DiagnosticException caseDiagnostic = DiagnosticException.find(caseError.getCause());
+            assertNotNull(caseDiagnostic, reference);
+            assertEquals(DiagnosticCodes.CONTEXT_CROSS_SCOPE, caseDiagnostic.code(), reference);
+        }
+
+        StageTemplate valid = new StageTemplate("FLOW", tempDir, Arrays.asList(
+                new TemplateAction("check1", map("type", "log", "message", "done")),
+                new TemplateAction("read", map("type", "log", "message", "${EXEC.ACTIONS.check1.output.status}"))), "att-template/v3.0");
+        assertDoesNotThrow(() -> contract.invoke(validator, valid, config));
+        assertDoesNotThrow(() -> values.invoke(validator, valid, testCase, stage, config));
+    }
+
+    @Test void staticValidationRejectsCanonicalTyposEvenForUnreferencedTemplates() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        for (String reference : Arrays.asList("${EXEC.INPT.customerId}", "${EXEC.STAGES.PAYMENT.foo}", "${META.TARGETT.id}")) {
+            StageTemplate template = new StageTemplate("UNREFERENCED", tempDir,
+                    Collections.singletonList(new TemplateAction("show", map("type", "log", "message", reference))));
+            java.lang.reflect.InvocationTargetException thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> contract.invoke(validator, template, config), reference);
+            DiagnosticException error = DiagnosticException.find(thrown.getCause());
+            assertNotNull(error, reference);
+            assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code(), reference);
+        }
+    }
+
     @Test void caseBoundValidationUsesTheRuntimeUniqueSuffixResolver() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
                 Collections.<String,ToolConfig>emptyMap(),null,null);
@@ -597,6 +660,35 @@ class PackageValidatorTest {
 
         assertDoesNotThrow(() -> { try {
             values.invoke(validator, template, testCase, stage, config, tempDir.resolve("payment.xlsx"), assigned);
+        } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
+    @Test void validateFlowRootlessActionShorthandUsesTheFlowLocalScope() throws Exception {
+        Path flowDirectory = tempDir.resolve("flows/rootless");
+        Files.createDirectories(flowDirectory);
+        Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.0\n"
+                + "id: common.rootless.v1\nname: Rootless\ndescription: Rootless\n"
+                + "actions:\n  prepare: {type: log, message: ready}\n"
+                + "  consume: {type: log, message: '${prepare.output.result}'}\n").getBytes("UTF-8"));
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Field registryField = PackageValidator.class.getDeclaredField("flows");
+        registryField.setAccessible(true);
+        registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir));
+
+        TemplateAction call = new TemplateAction("callRootless", map("type", "flow", "use", "common.rootless.v1"),
+                "att-template/v3.0");
+        StageTemplate template = new StageTemplate("ROOTLESS", tempDir, Collections.singletonList(call), "att-template/v3.0");
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "ROOTLESS", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+        assertDoesNotThrow(() -> { try {
+            values.invoke(validator, template, testCase, stage, config, tempDir.resolve("payment.xlsx"), new LinkedHashSet<String>());
         } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
         catch (Exception e) { throw new RuntimeException(e); } });
     }

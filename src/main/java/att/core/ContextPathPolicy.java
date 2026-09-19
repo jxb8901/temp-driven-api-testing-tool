@@ -64,10 +64,19 @@ public final class ContextPathPolicy {
         if (field == null) return false;
         return "ID".equals(field) || "MODE".equals(field) || "STARTED_AT".equals(field)
                 || "OUTPUT_DIR".equals(field) || "INPUT".equals(field) || "VARS".equals(field)
-                || "ACTIONS".equals(field) || "STATUS".equals(field)
-                || "DURATION_MS".equals(field) || "ERROR".equals(field)
-                || "ERROR_DIAGNOSTIC".equals(field) || "ENVIRONMENT".equals(field)
-                || "DEBUG_INPUT".equals(field);
+                || "ACTIONS".equals(field);
+    }
+
+    /** Returns whether the first child below EXEC is part of the public 3.4.2 tree. */
+    public static boolean isCanonicalExecField(String field) {
+        return isFrameworkOwnedExecField(field);
+    }
+
+    /** Returns whether the first child below META is part of the curated public tree. */
+    public static boolean isCanonicalMetaField(String field) {
+        return "PROJECT".equals(field) || "SOURCE".equals(field) || "TARGET".equals(field)
+                || "TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
+                || "DBHELPER".equals(field) || "MQHELPER".equals(field);
     }
 
     public static Scope classify(String path) {

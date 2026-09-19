@@ -967,7 +967,7 @@ tools:
       status: {name: Status, description: New status, required: true}
 ```
 
-The definition reads typed values through `${input.<argument>}` or `${TOOL.input.<argument>}`. Bare input paths are rejected. `CASE`, `RUN`, `ACTIONS`, `DB`, and configured Tool chaining are not available. Case data must enter through the outer Tool call. Pure built-ins are allowed inside the definition, for example `params=[${input.customerId}, #{upper(${input.status})}]`.
+The definition reads typed values through canonical `${input.<argument>}`. `${TOOL.input.<argument>}` remains a legacy compatible alias and emits `CONTEXT_TOOL_INPUT_SHORTHAND`; bare input paths are rejected. `CASE`, `RUN`, `ACTIONS`, `DB`, and configured Tool chaining are not available. Case data must enter through the outer Tool call. Pure built-ins are allowed inside the definition, for example `params=[${input.customerId}, #{upper(${input.status})}]`.
 
 The `call` value must be one exact `#{...}` expression targeting `db.<instance>.query`, `scalar`, `update`, or one pure built-in. A call-backed Tool cannot configure `output`, SSH, group `script`, or argument `argName|argNameMode`; those fields describe process execution and are rejected rather than ignored.
 
@@ -1154,7 +1154,7 @@ arguments:
 
 With `reference='REF 123'`, the final portion of logical argv is `--reference`, `REF 123`; the value remains one atomic argument. If the optional value is missing or normalizes to blank, neither token is emitted. Omitting `argName` or setting `argName: ''` makes the argument positional: an exact-token placeholder emits only its value, or emits no argv when the optional value is blank. An embedded placeholder such as `--reference=${reference}` remains one ordinary rendered token and cannot receive a List. For typed List values, `argNameMode` controls whether the name is emitted `once` (the default) before the complete list or `repeat` before every value; it has no output effect for positional arguments.
 
-Prefer the canonical declared-argument placeholder `${input.keywords}`. `${TOOL.input.keywords}` remains supported as an explicit alias. The shorthand `${keywords}` is compatibility-only, must exactly match one declared argument, and produces `CONTEXT_TOOL_INPUT_SHORTHAND`. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
+Prefer the canonical declared-argument placeholder `${input.keywords}`. `${TOOL.input.keywords}` remains a legacy compatible alias and `${keywords}` remains deprecated shorthand; both must exactly match one declared argument and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Tools write their raw result to stdout and diagnostics to stderr; ATT records input/stdout/stderr in the case log.
 
 Global tool commands may reference only their declared arguments. They cannot reference `${EXEC.INPUT...}`, `${EXEC.ACTIONS...}`, or other runtime Context scopes. Pass runtime data explicitly in the action call, then reference that declared argument in the command. This keeps the global tool independent and its dependencies statically validateable.
 
@@ -1181,7 +1181,7 @@ Available command placeholders are:
 | Placeholder | Meaning |
 |---|---|
 | `${input.argument}` | Canonical Tool-local reference to a declared argument key |
-| `${TOOL.input.argument}` | Supported explicit alias for the same declared argument |
+| `${TOOL.input.argument}` | Legacy compatible alias; `att validate` emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
 | `${argument}` | Deprecated compatibility shorthand; warning when it uniquely matches a declared argument |
 
 The shorthand is intentionally narrow: `${argument}` is accepted only when the
@@ -2175,7 +2175,7 @@ The following aliases are required for existing packages. New authoring should u
 | `${ACTIONS}` | `${EXEC.ACTIONS}` |
 | `${RUN.id}` / `${RUN.runId}` | `${EXEC.ID}` |
 | `${CASE.outputDirectory}` | `${EXEC.OUTPUT_DIR}` |
-| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | `${EXEC.STATUS}` / `${EXEC.DURATION_MS}` / `${EXEC.ENVIRONMENT}` |
+| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | Legacy lifecycle/result aliases; there is no corresponding canonical `EXEC` field |
 | `${CASE.STAGES.<stage>...}` | Legacy execution/evidence data only; direct expression use is rejected with `CONTEXT_CROSS_SCOPE` |
 | `${output.*}` | current Action-local `output.*` |
 
@@ -2281,13 +2281,13 @@ A pattern such as `${suiteName}-${runId}.xlsx` is rejected; unknown references a
 
 #### Context and legal forms
 
-A configured Tool `command` also has its own restricted Context. It may reference only keys declared by that Tool's `arguments` map. The canonical placeholder is `${input.argument}`; `${TOOL.input.argument}` is an explicit alias, while the exact `${argument}` spelling is deprecated compatibility shorthand and produces a migration warning when it uniquely matches a declared key:
+A configured Tool `command` also has its own restricted Context. It may reference only keys declared by that Tool's `arguments` map. The canonical placeholder is `${input.argument}`. `${TOOL.input.argument}` and the exact `${argument}` spelling remain compatible legacy forms and both produce `CONTEXT_TOOL_INPUT_SHORTHAND` when they uniquely match a declared key:
 
 | Form | Meaning |
 |---|---|
-| `${requestFile}` | Preferred direct argument reference |
+| `${requestFile}` | Legacy shorthand; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
 | `${input.requestFile}` | Explicit Tool-input namespace |
-| `${TOOL.input.requestFile}` | Supported full alias for the same Tool input |
+| `${TOOL.input.requestFile}` | Legacy full alias; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
 
 For example:
 
@@ -2320,7 +2320,7 @@ callApi:
   call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}"
 ```
 
-The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestFile` and `environment`. The command then substitutes `${input.requestFile}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestFile}` / `${environment}` spelling remains compatible only when each name is declared and emits `CONTEXT_TOOL_INPUT_SHORTHAND`. `${TOOL.input.*}` is also accepted as an explicit alias.
+The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestFile` and `environment`. The command then substitutes `${input.requestFile}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestFile}` / `${environment}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
 
 Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
 
@@ -2331,7 +2331,7 @@ command:
   - "--label=#{concat('ATT-', #{lower(${input.requestFile})})}"
 ```
 
-Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestFile}` and `${TOOL.input.requestFile}` are canonical/explicit forms; `${requestFile}` is the deprecated declared-argument shorthand. Bare `requestFile` or `input.requestFile` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
+Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestFile}` is canonical; `${TOOL.input.requestFile}` and `${requestFile}` are deprecated compatible forms and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Bare `requestFile` or `input.requestFile` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
 
 A normal argument placeholder may occupy a complete argv token, which is preferred, or be embedded in fixed text:
 

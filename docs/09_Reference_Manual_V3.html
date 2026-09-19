@@ -1666,13 +1666,14 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb45-1"><a href=
 <span id="cb45-39"><a href="#cb45-39" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
 <span id="cb45-40"><a href="#cb45-40" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">orderId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Order ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Order to update</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
 <span id="cb45-41"><a href="#cb45-41" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> New status</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
-<p>The definition reads typed values through
-<code>${input.&lt;argument&gt;}</code> or
-<code>${TOOL.input.&lt;argument&gt;}</code>. Bare input paths are
-rejected. <code>CASE</code>, <code>RUN</code>, <code>ACTIONS</code>,
-<code>DB</code>, and configured Tool chaining are not available. Case
-data must enter through the outer Tool call. Pure built-ins are allowed
-inside the definition, for example
+<p>The definition reads typed values through canonical
+<code>${input.&lt;argument&gt;}</code>.
+<code>${TOOL.input.&lt;argument&gt;}</code> remains a legacy compatible
+alias and emits <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>; bare input
+paths are rejected. <code>CASE</code>, <code>RUN</code>,
+<code>ACTIONS</code>, <code>DB</code>, and configured Tool chaining are
+not available. Case data must enter through the outer Tool call. Pure
+built-ins are allowed inside the definition, for example
 <code>params=[${input.customerId}, #{upper(${input.status})}]</code>.</p>
 <p>The <code>call</code> value must be one exact <code>#{...}</code>
 expression targeting <code>db.&lt;instance&gt;.query</code>,
@@ -1998,12 +1999,11 @@ rendered token and cannot receive a List. For typed List values,
 positional arguments.</p>
 <p>Prefer the canonical declared-argument placeholder
 <code>${input.keywords}</code>. <code>${TOOL.input.keywords}</code>
-remains supported as an explicit alias. The shorthand
-<code>${keywords}</code> is compatibility-only, must exactly match one
-declared argument, and produces
-<code>CONTEXT_TOOL_INPUT_SHORTHAND</code>. Tools write their raw result
-to stdout and diagnostics to stderr; ATT records input/stdout/stderr in
-the case log.</p>
+remains a legacy compatible alias and <code>${keywords}</code> remains
+deprecated shorthand; both must exactly match one declared argument and
+produce <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>. Tools write their raw
+result to stdout and diagnostics to stderr; ATT records
+input/stdout/stderr in the case log.</p>
 <p>Global tool commands may reference only their declared arguments.
 They cannot reference <code>${EXEC.INPUT...}</code>,
 <code>${EXEC.ACTIONS...}</code>, or other runtime Context scopes. Pass
@@ -2062,7 +2062,8 @@ status</h4>
 </tr>
 <tr class="even">
 <td><code>${TOOL.input.argument}</code></td>
-<td>Supported explicit alias for the same declared argument</td>
+<td>Legacy compatible alias; <code>att validate</code> emits
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code></td>
 </tr>
 <tr class="odd">
 <td><code>${argument}</code></td>
@@ -4454,8 +4455,8 @@ forms belong in migration or compatibility material only:</p>
 <tr class="odd">
 <td><code>${CASE.status}</code> / <code>${CASE.durationMs}</code> /
 <code>${CASE.environment}</code></td>
-<td><code>${EXEC.STATUS}</code> / <code>${EXEC.DURATION_MS}</code> /
-<code>${EXEC.ENVIRONMENT}</code></td>
+<td>Legacy lifecycle/result aliases; there is no corresponding canonical
+<code>EXEC</code> field</td>
 </tr>
 <tr class="even">
 <td><code>${CASE.STAGES.&lt;stage&gt;...}</code></td>
@@ -4693,10 +4694,10 @@ built-ins, random values, path separators, absolute paths,
 <p>A configured Tool <code>command</code> also has its own restricted
 Context. It may reference only keys declared by that Tool’s
 <code>arguments</code> map. The canonical placeholder is
-<code>${input.argument}</code>; <code>${TOOL.input.argument}</code> is
-an explicit alias, while the exact <code>${argument}</code> spelling is
-deprecated compatibility shorthand and produces a migration warning when
-it uniquely matches a declared key:</p>
+<code>${input.argument}</code>. <code>${TOOL.input.argument}</code> and
+the exact <code>${argument}</code> spelling remain compatible legacy
+forms and both produce <code>CONTEXT_TOOL_INPUT_SHORTHAND</code> when
+they uniquely match a declared key:</p>
 <table>
 <colgroup>
 <col style="width: 50%" />
@@ -4711,7 +4712,8 @@ it uniquely matches a declared key:</p>
 <tbody>
 <tr class="odd">
 <td><code>${requestFile}</code></td>
-<td>Preferred direct argument reference</td>
+<td>Legacy shorthand; emits
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code></td>
 </tr>
 <tr class="even">
 <td><code>${input.requestFile}</code></td>
@@ -4719,7 +4721,8 @@ it uniquely matches a declared key:</p>
 </tr>
 <tr class="odd">
 <td><code>${TOOL.input.requestFile}</code></td>
-<td>Supported full alias for the same Tool input</td>
+<td>Legacy full alias; emits
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code></td>
 </tr>
 </tbody>
 </table>
@@ -4756,9 +4759,9 @@ then substitutes <code>${input.requestFile}</code> and
 <code>${input.environment}</code> from those inputs;
 <code>${input.environment}</code> does not read global configuration
 directly. The legacy <code>${requestFile}</code> /
-<code>${environment}</code> spelling remains compatible only when each
-name is declared and emits <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>.
-<code>${TOOL.input.*}</code> is also accepted as an explicit alias.</p>
+<code>${environment}</code> spelling and <code>${TOOL.input.*}</code>
+remain compatible only when each name is declared and emit
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code>.</p>
 <p>Each command token also accepts built-in calls through the same
 expression engine. Built-ins see only the declared Tool-input aliases
 shown above, and calls may be nested:</p>
@@ -4768,11 +4771,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb104-1"><a href
 <span id="cb104-3"><a href="#cb104-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--environment=#{upper(${input.environment})}&quot;</span></span>
 <span id="cb104-4"><a href="#cb104-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--label=#{concat(&#39;ATT-&#39;, #{lower(${input.requestFile})})}&quot;</span></span></code></pre></div>
 <p>Inside a command-side built-in call, declared inputs must also use
-placeholders: <code>${input.requestFile}</code> and
-<code>${TOOL.input.requestFile}</code> are canonical/explicit forms;
-<code>${requestFile}</code> is the deprecated declared-argument
-shorthand. Bare <code>requestFile</code> or
-<code>input.requestFile</code> is not inferred. Outside
+placeholders: <code>${input.requestFile}</code> is canonical;
+<code>${TOOL.input.requestFile}</code> and <code>${requestFile}</code>
+are deprecated compatible forms and produce
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code>. Bare <code>requestFile</code>
+or <code>input.requestFile</code> is not inferred. Outside
 <code>#{...}</code>, command text continues to use the same Tool-local
 rule.</p>
 <p>A normal argument placeholder may occupy a complete argv token, which

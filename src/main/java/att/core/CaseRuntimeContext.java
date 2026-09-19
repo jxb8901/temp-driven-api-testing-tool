@@ -26,6 +26,8 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> metaNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
+    /** Execution result/lifecycle state; deliberately not part of public EXEC. */
+    private final Map<String, Object> lifecycleNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> runNode = new LinkedHashMap<String, Object>();
     /** Current Stage's published Action results; history is retained below CASE.STAGES. */
     private final Map<String, Object> actionsView = new LinkedHashMap<String, Object>();
@@ -69,7 +71,7 @@ public final class CaseRuntimeContext {
         execNode.put("INPUT", inputNode);
         execNode.put("VARS", varsNode);
         execNode.put("ACTIONS", actionsView);
-        execNode.put("STATUS", "RUNNING");
+        lifecycleNode.put("status", "RUNNING");
 
         inputNode.putAll(testCase.caseData());
 
@@ -413,6 +415,10 @@ public final class CaseRuntimeContext {
         if (!internal && ContextPathPolicy.isFrameworkOwnedExecField(first)) {
             throw new IllegalArgumentException("Framework-owned EXEC field cannot be overwritten: EXEC." + first);
         }
+        if (!ContextPathPolicy.isCanonicalExecField(first)) {
+            throw new IllegalArgumentException("Unknown EXEC field: EXEC." + first
+                    + "; 3.4.2 exposes only ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, and ACTIONS");
+        }
         if ("INPUT".equals(first)) putPath(inputNode, suffix(path, first), value);
         else if ("VARS".equals(first)) putPath(varsNode, suffix(path, first), value);
         else if ("ACTIONS".equals(first)) putPath(actionsView, suffix(path, first), value);
@@ -439,7 +445,7 @@ public final class CaseRuntimeContext {
         } else if ("status".equals(path) || "durationMs".equals(path) || "error".equals(path)
                 || "errorDiagnostic".equals(path) || "environment".equals(path) || "debugInput".equals(path)) {
             if ("status".equals(path)) statusPublished = true;
-            putExecutionPath(legacyExecutionField(path), value, true);
+            lifecycleNode.put(path, value);
         } else {
             // Legacy business-field writes are retained for existing adapters.
             // They update the canonical input map, but cannot replace any
@@ -452,14 +458,6 @@ public final class CaseRuntimeContext {
         if ("id".equals(path) || "runId".equals(path))
             throw new IllegalArgumentException("Framework-owned RUN identity cannot be overwritten");
         putPath(runNode, path, value);
-    }
-
-    private String legacyExecutionField(String path) {
-        if ("environment".equals(path)) return "ENVIRONMENT";
-        if ("debugInput".equals(path)) return "DEBUG_INPUT";
-        if ("durationMs".equals(path)) return "DURATION_MS";
-        if ("errorDiagnostic".equals(path)) return "ERROR_DIAGNOSTIC";
-        return path.toUpperCase(java.util.Locale.ROOT);
     }
 
     private static String firstSegment(String path) {
@@ -488,14 +486,14 @@ public final class CaseRuntimeContext {
         result.putAll(caseNode);
         if (!includeStageHistory) result.remove("STAGES");
         result.put("status", statusPublished || !inputNode.containsKey("status")
-                ? execNode.get("STATUS") : inputNode.get("status"));
+                ? lifecycleNode.get("status") : inputNode.get("status"));
         result.put("startedAt", execNode.get("STARTED_AT"));
         result.put("outputDirectory", execNode.get("OUTPUT_DIR"));
-        result.put("durationMs", execNode.get("DURATION_MS"));
-        if (execNode.containsKey("ENVIRONMENT")) result.put("environment", execNode.get("ENVIRONMENT"));
-        if (execNode.containsKey("DEBUG_INPUT")) result.put("debugInput", execNode.get("DEBUG_INPUT"));
-        if (execNode.containsKey("ERROR")) result.put("error", execNode.get("ERROR"));
-        if (execNode.containsKey("ERROR_DIAGNOSTIC")) result.put("errorDiagnostic", execNode.get("ERROR_DIAGNOSTIC"));
+        result.put("durationMs", lifecycleNode.get("durationMs"));
+        if (lifecycleNode.containsKey("environment")) result.put("environment", lifecycleNode.get("environment"));
+        if (lifecycleNode.containsKey("debugInput")) result.put("debugInput", lifecycleNode.get("debugInput"));
+        if (lifecycleNode.containsKey("error")) result.put("error", lifecycleNode.get("error"));
+        if (lifecycleNode.containsKey("errorDiagnostic")) result.put("errorDiagnostic", lifecycleNode.get("errorDiagnostic"));
         result.put("VARS", varsNode);
         result.put("DB", caseDbNode);
         if (includeStageHistory) result.put("STAGES", stagesNode);

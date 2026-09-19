@@ -148,6 +148,11 @@ not an expression namespace. `EXEC.ACTIONS` is the current Action scope and is
 cleared when the next Stage starts; the legacy `ACTIONS.*` alias is only the
 compatibility spelling for that same current scope.
 
+Lifecycle/result fields such as status, duration, error, diagnostic,
+environment, and debug input remain in the execution result and legacy Case
+adapter. They are not promoted to new `EXEC` fields; the public `EXEC` tree
+stays limited to the seven nodes shown above.
+
 | Root | Meaning |
 |---|---|
 | `EXEC.*` | Canonical execution identity, input, variables, and completed Actions |
@@ -257,6 +262,7 @@ Earlier isolated V3 Flow packages must be migrated:
 - replace CASE business aliases, `CASE.VARS`, `ACTIONS`, `RUN`, and `CASE.outputDirectory` with their canonical paths. `att validate` reports these as `CONTEXT_LEGACY_PATH` warnings with exact replacements;
 - remove direct `CASE.STAGES` expression reads and cross-scope `EXEC.ACTIONS` reads. These are errors (`CONTEXT_CROSS_SCOPE`) because Stage/Flow history is evidence, not reusable input;
 - replace Tool-local `${argument}` shorthand with `${input.argument}`. The shorthand remains compatible only for a uniquely declared Tool argument and produces `CONTEXT_TOOL_INPUT_SHORTHAND`.
+- treat rootless `${...}` references as deprecated convenience syntax. `att validate` supplies an exact replacement only when the current scope proves one unique canonical path; otherwise it emits a warning without guessing `EXEC.INPUT`.
 
 This is intentionally a breaking reinterpretation of `att-flow/v3.0` and `att-template/v3.0`. No compatibility mode is provided. Non-Flow V2 Templates remain compatible.
 

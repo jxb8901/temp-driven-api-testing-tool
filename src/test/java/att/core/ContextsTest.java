@@ -319,6 +319,12 @@ class ContextsTest {
         assertNull(context.resolve("META.TEMPLATE.missing"));
         assertNull(context.resolve("EXEC.STAGES.invoke.channel"));
         assertFalse(context.executionTree().containsKey("STAGES"));
+        assertFalse(context.executionTree().containsKey("STATUS"));
+        assertFalse(context.executionTree().containsKey("DURATION_MS"));
+        assertFalse(context.executionTree().containsKey("ERROR"));
+        assertFalse(context.executionTree().containsKey("ERROR_DIAGNOSTIC"));
+        assertFalse(context.executionTree().containsKey("ENVIRONMENT"));
+        assertFalse(context.executionTree().containsKey("DEBUG_INPUT"));
         assertFalse(String.valueOf(context.metadataTree()).contains("secretToken"));
         assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.ID", "EVIL"));
         assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.STATUS", "PASS"));
@@ -326,10 +332,14 @@ class ContextsTest {
         assertThrows(IllegalArgumentException.class, () -> context.put("EXEC.STAGE.invoke", "EVIL"));
 
         context.finishStage("PASS", 1L);
+        context.put("CASE.durationMs", 1L);
+        context.put("CASE.environment", "SIT");
         assertEquals("CASE", context.resolve("EXEC.INPUT.channel"));
         assertNull(context.resolve("EXEC.INPUT.stageOnly"));
         assertNull(context.resolve("CASE.STAGES.invoke.channel"));
         assertEquals("STAGE", CaseRuntimeContext.getPath(context.caseTree(), "STAGES.invoke.channel"));
+        assertEquals(Long.valueOf(1L), context.caseTree().get("durationMs"));
+        assertEquals("SIT", context.caseTree().get("environment"));
 
         context.assignCaseVariable("txnId", "TX-1");
         assertSame(context.resolve("EXEC.VARS"), context.resolve("CASE.VARS"));

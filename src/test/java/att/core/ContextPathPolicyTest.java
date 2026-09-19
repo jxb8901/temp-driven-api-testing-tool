@@ -30,6 +30,10 @@ class ContextPathPolicyTest {
         assertTrue(ContextPathPolicy.isRuntimeDependent("EXEC.ACTIONS.call.output.result"));
         assertTrue(ContextPathPolicy.isRuntimeDependent("CASE.STAGES.invoke.status"));
         assertTrue(ContextPathPolicy.isFrameworkOwnedExecField("INPUT"));
+        assertTrue(ContextPathPolicy.isCanonicalExecField("ACTIONS"));
+        assertTrue(ContextPathPolicy.isCanonicalMetaField("TARGET"));
+        org.junit.jupiter.api.Assertions.assertFalse(ContextPathPolicy.isCanonicalExecField("STATUS"));
+        org.junit.jupiter.api.Assertions.assertFalse(ContextPathPolicy.isCanonicalMetaField("TARGETT"));
         assertTrue(ContextPathPolicy.isUnsupportedStagePath("STAGES.invoke"));
         assertTrue(ContextPathPolicy.isCanonicalRoot("EXEC"));
         assertTrue(ContextPathPolicy.isCanonicalRoot("META"));

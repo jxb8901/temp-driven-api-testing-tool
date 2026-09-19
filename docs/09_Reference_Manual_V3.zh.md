@@ -934,7 +934,7 @@ tools:
       status: {name: Status, description: 新状态, required: true}
 ```
 
-Tool 定义必须通过 `${input.<argument>}` 或 `${TOOL.input.<argument>}` 读取 typed 参数；裸 `input.*`／`TOOL.input.*` 会被拒绝。定义内不能读取 `CASE`、`RUN`、`ACTIONS` 或 evidence root，Case 数据必须从外层调用传入。允许 pure built-in，例如 `params=[${input.customerId}, #{upper(${input.status})}]`。不允许调用另一 configured Tool，因此不会形成 Tool dependency cycle。
+Tool 定义应通过 canonical `${input.<argument>}` 读取 typed 参数；`${TOOL.input.<argument>}` 是 legacy 兼容 alias，并产生 `CONTEXT_TOOL_INPUT_SHORTHAND`。裸 `input.*`／`TOOL.input.*` 会被拒绝。定义内不能读取 `CASE`、`RUN`、`ACTIONS` 或 evidence root，Case 数据必须从外层调用传入。允许 pure built-in，例如 `params=[${input.customerId}, #{upper(${input.status})}]`。不允许调用另一 configured Tool，因此不会形成 Tool dependency cycle。
 
 `call` 必须是一个完整 `#{...}`，目标只能是 `db.<instance>.query|scalar|update` 或一个 pure built-in。Call-backed Tool 禁止 `output`、SSH、group `script` 及参数的 `argName|argNameMode`；这些 process-only 字段会报错，不会被静默忽略。
 
@@ -1110,7 +1110,7 @@ arguments:
 
 当 `reference='REF 123'` 时，逻辑 argv 的最后一部分为 `--reference`、`REF 123`；该值仍是一个原子参数。如果可选值缺失或归一化为空白，则这两个 token 都不会输出。省略 `argName` 或将 `argName: ''` 设为空，会使该参数变成位置参数：一个完整 token 占位符只输出其值，或在可选值为空白时输出空。嵌入式占位符如 `--reference=${reference}` 仍然是一个普通渲染 token，不能接收 List。对于 typed List，`argNameMode` 控制名称是 `once`（默认值，出现在整个列表前）还是 `repeat`（每个值前都重复）；对位置参数没有输出影响。
 
-优先使用 canonical 声明参数占位符 `${input.keywords}`。`${TOOL.input.keywords}` 仍然支持作为显式 alias；`${keywords}` 只在唯一对应已声明参数时兼容，并产生 `CONTEXT_TOOL_INPUT_SHORTHAND`。工具会把原始结果写到 stdout，把诊断写到 stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。
+优先使用 canonical 声明参数占位符 `${input.keywords}`。`${TOOL.input.keywords}` 是 legacy 兼容 alias，`${keywords}` 是 deprecated shorthand；两者只在唯一对应已声明参数时兼容，并产生 `CONTEXT_TOOL_INPUT_SHORTHAND`。工具会把原始结果写到 stdout，把诊断写到 stderr；ATT 会在 Case 日志中记录输入/标准输出/标准错误。
 
 全局工具命令只能引用其声明参数，不能引用 `${EXEC.INPUT...}`、`${EXEC.ACTIONS...}` 或其它运行时 Context 作用域。需要把运行时数据显式传递到动作调用中，然后再在命令中引用对应声明参数。这使全局工具保持独立，并使依赖可静态校验。
 
@@ -1136,9 +1136,9 @@ Case 输出工作目录以及两个环境变量规则仅适用于本地工具进
 
 | 占位符 | 含义 |
 |---|---|
-| `${argument}` | 首选直接引用已声明参数键 |
+| `${argument}` | deprecated shorthand；唯一匹配已声明参数时兼容并产生 warning |
 | `${input.argument}` | 显式命名空间引用同一已声明参数 |
-| `${TOOL.input.argument}` | 对同一参数的支持完整别名 |
+| `${TOOL.input.argument}` | legacy 兼容别名；`att validate` 会产生 `CONTEXT_TOOL_INPUT_SHORTHAND` |
 
 ATT 按工具配置的 `output: txt|yaml|json|xml` 解析 stdout，默认 `txt`。V2.6 Tool Action 的 object `saveAs` 可保存精确 raw stdout，或把 typed `${output.result}` 编码为 text/json/yaml/xml；路径写入当前 Case artifact 目录。retry 共用一个渲染后的路径，最终保留最后一次可写 attempt 的内容。不使用 `saveAs` 时，ATT 不创建额外命名 artifact，但输入、argv、stdout、stderr、解析结果、退出码和 retry evidence 仍保存在 Case evidence 中。
 
@@ -1891,7 +1891,7 @@ output
 | `${ACTIONS}` | `${EXEC.ACTIONS}` |
 | `${RUN.id}` / `${RUN.runId}` | `${EXEC.ID}` |
 | `${CASE.outputDirectory}` | `${EXEC.OUTPUT_DIR}` |
-| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | `${EXEC.STATUS}` / `${EXEC.DURATION_MS}` / `${EXEC.ENVIRONMENT}` |
+| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | legacy lifecycle/result alias；没有对应的 canonical `EXEC` 字段 |
 | `${CASE.STAGES.<stage>...}` | 旧 execution/evidence data；runtime expression 读取会以 `CONTEXT_CROSS_SCOPE` 拒绝 |
 | `${output.*}` | 当前 Action-local `output.*` |
 
@@ -1935,10 +1935,10 @@ Tool 的 `command` 也拥有独立的受限上下文，只能引用该工具 `ar
 | 形式 | 含义 |
 |---|---|
 | `${input.requestFile}` | canonical 工具本地输入引用 |
-| `${TOOL.input.requestFile}` | 对同一工具输入的支持完整别名 |
+| `${TOOL.input.requestFile}` | legacy 完整别名；会产生 `CONTEXT_TOOL_INPUT_SHORTHAND` |
 | `${requestFile}` | deprecated shorthand；仅在唯一对应已声明参数时兼容，并产生迁移 warning |
 
-`${argument}` 只有在名称恰好对应当前 Tool 一个已声明参数时才会接受。`att validate` 会以 `CONTEXT_TOOL_INPUT_SHORTHAND` 给出精确的 `${input.argument}` 替换；未声明或有歧义的 shorthand 会报错。command-backed 与 call-backed Tool 使用相同规则。
+`${TOOL.input.argument}` 与 `${argument}` 只有在名称恰好对应当前 Tool 一个已声明参数时才会接受，并产生 `CONTEXT_TOOL_INPUT_SHORTHAND`；`att validate` 会给出精确的 `${input.argument}` 替换。未声明或有歧义的 shorthand 会报错。command-backed 与 call-backed Tool 使用相同规则。
 
 例如：
 

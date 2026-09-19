@@ -1500,8 +1500,9 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb43-1"><a href=
 <span id="cb43-39"><a href="#cb43-39" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
 <span id="cb43-40"><a href="#cb43-40" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">orderId</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Order ID</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 要更新的订单</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
 <span id="cb43-41"><a href="#cb43-41" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">status</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span><span class="kw">,</span><span class="at"> </span><span class="fu">description</span><span class="kw">:</span><span class="at"> 新状态</span><span class="kw">,</span><span class="at"> </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
-<p>Tool 定义必须通过 <code>${input.&lt;argument&gt;}</code> 或
-<code>${TOOL.input.&lt;argument&gt;}</code> 读取 typed 参数；裸
+<p>Tool 定义应通过 canonical <code>${input.&lt;argument&gt;}</code> 读取
+typed 参数；<code>${TOOL.input.&lt;argument&gt;}</code> 是 legacy 兼容
+alias，并产生 <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>。裸
 <code>input.*</code>／<code>TOOL.input.*</code> 会被拒绝。定义内不能读取
 <code>CASE</code>、<code>RUN</code>、<code>ACTIONS</code> 或 evidence
 root，Case 数据必须从外层调用传入。允许 pure built-in，例如
@@ -1768,9 +1769,9 @@ List。对于 typed List，<code>argNameMode</code> 控制名称是
 <code>once</code>（默认值，出现在整个列表前）还是
 <code>repeat</code>（每个值前都重复）；对位置参数没有输出影响。</p>
 <p>优先使用 canonical 声明参数占位符
-<code>${input.keywords}</code>。<code>${TOOL.input.keywords}</code>
-仍然支持作为显式 alias；<code>${keywords}</code>
-只在唯一对应已声明参数时兼容，并产生
+<code>${input.keywords}</code>。<code>${TOOL.input.keywords}</code> 是
+legacy 兼容 alias，<code>${keywords}</code> 是 deprecated
+shorthand；两者只在唯一对应已声明参数时兼容，并产生
 <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>。工具会把原始结果写到
 stdout，把诊断写到 stderr；ATT 会在 Case
 日志中记录输入/标准输出/标准错误。</p>
@@ -1808,6 +1809,10 @@ SSH
 <h4 id="输入输出超时和状态">输入、输出、超时和状态</h4>
 <p>可用命令占位符为：</p>
 <table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
 <thead>
 <tr class="header">
 <th>占位符</th>
@@ -1817,7 +1822,7 @@ SSH
 <tbody>
 <tr class="odd">
 <td><code>${argument}</code></td>
-<td>首选直接引用已声明参数键</td>
+<td>deprecated shorthand；唯一匹配已声明参数时兼容并产生 warning</td>
 </tr>
 <tr class="even">
 <td><code>${input.argument}</code></td>
@@ -1825,7 +1830,8 @@ SSH
 </tr>
 <tr class="odd">
 <td><code>${TOOL.input.argument}</code></td>
-<td>对同一参数的支持完整别名</td>
+<td>legacy 兼容别名；<code>att validate</code> 会产生
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code></td>
 </tr>
 </tbody>
 </table>
@@ -3383,8 +3389,8 @@ canonical/local path；左侧只用于迁移或兼容说明：</p>
 <tr class="odd">
 <td><code>${CASE.status}</code> / <code>${CASE.durationMs}</code> /
 <code>${CASE.environment}</code></td>
-<td><code>${EXEC.STATUS}</code> / <code>${EXEC.DURATION_MS}</code> /
-<code>${EXEC.ENVIRONMENT}</code></td>
+<td>legacy lifecycle/result alias；没有对应的 canonical
+<code>EXEC</code> 字段</td>
 </tr>
 <tr class="even">
 <td><code>${CASE.STAGES.&lt;stage&gt;...}</code></td>
@@ -3486,7 +3492,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb88-1"><a href=
 </tr>
 <tr class="even">
 <td><code>${TOOL.input.requestFile}</code></td>
-<td>对同一工具输入的支持完整别名</td>
+<td>legacy 完整别名；会产生
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code></td>
 </tr>
 <tr class="odd">
 <td><code>${requestFile}</code></td>
@@ -3495,11 +3502,11 @@ warning</td>
 </tr>
 </tbody>
 </table>
-<p><code>${argument}</code> 只有在名称恰好对应当前 Tool
-一个已声明参数时才会接受。<code>att validate</code> 会以
-<code>CONTEXT_TOOL_INPUT_SHORTHAND</code> 给出精确的
-<code>${input.argument}</code> 替换；未声明或有歧义的 shorthand
-会报错。command-backed 与 call-backed Tool 使用相同规则。</p>
+<p><code>${TOOL.input.argument}</code> 与 <code>${argument}</code>
+只有在名称恰好对应当前 Tool 一个已声明参数时才会接受，并产生
+<code>CONTEXT_TOOL_INPUT_SHORTHAND</code>；<code>att validate</code>
+会给出精确的 <code>${input.argument}</code> 替换。未声明或有歧义的
+shorthand 会报错。command-backed 与 call-backed Tool 使用相同规则。</p>
 <p>例如：</p>
 <div class="sourceCode" id="cb89"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb89-1"><a href="#cb89-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>

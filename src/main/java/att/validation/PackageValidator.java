@@ -82,10 +82,10 @@ public final class PackageValidator {
         int cases = 0;
         Set<String> templates = new LinkedHashSet<String>();
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
-        // Tool definitions are loaded before package/template validation.  Keep
-        // the legacy Tool-local placeholder readable, but make its migration
-        // visible even when no TestCase happens to call that Tool.
-        addToolInputShorthandWarnings(diagnostics, global.tools());
+        // Package validation owns the complete Tool catalog.  Selected
+        // validation adds warnings only while walking its dependency closure.
+        // This keeps an unrelated Tool from affecting a selected run.
+        if ("package".equals(options.validationScope())) addToolInputShorthandWarnings(diagnostics, global.tools());
         Map<String, Path> workbookIds = new LinkedHashMap<String, Path>();
         Map<String, CaseLocation> fullCaseIds = new LinkedHashMap<String, CaseLocation>();
         SuiteConfigResolver resolver = new SuiteConfigResolver(projectRoot, global);
@@ -140,7 +140,7 @@ public final class PackageValidator {
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
                             validateTemplate(template, config);
-                            validateReferencedTools(template, config);
+                            validateReferencedTools(template, config, diagnostics);
                         } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, resolved)); }
                     }
                 }
@@ -149,6 +149,7 @@ public final class PackageValidator {
             }
         }
         addWindowsShellExecutableWarning(diagnostics);
+        deduplicateMigrationDiagnostics(diagnostics);
         if (cases == 0) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTION_EMPTY, Diagnostic.Severity.ERROR, "Case selection is empty", null, null, null, null, null, null));
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
@@ -162,9 +163,23 @@ public final class PackageValidator {
     }
 
     private void validateReferencedTools(StageTemplate template, FrameworkConfig config) {
+        validateReferencedTools(template, config, null);
+    }
+
+    private void validateReferencedTools(StageTemplate template, FrameworkConfig config,
+                                         List<Diagnostic> diagnostics) {
+        validateReferencedTools(template, config, diagnostics, new LinkedHashSet<String>());
+    }
+
+    private void validateReferencedTools(StageTemplate template, FrameworkConfig config,
+                                         List<Diagnostic> diagnostics, Set<String> visitedFlows) {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
             String prefix = "actions." + action.id();
+            if (diagnostics != null) {
+                for (String expression : actionExpressions(action))
+                    warnReferencedToolDefinitions(diagnostics, expression, syntaxEngine, config);
+            }
             if ("tool".equalsIgnoreCase(action.type())) {
                 try {
                     validateToolCall(action.call(), config);
@@ -220,12 +235,21 @@ public final class PackageValidator {
             if ("render".equalsIgnoreCase(action.type())) try {
                 for (Path payload : new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload())) {
                     String content = att.template.PayloadCache.readUtf8(payload);
+                    if (diagnostics != null) warnReferencedToolDefinitions(diagnostics, content, syntaxEngine, config);
                     validateReferencedExpression(content, prefix + ".payload", template, action, payload, syntaxEngine, config);
                 }
             } catch (Exception e) {
                 DiagnosticException typed = DiagnosticException.find(e);
                 if (typed != null) throw typed;
                 throw new IllegalArgumentException("Unable to inspect render payload calls for action " + action.id() + ": " + e.getMessage(), e);
+            }
+            if ("flow".equalsIgnoreCase(action.type()) && flows != null && visitedFlows.add(action.use())) {
+                att.flow.FlowDefinition target = flows.get(action.use());
+                if (target != null) {
+                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(),
+                            att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                    validateReferencedTools(body, config, diagnostics, visitedFlows);
+                }
             }
         }
     }
@@ -305,18 +329,23 @@ public final class PackageValidator {
             String replacement = legacyReplacement(path);
             if (replacement == null && isRootlessReference(path)) {
                 replacement = rootlessReplacement(path, template);
+                String legacy = "${" + original + "}";
+                String message = "Rootless Context shorthand: " + legacy;
+                String suggestion;
                 if (replacement != null) {
-                    String legacy = "${" + original + "}";
-                    String message = "Rootless Context shorthand: " + legacy
-                            + "\nCanonical replacement: ${" + replacement + "}"
-                            + "\nThe shorthand remains compatible only when it resolves to one unique current-scope path."
-                            + "\nMigrate new definitions to the canonical path.";
-                    diagnostics.add(new Diagnostic(DiagnosticCodes.CONTEXT_LEGACY_PATH,
-                            Diagnostic.Severity.WARNING, message,
-                            sourceFile == null ? null : sourceFile.toString(), field,
-                            null, null, null, template.name(), action.id(),
-                            "Replace " + legacy + " with ${" + replacement + "}.", null, null, null, null));
+                    message += "\nCanonical replacement: ${" + replacement + "}";
+                    suggestion = "Replace " + legacy + " with ${" + replacement + "}.";
+                } else {
+                    message += "\nThe validator cannot prove one unique canonical replacement from the static template alone.";
+                    suggestion = "Resolve the shorthand against the current scope and replace it with the exact unique EXEC/META path; do not assume EXEC.INPUT.";
                 }
+                message += "\nThe shorthand remains compatible only when it resolves to one unique current-scope path."
+                        + "\nMigrate new definitions to the canonical path.";
+                diagnostics.add(new Diagnostic(DiagnosticCodes.CONTEXT_LEGACY_PATH,
+                        Diagnostic.Severity.WARNING, message,
+                        sourceFile == null ? null : sourceFile.toString(), field,
+                        null, null, null, template.name(), action.id(),
+                        suggestion, null, null, null, null));
                 continue;
             }
             if (replacement == null) continue;
@@ -345,13 +374,12 @@ public final class PackageValidator {
     }
 
     private String rootlessReplacement(String path, StageTemplate template) {
-        String root = att.core.ContextPathPolicy.firstSegment(path);
-        for (TemplateAction action : template.actions()) {
-            if (action.id().equals(root)) return "EXEC.ACTIONS." + path;
-        }
-        if ("caseId".equals(root) || "workbookId".equals(root) || "groupId".equals(root)
-                || "rowCaseId".equals(root)) return "META.SOURCE." + path;
-        return "EXEC.INPUT." + path;
+        // A static Template does not know the Case input columns or the
+        // runtime shape of EXEC.VARS.  An Action/variable name can therefore
+        // still collide with a Case input suffix.  Do not guess a canonical
+        // replacement here; a case-bound resolver may supply an exact path
+        // when it can prove uniqueness.
+        return null;
     }
 
     private String legacyReplacement(String path) {
@@ -463,19 +491,52 @@ public final class PackageValidator {
      */
     private void addToolInputShorthandWarnings(List<Diagnostic> diagnostics,
                                                 Map<String, ToolConfig> tools) {
+        for (ToolConfig tool : tools.values()) addToolInputShorthandWarnings(diagnostics, tool);
+    }
+
+    private void addToolInputShorthandWarnings(List<Diagnostic> diagnostics, ToolConfig tool) {
         java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\$\\{([^}]+)}");
-        for (ToolConfig tool : tools.values()) {
-            if (tool.commandBacked()) {
-                for (int index = 0; index < tool.commandArgv().size(); index++) {
-                    String token = tool.commandArgv().get(index);
-                    addToolInputShorthandWarnings(diagnostics, tool, token,
-                            "tools." + tool.key() + ".command[" + index + "]", placeholder);
-                }
-            } else {
-                addToolInputShorthandWarnings(diagnostics, tool, tool.call(),
-                        "tools." + tool.key() + ".call", placeholder);
+        if (tool.commandBacked()) {
+            for (int index = 0; index < tool.commandArgv().size(); index++) {
+                String token = tool.commandArgv().get(index);
+                addToolInputShorthandWarnings(diagnostics, tool, token,
+                        "tools." + tool.key() + ".command[" + index + "]", placeholder);
             }
+        } else {
+            addToolInputShorthandWarnings(diagnostics, tool, tool.call(),
+                    "tools." + tool.key() + ".call", placeholder);
         }
+    }
+
+    private void warnReferencedToolDefinitions(List<Diagnostic> diagnostics, String text,
+                                                att.template.UnifiedTemplateEngine engine,
+                                                FrameworkConfig config) {
+        if (text == null || text.trim().isEmpty()) return;
+        for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) {
+            ToolConfig tool = config.tool(call.name());
+            if (tool != null) addToolInputShorthandWarnings(diagnostics, tool);
+        }
+    }
+
+    /** Migration warnings describe source definitions, not every Case that uses them. */
+    private void deduplicateMigrationDiagnostics(List<Diagnostic> diagnostics) {
+        Set<String> seen = new LinkedHashSet<String>();
+        List<Diagnostic> unique = new ArrayList<Diagnostic>();
+        for (Diagnostic diagnostic : diagnostics) {
+            if (!DiagnosticCodes.CONTEXT_LEGACY_PATH.equals(diagnostic.code())
+                    && !DiagnosticCodes.CONTEXT_TOOL_INPUT_SHORTHAND.equals(diagnostic.code())) {
+                unique.add(diagnostic);
+                continue;
+            }
+            String message = diagnostic.message() == null ? "" : diagnostic.message();
+            int newline = message.indexOf('\n');
+            String legacyPath = newline < 0 ? message : message.substring(0, newline);
+            String key = diagnostic.code() + "\u0000" + String.valueOf(diagnostic.file()) + "\u0000"
+                    + String.valueOf(diagnostic.field()) + "\u0000" + legacyPath;
+            if (seen.add(key)) unique.add(diagnostic);
+        }
+        diagnostics.clear();
+        diagnostics.addAll(unique);
     }
 
     private void addToolInputShorthandWarnings(List<Diagnostic> diagnostics, ToolConfig tool,
@@ -485,21 +546,23 @@ public final class PackageValidator {
         java.util.regex.Matcher matcher = placeholder.matcher(text);
         while (matcher.find()) {
             String path = matcher.group(1).trim();
-            if (!tool.arguments().containsKey(path)) continue;
-            // ${input.x} and ${TOOL.input.x} are already the explicit form.
-            if (path.startsWith("input.") || path.startsWith("TOOL.input.")) continue;
-            if (!path.matches("[A-Za-z_][A-Za-z0-9_]*")) continue;
+            boolean canonical = path.startsWith("input.");
+            boolean explicitLegacy = path.startsWith("TOOL.input.");
+            String argument = canonical ? path.substring("input.".length())
+                    : explicitLegacy ? path.substring("TOOL.input.".length()) : path;
+            if (!tool.arguments().containsKey(argument)) continue;
+            if (canonical || (!explicitLegacy && !argument.matches("[A-Za-z_][A-Za-z0-9_]*"))) continue;
             String legacy = "${" + path + "}";
-            String canonical = "${input." + path + "}";
+            String canonicalForm = "${input." + argument + "}";
             String message = "Legacy Tool argument reference: " + legacy
-                    + "\nCanonical Tool argument reference: " + canonical
+                    + "\nCanonical Tool argument reference: " + canonicalForm
                     + "\nThe shorthand remains compatible in 3.4.2 when it resolves unambiguously to a declared Tool-local argument."
                     + "\nTool: " + tool.key() + "\nField: " + field;
             diagnostics.add(new Diagnostic(DiagnosticCodes.CONTEXT_TOOL_INPUT_SHORTHAND,
                     Diagnostic.Severity.WARNING, message,
                     tool.sourceFile() == null ? null : tool.sourceFile().toString(), field,
                     null, null, null, null, null,
-                    "Migrate to the explicit Tool-local input form " + canonical + "."));
+                    "Migrate to the canonical Tool-local input form " + canonicalForm + "."));
         }
     }
 
@@ -892,6 +955,14 @@ public final class PackageValidator {
                         "TOOL.* and DB.* are transient helper/runtime views, not general 3.4.2 expression roots.",
                         "Use local output during the current Action or EXEC.ACTIONS.<actionId> after publication; helper identity belongs in curated META metadata.");
             }
+            if (isActionReference(referencePath)) {
+                validateActionReference(path, referencePath, availableActions);
+                continue;
+            }
+            if ("EXEC".equals(root) || "META".equals(root)) {
+                validateCanonicalPath(path, referencePath);
+                continue;
+            }
             if ("CASE".equals(root)) continue;
             if ("RUN".equals(root)) {
                 String field = firstChildSegment(referencePath, "RUN");
@@ -902,24 +973,7 @@ public final class PackageValidator {
                         null, null, null, null, null,
                         "Use the exact case-sensitive RUN field name.", null);
             }
-            if ("ACTIONS".equals(root)) {
-                String id = firstChildSegment(referencePath, "ACTIONS");
-                if (id.isEmpty()) continue;
-                if (availableActions.contains(id)) {
-                    String prefix = "ACTIONS." + id;
-                    String remainder = referencePath.length() <= prefix.length() ? "" : referencePath.substring(prefix.length());
-                    if (remainder.equals(".flow") || remainder.startsWith(".flow.") || remainder.startsWith(".flow[")
-                            || remainder.equals(".actions") || remainder.startsWith(".actions.") || remainder.startsWith(".actions[")) {
-                        throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
-                                "Flow internals are not a stable Context contract '${" + path + "}'",
-                                "Flow evidence is diagnostic-only; completed internal Actions are published directly in ACTIONS.", null, path,
-                                null, null, null, null, null,
-                                "Use EXEC.ACTIONS.<internalActionId>.output.<field> instead.", null);
-                    }
-                    continue;
-                }
-                throw unavailableActionContext(path, id, availableActions);
-            }
+            if ("ACTIONS".equals(root)) continue;
             if ("output".equals(root)) {
                 if (currentOutputAvailable) continue;
                 throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
@@ -949,6 +1003,83 @@ public final class PackageValidator {
                 "Action '" + id + "' has not completed at the point where this value is rendered. Available actions: " + String.join(", ", availableActions),
                 null, path, null, null, null, null, null,
                 "Reference an earlier action ID, or move this reference to a field rendered after that action completes.", null);
+    }
+
+    private boolean isActionReference(String path) {
+        return "ACTIONS".equals(path) || path.startsWith("ACTIONS.") || path.startsWith("ACTIONS[")
+                || "EXEC.ACTIONS".equals(path) || path.startsWith("EXEC.ACTIONS.") || path.startsWith("EXEC.ACTIONS[");
+    }
+
+    private void validateActionReference(String originalPath, String referencePath, Set<String> availableActions) {
+        String root = referencePath.startsWith("EXEC.ACTIONS") ? "EXEC.ACTIONS" : "ACTIONS";
+        String id = firstChildSegment(referencePath, root);
+        if (id.isEmpty()) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                "Action Context root requires an Action ID '${" + originalPath + "}'",
+                "Reference the completed Action below " + root + ".",
+                null, originalPath, null, null, null, null, null,
+                "Use ${" + root + ".<actionId>.output...}.", null);
+        if (!availableActions.contains(id)) throw unavailableActionContext(originalPath, id, availableActions);
+        String remainder = remainderAfterActionId(referencePath, root);
+        if (remainder.equals(".flow") || remainder.startsWith(".flow.") || remainder.startsWith(".flow[")
+                || remainder.equals(".actions") || remainder.startsWith(".actions.") || remainder.startsWith(".actions[")) {
+            throw new DiagnosticException(DiagnosticCodes.CONTEXT_CROSS_SCOPE,
+                    "Flow internal Actions are not visible through '${" + originalPath + "}'",
+                    "Flow evidence is execution-result data, not a parent or sibling Context namespace.",
+                    null, originalPath, null, null, null, null, null,
+                    "If a value must cross the Flow boundary, publish it through EXEC.VARS; do not read Flow internal Actions after return.", null);
+        }
+    }
+
+    private String remainderAfterActionId(String path, String root) {
+        String remainder = path.substring(root.length());
+        if (remainder.startsWith(".")) {
+            String child = remainder.substring(1);
+            int dot = child.indexOf('.');
+            int bracket = child.indexOf('[');
+            int end = child.length();
+            if (dot >= 0 && dot < end) end = dot;
+            if (bracket >= 0 && bracket < end) end = bracket;
+            return end == child.length() ? "" : child.substring(end);
+        }
+        if (remainder.startsWith("[")) {
+            int end = remainder.indexOf(']');
+            if (end < 0) return "";
+            return remainder.substring(end + 1);
+        }
+        return "";
+    }
+
+    private void validateCanonicalPath(String originalPath, String referencePath) {
+        String root = firstPathSegment(referencePath);
+        if ("EXEC".equals(root)) {
+            String child = firstChildSegment(referencePath, "EXEC");
+            if (child.isEmpty()) throw invalidCanonicalPath(originalPath,
+                    "EXEC must be followed by one of ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, or ACTIONS.");
+            String execPath = referencePath.substring("EXEC.".length());
+            if (att.core.ContextPathPolicy.isUnsupportedExecPath(execPath)) {
+                throw invalidCanonicalPath(originalPath,
+                        att.core.ContextPathPolicy.isUnsupportedStagePath(execPath)
+                                ? "3.4.2 does not define EXEC.STAGE or EXEC.STAGES; Stage history is result evidence."
+                                : "3.4.2 does not define helper, resource, output, load, call, invocation, or orchestration namespaces below EXEC.");
+            }
+            if (!att.core.ContextPathPolicy.isCanonicalExecField(child)) {
+                throw invalidCanonicalPath(originalPath,
+                        "Unknown EXEC field '" + child + "'; the public tree contains only ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, and ACTIONS.");
+            }
+            return;
+        }
+        String child = firstChildSegment(referencePath, "META");
+        if (child.isEmpty() || !att.core.ContextPathPolicy.isCanonicalMetaField(child)) {
+            throw invalidCanonicalPath(originalPath,
+                    "Unknown META field '" + child + "'; use PROJECT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
+        }
+    }
+
+    private DiagnosticException invalidCanonicalPath(String path, String detail) {
+        return new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+                "Unsupported canonical Context path '${" + path + "}'", detail,
+                null, path, null, null, null, null, null,
+                "Use the 3.4.2 EXEC/META tree documented in the Reference Manual.", null);
     }
 
     private DiagnosticException incompatibleContextPath(String path, String code, String detail, String suggestion) {
@@ -1015,9 +1146,9 @@ public final class PackageValidator {
             try {
                 if (!actionIds.add(action.id())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Duplicate expanded Action ID '" + action.id() + "'",
-                        "Template and all nested Flows share one ACTIONS namespace.", null, sourceField,
+                        "Action IDs must be unique within the current Stage/Template/Flow scope.", null, sourceField,
                         testCase.sheetName(), testCase.rowNumber(), null, template.name(), action.id(),
-                        "Use a unique Action ID across the complete expanded Template plan.", null);
+                        "Use a unique Action ID in this scope; separate Flow invocations may reuse internal IDs.", null);
                 Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
                 afterCurrentAction.add(action.id());
 
@@ -1030,6 +1161,12 @@ public final class PackageValidator {
                 validateContextStructure(action.runWhen(), engine, context, testCase, completedActions);
                 engine.renderValidationValues(action.runWhen(), context);
                 validateCallArgumentsIn(action.runWhen(), context, engine);
+
+                // Keep the validation Context in the same current-scope shape
+                // as runtime.  This placeholder is deferred, but it makes
+                // rootless suffixes such as ${first.output.result} resolve
+                // against the current scope instead of the parent scope.
+                context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
 
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
@@ -1143,8 +1280,13 @@ public final class PackageValidator {
                 if ("flow".equalsIgnoreCase(action.type())) {
                     att.flow.FlowDefinition target = flows.get(action.use());
                     StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
-                    validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
-                            context, engine, new LinkedHashSet<String>(), new LinkedHashSet<String>());
+                    context.beginFlow(action.use(), action.id());
+                    try {
+                        validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
+                                context, engine, new LinkedHashSet<String>(), new LinkedHashSet<String>());
+                    } finally {
+                        context.finishFlow();
+                    }
                 }
             } catch (Exception e) {
                 DiagnosticException typed = DiagnosticException.find(e);
@@ -1196,9 +1338,9 @@ public final class PackageValidator {
                         "TOOL.* and DB.* are transient helper/runtime views and cannot be used as general 3.4.2 Context APIs.",
                         "Use ${output...} while the Action is active or ${EXEC.ACTIONS.<actionId>...} after publication; use curated META helper identity only for static metadata.");
             }
-            if (referencePath.startsWith("ACTIONS.")) {
-                String id = firstPathSegment(referencePath.substring("ACTIONS.".length()));
-                if (!availableActions.contains(id)) throw unavailableActionContext(path, id, availableActions);
+            if (isActionReference(referencePath)) {
+                validateActionReference(path, referencePath, availableActions);
+                continue;
             }
             if (referencePath.startsWith("EXEC.ACTIONS.")) {
                 String id = firstPathSegment(referencePath.substring("EXEC.ACTIONS.".length()));
@@ -1214,32 +1356,19 @@ public final class PackageValidator {
             }
             String root = firstPathSegment(referencePath);
             if ("EXEC".equals(root)) {
+                validateCanonicalPath(path, referencePath);
                 String field = firstChildSegment(referencePath, "EXEC");
-                String execPath = referencePath.substring("EXEC.".length());
-                if (att.core.ContextPathPolicy.isUnsupportedExecPath(execPath)) {
-                    String detail = att.core.ContextPathPolicy.isUnsupportedStagePath(execPath)
-                            ? "3.4.2 does not define EXEC.STAGE or EXEC.STAGES. Current Stage input is exposed through EXEC.INPUT; Stage history remains in CASE.STAGES."
-                            : "3.4.2 does not define helper, resource, output, load, call, invocation, or orchestration namespaces below EXEC."
-                            ;
-                    String suggestion = att.core.ContextPathPolicy.isUnsupportedStagePath(execPath)
-                            ? "Use EXEC.INPUT for current Stage values or CASE.STAGES for legacy execution evidence."
-                            : "Use local output during the current Action, EXEC.ACTIONS for completed Actions, or META helper identity where applicable.";
-                    throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
-                            "Unsupported canonical Context path '${" + path + "}'", detail,
-                            null, path, null, null, null, null, null, suggestion, null);
-                }
-                if (!"ACTIONS".equals(field)) {
-                    try {
-                        if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
-                        else context.require(referencePath);
-                    } catch (DiagnosticException e) {
-                        if (context.isValidationDeferred(referencePath)) continue;
-                        throw e;
-                    }
+                try {
+                    if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                    else context.require(referencePath);
+                } catch (DiagnosticException e) {
+                    if (context.isValidationDeferred(referencePath)) continue;
+                    throw e;
                 }
                 continue;
             }
             if ("META".equals(root)) {
+                validateCanonicalPath(path, referencePath);
                 String field = firstChildSegment(referencePath, "META");
                 if (!("TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
                         || "DBHELPER".equals(field) || "MQHELPER".equals(field))) {
