@@ -1,11 +1,13 @@
 /* Author: Jeffrey + ChatGPT */
 package att.core;
 
+import att.exec.ActionExecutionResult;
+
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -49,7 +51,7 @@ public final class CaseRuntimeContext {
     /** Current Action/attempt-local output; never published as EXEC.OUTPUT. */
     private Map<String, Object> actionOutput;
     /** Canonical Action result sink used while an Action is executing. */
-    private Map<String, Object> actionEvidenceSink;
+    private final Deque<Map<String, Object>> actionEvidenceSinks = new ArrayDeque<Map<String, Object>>();
     private boolean statusPublished;
     private int toolSequence;
     private int dbSequence;
@@ -647,23 +649,26 @@ public final class CaseRuntimeContext {
      */
     public void beginAction(Map<String, Object> output) {
         if (output == null) throw new IllegalArgumentException("Action output cannot be null");
-        actionEvidenceSink = output;
+        actionEvidenceSinks.push(output);
     }
 
     /** Adds executor-neutral evidence to the active Action result envelope. */
     @SuppressWarnings("unchecked")
     public void recordActionEvidence(Map<String, Object> commonEvidence) {
-        if (actionEvidenceSink == null || commonEvidence == null || commonEvidence.isEmpty()) return;
-        Map<String, Object> target = (Map<String, Object>) actionEvidenceSink.get("evidence");
+        if (actionEvidenceSinks.isEmpty() || commonEvidence == null || commonEvidence.isEmpty()) return;
+        Map<String, Object> targetOutput = actionEvidenceSinks.peek();
+        Map<String, Object> target = (Map<String, Object>) targetOutput.get("evidence");
         if (target == null) {
             target = new LinkedHashMap<String, Object>();
-            actionEvidenceSink.put("evidence", target);
+            targetOutput.put("evidence", target);
         }
-        for (Map.Entry<String, Object> entry : commonEvidence.entrySet()) mergeActionEvidence(target, entry.getKey(), entry.getValue());
+        ActionExecutionResult.mergeEvidence(target, commonEvidence);
     }
 
-    /** Clears only the private collection sink; the published Action remains intact. */
-    public void endAction() { actionEvidenceSink = null; }
+    /** Restores the enclosing Action sink; the published Action remains intact. */
+    public void endAction() {
+        if (!actionEvidenceSinks.isEmpty()) actionEvidenceSinks.pop();
+    }
 
     public int nextToolSequence(String ignored) { return ++toolSequence; }
     public String nextInvocationId(String base) { return base + "_" + String.format("%03d", nextToolSequence(base)); }
@@ -813,35 +818,6 @@ public final class CaseRuntimeContext {
             this.previousVisibleActions = previousVisibleActions;
             flow.put("id", flowId); flow.put("invocationId", invocationId); flow.put("depth", Integer.valueOf(depth));
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void mergeActionEvidence(Map<String, Object> target, String kind, Object value) {
-        if (!target.containsKey(kind)) {
-            target.put(kind, value);
-            return;
-        }
-        Object existing = target.get(kind);
-        if (existing == value || (existing != null && existing.equals(value))) return;
-        if (existing instanceof Map && value instanceof Map) {
-            Map<String, Object> current = (Map<String, Object>) existing;
-            Object calls = current.get("invocations");
-            if (calls instanceof List) {
-                ((List<Object>) calls).add(value);
-                return;
-            }
-            List<Object> invocationList = new ArrayList<Object>();
-            invocationList.add(existing);
-            invocationList.add(value);
-            Map<String, Object> grouped = new LinkedHashMap<String, Object>();
-            grouped.put("invocations", invocationList);
-            target.put(kind, grouped);
-            return;
-        }
-        List<Object> values = new ArrayList<Object>();
-        values.add(existing);
-        values.add(value);
-        target.put(kind, values);
     }
 
     @SuppressWarnings("unchecked")

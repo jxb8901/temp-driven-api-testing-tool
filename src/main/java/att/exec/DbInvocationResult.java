@@ -8,20 +8,22 @@ import java.util.Map;
 public final class DbInvocationResult {
     private final Object result;
     private final Map<String, Object> evidence;
-    private final ActionExecutionResult actionResult;
 
     public DbInvocationResult(Object result, Map<String, Object> evidence) {
         this.result = result;
         this.evidence = new LinkedHashMap<String, Object>(evidence);
-        this.actionResult = new ActionExecutionResult(result,
-                ActionExecutionResult.evidence("db", this.evidence), successValue(result));
     }
 
     public Object result() { return result; }
     public Map<String, Object> evidence() { return evidence; }
-    public ActionExecutionResult actionResult() { return actionResult; }
+    /** Returns an operation snapshot, including evidence added during logging. */
+    public ActionExecutionResult operationResult() {
+        return new ActionExecutionResult(result, ActionExecutionResult.evidence("db", evidence), successValue(result));
+    }
+    /** @deprecated Use {@link #operationResult()}; this is not an Action lifecycle result. */
+    @Deprecated public ActionExecutionResult actionResult() { return operationResult(); }
     public boolean success() {
-        return actionResult.success();
+        return operationResult().executionSuccess();
     }
 
     private static boolean successValue(Object value) {

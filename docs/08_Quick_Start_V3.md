@@ -39,9 +39,9 @@ invokePayment:
 兩者的 observable result 使用同一個 Action lifecycle：Action 執行時讀 `${output.result}`，完成後讀 `${EXEC.ACTIONS.<id>.output.result}`；Tool／DB／MQ／collector 的安全證據則在 `${output.evidence}` 及發布後的 `EXEC.ACTIONS` 下保存。
 
 ```text
-output.evidence.tool        # command/call/built-in Tool metadata
-output.evidence.db          # SQL, parameter, row/update and timing metadata
-output.evidence.mq          # queue, MsgId/CorrelId, reason and timing metadata
+output.evidence.tool.invocations[0] # final command/call/built-in Tool metadata
+output.evidence.db.invocations[0]   # final SQL, parameter, row/update and timing metadata
+output.evidence.mq.invocations[0]   # final queue, MsgId/CorrelId, reason and timing metadata
 output.attempts[n].evidence # post-invoke collector evidence
 ```
 
@@ -480,7 +480,7 @@ checkCount:
     )} > 0
 ```
 
-`params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB operation result 位於 `${output.result}`，SQL、parameters、row/update、status 和 timing evidence 位於 `${output.evidence.db}`，Action 發布後使用對應的 `${EXEC.ACTIONS.<id>.output...}`。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`，這只表示 resource finalization，不是 operation evidence。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
+`params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB operation result 位於 `${output.result}`，SQL、parameters、row/update、status 和 timing evidence 位於 `${output.evidence.db.invocations[0]}`；Action 發布後使用對應的 `${EXEC.ACTIONS.<id>.output...}`。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`，這只表示 resource finalization，不是 operation evidence。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
 
 ### 4.1 配置 IBM MQ helper
 
@@ -533,7 +533,7 @@ waitReply:
   assert: "${output.result.replyReceived} == true"
 ```
 
-`request` 先 PUT，再以送出訊息的 MsgId 作為 GET CorrelId；回覆文件只寫入一次 `mq/<instance>/` 下的 Case output。等待逾時的 MQ reason 2033 會是成功但 `replyReceived: false`，需要回覆時才用 assertion 將它判定為 FAIL。MQ evidence 保留 queue、MsgId、CorrelId、bytes、status、reason 和 duration 等 metadata，並在 primary Action 的 `${output.evidence.mq}` 發布；不保存完整 payload，也不輸出密碼。
+`request` 先 PUT，再以送出訊息的 MsgId 作為 GET CorrelId；回覆文件只寫入一次 `mq/<instance>/` 下的 Case output。等待逾時的 MQ reason 2033 會是成功但 `replyReceived: false`，需要回覆時才用 assertion 將它判定為 FAIL。MQ evidence 保留 queue、MsgId、CorrelId、bytes、status、reason 和 duration 等 metadata，並在 primary Action 的 `${output.evidence.mq.invocations[0]}` 發布；不保存完整 payload，也不輸出密碼。
 
 若同一操作會重複出現，可新增 `config/tools/orders-db.yaml` 將它包裝成 typed Tool：
 

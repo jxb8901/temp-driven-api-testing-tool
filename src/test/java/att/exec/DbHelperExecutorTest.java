@@ -286,9 +286,9 @@ class DbHelperExecutorTest {
         assertEquals(ResultStatus.PASS, results.get(3).status());
         assertEquals(ResultStatus.PASS, results.get(4).status());
         assertTrue(context.resolve("ACTIONS.query.output.result.rows") instanceof List);
-        assertEquals("orders", context.resolve("ACTIONS.query.output.evidence.db.db"));
-        assertEquals("orders", context.resolve("ACTIONS.query.output.evidence.db.helperId"));
-        assertEquals("query", context.resolve("ACTIONS.query.output.evidence.db.operation"));
+        assertEquals("orders", context.resolve("ACTIONS.query.output.evidence.db.invocations[0].db"));
+        assertEquals("orders", context.resolve("ACTIONS.query.output.evidence.db.invocations[0].helperId"));
+        assertEquals("query", context.resolve("ACTIONS.query.output.evidence.db.invocations[0].operation"));
         assertEquals("A100", context.resolve("CASE.VARS.orders.rows[0].ID"));
         assertEquals("A100", context.resolve("CASE.VARS.orderId"));
         Path artifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.query.output.targetFiles[0]")));
@@ -300,7 +300,7 @@ class DbHelperExecutorTest {
         assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
                 context.resolve("ACTIONS.printRows.output.result"));
         assertTrue(context.resolve("ACTIONS.assign.DB.orders") instanceof Map);
-        assertEquals("orders", context.resolve("ACTIONS.assign.output.evidence.db.db"));
+        assertEquals("orders", context.resolve("ACTIONS.assign.output.evidence.db.invocations[0].db"));
         assertTrue(executor.finishCase(context, log).isEmpty());
         assertEquals("ROLLED_BACK", context.resolve("CASE.DB.orders.state"));
         executor.close();
@@ -366,7 +366,7 @@ class DbHelperExecutorTest {
         assertEquals("A100", context.resolve("ACTIONS.scalar.output.result"));
         assertEquals("call", context.resolve("ACTIONS.close.TOOL.orders.close.implementation"));
         assertTrue(context.resolve("ACTIONS.close.DB.orders") instanceof Map);
-        assertEquals("orders", context.resolve("ACTIONS.close.output.evidence.db.db"));
+        assertEquals("orders", context.resolve("ACTIONS.close.output.evidence.db.invocations[0].db"));
         assertNotNull(context.resolve("ACTIONS.close.output.evidence.tool"));
         assertNull(context.resolve("ACTIONS.close.output.exitCode"));
         assertTrue(executor.finishCase(context, log).isEmpty());

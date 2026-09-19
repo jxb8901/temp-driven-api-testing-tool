@@ -54,8 +54,8 @@ class StageTemplateRunnerTest {
         assertEquals(0, context.resolve("ACTIONS.normalize.output.exitCode"));
         assertEquals("builtin", context.resolve("ACTIONS.normalize.output.attempts[0].type"));
         assertEquals("upper", context.resolve("ACTIONS.normalize.output.attempts[0].name"));
-        assertEquals("upper", context.resolve("ACTIONS.normalize.output.evidence.tool.name"));
-        assertEquals("builtin", context.resolve("ACTIONS.normalize.output.evidence.tool.type"));
+        assertEquals("upper", context.resolve("ACTIONS.normalize.output.evidence.tool.invocations[0].name"));
+        assertEquals("builtin", context.resolve("ACTIONS.normalize.output.evidence.tool.invocations[0].type"));
         assertEquals("ABC", new String(Files.readAllBytes(caseDir.resolve("normalized.txt")), "UTF-8"));
         assertNull(context.resolve("ACTIONS.normalize.TOOL"));
     }
@@ -99,11 +99,11 @@ class StageTemplateRunnerTest {
         assertEquals(ResultStatus.PASS, results.get(0).status());
         assertEquals("ok", builtIns.last.get("value"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.result"));
-        assertEquals("sample", context.resolve("ACTIONS.call.output.evidence.tool.name"));
-        assertEquals("tool", context.resolve("ACTIONS.call.output.evidence.tool.type"));
+        assertEquals("sample", context.resolve("ACTIONS.call.output.evidence.tool.invocations[0].name"));
+        assertEquals("tool", context.resolve("ACTIONS.call.output.evidence.tool.invocations[0].type"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.evidence.collectors.snapshot.result"));
-        assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.result"));
-        assertEquals("PASS", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.status"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.result"));
+        assertEquals("PASS", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.status"));
         String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
         assertTrue(caseLog.contains("EVIDENCE call attempt=1 collector=snapshot"));
         assertTrue(caseLog.contains("status: PASS"));
@@ -131,8 +131,9 @@ class StageTemplateRunnerTest {
         assertEquals(ResultStatus.PASS, results.get(0).status());
         assertEquals(2, runner.calls);
         assertEquals(2, builtIns.calls);
-        assertEquals("first", context.resolve("ACTIONS.call.output.attempts[0].evidence.snapshot.result"));
-        assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[1].evidence.snapshot.result"));
+        assertEquals("first", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.result"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[1].evidence.collectors.snapshot.result"));
+        assertEquals("ok", context.resolve("ACTIONS.call.output.evidence.tool.invocations[0].output"));
     }
 
     @Test void evidenceFailureContinuePreservesPrimaryAssertionAndStopSkipsIt() throws Exception {
@@ -153,7 +154,7 @@ class StageTemplateRunnerTest {
                     .execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(directory.resolve("case.log")));
             assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
             assertEquals("ok", context.resolve("ACTIONS.call.output.result"));
-            assertEquals("ERROR", context.resolve("ACTIONS.call.output.attempts[0].evidence.broken.status"));
+            assertEquals("ERROR", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.broken.status"));
             if ("stop".equals(mode)) assertNull(context.resolve("ACTIONS.call.output.assertion"));
         }
     }

@@ -1139,15 +1139,15 @@ expand</td>
 </tr>
 <tr class="odd">
 <td>publication</td>
-<td>common Action result/evidence</td>
-<td>common Action result/evidence</td>
+<td>operation result consumed by the Action runner</td>
+<td>operation result consumed by the Action runner</td>
 </tr>
 </tbody>
 </table>
 <p>Every primary Tool, direct DB operation, and MQ helper operation
-publishes one common Action result/evidence model. While the Action is
-active, use <code>${output.result}</code> and
-<code>${output.evidence}</code>. After publication, use
+produces one operation result consumed exactly once by the Action
+runner. While the Action is active, use <code>${output.result}</code>
+and <code>${output.evidence}</code>. After publication, use
 <code>${EXEC.ACTIONS.&lt;actionId&gt;.output.result}</code> and
 <code>${EXEC.ACTIONS.&lt;actionId&gt;.output.evidence}</code>. The
 envelope may contain <code>status</code>/<code>success</code>,
@@ -1165,15 +1165,25 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb22-1"><a href=
 <span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile})}&quot;</span></span></code></pre></div>
 <p>The standard evidence keys are <code>tool</code>, <code>db</code>,
-and <code>mq</code>; post-invoke collectors remain under the Action’s
-attempt evidence. DB connection/transaction state, MQ connection/queue
-handles, process handles, and cache leases are resource lifecycle state
-and never become <code>EXEC.DB</code>, <code>EXEC.MQ</code>,
+and <code>mq</code>. Each operation key has the stable shape
+<code>&lt;kind&gt;.invocations[]</code>, including when only one
+invocation exists. For example, use
+<code>${output.evidence.db.invocations[0].helperId}</code> and
+<code>${EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.tool.invocations[0].name}</code>.
+The final/winning primary operation is published at top level; prior and
+attempt-specific evidence remains below
+<code>${output.attempts[n].evidence}</code>. Post-invoke collectors
+remain under the final Action evidence and the corresponding attempt
+evidence. DB connection/transaction state, MQ connection/queue handles,
+process handles, and cache leases are resource lifecycle state and never
+become <code>EXEC.DB</code>, <code>EXEC.MQ</code>,
 <code>EXEC.TOOL</code>, or another helper-specific canonical Context
 root. Existing root <code>TOOL.*</code>/<code>DB.*</code> and
-Action-level uppercase helper nodes are compatibility views only. The
-completed Case <code>${CASE.DB.&lt;instance&gt;}</code> view contains
-transaction finalization state, not the DB operation
+Action-level uppercase helper nodes may remain only in internal or
+persisted historical/result compatibility views; they are not supported
+general expression APIs and do not weaken #29 validation/migration
+rules. The completed Case <code>${CASE.DB.&lt;instance&gt;}</code> view
+contains transaction finalization state, not the DB operation
 result/evidence.</p>
 <div class="sourceCode" id="cb23"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
@@ -4428,12 +4438,14 @@ input. There is intentionally no <code>EXEC.TOOL</code>,
 <code>EXEC.LOAD</code>, <code>EXEC.CALL</code>,
 <code>EXEC.INVOCATION</code>, <code>EXEC.STAGE</code>, or
 <code>EXEC.STAGES</code>: helper/resource state remains internal,
-root-level <code>TOOL.*</code> / <code>DB.*</code> remain compatibility
-or transient views, and Action result/evidence is consumed through local
-<code>output</code> while active and <code>EXEC.ACTIONS</code> after
-publication. Stage/Template status, timing, and history remain in the
-execution result/evidence model and legacy <code>CASE.STAGES</code>.
-Load-specific state is outside this 3.4.2 contract.</p>
+root-level <code>TOOL.*</code> / <code>DB.*</code> may remain only in
+internal or persisted historical/result compatibility views and are not
+supported general expression APIs, and Action result/evidence is
+consumed through local <code>output</code> while active and
+<code>EXEC.ACTIONS</code> after publication. Stage/Template status,
+timing, and history remain in the execution result/evidence model and
+legacy <code>CASE.STAGES</code>. Load-specific state is outside this
+3.4.2 contract.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>
@@ -4498,10 +4510,12 @@ for a completed Action in the current scope. Stage/Template/Flow
 history, including <code>${CASE.STAGES...}</code>, is persisted
 result/evidence data and is not a supported reusable expression path;
 direct reads produce <code>CONTEXT_CROSS_SCOPE</code>. Root
-<code>${TOOL...}</code> and <code>${DB...}</code> are transient helper
-views, not case-wide “latest invocation” APIs, and general expressions
-using them produce <code>CONTEXT_LEGACY_PATH</code>. Tool and inline DB
-evidence is persisted below the containing Action; Case-level DB
+<code>${TOOL...}</code> and <code>${DB...}</code> may remain only as
+internal or persisted historical/result compatibility views, not
+case-wide “latest invocation” APIs; general expressions using them
+produce <code>CONTEXT_LEGACY_PATH</code>. Tool and inline DB evidence is
+persisted below the containing Action with stable
+<code>&lt;kind&gt;.invocations[]</code> cardinality; Case-level DB
 finalization remains available through
 <code>${CASE.DB.&lt;instance&gt;}</code> after Case completion.</p>
 <p>The following aliases are required for existing packages. New

@@ -7,7 +7,7 @@
 
 ## 1. Purpose
 
-ATT V3.4.2 defines one execution-neutral expression Context for ordinary TestCase and standalone debug execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. Tool, DB, and MQ executors adapt their native outcomes to one common Action result/evidence envelope. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug invokes the same runtime with a synthetic Case.
+ATT V3.4.2 defines one execution-neutral expression Context for ordinary TestCase and standalone debug execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. Tool, DB, and MQ executors adapt their native outcomes to one operation-result boundary, then the Action runner owns status, retry, and publication into one stable result/evidence envelope. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug invokes the same runtime with a synthetic Case.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
@@ -48,8 +48,8 @@ V3.4 additionally provides:
 
 V3.4.2 additionally provides:
 
-- one executor-neutral Action result/evidence publication boundary for generic Tools, DB operations, MQ operations, and future helpers;
-- helper-native evidence under `output.evidence.<kind>` while the Action is active and under `EXEC.ACTIONS.<id>.output.evidence.<kind>` after publication;
+- one executor-neutral operation-result boundary for generic Tools, DB operations, MQ operations, and future helpers;
+- helper-native evidence under `output.evidence.<kind>.invocations[]` while the Action is active and under `EXEC.ACTIONS.<id>.output.evidence.<kind>.invocations[]` after publication;
 - call-backed Tools as the preferred extension model for framework-native/reusable capabilities, with typed arguments preserved;
 - command-backed Tools as a supported external-process extension mechanism, with deterministic argv, process evidence, SSH, and script use cases preserved; and
 - DB transaction/connection state kept internal to the resource scope, with legacy `CASE.DB` finalization retained separately from operation evidence.
@@ -141,8 +141,9 @@ output
 
 `EXEC` deliberately has no `TOOL`, `DB`, `MQ`, `OUTPUT`, `LOAD`, `CALL`,
 `INVOCATION`, `STAGE`, or `STAGES` child. Helper/resource state remains
-internal; existing root-level `TOOL.*` and `DB.*` paths are compatibility or
-transient views only and never define canonical storage. Helper identity may be
+internal; existing root-level `TOOL.*` and `DB.*` structures may remain in
+internal or persisted historical/result compatibility views only and never
+define supported expression APIs or canonical storage. Helper identity may be
 exposed through curated `META.TOOL`, `META.DBHELPER`, and `META.MQHELPER`
 metadata where there is a concrete expression use case.
 
@@ -168,8 +169,8 @@ stays limited to the seven nodes shown above.
 | `CASE.*` | Legacy Case/input/lifecycle aliases; `CASE.STAGES` is result/evidence data, not a supported expression root |
 | `RUN.*` | Current Run metadata |
 | `ACTIONS.*` | Current-scope completed Actions, compatibility spelling of `EXEC.ACTIONS` |
-| `TOOL.*` | Legacy/transient Tool view where available; not canonical storage |
-| `DB.*` | Legacy/transient DB view where available; not canonical storage |
+| `TOOL.*` | Internal/historical compatibility view where required; not a supported expression API |
+| `DB.*` | Internal/historical compatibility view where required; not a supported expression API |
 | `output.*` | Current Action outcome during supported post-execution fields |
 
 Existing unique-suffix shorthand remains unchanged. Removed Flow-only roots are invalid rather than treated as aliases.
@@ -182,21 +183,28 @@ executor to share a low-level implementation or parameter contract:
 ```text
 generic Tool / DB helper / MQ helper
               |
-      ActionExecutionResult
-      | result | evidence | diagnostic | attempts
+   operation result (result, evidence,
+   executionSuccess, diagnostic, timing)
+              |
+   StageTemplateRunner owns Action
+   status, retry attempts, and duration
               |
    local output while active
               |
    EXEC.ACTIONS.<actionId> after publication
 ```
 
-The common envelope is intentionally additive. `result` contains the typed
-business/operation value; `evidence` contains safe helper or process metadata;
-`diagnostic` is present for typed failures; and `attempts` is used where retry
-or collector semantics apply. DB SQL/parameter metadata is stored as
-`output.evidence.db`, MQ metadata as `output.evidence.mq`, and Tool/process
-metadata as `output.evidence.tool`. Post-invoke collectors remain under the
-same Action's evidence/attempt structure. A DB connection, transaction,
+The operation result is intentionally separate from the Action lifecycle.
+`result` contains the typed business/operation value; `evidence` contains safe
+helper or process metadata; `diagnostic` is present for typed failures; and
+`executionSuccess` describes only the operation, not a final assertion. The
+Action runner adds `status`, `success`, `durationMs`, and `attempts`. Every
+operation evidence kind has a stable `invocations[]` list, even when there is
+only one invocation: DB SQL/parameter metadata is stored as
+`output.evidence.db.invocations[0]`, MQ metadata as
+`output.evidence.mq.invocations[0]`, and Tool/process metadata as
+`output.evidence.tool.invocations[0]`. Post-invoke collectors remain under
+the final Action evidence and each attempt's evidence. A DB connection, transaction,
 Hikari lease, MQ connection/queue handle, process handle, or retry frame is
 resource state, not Action evidence and is never a canonical Context root.
 
@@ -210,7 +218,7 @@ The two Tool backends converge only at this boundary:
 | `argName` / `argNameMode` | not applicable | supported for process shaping |
 | stdout/stderr and exit code | no process contract | process evidence contract |
 | cache | supported where valid | no process cache |
-| Action publication | common `ActionExecutionResult` | common `ActionExecutionResult` |
+| Action publication | operation result consumed by the Action runner | operation result consumed by the Action runner |
 
 New framework-native capabilities should use `call`. Existing and new
 command-backed Tools remain supported when an external process is the natural

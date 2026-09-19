@@ -545,10 +545,10 @@ their observable outcome converges at the Action boundary:
 | `argName` / `argNameMode` | invalid/not applicable | supported process-only shaping |
 | stdout/stderr and exit code | no process contract | captured process evidence |
 | cache | supported where valid | no process cache |
-| publication | common Action result/evidence | common Action result/evidence |
+| publication | operation result consumed by the Action runner | operation result consumed by the Action runner |
 
-Every primary Tool, direct DB operation, and MQ helper operation publishes one
-common Action result/evidence model. While the Action is active, use
+Every primary Tool, direct DB operation, and MQ helper operation produces one
+operation result consumed exactly once by the Action runner. While the Action is active, use
 `${output.result}` and `${output.evidence}`. After publication, use
 `${EXEC.ACTIONS.<actionId>.output.result}` and
 `${EXEC.ACTIONS.<actionId>.output.evidence}`. The envelope may contain
@@ -567,12 +567,20 @@ invokeApi:
   call: "#{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile})}"
 ```
 
-The standard evidence keys are `tool`, `db`, and `mq`; post-invoke collectors
-remain under the Action's attempt evidence. DB connection/transaction state,
+The standard evidence keys are `tool`, `db`, and `mq`. Each operation key has
+the stable shape `<kind>.invocations[]`, including when only one invocation
+exists. For example, use `${output.evidence.db.invocations[0].helperId}` and
+`${EXEC.ACTIONS.<actionId>.output.evidence.tool.invocations[0].name}`. The
+final/winning primary operation is published at top level; prior and
+attempt-specific evidence remains below `${output.attempts[n].evidence}`.
+Post-invoke collectors remain under the final Action evidence and the
+corresponding attempt evidence. DB connection/transaction state,
 MQ connection/queue handles, process handles, and cache leases are resource
 lifecycle state and never become `EXEC.DB`, `EXEC.MQ`, `EXEC.TOOL`, or another
 helper-specific canonical Context root. Existing root `TOOL.*`/`DB.*` and
-Action-level uppercase helper nodes are compatibility views only. The
+Action-level uppercase helper nodes may remain only in internal or persisted
+historical/result compatibility views; they are not supported general
+expression APIs and do not weaken #29 validation/migration rules. The
 completed Case `${CASE.DB.<instance>}` view contains transaction finalization
 state, not the DB operation result/evidence.
 
@@ -2200,7 +2208,7 @@ output
 └── current Action/attempt-local result; unavailable outside that Action scope
 ```
 
-`EXEC.MODE` is `testcase` for a normal run and `debug` for standalone debug. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by both modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.LOAD`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. Load-specific state is outside this 3.4.2 contract.
+`EXEC.MODE` is `testcase` for a normal run and `debug` for standalone debug. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by both modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.LOAD`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` may remain only in internal or persisted historical/result compatibility views and are not supported general expression APIs, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. Load-specific state is outside this 3.4.2 contract.
 
 Common properties include:
 
@@ -2215,7 +2223,7 @@ Common properties include:
 | CASE / RUN / ACTIONS | generated legacy views of the canonical state; `ACTIONS` is current-scope only |
 | CASE.DB / TOOL / DB | existing finalization or transient framework scopes, kept separate from `EXEC` |
 
-Prefer canonical paths such as `${EXEC.INPUT.amount}`, `${EXEC.INPUT.channel}`, `${EXEC.VARS.txnSeq}`, `${EXEC.ACTIONS.callApi.output.result}`, and `${META.TARGET.id}`. Use `${output...}` only for the current Action and `${EXEC.ACTIONS.<id>...}` only for a completed Action in the current scope. Stage/Template/Flow history, including `${CASE.STAGES...}`, is persisted result/evidence data and is not a supported reusable expression path; direct reads produce `CONTEXT_CROSS_SCOPE`. Root `${TOOL...}` and `${DB...}` are transient helper views, not case-wide “latest invocation” APIs, and general expressions using them produce `CONTEXT_LEGACY_PATH`. Tool and inline DB evidence is persisted below the containing Action; Case-level DB finalization remains available through `${CASE.DB.<instance>}` after Case completion.
+Prefer canonical paths such as `${EXEC.INPUT.amount}`, `${EXEC.INPUT.channel}`, `${EXEC.VARS.txnSeq}`, `${EXEC.ACTIONS.callApi.output.result}`, and `${META.TARGET.id}`. Use `${output...}` only for the current Action and `${EXEC.ACTIONS.<id>...}` only for a completed Action in the current scope. Stage/Template/Flow history, including `${CASE.STAGES...}`, is persisted result/evidence data and is not a supported reusable expression path; direct reads produce `CONTEXT_CROSS_SCOPE`. Root `${TOOL...}` and `${DB...}` may remain only as internal or persisted historical/result compatibility views, not case-wide “latest invocation” APIs; general expressions using them produce `CONTEXT_LEGACY_PATH`. Tool and inline DB evidence is persisted below the containing Action with stable `<kind>.invocations[]` cardinality; Case-level DB finalization remains available through `${CASE.DB.<instance>}` after Case completion.
 
 The following aliases are required for existing packages. New authoring should use the right-hand canonical/local path; the left-hand forms belong in migration or compatibility material only:
 

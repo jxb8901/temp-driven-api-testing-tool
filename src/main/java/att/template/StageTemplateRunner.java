@@ -346,11 +346,11 @@ public class StageTemplateRunner {
         att.exec.DbInvocationResult result = parameterNames.isEmpty()
                 ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
                 : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
-        context.recordActionEvidence(result.actionResult().evidence());
         try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
         catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
-        output.put("result", result.result());
-        if (result.success() && action.saveConfig().configured()) {
+        ActionExecutionResult operationResult = result.operationResult();
+        publishOperationResult(output, operationResult);
+        if (operationResult.executionSuccess() && action.saveConfig().configured()) {
             String path = templateEngine.render(action.saveConfig().path(), context, log);
             String format = requiredFormat(action.saveConfig(), "DB", "");
             if (console(path)) try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result.result())); }
@@ -360,7 +360,7 @@ public class StageTemplateRunner {
                 targets.add(saved.toString());
             }
         }
-        return result.success();
+        return operationResult.executionSuccess();
     }
 
     private ResultStatus executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
@@ -402,15 +402,15 @@ public class StageTemplateRunner {
                     actionOwnedArtifact = true;
                 }
                 attempts.add(invocation);
-                output.put("result", result.output());
-                mergeActionResult(output, result.actionResult());
-                invocation.put("actionResult", result.actionResult().evidence());
+                ActionExecutionResult operation = result.operationResult();
+                publishOperationResult(output, operation);
+                invocation.put("evidence", operation.evidence());
                 copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 Object saved = invocation.get("outputFile");
                 if (saved != null && !targets.contains(String.valueOf(saved))) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
-                if (!result.executionSuccess()) {
+                if (!operation.executionSuccess()) {
                     output.put("finalAttempt", number);
                     output.put("status", "ERROR"); output.put("success", false);
                     return ResultStatus.ERROR;
@@ -435,12 +435,16 @@ public class StageTemplateRunner {
                 Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
                 evidence.put("attempt", number);
                 evidence.put("category", e.category());
+                Map<String, Object> operationEvidence = new LinkedHashMap<String, Object>(evidence);
+                operationEvidence.remove("TOOL");
+                operationEvidence.remove("DB");
+                operationEvidence.remove("MQ");
+                Map<String, Object> failedEvidence = ActionExecutionResult.evidence("tool", operationEvidence);
+                evidence.put("evidence", failedEvidence);
                 attempts.add(evidence);
                 copy(evidence, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 if (evidence.containsKey("output")) output.put("result", evidence.get("output"));
-                Map<String, Object> failedEvidence = ActionExecutionResult.evidence("tool", evidence);
-                context.recordActionEvidence(failedEvidence);
-                mergeActionEvidence(output, failedEvidence);
+                replaceActionEvidence(output, failedEvidence);
                 if (evidence.get("outputFile") != null && !targets.contains(String.valueOf(evidence.get("outputFile")))) targets.add(String.valueOf(evidence.get("outputFile")));
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
@@ -459,8 +463,10 @@ public class StageTemplateRunner {
                                        CaseExecutionLog log, Map<String, Object> output,
                                        Map<String, Object> invocation) throws Exception {
         if (action.evidence().isEmpty()) return;
-        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
-        invocation.put("evidence", evidence);
+        Map<String, Object> attemptEvidence = invocationEvidence(invocation);
+        Map<String, Object> evidence = attemptEvidence.get("collectors") instanceof Map
+                ? (Map<String, Object>) attemptEvidence.get("collectors") : new LinkedHashMap<String, Object>();
+        attemptEvidence.put("collectors", evidence);
         for (EvidenceCollector collector : action.evidence().values()) {
             long started = System.nanoTime();
             Map<String, Object> record = new LinkedHashMap<String, Object>();
@@ -482,7 +488,10 @@ public class StageTemplateRunner {
                 record.put("result", result.output());
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 evidence.put(collector.id(), record);
-                mergeActionEvidence(output, ActionExecutionResult.evidence("collectors", evidence));
+                Map<String, Object> collectorEvidence = new LinkedHashMap<String, Object>();
+                collectorEvidence.put("collectors", evidence);
+                ActionExecutionResult.mergeEvidence(attemptEvidence, collectorEvidence);
+                ActionExecutionResult.mergeEvidence(outputEvidence(output), collectorEvidence);
                 if (!passed) {
                     record.put("error", collectorError(result.invocation(), "Evidence collector did not complete successfully"));
                     throw new EvidenceCollectorFailure(collector, record);
@@ -500,7 +509,10 @@ public class StageTemplateRunner {
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 record.put("error", collectorError(error));
                 evidence.put(collector.id(), record);
-                mergeActionEvidence(output, ActionExecutionResult.evidence("collectors", evidence));
+                Map<String, Object> collectorEvidence = new LinkedHashMap<String, Object>();
+                collectorEvidence.put("collectors", evidence);
+                ActionExecutionResult.mergeEvidence(attemptEvidence, collectorEvidence);
+                ActionExecutionResult.mergeEvidence(outputEvidence(output), collectorEvidence);
                 appendEvidenceLog(log, action, attempt, collector, record);
                 if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, error);
             }
@@ -642,33 +654,34 @@ public class StageTemplateRunner {
 
     private void copy(Map<String, Object> from, Map<String, Object> to, String... keys) { for (String key : keys) if (from.containsKey(key)) to.put(key, from.get(key)); }
     @SuppressWarnings("unchecked")
-    private void mergeActionResult(Map<String, Object> output, ActionExecutionResult result) {
+    private void publishOperationResult(Map<String, Object> output, ActionExecutionResult result) {
         if (result == null) return;
-        mergeActionEvidence(output, result.evidence());
+        output.put("result", result.result());
+        replaceActionEvidence(output, result.evidence());
+        if (result.diagnostic() != null) output.put("diagnostic", result.diagnostic());
     }
 
     @SuppressWarnings("unchecked")
-    private void mergeActionEvidence(Map<String, Object> output, Map<String, Object> additions) {
-        if (additions == null || additions.isEmpty()) return;
+    private void replaceActionEvidence(Map<String, Object> output, Map<String, Object> additions) {
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        ActionExecutionResult.mergeEvidence(evidence, additions);
+        if (evidence.isEmpty()) output.remove("evidence"); else output.put("evidence", evidence);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> outputEvidence(Map<String, Object> output) {
         Map<String, Object> evidence = output.get("evidence") instanceof Map
                 ? (Map<String, Object>) output.get("evidence") : new LinkedHashMap<String, Object>();
-        for (Map.Entry<String, Object> entry : additions.entrySet()) {
-            Object existing = evidence.get(entry.getKey());
-            if (existing == null || existing == entry.getValue() || (existing != null && existing.equals(entry.getValue()))) {
-                evidence.put(entry.getKey(), entry.getValue());
-            } else if (existing instanceof Map && entry.getValue() instanceof Map) {
-                List<Object> values = new ArrayList<Object>();
-                values.add(existing); values.add(entry.getValue());
-                Map<String, Object> grouped = new LinkedHashMap<String, Object>();
-                grouped.put("invocations", values);
-                evidence.put(entry.getKey(), grouped);
-            } else {
-                List<Object> values = new ArrayList<Object>();
-                values.add(existing); values.add(entry.getValue());
-                evidence.put(entry.getKey(), values);
-            }
-        }
         output.put("evidence", evidence);
+        return evidence;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> invocationEvidence(Map<String, Object> invocation) {
+        Map<String, Object> evidence = invocation.get("evidence") instanceof Map
+                ? (Map<String, Object>) invocation.get("evidence") : new LinkedHashMap<String, Object>();
+        invocation.put("evidence", evidence);
+        return evidence;
     }
 
     @SuppressWarnings("unchecked")
@@ -677,14 +690,24 @@ public class StageTemplateRunner {
         if (!(evidence instanceof Map)) return;
         Object db = ((Map<?, ?>) evidence).get("db");
         if (!(db instanceof Map)) return;
-        Map<?, ?> dbEvidence = (Map<?, ?>) db;
-        Object helper = dbEvidence.get("db");
-        Object invocation = dbEvidence.get("id");
-        if (helper == null || invocation == null) return;
+        Object invocations = ((Map<?, ?>) db).get("invocations");
+        if (!(invocations instanceof List)) return;
         Map<String, Object> calls = new LinkedHashMap<String, Object>();
-        calls.put(String.valueOf(invocation), db);
+        for (Object item : (List<?>) invocations) {
+            if (!(item instanceof Map)) continue;
+            Map<?, ?> dbEvidence = (Map<?, ?>) item;
+            Object helper = dbEvidence.get("db");
+            Object invocation = dbEvidence.get("id");
+            if (helper == null || invocation == null) continue;
+            Object helperCalls = calls.get(String.valueOf(helper));
+            Map<String, Object> helperNode = helperCalls instanceof Map
+                    ? (Map<String, Object>) helperCalls : new LinkedHashMap<String, Object>();
+            helperNode.put(String.valueOf(invocation), dbEvidence);
+            calls.put(String.valueOf(helper), helperNode);
+        }
+        if (calls.isEmpty()) return;
         Map<String, Object> legacy = new LinkedHashMap<String, Object>();
-        legacy.put(String.valueOf(helper), calls);
+        legacy.putAll(calls);
         node.put("DB", legacy);
     }
     private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }

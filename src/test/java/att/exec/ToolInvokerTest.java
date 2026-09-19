@@ -71,7 +71,7 @@ class ToolInvokerTest {
         ToolInvocationResult result=new ToolInvoker(tempDir,config).invoke("call","copyInput",input,context,new CaseExecutionLog(tempDir.resolve("case.log")));
         Map<?,?> output=(Map<?,?>)result.output();
         assertEquals("00123",output.get("account")); assertEquals(7,((Number) output.get("count")).intValue()); assertEquals(Boolean.TRUE,output.get("enabled"));
-        assertEquals("copyInput", CaseRuntimeContext.getPath(result.evidence(), "tool.name"));
+        assertEquals("copyInput", CaseRuntimeContext.getPath(result.evidence(), "tool.invocations[0].name"));
         assertNotNull(CaseRuntimeContext.getPath(context.caseTree(), "STAGES.invoke.TEMPLATE.ACTIONS.call.TOOL.copyInput"));
         assertNull(context.resolve("TOOL.inputFile"));
         assertNull(context.resolve("TOOL.outputFile"));

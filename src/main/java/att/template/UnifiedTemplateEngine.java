@@ -340,7 +340,7 @@ public class UnifiedTemplateEngine {
         invocation.put("output", result.result());
         invocation.put("MQ", result.evidence());
         return new att.exec.ToolInvocationResult(name, id, result.result(), invocation, result.success(),
-                result.actionResult().evidence());
+                result.operationResult().evidence());
     }
 
     private Object executeCallBackedTool(ToolConfig tool, Map<String, Object> supplied,
@@ -423,9 +423,12 @@ public class UnifiedTemplateEngine {
         invocation.put("output", output);
         invocation.put("TOOL", toolNode);
         if (!dbEvidence.isEmpty()) invocation.put("DB", dbEvidence);
-        Map<String, Object> actionEvidence = new LinkedHashMap<String, Object>();
-        actionEvidence.put("tool", toolEvidence);
-        if (commonDbEvidence != null) actionEvidence.put("db", commonDbEvidence);
+        Map<String, Object> commonToolEvidence = new LinkedHashMap<String, Object>(toolEvidence);
+        commonToolEvidence.remove("DB");
+        Map<String, Object> actionEvidence = ActionExecutionResult.evidence("tool", commonToolEvidence);
+        if (commonDbEvidence != null) {
+            actionEvidence.putAll(ActionExecutionResult.evidence("db", commonDbEvidence));
+        }
         att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult(tool.key(), id, output, invocation,
                 success, actionEvidence);
         if (attempt && !success && dbTimeout(output)) {
@@ -506,9 +509,9 @@ public class UnifiedTemplateEngine {
         String invocationId = context.nextDbInvocationId(parts[1]);
         String operation = "update".equals(parts[2]) ? "update" : "query";
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs);
-        context.recordActionEvidence(result.actionResult().evidence());
         if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
+        context.recordActionEvidence(result.operationResult().evidence());
         Object output = result.result();
         if (result.success() && "scalar".equals(parts[2])) output = scalar(parts[1], result.result());
         return new CallBackedDbResult(parts[1], invocationId, output, result.evidence(), result.success());
@@ -623,9 +626,9 @@ public class UnifiedTemplateEngine {
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextDbInvocationId(parts[1]) : requestedId;
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id);
-        context.recordActionEvidence(result.actionResult().evidence());
         if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
+        context.recordActionEvidence(result.operationResult().evidence());
         if (!result.success()) {
             Object error = result.result() instanceof Map ? ((Map<?, ?>) result.result()).get("error") : null;
             throw new IllegalStateException("DB query failed for " + parts[1] + ": " + String.valueOf(error));

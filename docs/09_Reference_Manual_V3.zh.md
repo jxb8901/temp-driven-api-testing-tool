@@ -542,23 +542,28 @@ printOrders:
 | 发布 | 共同 Action result/evidence | 共同 Action result/evidence |
 
 每个 primary Tool、直接 DB operation 和 MQ helper operation 都发布同一个
-Action result/evidence envelope。Action 执行期间使用 `${output.result}` 和
+operation result，由 Action runner 消费并发布为 Action result/evidence envelope。Action 执行期间使用 `${output.result}` 和
 `${output.evidence}`；发布后使用 `${EXEC.ACTIONS.<actionId>.output.result}`
 和 `${EXEC.ACTIONS.<actionId>.output.evidence}`。按实际能力，envelope 可包含
 `status`／`success`、`durationMs`、typed `result`、`diagnostic`、helper-native
 `evidence` 以及 retry／collector `attempts`：
 
 ```text
-output.evidence.tool        # Tool、command 或 built-in metadata
-output.evidence.db          # SQL、parameter、row/update 和 timing metadata
-output.evidence.mq          # queue、MsgId/CorrelId、reason 和 timing metadata
+output.evidence.tool.invocations[0] # 最终 Tool、command 或 built-in metadata
+output.evidence.db.invocations[0]   # 最终 SQL、parameter、row/update 和 timing metadata
+output.evidence.mq.invocations[0]   # 最终 queue、MsgId/CorrelId、reason 和 timing metadata
 output.attempts[n].evidence # post-invoke collector evidence
 ```
 
+每个 operation evidence kind 都固定使用 `<kind>.invocations[]`，即使只有
+一次 invocation 也不改变形状；retry 的历史 evidence 只保留在
+`${output.attempts[n].evidence}`，顶层只发布最终／winning operation。
 JDBC connection/transaction、MQ connection/queue、process handle 和 cache
 lease 都是 internal resource lifecycle state，不会成为 `EXEC.DB`、
 `EXEC.MQ`、`EXEC.TOOL` 或其它 helper-specific canonical Context root。
-现有 root `TOOL.*`／`DB.*` 及 Action-level 大写 helper node 只属于兼容 view；
+现有 root `TOOL.*`／`DB.*` 及 Action-level 大写 helper node 只可保留在
+internal 或 persisted historical/result compatibility view，不是受支持的
+general expression API，也不会削弱 #29 的 validation/migration 规则；
 完成 Case 后的 `${CASE.DB.<instance>}` 表示 transaction finalization state，
 不是 DB operation result/evidence。
 
@@ -615,7 +620,7 @@ tools:
       caseId: {name: Case ID, description: Full Case ID, required: true}
 ```
 
-调用方式为 `#{database.selectPayment(caseId=${EXEC.INPUT.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。规范的结果／证据路径是当前 Action 的 `output.result`／`output.evidence.tool`；`TOOL.database.selectPayment` 只作为现有包的兼容 view。
+调用方式为 `#{database.selectPayment(caseId=${EXEC.INPUT.caseId})}`。在 `script` 存在时，逻辑 argv 为 `/opt/att/database-tools selectPayment select-payment --case <caseId>`：脚本 argv、无前缀 tool key、然后是 tool command argv。没有 `script` 时，工具命令从可执行文件开始。规范的结果／证据路径是当前 Action 的 `output.result`／`output.evidence.tool.invocations[0]`；`TOOL.database.selectPayment` 只作为现有包的历史结果兼容 view，并不是受支持的 general expression API。
 
 以下两个参考 helper 会明确提供 pathname expansion，但不会改变普通 process-backed Tool 的契约：
 
@@ -1075,7 +1080,7 @@ Evidence 记录 `cache.scope`、SHA-256 `cache.key` 与 `cache.hit`。Cache miss
 
 Call-backed DB Tool 保留目标 dbhelper 的 read-only、transaction、result limits、Connection 与 Case lifecycle 规则，并与 command-backed Tool 共用 Action `timeoutMs` 和 ASSERTION/TIMEOUT retry。JDBC query timeout 取 Tool attempt timeout 与 `statement.timeoutSeconds` 中较短者；配置 retry 的 Action 会绕过 call-backed cache，避免轮询旧值。
 
-Action 通过共同 envelope 保存 `output.result`、`output.evidence.tool` 和适用的 `output.evidence.db`；`TOOL`／`DB` wrapper 只作兼容 view。`command`、`argv`、`stdout`、`stderr`、`rawOutput`、`exitCode` 等 process-only 字段不存在于 call-backed Tool 的 typed contract。
+Action 通过共同 envelope 保存 `output.result`、`output.evidence.tool.invocations[0]` 和适用的 `output.evidence.db.invocations[0]`；`TOOL`／`DB` wrapper 只作历史结果兼容 view。`command`、`argv`、`stdout`、`stderr`、`rawOutput`、`exitCode` 等 process-only 字段不存在于 call-backed Tool 的 typed contract。
 
 选择建议：一次性 SQL 用 `type: db`；一次性表达式读取用直接 `db.*`；稳定、重复、有业务名称或需要 cache 的操作用 call-backed Tool；需要 executable、SSH、argv、stdout parser 或 exit-code retry 时继续用 command-backed Tool。
 
@@ -1901,7 +1906,7 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是两种执行模式共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.LOAD`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。Load-specific state 不属于本 3.4.2 contract。
+`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是两种执行模式共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.LOAD`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 internal 或 persisted historical/result compatibility view，不是受支持的 general expression API；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。Load-specific state 不属于本 3.4.2 contract。
 
 常见作用域包括：
 
@@ -1916,7 +1921,7 @@ output
 | CASE / RUN / ACTIONS | canonical state 的生成式 legacy views；`ACTIONS` 只表示当前 scope |
 | CASE.DB / TOOL / DB | 既有 finalization 或 transient framework scope，与 `EXEC` 分开 |
 
-建议使用 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.channel}`、`${EXEC.VARS.txnSeq}`、`${EXEC.ACTIONS.callApi.output.result}` 和 `${META.TARGET.id}` 等 canonical paths。`${output...}` 只用于当前 Action，`${EXEC.ACTIONS.<id>...}` 只用于当前 scope 已完成的 Action。Stage／Template／Flow history（包括 `${CASE.STAGES...}`）属于持久化 result/evidence，不是可重用的 expression path；直接读取会产生 `CONTEXT_CROSS_SCOPE`。根 `${TOOL...}` 与 `${DB...}` 是 transient helper view，不是 Case 级“最近一次调用”API；普通 expression 读取会产生 `CONTEXT_LEGACY_PATH`。Tool 与 inline DB evidence 保存在所在 Action；Case 级 DB 收尾在完成后仍通过 `${CASE.DB.<instance>}` 提供。
+建议使用 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.channel}`、`${EXEC.VARS.txnSeq}`、`${EXEC.ACTIONS.callApi.output.result}` 和 `${META.TARGET.id}` 等 canonical paths。`${output...}` 只用于当前 Action，`${EXEC.ACTIONS.<id>...}` 只用于当前 scope 已完成的 Action。Stage／Template／Flow history（包括 `${CASE.STAGES...}`）属于持久化 result/evidence，不是可重用的 expression path；直接读取会产生 `CONTEXT_CROSS_SCOPE`。根 `${TOOL...}` 与 `${DB...}` 只可存在于 internal 或 persisted historical/result compatibility view，不是 Case 级“最近一次调用”API；普通 expression 读取会产生 `CONTEXT_LEGACY_PATH`。Tool 与 inline DB evidence 保存在所在 Action，并固定为 `<kind>.invocations[]`；Case 级 DB 收尾在完成后仍通过 `${CASE.DB.<instance>}` 提供。
 
 现有 package 必须继续支持以下 aliases。新配置应使用右侧 canonical/local path；左侧只用于迁移或兼容说明：
 
