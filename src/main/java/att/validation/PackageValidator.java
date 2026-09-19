@@ -1152,79 +1152,52 @@ public final class PackageValidator {
                 Set<String> afterCurrentAction = new LinkedHashSet<String>(completedActions);
                 afterCurrentAction.add(action.id());
 
-                sourceField = "actions." + action.id() + ".description";
-                validateContextStructure(action.description(), engine, context, testCase, afterCurrentAction);
-                engine.renderValidationValues(action.description(), context);
-                validateCallArgumentsIn(action.description(), context, engine);
-
                 sourceField = "actions." + action.id() + ".runWhen";
-                validateContextStructure(action.runWhen(), engine, context, testCase, completedActions);
+                validateContextStructure(action.runWhen(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.runWhen(), context);
                 validateCallArgumentsIn(action.runWhen(), context, engine);
-
-                // Keep the validation Context in the same current-scope shape
-                // as runtime.  This placeholder is deferred, but it makes
-                // rootless suffixes such as ${first.output.result} resolve
-                // against the current scope instead of the parent scope.
-                context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
 
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
                     context.requireCaseVariableAvailable(action.name());
                     sourceField = "actions." + action.id() + ".expression";
-                    validateContextStructure(action.expression(), engine, context, testCase, completedActions);
+                    validateContextStructure(action.expression(), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(action.expression(), context);
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
-                    context.putValidationPlaceholder("EXEC.VARS." + action.name());
                 }
 
-                sourceField = "actions." + action.id() + ".assert";
-                validateContextStructure(action.assertion(), engine, context, testCase, afterCurrentAction);
-                engine.renderValidationValues(action.assertion(), context);
-                validateCallArgumentsIn(action.assertion(), context, engine);
-
-                sourceField = "actions." + action.id() + ".actual";
-                validateContextStructure(action.actual(), engine, context, testCase, afterCurrentAction);
-                engine.renderValidationValues(action.actual(), context);
-                validateCallArgumentsIn(action.actual(), context, engine);
-
-                sourceField = "actions." + action.id() + ".expected";
-                validateContextStructure(action.expected(), engine, context, testCase, completedActions);
-                engine.renderValidationValues(action.expected(), context);
-                validateCallArgumentsIn(action.expected(), context, engine);
-
                 sourceField = "actions." + action.id() + ".message";
-                validateContextStructure(action.message(), engine, context, testCase, completedActions);
+                validateContextStructure(action.message(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.message(), context);
                 validateCallArgumentsIn(action.message(), context, engine);
 
                 sourceField = "actions." + action.id() + ".file";
-                validateContextStructure(action.file(), engine, context, testCase, completedActions);
+                validateContextStructure(action.file(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.file(), context);
                 validateCallArgumentsIn(action.file(), context, engine);
 
                 sourceField = "actions." + action.id() + ".saveAs";
-                validateContextStructure(action.saveAs(), engine, context, testCase, completedActions);
+                validateContextStructure(action.saveAs(), engine, context, testCase, completedActions, action.id());
                 engine.renderValidationValues(action.saveAs(), context);
                 validateCallArgumentsIn(action.saveAs(), context, engine);
 
                 for (Object key : action.fields().keySet()) {
                     sourceField = "actions." + action.id() + ".fields." + key;
                     Object value = action.fields().get(key);
-                    validateContextStructure(String.valueOf(value), engine, context, testCase, completedActions);
+                    validateContextStructure(String.valueOf(value), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(String.valueOf(value), context);
                     validateCallArgumentsIn(String.valueOf(value), context, engine);
                 }
                 if ("tool".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".call";
-                    validateContextStructure(action.call(), engine, context, testCase, completedActions);
+                    validateContextStructure(action.call(), engine, context, testCase, completedActions, action.id());
                     engine.renderValidationValues(action.call(), context);
                     validateCallArgumentsIn(action.call(), context, engine);
                     for (EvidenceCollector collector : action.evidence().values()) {
                         sourceField = "actions." + action.id() + ".evidence." + collector.id() + ".call";
-                        validateContextStructure(collector.call(), engine, context, testCase, afterCurrentAction);
+                        validateContextStructure(collector.call(), engine, context, testCase, completedActions, action.id());
                         engine.renderValidationValues(collector.call(), context);
                         validateCallArgumentsIn(collector.call(), context, engine);
                     }
@@ -1234,7 +1207,7 @@ public final class PackageValidator {
                     if (operation.get("sql") != null) {
                         sourceField = "actions." + action.id() + "." + (action.query().isEmpty() ? "update" : "query") + ".sql";
                         String sql = String.valueOf(operation.get("sql"));
-                        validateContextStructure(sql, engine, context, testCase, completedActions);
+                        validateContextStructure(sql, engine, context, testCase, completedActions, action.id());
                         engine.renderValidationValues(sql, context);
                     }
                     Object params = operation.get("params");
@@ -1243,7 +1216,7 @@ public final class PackageValidator {
                         for (Object value : (Iterable<?>) params) {
                             if (value instanceof String) {
                                 sourceField = "actions." + action.id() + ".params[" + index + "]";
-                                validateContextStructure((String) value, engine, context, testCase, completedActions);
+                                validateContextStructure((String) value, engine, context, testCase, completedActions, action.id());
                                 engine.renderValidationValues((String) value, context);
                                 validateCallArgumentsIn((String) value, context, engine);
                             }
@@ -1260,7 +1233,7 @@ public final class PackageValidator {
                         Object value = entry.getValue();
                         if (value instanceof String) {
                             sourceField = "actions." + action.id() + ".parameters." + entry.getKey();
-                            validateContextStructure((String) value, engine, context, testCase, completedActions);
+                            validateContextStructure((String) value, engine, context, testCase, completedActions, action.id());
                             engine.renderValidationValues((String) value, context);
                             validateCallArgumentsIn((String) value, context, engine);
                         }
@@ -1271,12 +1244,44 @@ public final class PackageValidator {
                         sourceFile = payload;
                         sourceField = "actions." + action.id() + ".payload";
                         String content = att.template.PayloadCache.readUtf8(payload);
-                        validateContextStructure(content, engine, context, testCase, completedActions);
+                        validateContextStructure(content, engine, context, testCase, completedActions, action.id());
                         String partial = engine.renderValidationValues(content, context);
                         validateCallArgumentsIn(content, context, engine);
                         if (!"file".equalsIgnoreCase(action.renderAs()) && !partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
                     }
                 }
+
+                // Publish the deferred Action shape only after all fields that
+                // runtime renders before context.addAction(...) have passed.
+                // This keeps validation-time shorthand resolution aligned with
+                // the runtime publication boundary.
+                context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
+                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
+
+                sourceField = "actions." + action.id() + ".description";
+                validateContextStructure(action.description(), engine, context, testCase, afterCurrentAction, action.id());
+                engine.renderValidationValues(action.description(), context);
+                validateCallArgumentsIn(action.description(), context, engine);
+
+                sourceField = "actions." + action.id() + ".assert";
+                Set<String> assertionActions = ("tool".equalsIgnoreCase(action.type())
+                        || "flow".equalsIgnoreCase(action.type())) ? completedActions : afterCurrentAction;
+                validateContextStructure(action.assertion(), engine, context, testCase, assertionActions, action.id());
+                engine.renderValidationValues(action.assertion(), context);
+                validateCallArgumentsIn(action.assertion(), context, engine);
+
+                sourceField = "actions." + action.id() + ".actual";
+                validateContextStructure(action.actual(), engine, context, testCase, afterCurrentAction, action.id());
+                engine.renderValidationValues(action.actual(), context);
+                validateCallArgumentsIn(action.actual(), context, engine);
+
+                sourceField = "actions." + action.id() + ".expected";
+                Set<String> expectedActions = "tool".equalsIgnoreCase(action.type())
+                        ? afterCurrentAction : completedActions;
+                validateContextStructure(action.expected(), engine, context, testCase, expectedActions, action.id());
+                engine.renderValidationValues(action.expected(), context);
+                validateCallArgumentsIn(action.expected(), context, engine);
+
                 if ("flow".equalsIgnoreCase(action.type())) {
                     att.flow.FlowDefinition target = flows.get(action.use());
                     StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
@@ -1324,6 +1329,12 @@ public final class PackageValidator {
     private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                           att.core.CaseRuntimeContext context, TestCase testCase,
                                           Set<String> availableActions) {
+        validateContextStructure(text, engine, context, testCase, availableActions, null);
+    }
+
+    private void validateContextStructure(String text, att.template.UnifiedTemplateEngine engine,
+                                          att.core.CaseRuntimeContext context, TestCase testCase,
+                                          Set<String> availableActions, String currentActionId) {
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
             if (referencePath.equals("CASE.STAGES") || referencePath.startsWith("CASE.STAGES.")
@@ -1384,6 +1395,10 @@ public final class PackageValidator {
             }
             if (!("CASE".equals(root) || "RUN".equals(root) || "ACTIONS".equals(root)
                     || "TOOL".equals(root) || "DB".equals(root) || "output".equals(root))) {
+                if (currentActionId != null && currentActionId.equals(root) && !availableActions.contains(root)
+                        && !context.contains(referencePath)) {
+                    throw unavailableActionContext(path, root, availableActions);
+                }
                 try {
                     if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
                     else context.require(referencePath);

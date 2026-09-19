@@ -693,6 +693,47 @@ class PackageValidatorTest {
         catch (Exception e) { throw new RuntimeException(e); } });
     }
 
+    @Test void validateRootlessActionReferencesRespectPublicationTiming() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
+                Collections.<String,ToolConfig>emptyMap(),null,null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "TIMING", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+
+        TemplateAction selfReference = new TemplateAction("show", map("type", "log",
+                "message", "${show.output.result}"));
+        java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, new StageTemplate("TIMING", tempDir,
+                        Collections.singletonList(selfReference)), testCase, stage, config,
+                        tempDir.resolve("payment.xlsx"), new LinkedHashSet<String>()));
+        DiagnosticException diagnostic = DiagnosticException.find(error.getCause());
+        assertNotNull(diagnostic);
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, diagnostic.code());
+        assertTrue(diagnostic.detail().contains("has not completed"));
+
+        TemplateAction previous = new TemplateAction("show", map("type", "log",
+                "message", "${prepare.output.result}"));
+        TemplateAction prepare = new TemplateAction("prepare", map("type", "log", "message", "ready"));
+        assertDoesNotThrow(() -> { try {
+            values.invoke(validator, new StageTemplate("TIMING", tempDir, Arrays.asList(prepare, previous)),
+                    testCase, stage, config, tempDir.resolve("payment.xlsx"), new LinkedHashSet<String>());
+        } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        catch (Exception e) { throw new RuntimeException(e); } });
+
+        TemplateAction postPublication = new TemplateAction("show", map("type", "log",
+                "message", "ready", "description", "${show.output.result}"));
+        assertDoesNotThrow(() -> { try {
+            values.invoke(validator, new StageTemplate("TIMING", tempDir,
+                    Collections.singletonList(postPublication)), testCase, stage, config,
+                    tempDir.resolve("payment.xlsx"), new LinkedHashSet<String>());
+        } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        catch (Exception e) { throw new RuntimeException(e); } });
+    }
+
     @Test void validateDefersNestedShapeOfEarlierAssignButStillRejectsUnknownOrRealNullParents() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
                 Collections.<String,ToolConfig>emptyMap(),null,null);

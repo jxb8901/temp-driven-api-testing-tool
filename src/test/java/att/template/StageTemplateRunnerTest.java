@@ -58,6 +58,24 @@ class StageTemplateRunnerTest {
         assertNull(context.resolve("ACTIONS.normalize.TOOL"));
     }
 
+    @Test void currentActionRootlessReferenceFailsBeforeActionPublication() throws Exception {
+        Path caseDir = tempDir.resolve("self-reference-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
+        TemplateAction action = new TemplateAction("show", map("type","log",
+                "message","${show.output.result}"));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertTrue(results.get(0).message().contains("Unknown Context variable"));
+    }
+
     @Test void toolEvidenceRunsAfterPrimaryResultAndIsAvailableToAssertion() throws Exception {
         Path caseDir = tempDir.resolve("evidence-case");
         Files.createDirectories(caseDir);
