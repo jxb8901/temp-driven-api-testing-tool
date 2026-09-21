@@ -22,9 +22,13 @@ public final class LoadMetrics implements LoadEventListener {
     private final AtomicLong measuredLatencyCount = new AtomicLong();
     private final String model;
     private final long startedAtEpochMs;
+    private final long rateWindowMs;
     private volatile long endedAtEpochMs;
 
-    public LoadMetrics(String model, long startedAtEpochMs) { this.model = model; this.startedAtEpochMs = startedAtEpochMs; }
+    public LoadMetrics(String model, long startedAtEpochMs) { this(model, startedAtEpochMs, 0L); }
+    public LoadMetrics(String model, long startedAtEpochMs, long rateWindowMs) {
+        this.model = model; this.startedAtEpochMs = startedAtEpochMs; this.rateWindowMs = Math.max(0L, rateWindowMs);
+    }
 
     @Override public void onEvent(LoadEvent event) {
         if (event == null) return;
@@ -73,7 +77,8 @@ public final class LoadMetrics implements LoadEventListener {
         Collections.sort(sorted);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         long measured = Math.max(0L, completed.get() - warmupCompleted());
-        double elapsedSeconds = Math.max(0.001, ((endedAtEpochMs == 0L ? System.currentTimeMillis() : endedAtEpochMs) - startedAtEpochMs) / 1000.0);
+        long elapsedMs = rateWindowMs > 0L ? rateWindowMs : (endedAtEpochMs == 0L ? System.currentTimeMillis() : endedAtEpochMs) - startedAtEpochMs;
+        double elapsedSeconds = Math.max(0.001, elapsedMs / 1000.0);
         long sum = 0L; for (Long value : sorted) sum += value.longValue();
         result.put("model", model); result.put("scheduled", scheduled.get()); result.put("started", started.get());
         result.put("completed", completed.get()); result.put("success", success.get()); result.put("failure", failure.get());

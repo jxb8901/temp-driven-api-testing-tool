@@ -174,7 +174,7 @@ scenario 是基礎配置，明確提供的 CLI workload option 會覆蓋同名 Y
 
 ## 7. EXEC/META Context
 
-未來 scheduler 呼叫共用 `IterationExecutor` 時，每個 iteration 都建立獨立 runtime：
+scheduler 呼叫共用 `IterationExecutor` 時，每個 iteration 都建立獨立 runtime：
 
 | Context | 意義 |
 |---|---|
