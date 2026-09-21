@@ -4,6 +4,7 @@ import att.config.FrameworkConfig;
 import att.exec.DbHelperExecutor;
 import att.exec.MqHelperExecutor;
 import att.exec.IbmMqClientFactory;
+import att.exec.MqTransport;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -20,10 +21,15 @@ public final class LoadRunResources implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
+        this(projectRoot, config, new IbmMqClientFactory());
+    }
+
+    /** Creates load resources with an injectable MQ transport boundary for integration tests. */
+    LoadRunResources(Path projectRoot, FrameworkConfig config, MqTransport.Factory mqTransportFactory) {
         this.config = config;
         this.dbProvider = new HikariDbConnectionProvider();
         this.db = new DbHelperExecutor(projectRoot, config, dbProvider);
-        this.mqFactory = new PooledMqTransportFactory(new IbmMqClientFactory(), 20, 2000L);
+        this.mqFactory = new PooledMqTransportFactory(mqTransportFactory, 20, 2000L);
         this.mq = new MqHelperExecutor(projectRoot, config, mqFactory);
     }
 

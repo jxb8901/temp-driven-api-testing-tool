@@ -7,6 +7,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -77,7 +78,7 @@ class FixedArrivalRateSchedulerTest {
 
     @Test
     void responseTimeDoesNotChangeAbsoluteDueTimesWhileCapacityIsAvailable() throws Exception {
-        LoadScenario scenario = scenario(100.0, 0L, 0L, 50L, 0L, 2);
+        LoadScenario scenario = scenario(100.0, 0L, 0L, 50L, 0L, 5);
         FakeTiming fake = new FakeTiming();
         List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
         LoadIterationRunner runner = request -> {
@@ -89,6 +90,7 @@ class FixedArrivalRateSchedulerTest {
         List<LoadEvent> completed = new ArrayList<LoadEvent>();
         for (LoadEvent event : events) if (event.completed()) completed.add(event);
         assertTrue(completed.size() >= 4);
+        Collections.sort(completed, Comparator.comparingLong(LoadEvent::sequence));
         for (int index = 1; index < completed.size(); index++) {
             assertEquals(FixedArrivalRateScheduler.plannedDue(scenario, 0L, completed.get(index).sequence()),
                     completed.get(index).scheduledAtEpochMs());
