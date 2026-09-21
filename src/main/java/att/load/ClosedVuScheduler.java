@@ -60,11 +60,15 @@ public final class ClosedVuScheduler implements LoadScheduler {
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
                 long iterationStarted = LoadSchedulerSupport.now();
                 att.core.ResultStatus status;
-                try { status = executor.execute(request).status(); }
+                EvidenceRef evidence = null;
+                try {
+                    IterationResult result = executor.execute(request);
+                    status = result.status(); evidence = result.evidenceRef();
+                }
                 catch (RuntimeException failure) { status = att.core.ResultStatus.ERROR; }
                 long completedAt = LoadSchedulerSupport.now();
                 LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completed(runId, "closed", phase, iterationId, userId,
-                        sequenceValue, scheduledAt, iterationStarted, completedAt, status));
+                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, evidence));
                 LoadSchedulerSupport.sleep(scenario.thinkTime().toMillis());
             }
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }

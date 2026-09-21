@@ -178,7 +178,7 @@ public final class FrameworkRunner {
         att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario));
         att.load.LoadRunResult result;
         try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
-            att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources);
+            att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
             att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
                     ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence)
                     : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence);

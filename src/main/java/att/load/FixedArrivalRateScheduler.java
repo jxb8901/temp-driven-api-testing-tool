@@ -56,15 +56,16 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private void submit(LoadMetrics metrics, String phase, String id, long sequenceValue, long dueAt, long runStartedAt) {
         inFlight.incrementAndGet();
         workers.submit(() -> {
-            long iterationStarted = LoadSchedulerSupport.now(); att.core.ResultStatus status;
+            long iterationStarted = LoadSchedulerSupport.now(); att.core.ResultStatus status; EvidenceRef evidence = null;
             try {
                 IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                         sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
-                status = executor.execute(request).status();
+                IterationResult result = executor.execute(request);
+                status = result.status(); evidence = result.evidenceRef();
             } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; }
             long completedAt = LoadSchedulerSupport.now(); inFlight.decrementAndGet();
             LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completed(runId, "arrivalRate", phase, id, null,
-                    sequenceValue, dueAt, iterationStarted, completedAt, status));
+                    sequenceValue, dueAt, iterationStarted, completedAt, status, evidence));
         });
     }
     private double cumulativeArrivals(long elapsedMs) {

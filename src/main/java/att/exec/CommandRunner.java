@@ -56,7 +56,22 @@ public class CommandRunner {
         outThread.start();
         errThread.start();
 
-        boolean completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        boolean completed;
+        try {
+            completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            process.destroyForcibly();
+            try { process.waitFor(5L, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+            try { join(outThread, process.getInputStream()); } catch (InterruptedException ignored) {
+                try { process.getInputStream().close(); } catch (IOException ignoredInput) { }
+            }
+            try { join(errThread, process.getErrorStream()); } catch (InterruptedException ignored) {
+                try { process.getErrorStream().close(); } catch (IOException ignoredError) { }
+            }
+            stdoutCapture.close(); stderrCapture.close();
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        }
         if (!completed) {
             process.destroyForcibly();
             join(outThread, process.getInputStream());

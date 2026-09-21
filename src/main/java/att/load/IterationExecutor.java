@@ -32,20 +32,31 @@ public final class IterationExecutor {
     private final FrameworkConfig config;
     private final LoadTarget target;
     private final LoadRunResources resources;
+    private final Path outputRoot;
+    private final FlowRegistry flows;
     private final boolean ownsResources;
 
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target) {
-        this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true);
+        this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true,
+                projectRoot.resolve(config.outputDirectory()));
     }
 
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target, LoadRunResources resources) {
-        this(projectRoot, config, target, resources, false);
+        this(projectRoot, config, target, resources, false, projectRoot.resolve(config.outputDirectory()));
+    }
+
+    public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
+                             LoadRunResources resources, Path outputRoot) {
+        this(projectRoot, config, target, resources, false, outputRoot);
     }
 
     private IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
-                              LoadRunResources resources, boolean ownsResources) {
+                              LoadRunResources resources, boolean ownsResources, Path outputRoot) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize(); this.config = config; this.target = target;
         this.resources = resources == null ? new LoadRunResources(projectRoot, config) : resources;
+        this.outputRoot = (outputRoot == null ? this.projectRoot.resolve(config.outputDirectory()) : outputRoot)
+                .toAbsolutePath().normalize();
+        this.flows = target.flows().freezeFor(target.template());
         this.ownsResources = resources == null || ownsResources;
     }
 
@@ -74,9 +85,9 @@ public final class IterationExecutor {
             ToolInvoker tools = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = resources.mq();
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq);
-            FlowRegistry flows = new FlowRegistry(projectRoot, target.templatesRoot(), false);
             results.addAll(new StageTemplateRunner(engine, flows).execute("LOAD", target.template(), context, log));
-            results.addAll(db.finishCase(context, log));
+            if (Thread.currentThread().isInterrupted()) resources.db().abortCase();
+            else results.addAll(db.finishCase(context, log));
             finalized = true;
             status = aggregate(results);
             context.put("CASE.status", status.name());
@@ -94,6 +105,7 @@ public final class IterationExecutor {
             }
             if (log != null) try { log.append("LOAD ERROR", typed == null ? message(error) : typed.toDiagnostic().toMap()); } catch (Exception ignored) { }
             if (!finalized) resources.db().abortCase();
+            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
         } finally {
             if (context != null) context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             if (log != null) try { log.close(); } catch (Exception ignored) { }
@@ -108,7 +120,7 @@ public final class IterationExecutor {
 
     private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {
         if (!retainedWorkspace) {
-            return projectRoot.resolve(config.outputDirectory()).resolve("load").resolve(safe(request.runId()))
+            return outputRoot.resolve("load").resolve(safe(request.runId()))
                     .resolve("iterations").resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
         }
         Path root = request.outputDirectory().toAbsolutePath().normalize();

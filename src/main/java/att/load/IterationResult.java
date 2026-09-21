@@ -33,4 +33,9 @@ public final class IterationResult {
     public List<ValidationResult> validations() { return validations; }
     public Path outputDirectory() { return outputDirectory; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
+    public EvidenceRef evidenceRef() {
+        if (status == ResultStatus.PASS && diagnostic == null) return null;
+        Path caseLog = outputDirectory == null ? null : outputDirectory.resolve("case.log");
+        return new EvidenceRef(outputDirectory, caseLog, diagnostic);
+    }
 }

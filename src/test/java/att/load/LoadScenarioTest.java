@@ -6,6 +6,7 @@ import att.core.ExecutionOptions;
 import att.core.ResultStatus;
 import att.core.TestCase;
 import att.validation.DiagnosticException;
+import att.validation.JsonSupport;
 import att.validation.PackageValidator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,10 +17,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -151,6 +154,92 @@ class LoadScenarioTest {
             assertEquals("arrivalRate", arrival.context().resolve("EXEC.LOAD.MODEL"));
             assertNull(arrival.context().resolve("EXEC.LOAD.USER_ID"));
         } finally { pool.shutdownNow(); }
+    }
+
+    @Test void iterationWorkspaceAndFailureEvidenceUseResolvedLoadOutputRoot() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/FAIL_TEMPLATE"));
+        write(project, "templates/FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: FAIL_TEMPLATE\ndescription: retained failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("configured-output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("cli-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("resolved-run", "resolved-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            Path expectedWorkspace = outputRoot.resolve("load/resolved-run/iterations")
+                    .resolve(LoadIsolation.workspaceName("resolved-run", "resolved-iteration", 1)).toAbsolutePath().normalize();
+            assertEquals(expectedWorkspace, result.outputDirectory().toAbsolutePath().normalize());
+            assertTrue(Files.isDirectory(expectedWorkspace));
+            assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.log")));
+            assertNotNull(result.evidenceRef());
+
+            LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
+                    LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10));
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("resolved-run", "closed", "STEADY", "resolved-iteration", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            Path runDirectory = outputRoot.resolve("load/resolved-run");
+            Map<String, Object> written = evidence.write(runDirectory);
+            assertEquals(1, written.get("count"));
+            @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) written.get("items");
+            Path eventFile = runDirectory.resolve(String.valueOf(items.get(0).get("path")));
+            @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
+            @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
+            assertEquals("iterations/" + expectedWorkspace.getFileName(), reference.get("workspace"));
+            assertEquals("iterations/" + expectedWorkspace.getFileName() + "/case.log", reference.get("caseLog"));
+        } finally { resources.close(); }
+    }
+
+    @Test void cancellationRetainsFailureEvidenceAndStopsActiveToolIteration() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/SLOW_TEMPLATE"));
+        Path started = temp.resolve("slow-started");
+        Path completed = temp.resolve("slow-completed");
+        String command = "/bin/sh -c 'touch " + started + "; sleep 1; touch " + completed + "'";
+        write(project, "templates/SLOW_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: SLOW_TEMPLATE\ndescription: cancellable load action\nactions:\n"
+                + "  run: {type: tool, call: \"#{slow()}\"}\n");
+        Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: SLOW_TEMPLATE}\nload: {users: 1, duration: 10s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("slow", new ToolConfig("slow", "Slow", "Slow", command, "txt", Collections.emptyMap())), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("cancel-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
+                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10));
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario,
+                new IterationExecutor(project, config, target, resources, outputRoot), "cancel-run", evidence);
+        ExecutorService runner = Executors.newSingleThreadExecutor();
+        try {
+            Future<LoadRunResult> future = runner.submit(scheduler::run);
+            long deadline = System.currentTimeMillis() + 3000L;
+            while (!Files.exists(started) && System.currentTimeMillis() < deadline) Thread.sleep(10L);
+            assertTrue(Files.exists(started), "the active iteration did not start");
+            scheduler.cancel();
+            future.get(5, TimeUnit.SECONDS);
+            Thread.sleep(1500L);
+            assertFalse(Files.exists(completed), "the cancelled tool completed after scheduler shutdown");
+            assertEquals(1, evidence.events().size());
+            assertEquals(ResultStatus.ERROR, evidence.events().get(0).status());
+            assertNotNull(evidence.events().get(0).evidence());
+            assertFalse(resources.isClosed());
+        } finally {
+            scheduler.close();
+            runner.shutdownNow();
+            resources.close();
+            assertTrue(resources.isClosed());
+        }
     }
 
     @Test void loadValidationIsModeAwareAndOptionalLoadPathsRemainPortable() throws Exception {
