@@ -134,14 +134,14 @@ public class UnifiedTemplateEngine {
             if (validationOnly) {
                 boolean runtimeDependent = att.core.ContextPathPolicy.isRuntimeDependent(path);
                 if (context.isValidationDeferred(path)) value = null;
-                else if (validationValueAvailable) value = optional ? context.requireOptional(path) : context.require(path);
+                else if (validationValueAvailable) value = optional ? context.requireOptional(expression) : context.require(path);
                 else if (runtimeDependent) value = null;
-                else if (context.contains(path)) value = optional ? context.requireOptional(path) : context.require(path);
+                else if (context.contains(path)) value = optional ? context.requireOptional(expression) : context.require(path);
                 else if (!explicitContextRoot(path)) value = null; // A dynamic unique suffix is checked structurally and completed at runtime.
-                else value = optional ? context.requireOptional(path) : context.require(path);
+                else value = optional ? context.requireOptional(expression) : context.require(path);
             }
-            else if (preserveMissing) value = optional ? context.resolveOptional(path) : context.resolve(path);
-            else value = optional ? context.requireOptional(path) : context.require(path);
+            else if (preserveMissing) value = optional ? context.resolveOptional(expression) : context.resolve(path);
+            else value = optional ? context.requireOptional(expression) : context.require(path);
             String replacement = value == null && preserveMissing ? matcher.group(0) : (value == null ? "" : String.valueOf(value));
             matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
         }
@@ -161,7 +161,7 @@ public class UnifiedTemplateEngine {
         Matcher exact = VALUE.matcher(value);
         if (exact.matches()) {
             String path = CaseRuntimeContext.requiredReferencePath(exact.group(1));
-            return CaseRuntimeContext.isOptionalReference(exact.group(1)) ? context.requireOptional(path) : context.require(path);
+            return CaseRuntimeContext.isOptionalReference(exact.group(1)) ? context.requireOptional(exact.group(1)) : context.require(path);
         }
         if (value.startsWith("#{") && findToolEnd(value, 2) == value.length() - 1) {
             return evaluateBlock(value, context, log);

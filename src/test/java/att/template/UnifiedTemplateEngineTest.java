@@ -114,17 +114,41 @@ class UnifiedTemplateEngineTest {
         assertNull(engine.evaluate("${CASE.result.actualNull?}", context, null));
         assertNull(engine.evaluate("${CASE.result.missing.child?}", context, null));
         assertEquals(Boolean.TRUE, engine.evaluate("#{${CASE.result.missing?} is null}", context, null));
+        assertNull(engine.evaluate("${CASE.result.actualNull.child?}", context, null));
+        assertEquals(Boolean.TRUE, engine.evaluate("#{${CASE.result.actualNull.child?} is null}", context, null));
         assertEquals("fallback", engine.render("#{nvl(${CASE.result.missing?}, 'fallback')}", context));
         assertEquals("fallback", engine.render("#{coalesce(${CASE.result.missing?}, 'fallback')}", context));
-        assertEquals("missing=; present=READY", engine.render("missing=${CASE.result.missing?}; present=${CASE.result.text?}", context));
+        assertEquals("missing=; nullIntermediate=; present=READY", engine.render(
+                "missing=${CASE.result.missing?}; nullIntermediate=${CASE.result.actualNull.child?}; present=${CASE.result.text?}", context));
+        assertEquals("fallback", engine.render("#{nvl(${CASE.result.actualNull.child?}, 'fallback')}", context));
+        assertEquals("fallback", engine.render("#{coalesce(${CASE.result.actualNull.child?}, 'fallback')}", context));
         assertThrows(att.validation.DiagnosticException.class,
                 () -> engine.evaluate("${CASE.result.missing}", context, null));
-        assertThrows(att.validation.DiagnosticException.class,
+        att.validation.DiagnosticException scalarTraversal = assertThrows(att.validation.DiagnosticException.class,
                 () -> engine.evaluate("#{${CASE.result.scalar.child?} is null}", context, null));
+        assertTrue(scalarTraversal.format().contains("Invalid Context path '${CASE.result.scalar.child?}'"));
+        assertTrue(scalarTraversal.format().contains("requestedPath: CASE.result.scalar.child?"));
+        assertThrows(att.validation.DiagnosticException.class,
+                () -> engine.render("${CASE.result.scalar.child?}", context));
         assertThrows(ExpressionSyntaxException.class,
                 () -> engine.validateExpressionBlockSyntax("#{${CASE..value?} is null}"));
         assertThrows(ExpressionSyntaxException.class,
                 () -> engine.validateValueSyntax("${CASE.result.value??}"));
+
+        Map<String, Object> skippedOutput = new LinkedHashMap<String, Object>();
+        skippedOutput.put("status", "SKIPPED");
+        skippedOutput.put("durationMs", Integer.valueOf(0));
+        Map<String, Object> skippedAction = new LinkedHashMap<String, Object>();
+        skippedAction.put("type", "tool");
+        skippedAction.put("status", "SKIPPED");
+        skippedAction.put("output", skippedOutput);
+        context.beginStage(new att.core.StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        context.addAction("skipped", skippedAction);
+        String skippedPath = "${ACTIONS.skipped.output.result.EaiTxn.Frm.FrmData.InterbankSetlAmt?}";
+        assertNull(engine.evaluate(skippedPath, context, null));
+        assertEquals("", engine.render(skippedPath, context));
+        assertEquals("fallback", engine.render("#{nvl(" + skippedPath + ", 'fallback')}", context));
+        assertEquals(Boolean.TRUE, engine.evaluate("#{" + skippedPath + " is null}", context, null));
     }
 
     @Test void syntaxDiagnosticIdentifiesMalformedPathArgument() {

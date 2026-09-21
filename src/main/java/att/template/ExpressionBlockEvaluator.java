@@ -19,7 +19,7 @@ public final class ExpressionBlockEvaluator {
         default boolean hasContext(String path) { return false; }
         default Object contextOptional(String path) throws Exception { return context(path); }
         default Object context(String path, boolean optional) throws Exception {
-            return optional ? contextOptional(path) : context(path);
+            return optional ? contextOptional(path + "?") : context(path);
         }
     }
 

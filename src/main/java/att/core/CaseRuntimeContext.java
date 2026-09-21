@@ -216,48 +216,51 @@ public final class CaseRuntimeContext {
      * errors so optional lookup cannot hide authoring mistakes.
      */
     public Object requireOptional(String path) {
-        return requireResolved(requiredReferencePath(path), true);
+        return requireResolved(path, true);
     }
 
     private Object requireResolved(String path, boolean optional) {
-        Resolution resolution = resolution(path);
+        String lookupPath = optional ? requiredReferencePath(path) : path;
+        Resolution resolution = resolution(lookupPath);
         if (resolution.status == ResolutionStatus.FOUND) return resolution.value;
         if (resolution.status == ResolutionStatus.DEFERRED) return null;
-        if (optional && resolution.status == ResolutionStatus.MISSING) return null;
+        if (optional && (resolution.status == ResolutionStatus.MISSING
+                || resolution.status == ResolutionStatus.NULL_INTERMEDIATE)) return null;
+        String diagnosticPath = path == null ? lookupPath : path;
         java.util.List<String> paths = availablePaths();
-        String nearest = nearest(path, paths);
+        String nearest = nearest(lookupPath, paths);
         StringBuilder detail = new StringBuilder();
         if (resolution.status == ResolutionStatus.AMBIGUOUS) {
             detail.append("The shorthand matches more than one readable logical Context path.")
-                    .append("\nrequestedPath: ").append(path)
+                    .append("\nrequestedPath: ").append(diagnosticPath)
                     .append("\ncurrentNode: <root>")
                     .append("\ncandidates:");
             for (String candidate : resolution.candidates) detail.append("\n  - ").append(candidate);
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_AMBIGUOUS,
-                    "Ambiguous Context shorthand '${" + path + "}'", detail.toString(), null, path, null, null, null,
+                    "Ambiguous Context shorthand '${" + diagnosticPath + "}'", detail.toString(), null, diagnosticPath, null, null, null,
                     null, null, "Use a longer unique suffix or one of the listed canonical Context paths.", null);
         }
-        if (resolution.status == ResolutionStatus.INVALID_PATH) {
+        if (resolution.status == ResolutionStatus.INVALID_PATH || resolution.status == ResolutionStatus.NULL_INTERMEDIATE) {
             detail.append("The requested Context path cannot be traversed.")
-                    .append("\nrequestedPath: ").append(path)
+                    .append("\nrequestedPath: ").append(diagnosticPath)
                     .append("\ncurrentNode: ").append(resolution.currentNode)
                     .append("\nreason: ").append(resolution.reason);
             if (resolution.missingSegment != null) detail.append("\nmissingSegment: ").append(resolution.missingSegment);
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    "Invalid Context path '${" + path + "}'", detail.toString(), null, path, null, null, null,
+                    "Invalid Context path '${" + diagnosticPath + "}'", detail.toString(), null, diagnosticPath, null, null, null,
                     null, null,
                     "Check the path segment type and use a valid map key or list index.", null);
         }
         detail.append("No value exists at the requested case-sensitive Context path.")
-                .append("\nrequestedPath: ").append(path)
+                .append("\nrequestedPath: ").append(diagnosticPath)
                 .append("\ncurrentNode: ").append(resolution.currentNode)
                 .append("\nmissingSegment: ").append(resolution.missingSegment);
         String suggestion = nearest == null
                 ? "Check the case-sensitive field name and whether the stage/action output is available at this point."
                 : "Use '${" + nearest + "}' if that is the intended Context variable; Context names are case-sensitive.";
         throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                "Unknown Context variable '${" + path + "}'", detail.toString(), null, path, null, null, null,
-                null, null, suggestion, null);
+                "Unknown Context variable '${" + diagnosticPath + "}'", detail.toString(), null, diagnosticPath, null, null,
+                null, null, null, suggestion, null);
     }
 
     public boolean contains(String path) {
@@ -972,7 +975,7 @@ public final class CaseRuntimeContext {
                 java.util.List<?> list = (java.util.List<?>) current;
                 if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return Resolution.missing(currentPath, segment.display());
                 current = list.get(segment.index.intValue());
-            } else if (current == null) return Resolution.invalidPath(currentPath, "value is null");
+            } else if (current == null) return Resolution.nullIntermediate(currentPath, segment.display());
             else if (current instanceof java.util.List) return Resolution.invalidPath(currentPath, "expected a numeric list index but found " + segment.display());
             else return Resolution.invalidPath(currentPath, "value is a scalar and cannot contain '" + segment.display() + "'");
             currentPath = appendPath("<root>".equals(currentPath) ? "" : currentPath, segment);
@@ -1060,7 +1063,7 @@ public final class CaseRuntimeContext {
 
     private static boolean simpleKey(String key) { return key != null && key.matches("[A-Za-z_][A-Za-z0-9_-]*"); }
 
-    private enum ResolutionStatus { FOUND, DEFERRED, MISSING, INVALID_PATH, AMBIGUOUS }
+    private enum ResolutionStatus { FOUND, DEFERRED, MISSING, NULL_INTERMEDIATE, INVALID_PATH, AMBIGUOUS }
 
     private static final class Resolution {
         private final ResolutionStatus status; private final Object value; private final String canonicalPath;
@@ -1073,6 +1076,7 @@ public final class CaseRuntimeContext {
         private static Resolution found(Object value, String canonicalPath) { return new Resolution(ResolutionStatus.FOUND, value, canonicalPath, null, null, null, java.util.Collections.<String>emptyList()); }
         private static Resolution deferred(String canonicalPath) { return new Resolution(ResolutionStatus.DEFERRED, null, canonicalPath, null, null, null, java.util.Collections.<String>emptyList()); }
         private static Resolution missing(String currentNode, String missingSegment) { return new Resolution(ResolutionStatus.MISSING, null, null, currentNode, missingSegment, null, java.util.Collections.<String>emptyList()); }
+        private static Resolution nullIntermediate(String currentNode, String missingSegment) { return new Resolution(ResolutionStatus.NULL_INTERMEDIATE, null, null, currentNode, missingSegment, "value is null", java.util.Collections.<String>emptyList()); }
         private static Resolution invalidPath(String currentNode, String reason) { return new Resolution(ResolutionStatus.INVALID_PATH, null, null, currentNode, null, reason, java.util.Collections.<String>emptyList()); }
         private static Resolution invalidPath(String currentNode, String missingSegment, String reason) { return new Resolution(ResolutionStatus.INVALID_PATH, null, null, currentNode, missingSegment, reason, java.util.Collections.<String>emptyList()); }
         private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, null, new java.util.ArrayList<String>(candidates)); }

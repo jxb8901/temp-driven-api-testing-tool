@@ -1473,7 +1473,7 @@ public final class PackageValidator {
                 validateCanonicalPath(path, referencePath);
                 String field = firstChildSegment(referencePath, "EXEC");
                 try {
-                    if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                    if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(path);
                     else context.require(referencePath);
                 } catch (DiagnosticException e) {
                     if (context.isValidationDeferred(referencePath)) continue;
@@ -1487,7 +1487,7 @@ public final class PackageValidator {
                 if (!("TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
                         || "DBHELPER".equals(field) || "MQHELPER".equals(field))) {
                     try {
-                        if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                        if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(path);
                         else context.require(referencePath);
                     } catch (DiagnosticException e) {
                         if (context.isValidationDeferred(referencePath)) continue;
@@ -1502,7 +1502,7 @@ public final class PackageValidator {
                     throw unavailableActionContext(path, root, availableActions);
                 }
                 try {
-                    if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(referencePath);
+                    if (att.core.CaseRuntimeContext.isOptionalReference(path)) context.requireOptional(path);
                     else context.require(referencePath);
                 }
                 catch (DiagnosticException e) {

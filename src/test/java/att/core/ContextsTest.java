@@ -232,13 +232,16 @@ class ContextsTest {
         assertEquals(Integer.valueOf(7), context.requireOptional("CASE.result.amount?"));
         assertEquals(Boolean.TRUE, context.requireOptional("CASE.result.enabled?"));
         assertNull(context.requireOptional("CASE.result.actualNull?"));
+        assertNull(context.requireOptional("CASE.result.actualNull.child?"));
         assertEquals("A", context.requireOptional("CASE.result.items[0].code?"));
         assertNull(context.requireOptional("CASE.result.items[9].code?"));
 
         assertThrows(att.validation.DiagnosticException.class,
                 () -> context.require("CASE.result.missing"));
-        assertThrows(att.validation.DiagnosticException.class,
+        att.validation.DiagnosticException scalarTraversal = assertThrows(att.validation.DiagnosticException.class,
                 () -> context.requireOptional("CASE.scalar.child?"));
+        assertTrue(scalarTraversal.format().contains("Invalid Context path '${CASE.scalar.child?}'"));
+        assertTrue(scalarTraversal.format().contains("requestedPath: CASE.scalar.child?"));
 
         context.put("CASE.first", Collections.singletonMap("status", "A"));
         context.put("CASE.second", Collections.singletonMap("status", "B"));
