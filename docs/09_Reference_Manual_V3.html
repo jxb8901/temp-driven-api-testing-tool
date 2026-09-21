@@ -4534,10 +4534,15 @@ links.</p>
 and <code>minThroughput</code> (<code>/s</code> or <code>/m</code>)
 fields for both workload models. Arrival-rate scenarios additionally
 support <code>droppedRate</code> (<code>%</code>) and
-<code>achievedArrivalRate</code> (<code>%</code>), where achieved
-arrival rate is measured as a percentage of the configured arrival rate.
-<code>target.arguments</code> is valid only for Tool targets; Template
-and Flow targets reject it with a field-specific diagnostic.</p>
+<code>achievedArrivalRate</code> (<code>%</code>). For the percentage
+form, achieved arrival rate is <code>started / scheduled</code>, where
+<code>scheduled</code> is the integrated planned arrival count across
+warm-up, ramp-up, steady, and ramp-down; this keeps a correctly executed
+ramped profile from being diluted by its lower average rate. The
+<code>/s</code> form remains the actual average started rate over the
+full phase window. <code>target.arguments</code> is valid only for Tool
+targets; Template and Flow targets reject it with a field-specific
+diagnostic.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>

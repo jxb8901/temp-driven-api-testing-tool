@@ -16,9 +16,11 @@ class LoadRuntimeTest {
     @Test void metricsExcludeWarmupFromSlaAndKeepDropsSeparate() {
         long now = System.currentTimeMillis();
         LoadMetrics metrics = new LoadMetrics("arrivalRate", now);
-        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "WARMUP", "w-1", null, 1, now, now, now + 100, ResultStatus.ERROR));
+        metrics.onEvent(LoadEvent.started("r", "arrivalRate", "WARMUP", "w-1", null, 1, now, now));
+        metrics.onEvent(LoadEvent.completion("r", "arrivalRate", "WARMUP", "w-1", null, 1, now, now, now + 100, ResultStatus.ERROR, null));
         metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "d-1", 2, now + 1000, now + 1001));
-        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "s-1", null, 3, now + 1000, now + 1001, now + 1101, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.started("r", "arrivalRate", "STEADY", "s-1", null, 3, now + 1000, now + 1001));
+        metrics.onEvent(LoadEvent.completion("r", "arrivalRate", "STEADY", "s-1", null, 3, now + 1000, now + 1001, now + 1101, ResultStatus.PASS, null));
         metrics.finish(now + 2000);
         LoadMetricsSnapshot snapshot = metrics.snapshot();
         assertEquals(3L, snapshot.longValue("scheduled"));
@@ -63,6 +65,22 @@ class LoadRuntimeTest {
                 new LoadMetricsSnapshot(values, Collections.emptyMap()));
         assertTrue(summary.passed());
         assertEquals("99.0000%", summary.results().get(0).actual());
+    }
+
+    @Test void achievedArrivalRatePercentageUsesIntegratedRampedSchedule() {
+        Map<String, Object> thresholds = new LinkedHashMap<String, Object>();
+        thresholds.put("achievedArrivalRate", ">= 99%");
+        LoadScenario scenario = new LoadScenario(Paths.get("ramped-arrival.yaml"), "template", "LOAD_TEMPLATE", Collections.emptyMap(),
+                Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 100.0, "100/s", Duration.ZERO,
+                Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ZERO, 2, "drop", thresholds, Collections.emptyMap());
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("scheduled", 200L);
+        values.put("started", 200L);
+        values.put("achievedArrivalRate", 200.0 / 3.0);
+        LoadThresholdSummary summary = new LoadThresholdEvaluator().evaluate(scenario,
+                new LoadMetricsSnapshot(values, Collections.emptyMap()));
+        assertTrue(summary.passed());
+        assertEquals("100.0000%", summary.results().get(0).actual());
     }
 
     @Test void iterationWorkspaceNamesRemainDistinctAfterPathSanitization() {

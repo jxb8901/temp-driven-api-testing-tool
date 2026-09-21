@@ -62,16 +62,18 @@ class ClosedVuSchedulerTest {
 
         ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19", events::add, fake.timing());
         LoadRunResult result = scheduler.run();
+        List<LoadEvent> completions = new ArrayList<LoadEvent>();
+        for (LoadEvent event : events) if (event.completed()) completions.add(event);
 
         assertEquals(4, requests.size());
-        assertEquals(requests.size(), events.size());
+        assertEquals(requests.size(), completions.size());
         assertEquals("VU-1", requests.get(0).userId());
         assertEquals("VU-1", requests.get(3).userId());
         assertEquals("run-19-VU-1-1", requests.get(0).iterationId());
         assertEquals("run-19-VU-1-4", requests.get(3).iterationId());
         assertNotEquals(requests.get(0).iterationId(), requests.get(1).iterationId());
-        assertEquals(10L, events.get(1).scheduledAtEpochMs() - events.get(0).completedAtEpochMs());
-        assertEquals(10L, events.get(2).scheduledAtEpochMs() - events.get(1).completedAtEpochMs());
+        assertEquals(10L, completions.get(1).scheduledAtEpochMs() - completions.get(0).completedAtEpochMs());
+        assertEquals(10L, completions.get(2).scheduledAtEpochMs() - completions.get(1).completedAtEpochMs());
         assertEquals(50L, result.endedAt().toEpochMilli() - result.startedAt().toEpochMilli());
         assertEquals(4L, result.metrics().longValue("completed"));
         assertEquals(0L, result.metrics().longValue("runtimeError"));
@@ -90,11 +92,13 @@ class ClosedVuSchedulerTest {
         };
 
         new ClosedVuScheduler(scenario, runner, "run-19-failure", events::add, fake.timing()).run();
+        List<LoadEvent> completions = new ArrayList<LoadEvent>();
+        for (LoadEvent event : events) if (event.completed()) completions.add(event);
 
-        assertTrue(events.size() > 1);
-        assertEquals(ResultStatus.ERROR, events.get(0).status());
-        assertEquals(ResultStatus.PASS, events.get(1).status());
-        assertFalse(events.get(0).iterationId().equals(events.get(1).iterationId()));
+        assertTrue(completions.size() > 1);
+        assertEquals(ResultStatus.ERROR, completions.get(0).status());
+        assertEquals(ResultStatus.PASS, completions.get(1).status());
+        assertFalse(completions.get(0).iterationId().equals(completions.get(1).iterationId()));
     }
 
     private static LoadScenario scenario(int users, long warmupMs, long rampUpMs, long durationMs,

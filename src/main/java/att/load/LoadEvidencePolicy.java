@@ -20,7 +20,7 @@ public final class LoadEvidencePolicy {
     public Success success() { return success; } public Failure failure() { return failure; } public double sampleRate() { return sampleRate; } public int maxSamples() { return maxSamples; }
     public boolean retain(LoadEvent event, int currentSamples) {
         if (event == null || currentSamples >= maxSamples) return false;
-        if (event.dropped()) return false;
+        if (event.dropped() || !event.completed()) return false;
         if (!event.success()) return failure == Failure.FULL;
         if (success == Success.NONE || sampleRate <= 0.0) return false;
         long hash = Math.abs((long) event.iterationId().hashCode()); return (hash % 1000000L) < Math.round(sampleRate * 1000000.0);

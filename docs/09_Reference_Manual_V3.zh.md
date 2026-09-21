@@ -1926,7 +1926,7 @@ Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 
 
 `att load` 会在 scheduler 启动前完成 scenario 和 target validation，再选择两个 scheduler 之一。closed mode 为 Virtual User 保持稳定 identity，等待 target 完成后才进入 think time 和下一次 iteration；arrival-rate mode 使用 absolute planned due time，`maxConcurrent` 已满时记录 generator `dropped`，不排队，也不算作 SUT failure。两个 scheduler 都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`。warm-up 是真实 traffic，但默认不计入 measured threshold aggregates；成功 iteration 默认只保留 metrics，失败和显式 sample 才保留 bounded diagnostic links。
 
-Load threshold 中，`errorRate` 使用 `%`，`p95`／`p99` 使用 `ms`，`minThroughput` 使用 `/s` 或 `/m`，这些 common thresholds 对两种 workload 都适用。arrival-rate 另外支持 `droppedRate` 和 `achievedArrivalRate`，两者都使用 `%`；其中 achieved arrival rate 表示实际到达率相对于配置到达率的百分比。`target.arguments` 只适用于 Tool target；Template 和 Flow target 会以带准确 field path 的 diagnostic 拒绝。
+Load threshold 中，`errorRate` 使用 `%`，`p95`／`p99` 使用 `ms`，`minThroughput` 使用 `/s` 或 `/m`，这些 common thresholds 对两种 workload 都适用。arrival-rate 另外支持 `droppedRate` 和 `achievedArrivalRate`。`achievedArrivalRate` 使用 `%` 时表示 `started / scheduled`；其中 `scheduled` 是 warm-up、ramp-up、steady 和 ramp-down 各阶段 integrated planned arrivals 的总数，因此正确执行的 ramped profile 不会因为平均到达率低于 steady-state rate 而被稀释。若使用 `/s`，则表示整个 phase window 内实际 started 的平均速率。`target.arguments` 只适用于 Tool target；Template 和 Flow target 会以带准确 field path 的 diagnostic 拒绝。
 
 常见作用域包括：
 

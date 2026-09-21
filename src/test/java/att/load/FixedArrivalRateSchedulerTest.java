@@ -98,6 +98,72 @@ class FixedArrivalRateSchedulerTest {
     }
 
     @Test
+    void overlappingIterationsPublishSeparateStartAndCompletionEvents() throws Exception {
+        LoadScenario scenario = scenario(1000.0, 0L, 0L, 10L, 0L, 2);
+        FakeTiming fake = new FakeTiming();
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        CountDownLatch entered = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        LoadIterationRunner runner = request -> {
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+            return result(request.iterationId());
+        };
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, runner, "run-26-overlap",
+                events::add, fake.timing());
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(entered.await(2L, TimeUnit.SECONDS));
+            List<LoadEvent> observed;
+            synchronized (events) { observed = new ArrayList<LoadEvent>(events); }
+            long startedEvents = observed.stream().filter(LoadEvent::started).count();
+            assertTrue(startedEvents >= 2L, "both overlapping iterations must publish START events");
+            assertTrue(observed.stream().noneMatch(event -> event.started() && event.completed()),
+                    "START and completion must be separate events");
+            release.countDown();
+            LoadRunResult run = future.get(2L, TimeUnit.SECONDS);
+            assertTrue(run.metrics().longValue("maxInFlight") > 1L);
+            assertEquals(0L, run.metrics().longValue("currentInFlight"));
+        } finally {
+            release.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(2L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void rejectedSubmissionDuringCancellationRollsBackAdmission() throws Exception {
+        LoadScenario scenario = scenario(1000.0, 0L, 0L, 1000L, 0L, 1);
+        FakeTiming fake = new FakeTiming();
+        CountDownLatch beforeSubmit = new CountDownLatch(1);
+        CountDownLatch allowSubmit = new CountDownLatch(1);
+        Runnable hook = () -> {
+            beforeSubmit.countDown();
+            try { allowSubmit.await(2L, TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        };
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> result(request.iterationId()),
+                "run-26-submit-race", null, fake.timing(false), hook);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(beforeSubmit.await(2L, TimeUnit.SECONDS));
+            scheduler.cancel();
+            allowSubmit.countDown();
+            LoadRunResult run = future.get(2L, TimeUnit.SECONDS);
+            assertEquals(0L, run.metrics().longValue("currentInFlight"));
+        } finally {
+            allowSubmit.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(2L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void cancellationInterruptsAnActiveIterationAndStopsSchedulerWorkers() throws Exception {
         LoadScenario scenario = scenario(1000.0, 0L, 0L, 60000L, 0L, 1);
         FakeTiming fake = new FakeTiming();

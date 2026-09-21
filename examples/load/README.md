@@ -231,6 +231,6 @@ execution:
 
 closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，完成一個 iteration 後才進入 think time；arrival-rate workload 按絕對 planned due time 送出 arrival，超過 `maxConcurrent` 時記錄 `dropped`，不排隊，也不把 generator saturation 算成 SUT error。warm-up traffic 會執行，但預設不納入 thresholds 的 measured aggregates。
 
-每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、in-flight、scheduled/started/completed/dropped。threshold failure 會使命令以非零狀態結束；validation/configuration failure 與 runtime failure 保持不同的診斷類別。
+每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、current/max in-flight、scheduled/started/completed/dropped。arrival-rate 的 `achievedArrivalRate` 若以 `%` 作 threshold，表示 `started / scheduled`；`scheduled` 是 warmup、ramp-up、steady 和 ramp-down 的 integrated planned arrivals，因此 ramped profile 不會被 steady-state rate 稀釋。若以 `/s` 讀取，則是整個 phase window 的實際平均 started rate。threshold failure 會使命令以非零狀態結束；validation/configuration failure 與 runtime failure 保持不同的診斷類別。
 
 DB pool 的 `maxSize`/`connectionTimeout` 與 VU 或 `maxConcurrent` 無關；MQ pool 的 `maxSize`/`borrowTimeout` 同樣獨立。DB/MQ physical resources 由 load-run owner 管理，queue handles 仍然是 invocation-scoped，pool timeout 會分別標示為 `DB_POOL_TIMEOUT` / `MQ_POOL_TIMEOUT`，不會冒充 SQL、MQRC 2033 或 SUT failure。

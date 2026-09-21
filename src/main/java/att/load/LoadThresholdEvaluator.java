@@ -38,7 +38,16 @@ public final class LoadThresholdEvaluator {
         if ("minThroughput".equals(name)) return metrics.doubleValue("completedThroughput");
         if ("achievedArrivalRate".equals(name)) {
             double achieved = metrics.doubleValue("achievedArrivalRate");
-            return "%".equals(unit) ? (scenario.arrivalRatePerSecond() == 0.0 ? 0.0 : achieved / scenario.arrivalRatePerSecond()) : achieved;
+            if (!"%".equals(unit)) return achieved;
+            Object scheduledValue = metrics.value("scheduled");
+            Object startedValue = metrics.value("started");
+            if (scheduledValue instanceof Number && startedValue instanceof Number) {
+                double scheduled = ((Number) scheduledValue).doubleValue();
+                return scheduled == 0.0 ? 0.0 : ((Number) startedValue).doubleValue() / scheduled;
+            }
+            // Keep snapshots assembled by older callers readable while all
+            // scheduler-produced snapshots use started/scheduled coverage.
+            return scenario.arrivalRatePerSecond() == 0.0 ? 0.0 : achieved / scenario.arrivalRatePerSecond();
         }
         throw new IllegalArgumentException("Unsupported threshold: " + name);
     }

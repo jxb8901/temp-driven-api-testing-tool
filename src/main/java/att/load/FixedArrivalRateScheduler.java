@@ -3,6 +3,7 @@ package att.load;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -17,6 +18,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final String runId;
     private final Consumer<LoadEvent> listener;
     private final LoadSchedulerTiming timing;
+    private final Runnable beforeSubmitHook;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private volatile ExecutorService workers;
     private final AtomicInteger inFlight = new AtomicInteger();
@@ -27,6 +29,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId, LoadEventListener listener) { this(scenario, executor, runId, adapt(listener)); }
     FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                               Consumer<LoadEvent> listener, LoadSchedulerTiming timing) {
+        this(scenario, executor, runId, listener, timing, null);
+    }
+    FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
+                              Consumer<LoadEvent> listener, LoadSchedulerTiming timing, Runnable beforeSubmitHook) {
         if (scenario == null || scenario.model() != LoadScenario.Model.ARRIVAL_RATE) throw new IllegalArgumentException("FixedArrivalRateScheduler requires an arrivalRate scenario");
         if (executor == null) throw new IllegalArgumentException("FixedArrivalRateScheduler requires an iteration executor");
         this.scenario = scenario;
@@ -34,6 +40,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         this.runId = LoadSchedulerSupport.runId(runId);
         this.listener = listener;
         this.timing = timing == null ? LoadSchedulerTiming.system() : timing;
+        this.beforeSubmitHook = beforeSubmitHook;
     }
     private static Consumer<LoadEvent> adapt(final LoadEventListener listener) { return listener == null ? null : new Consumer<LoadEvent>() { @Override public void accept(LoadEvent event) { listener.onEvent(event); } }; }
 
@@ -66,18 +73,32 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
 
     private void submit(LoadMetrics metrics, String phase, String id, long sequenceValue, long dueAt, long runStartedAt) {
         inFlight.incrementAndGet();
-        workers.submit(() -> {
-            long iterationStarted = timing.now(); att.core.ResultStatus status; EvidenceRef evidence = null;
-            try {
-                IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
-                        sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
-                IterationResult result = executor.execute(request);
-                status = result.status(); evidence = result.evidenceRef();
-            } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; }
-            long completedAt = timing.now(); inFlight.decrementAndGet();
-            LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completed(runId, "arrivalRate", phase, id, null,
-                    sequenceValue, dueAt, iterationStarted, completedAt, status, evidence));
-        });
+        try {
+            if (beforeSubmitHook != null) beforeSubmitHook.run();
+            workers.submit(() -> {
+                long iterationStarted = timing.now();
+                att.core.ResultStatus status = att.core.ResultStatus.ERROR;
+                EvidenceRef evidence = null;
+                try {
+                    LoadSchedulerSupport.emit(metrics, listener, LoadEvent.started(runId, "arrivalRate", phase, id, null,
+                            sequenceValue, dueAt, iterationStarted));
+                    IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
+                            sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
+                    IterationResult result = executor.execute(request);
+                    status = result.status(); evidence = result.evidenceRef();
+                } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; }
+                finally {
+                    long completedAt = timing.now(); inFlight.decrementAndGet();
+                    LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completion(runId, "arrivalRate", phase, id, null,
+                            sequenceValue, dueAt, iterationStarted, completedAt, status, evidence));
+                }
+            });
+        } catch (RejectedExecutionException rejected) {
+            // cancel()/shutdownNow() may win after admission but before submit().
+            // The due arrival was never started, so release the admission slot and
+            // let the outer loop observe cancellation without turning it into a run error.
+            inFlight.decrementAndGet();
+        }
     }
     static long arrivalsDueAt(LoadScenario scenario, long elapsedMs) {
         if (elapsedMs < 0L) return 0L;
