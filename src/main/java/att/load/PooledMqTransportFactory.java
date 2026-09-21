@@ -87,6 +87,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
         @Override public MqTransport.Queue open(String queue, boolean input, boolean output) throws Exception {
             try { return new PooledQueue(lease.value().open(queue, input, output), lease); }
+            catch (MqTransport.Exception error) { invalidateIfBroken(error); throw error; }
             catch (Exception error) { broken = true; lease.invalidate(); throw error; }
         }
 
@@ -95,6 +96,10 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         }
 
         @Override public void close() { disconnect(); }
+
+        private void invalidateIfBroken(MqTransport.Exception error) {
+            if (error.connectionFailure()) { broken = true; lease.invalidate(); }
+        }
     }
 
     private static final class PooledQueue implements MqTransport.Queue {
@@ -106,13 +111,14 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) throws Exception {
             try { return delegate.put(payload, request); }
+            catch (MqTransport.Exception error) { if (error.connectionFailure()) lease.invalidate(); throw error; }
             catch (Exception error) { lease.invalidate(); throw error; }
         }
 
         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
             try { return delegate.get(request); }
             catch (MqTransport.Exception error) {
-                if (!isNoMessage(error)) lease.invalidate();
+                if (error.connectionFailure()) lease.invalidate();
                 throw error;
             } catch (Exception error) { lease.invalidate(); throw error; }
         }
@@ -122,8 +128,5 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
             catch (Exception error) { lease.invalidate(); throw error; }
         }
 
-        private boolean isNoMessage(MqTransport.Exception error) {
-            return Integer.valueOf(2033).equals(error.reasonCode()) || "MQRC_NO_MSG_AVAILABLE".equals(error.reason());
-        }
     }
 }

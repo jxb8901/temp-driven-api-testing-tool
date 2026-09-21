@@ -88,6 +88,57 @@ class PooledMqTransportFactoryTest {
         assertEquals(2, delegate.disconnects.get());
     }
 
+    @Test
+    void operationLevelFailureReturnsAHealthyPhysicalConnectionToThePool() throws Exception {
+        FakeFactory delegate = new FakeFactory(); delegate.operationError = true;
+        PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);
+        MqTransport.Connection first = factory.connect(config(1, 0, 100L));
+        MqTransport.Queue queue = first.open("REQUEST.Q", false, true);
+        assertThrows(MqTransport.Exception.class, () -> queue.put(new byte[]{1},
+                new MqTransport.PutRequest("", 1208, "MQSTR", "asQueue")));
+        queue.close(); first.disconnect();
+
+        delegate.operationError = false;
+        MqTransport.Connection second = factory.connect(config(1, 0, 100L));
+        second.disconnect();
+        assertEquals(1, delegate.connections.get());
+        assertEquals(0, factory.pool("broker").discarded());
+        factory.close();
+    }
+
+    @Test
+    void operationLevelOpenFailureReturnsAHealthyPhysicalConnectionToThePool() throws Exception {
+        FakeFactory delegate = new FakeFactory(); delegate.openOperationError = true;
+        PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);
+        MqTransport.Connection first = factory.connect(config(1, 0, 100L));
+        assertThrows(MqTransport.Exception.class, () -> first.open("REQUEST.Q", false, true));
+        first.disconnect();
+
+        delegate.openOperationError = false;
+        MqTransport.Connection second = factory.connect(config(1, 0, 100L));
+        second.disconnect();
+        assertEquals(1, delegate.connections.get());
+        assertEquals(0, factory.pool("broker").discarded());
+        factory.close();
+    }
+
+    @Test
+    void operationLevelGetFailureReturnsAHealthyPhysicalConnectionToThePool() throws Exception {
+        FakeFactory delegate = new FakeFactory(); delegate.getOperationError = true;
+        PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);
+        MqTransport.Connection first = factory.connect(config(1, 0, 100L));
+        MqTransport.Queue queue = first.open("REPLY.Q", true, false);
+        assertThrows(MqTransport.Exception.class, () -> queue.get(new MqTransport.GetRequest(null, 0)));
+        queue.close(); first.disconnect();
+
+        delegate.getOperationError = false;
+        MqTransport.Connection second = factory.connect(config(1, 0, 100L));
+        second.disconnect();
+        assertEquals(1, delegate.connections.get());
+        assertEquals(0, factory.pool("broker").discarded());
+        factory.close();
+    }
+
     private MqHelperConfig config(int maxSize, int minIdle, long timeoutMs) {
         return new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
                 "DEV.APP.SVRCONN", "user", "secret", 1208, "MQSTR", "asQueue", 1000, "metadata",
@@ -100,18 +151,24 @@ class PooledMqTransportFactoryTest {
         final AtomicInteger queueCloses = new AtomicInteger();
         volatile boolean noMessage;
         volatile boolean failPut;
+        volatile boolean operationError;
+        volatile boolean openOperationError;
+        volatile boolean getOperationError;
 
         @Override public MqTransport.Connection connect(MqHelperConfig config) {
             connections.incrementAndGet();
             return new MqTransport.Connection() {
-                @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
+                @Override public MqTransport.Queue open(String queue, boolean input, boolean output) throws Exception {
+                    if (openOperationError) throw new MqTransport.Exception("not authorized", 2, 2035, "MQRC_NOT_AUTHORIZED", null);
                     return new MqTransport.Queue() {
                         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) throws Exception {
                             if (failPut) throw new MqTransport.Exception("put failed", null, 2009, "MQRC_CONNECTION_BROKEN", null);
+                            if (operationError) throw new MqTransport.Exception("not authorized", 2, 2035, "MQRC_NOT_AUTHORIZED", null);
                             return new MqTransport.Message(new byte[]{1}, null, payload);
                         }
                         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
                             if (noMessage) throw new MqTransport.Exception("no message", 2, 2033, "MQRC_NO_MSG_AVAILABLE", null);
+                            if (getOperationError) throw new MqTransport.Exception("not authorized", 2, 2035, "MQRC_NOT_AUTHORIZED", null);
                             return new MqTransport.Message(new byte[]{1}, null, new byte[0]);
                         }
                         @Override public void close() { queueCloses.incrementAndGet(); }
