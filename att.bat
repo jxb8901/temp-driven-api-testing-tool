@@ -35,6 +35,7 @@ set "CP=%CP%;%M2_REPO%\com\fasterxml\jackson\core\jackson-annotations\2.17.2\jac
 set "CP=%CP%;%M2_REPO%\com\fasterxml\jackson\core\jackson-core\2.17.2\jackson-core-2.17.2.jar"
 set "CP=%CP%;%M2_REPO%\com\fasterxml\jackson\core\jackson-databind\2.17.2\jackson-databind-2.17.2.jar"
 set "CP=%CP%;%M2_REPO%\com\networknt\json-schema-validator\1.4.0\json-schema-validator-1.4.0.jar"
+set "CP=%CP%;%M2_REPO%\com\zaxxer\HikariCP\4.0.3\HikariCP-4.0.3.jar"
 set "CP=%CP%;%M2_REPO%\com\github\mwiede\jsch\2.28.2\jsch-2.28.2.jar"
 set "CP=%CP%;%M2_REPO%\com\ethlo\time\itu\1.8.0\itu-1.8.0.jar"
 set "CP=%CP%;%M2_REPO%\org\slf4j\slf4j-api\2.0.9\slf4j-api-2.0.9.jar"

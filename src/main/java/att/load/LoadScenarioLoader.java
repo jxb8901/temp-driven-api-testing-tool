@@ -63,6 +63,8 @@ public final class LoadScenarioLoader {
         Map<String, Object> execution = mapOptional(root.get("execution"), "execution");
         Map<String, Object> thresholds = mapOptional(root.get("thresholds"), "thresholds");
         Map<String, Object> evidence = mapOptional(root.get("evidence"), "evidence");
+        if (("template".equals(type) || "flow".equals(type)) && !arguments.isEmpty())
+            throw new IllegalArgumentException("target.arguments is supported only for Tool targets in V1");
 
         Object usersValue = load.get("users");
         Object rateValue = load.get("arrivalRate");
@@ -85,7 +87,7 @@ public final class LoadScenarioLoader {
         Duration duration = duration(load.get("duration"), "load.duration", true);
         Duration rampDown = duration(load.get("rampDown"), "load.rampDown", false);
         Duration thinkTime = duration(execution.get("thinkTime"), "execution.thinkTime", false);
-        validateThresholds(thresholds);
+        validateThresholds(model, thresholds);
         return new LoadScenario(source, type, id, arguments, inputs, model, users, rate, rateText,
                 warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, evidence);
     }
@@ -131,9 +133,15 @@ public final class LoadScenarioLoader {
         return perSecond;
     }
 
-    private void validateThresholds(Map<String, Object> thresholds) {
+    private void validateThresholds(LoadScenario.Model model, Map<String, Object> thresholds) {
         for (Map.Entry<String, Object> entry : thresholds.entrySet()) {
+            if (model == LoadScenario.Model.CLOSED && ("droppedRate".equals(entry.getKey()) || "achievedArrivalRate".equals(entry.getKey())))
+                throw new IllegalArgumentException("thresholds." + entry.getKey() + " is valid only for arrivalRate workloads");
+            if (model == LoadScenario.Model.ARRIVAL_RATE && "minThroughput".equals(entry.getKey()))
+                throw new IllegalArgumentException("thresholds.minThroughput is valid only for closed workloads");
             String value = String.valueOf(entry.getValue()).trim();
+            if (!(value.matches("^(<|<=|>|>=|==)\\s*[0-9]+(?:\\.[0-9]+)?(%|ms|/s|/m)$")))
+                throw new IllegalArgumentException("thresholds." + entry.getKey() + " must use an operator and %, ms, /s, or /m");
             if (value.endsWith("%")) {
                 String numeric = value.replaceFirst("^(<|<=|>|>=|==)\\s*", "").replace("%", "").trim();
                 if (Double.parseDouble(numeric) > 100.0) throw new IllegalArgumentException("thresholds." + entry.getKey() + " percentage must be between 0% and 100%");

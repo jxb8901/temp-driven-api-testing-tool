@@ -70,17 +70,7 @@ public final class FrameworkRunner {
                         att.load.LoadOverrides.from(options));
                 att.load.LoadTarget target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
                 new att.load.LoadTargetValidator(root, config).validate(scenario, target);
-                if ("json".equals(options.format())) {
-                    java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
-                    output.put("status", "VALID");
-                    output.put("scenario", scenario.toMap());
-                    output.put("target", target.toMap());
-                    System.out.println(att.validation.JsonSupport.write(output));
-                } else if (!options.quiet()) {
-                    System.out.println("LOAD VALIDATION PASS | model=" + scenario.model().wireName()
-                            + " | target=" + scenario.targetType() + " " + scenario.targetId());
-                    System.out.println("Scenario: " + scenario.source());
-                }
+                runLoad(root, config, options, scenario, target);
                 return;
             }
             if ("docs".equals(options.command())) {
@@ -176,10 +166,45 @@ public final class FrameworkRunner {
         }
     }
 
+    private static void runLoad(Path root, FrameworkConfig config, ExecutionOptions options,
+                                att.load.LoadScenario scenario, att.load.LoadTarget target) throws Exception {
+        Path outputRoot = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
+        String runId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty() ? "load-" + System.currentTimeMillis() : options.runId());
+        java.nio.file.Path loadRoot = outputRoot.resolve("load").toAbsolutePath().normalize();
+        java.nio.file.Files.createDirectories(loadRoot);
+        java.nio.file.Path reservedRunDirectory = att.core.IdentifierValidator.strictChild(loadRoot, runId, "Load run directory");
+        if (java.nio.file.Files.exists(reservedRunDirectory))
+            throw new IllegalArgumentException("Load run ID already exists: " + runId + " (" + reservedRunDirectory + "). Choose a different --run-id.");
+        att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario));
+        att.load.LoadRunResult result;
+        try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
+            att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources);
+            att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
+                    ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence)
+                    : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence);
+            try { result = scheduler.run(); } finally { scheduler.close(); }
+        }
+        java.nio.file.Path runDirectory = reservedRunDirectory;
+        java.nio.file.Files.createDirectories(runDirectory);
+        java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
+        result = result.withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics())).withEvidence(retainedEvidence);
+        java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
+        int exitCode = result.passed() ? 0 : 1;
+        if ("json".equals(options.format())) {
+            java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());
+            output.put("report", report.toString()); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
+        } else if (!options.quiet()) {
+            System.out.println("LOAD " + (result.passed() ? "PASS" : "FAIL") + " | model=" + scenario.model().wireName() + " | runId=" + result.runId());
+            System.out.println("Report: " + report);
+            System.out.println("Metrics: " + result.metrics().values());
+        }
+        if (exitCode != 0) System.exit(exitCode);
+    }
+
     private static void help() {
         System.out.println("Debug: ./att.sh debug template|flow|tool <id> [--config <file>] [--input <debug.yaml>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
-        System.out.println("Load: ./att.sh load <scenario.yaml> [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Validate a load scenario and its Template/Flow/Tool target\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
+        System.out.println("Load: ./att.sh load <scenario.yaml> [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {

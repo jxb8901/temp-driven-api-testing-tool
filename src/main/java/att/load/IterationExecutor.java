@@ -26,8 +26,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Workload-agnostic execution layer. Schedulers provide timing and identity;
@@ -37,27 +35,37 @@ public final class IterationExecutor {
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final LoadTarget target;
-    private final Set<String> iterationIds = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+    private final LoadRunResources resources;
+    private final boolean ownsResources;
 
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target) {
+        this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true);
+    }
+
+    public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target, LoadRunResources resources) {
+        this(projectRoot, config, target, resources, false);
+    }
+
+    private IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
+                              LoadRunResources resources, boolean ownsResources) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize(); this.config = config; this.target = target;
+        this.resources = resources == null ? new LoadRunResources(projectRoot, config) : resources;
+        this.ownsResources = resources == null || ownsResources;
     }
 
     public IterationResult execute(IterationRequest request) {
-        if (!iterationIds.add(request.iterationId()))
-            throw new IllegalArgumentException("Duplicate EXEC.LOAD.ITERATION_ID within this load run: " + request.iterationId());
+        resources.ensureOpen();
         Instant started = Instant.now();
         Path iterationDirectory = null;
-        boolean temporary = request.outputDirectory() == null;
+        boolean retainedWorkspace = request.outputDirectory() != null;
         CaseRuntimeContext context = null;
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         CaseExecutionLog log = null;
-        DbHelperExecutor db = null;
         boolean finalized = false;
         ResultStatus status = ResultStatus.ERROR;
         att.validation.Diagnostic diagnostic = null;
         try {
-            iterationDirectory = iterationDirectory(request, temporary);
+            iterationDirectory = iterationDirectory(request, retainedWorkspace);
             Path logPath = iterationDirectory.resolve("case.log");
             TestCase testCase = testCase(request);
             StageCaseData stage = new StageCaseData("LOAD", target.template().name(), Collections.<String, Object>emptyMap());
@@ -69,12 +77,13 @@ public final class IterationExecutor {
             context.put("CASE.environment", config.environment());
             context.setLoad(request.runId(), request.model(), request.iterationId(), request.iteration(), request.phase(),
                     request.startedAt().toString(), request.userId(), request.runStartedAt().toString());
-            log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors());
+            log = retainedWorkspace ? new CaseExecutionLog(logPath, config.caseLogYamlAnchors())
+                    : CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
             context.beginStage(stage, target.template().name(), target.template().directory());
-            db = new DbHelperExecutor(projectRoot, config);
+            DbHelperExecutor db = resources.db();
             db.beginCase();
             ToolInvoker tools = new ToolInvoker(projectRoot, config);
-            MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config);
+            MqHelperExecutor mq = resources.mq();
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq);
             FlowRegistry flows = new FlowRegistry(projectRoot, target.templatesRoot(), false);
             results.addAll(new StageTemplateRunner(engine, flows).execute("LOAD", target.template(), context, log));
@@ -95,14 +104,16 @@ public final class IterationExecutor {
                 if (typed != null) context.put("CASE.errorDiagnostic", typed.toDiagnostic().toMap());
             }
             if (log != null) try { log.append("LOAD ERROR", typed == null ? message(error) : typed.toDiagnostic().toMap()); } catch (Exception ignored) { }
-            if (db != null && !finalized) db.abortCase();
+            if (!finalized) resources.db().abortCase();
         } finally {
             if (context != null) context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             if (log != null) try { log.close(); } catch (Exception ignored) { }
-            if (db != null) db.close();
         }
         Duration duration = Duration.between(started, Instant.now());
-        if (temporary && status == ResultStatus.PASS && iterationDirectory != null) deleteTree(iterationDirectory);
+        if (!retainedWorkspace && status != ResultStatus.PASS && log != null) {
+            try { log.materialize(iterationDirectory.resolve("case.log")); iterationDirectory = iterationDirectory.resolve("case.log").getParent(); }
+            catch (Exception ignored) { }
+        }
         return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic);
     }
 
@@ -119,11 +130,17 @@ public final class IterationExecutor {
                 Collections.singletonMap("LOAD", new StageCaseData("LOAD", target.template().name(), Collections.<String, Object>emptyMap())), "");
     }
 
-    private Path iterationDirectory(IterationRequest request, boolean temporary) throws IOException {
-        if (temporary) return Files.createTempDirectory("att-load-" + safe(request.iterationId()) + "-");
+    private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {
+        if (!retainedWorkspace) {
+            return projectRoot.resolve(config.outputDirectory()).resolve("load").resolve(safe(request.runId()))
+                    .resolve("iterations").resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
+        }
         Path root = request.outputDirectory().toAbsolutePath().normalize();
         Files.createDirectories(root);
-        return IdentifierValidator.strictChild(root, safe(request.iterationId()), "Load iteration directory");
+        Path candidate = root.resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration())).normalize();
+        if (!candidate.startsWith(root)) throw new IllegalArgumentException("Load iteration directory escapes output root");
+        Files.createDirectories(candidate);
+        return candidate;
     }
 
     private ResultStatus aggregate(List<ValidationResult> values) {
@@ -138,12 +155,5 @@ public final class IterationExecutor {
     }
     private String safe(String value) { return value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
     private String message(Exception error) { return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(); }
-    private void deleteTree(Path root) {
-        try {
-            if (!Files.exists(root)) return;
-            java.util.List<Path> paths = new ArrayList<Path>();
-            try (java.util.stream.Stream<Path> stream = Files.walk(root)) { stream.sorted(java.util.Comparator.reverseOrder()).forEach(paths::add); }
-            for (Path path : paths) Files.deleteIfExists(path);
-        } catch (Exception ignored) { }
-    }
+    public void close() { if (ownsResources) resources.close(); }
 }

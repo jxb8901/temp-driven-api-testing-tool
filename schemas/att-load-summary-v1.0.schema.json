@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:load-summary:v1.0",
+  "type": "object",
+  "required": ["status", "runId", "startedAt", "endedAt", "scenario", "metrics", "thresholds"],
+  "properties": {
+    "status": {"enum": ["PASS", "FAIL"]},
+    "runId": {"type": "string", "minLength": 1},
+    "startedAt": {"type": "string"},
+    "endedAt": {"type": "string"},
+    "scenario": {"type": "object"},
+    "metrics": {"type": "object"},
+    "thresholds": {"type": "object"},
+    "evidence": {"type": "object"}
+  },
+  "additionalProperties": true
+}

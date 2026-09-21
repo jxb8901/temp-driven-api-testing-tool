@@ -4512,6 +4512,20 @@ and <code>EXEC.INVOCATION</code> are not public load APIs. See <a
 href="../examples/load/README.md"><code>examples/load/README.md</code></a>
 for complete closed/arrival-rate configurations, CLI overrides, target
 forms, thresholds, evidence, and validation examples.</p>
+<p><code>att load</code> validates the scenario and target before
+starting one of two schedulers. Closed mode keeps a stable Virtual User
+identity and waits for target completion before think time and the next
+iteration. Arrival-rate mode uses absolute planned due times; when
+<code>maxConcurrent</code> is full, the arrival is recorded as generator
+<code>dropped</code> work rather than queued or counted as a SUT
+failure. Both schedulers publish compact events to bounded-memory
+metrics, and both write isolated
+<code>output/load/&lt;runId&gt;/load-summary.json</code>,
+<code>load-summary.yaml</code>, and <code>report/index.html</code>.
+Warm-up is real traffic but is excluded from measured threshold
+aggregates by default. Successful iterations retain metrics only unless
+evidence sampling is configured; failures retain bounded diagnostic
+links.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>

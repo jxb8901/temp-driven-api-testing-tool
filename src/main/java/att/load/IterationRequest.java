@@ -39,7 +39,8 @@ public final class IterationRequest {
         if ("arrivalRate".equals(model) && userId != null && !userId.trim().isEmpty()) throw new IllegalArgumentException("Arrival-rate iterations must not use a long-lived LOAD.userId");
         this.runId = runId; this.model = model; this.iterationId = iterationId; this.iteration = iteration; this.phase = phase;
         this.startedAt = startedAt; this.runStartedAt = runStartedAt == null ? startedAt : runStartedAt; this.userId = userId;
-        this.inputs = inputs == null || inputs.isEmpty() ? Collections.<String, Object>emptyMap() : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(inputs));
+        this.inputs = inputs == null || inputs.isEmpty() ? Collections.<String, Object>emptyMap()
+                : Collections.unmodifiableMap(LoadIsolation.deepCopyMap(inputs));
         this.outputDirectory = outputDirectory;
     }
 

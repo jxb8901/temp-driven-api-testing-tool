@@ -13,6 +13,7 @@
     "transaction": {"$ref": "#/$defs/transaction"},
     "result": {"$ref": "#/$defs/result"},
     "evidence": {"$ref": "#/$defs/evidence"}
+    ,"pool": {"$ref": "#/$defs/pool"}
   },
   "patternProperties": {"^x-": {}},
   "additionalProperties": false,
@@ -64,6 +65,15 @@
         "parameters": {"enum": ["masked", "types", "values"]}
       },
       "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "pool": {
+      "type": "object",
+      "properties": {
+        "maxSize": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "minIdle": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "connectionTimeout": {"anyOf": [{"type": "integer", "minimum": 250}, {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}]}
+      },
       "additionalProperties": false
     }
   }

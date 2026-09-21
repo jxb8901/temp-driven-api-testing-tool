@@ -72,7 +72,7 @@ public final class DbHelperConfigLoader {
     private DbHelperConfig parse(Map<?, ?> map, Path file) {
         SchemaSupport.requireVersion(map, "att-dbhelper/v2.5", "dbhelper");
         SchemaSupport.rejectUnknown(map, "dbhelper", "schemaVersion", "id", "name", "description",
-                "connection", "statement", "transaction", "result", "evidence");
+                "connection", "statement", "transaction", "result", "evidence", "pool");
         String id = SchemaSupport.string(map.get("id"), "dbhelper.id", true);
         if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("dbhelper.id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);
         String name = SchemaSupport.string(map.get("name"), "dbhelper.name", true);
@@ -119,10 +119,15 @@ public final class DbHelperConfigLoader {
         SchemaSupport.rejectUnknown(evidence, "dbhelper.evidence", "sql", "parameters");
         String evidenceSql = choice(evidence.get("sql"), "full", "dbhelper.evidence.sql", "full", "hash");
         String evidenceParameters = choice(evidence.get("parameters"), "values", "dbhelper.evidence.parameters", "masked", "types", "values");
+        Map<?, ?> pool = optionalMap(map.get("pool"), "dbhelper.pool");
+        SchemaSupport.rejectUnknown(pool, "dbhelper.pool", "maxSize", "minIdle", "connectionTimeout");
+        int poolMaxSize = integer(pool.get("maxSize"), 20, 1, 10000, "dbhelper.pool.maxSize");
+        int poolMinIdle = integer(pool.get("minIdle"), 0, 0, poolMaxSize, "dbhelper.pool.minIdle");
+        long poolTimeout = durationMs(pool.get("connectionTimeout"), 2000L, "dbhelper.pool.connectionTimeout");
 
         return new DbHelperConfig(id, name, description, url, username, password, driverClass,
                 properties, readOnly, isolation, timeout, scope, onEnd, maxRows, maxCellBytes, maxBytes,
-                evidenceSql, evidenceParameters, file);
+                evidenceSql, evidenceParameters, poolMaxSize, poolMinIdle, poolTimeout, file);
     }
 
     private Map<?, ?> optionalMap(Object value, String owner) {
@@ -159,6 +164,16 @@ public final class DbHelperConfigLoader {
             throw new IllegalArgumentException(owner + " must be an integer from " + min + " to " + max);
         }
         return (int) number;
+    }
+
+    private long durationMs(Object value, long fallback, String owner) {
+        if (value == null) return fallback;
+        if (value instanceof Number) return Math.max(250L, ((Number) value).longValue());
+        if (!(value instanceof String) || !((String) value).matches("[0-9]+(ms|s|m)")) throw new IllegalArgumentException(owner + " must use <integer>ms, s, or m");
+        String text = (String) value; long amount = Long.parseLong(text.substring(0, text.length() - 1 * (text.endsWith("ms") ? 2 : 1)));
+        if (text.endsWith("ms")) return Math.max(250L, amount);
+        if (text.endsWith("s")) return Math.max(250L, Math.multiplyExact(amount, 1000L));
+        return Math.max(250L, Math.multiplyExact(amount, 60000L));
     }
 
     private String choice(Object value, String fallback, String owner, String... allowed) {

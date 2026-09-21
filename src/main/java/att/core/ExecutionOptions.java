@@ -242,7 +242,7 @@ public final class ExecutionOptions {
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
         else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--output-dir", "--format", "--quiet", "--verbose"));
-        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--format", "--quiet", "--verbose", "--profile", "--output-dir", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy"));
+        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
 

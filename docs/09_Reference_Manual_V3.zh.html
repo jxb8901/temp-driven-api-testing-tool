@@ -3363,10 +3363,10 @@ value。<code>EXEC.ID</code>、<code>EXEC.MODE</code>、<code>EXEC.OUTPUT_DIR</c
 覆盖。不存在
 <code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>
 或 <code>EXEC.STAGES</code>：helper/resource state 保持 internal，根层
-<code>TOOL.*</code>／<code>DB.*</code> 只可作为 internal 或 persisted
-historical/result compatibility view，不是受支持的 general expression
-API；当前 Action 使用 local <code>output</code>，完成后只在其所属 scope
-通过 <code>EXEC.ACTIONS</code> 发布。Flow 返回后 parent scope 会恢复，跨
+<code>TOOL.*</code>／<code>DB.*</code> 只可作为 compatibility 或
+transient view；当前 Action 使用 local
+<code>output</code>，完成后只在其所属 scope 通过
+<code>EXEC.ACTIONS</code> 发布。Flow 返回后 parent scope 会恢复，跨
 scope 值必须写入 <code>EXEC.VARS</code>。Stage/template 的
 status、timing 和 history 属于 execution result/evidence model，并由旧的
 <code>CASE.STAGES</code> view 提供读取。普通 3.4.2 TestCase 和 debug
@@ -3438,6 +3438,17 @@ Template／Flow／Tool，同时不暴露完整配置或 secrets。根层
 closed／arrival-rate 配置、CLI override、target
 形式、threshold、evidence 和 validation 例子见 <a
 href="../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
+<p><code>att load</code> 会在 scheduler 启动前完成 scenario 和 target
+validation，再选择两个 scheduler 之一。closed mode 为 Virtual User
+保持稳定 identity，等待 target 完成后才进入 think time 和下一次
+iteration；arrival-rate mode 使用 absolute planned due
+time，<code>maxConcurrent</code> 已满时记录 generator
+<code>dropped</code>，不排队，也不算作 SUT failure。两个 scheduler
+都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的
+<code>output/load/&lt;runId&gt;/load-summary.json</code>、<code>load-summary.yaml</code>
+和 <code>report/index.html</code>。warm-up 是真实 traffic，但默认不计入
+measured threshold aggregates；成功 iteration 默认只保留
+metrics，失败和显式 sample 才保留 bounded diagnostic links。</p>
 <p>常见作用域包括：</p>
 <table>
 <colgroup>

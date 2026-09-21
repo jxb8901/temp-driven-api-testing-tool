@@ -47,6 +47,18 @@ class LoadScenarioTest {
         assertEquals(LoadScenario.Model.ARRIVAL_RATE, open.model());
         assertEquals(100.0, open.arrivalRatePerSecond(), 0.0001);
         assertEquals(4, open.maxConcurrent());
+
+        Path closedArrivalThreshold = write(project, "closed-arrival-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "thresholds: {achievedArrivalRate: '>= 1/s'}\n");
+        assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(closedArrivalThreshold));
+
+        Path arrivalThroughputThreshold = write(project, "arrival-throughput-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
+                + "thresholds: {minThroughput: '>= 1/s'}\n");
+        assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(arrivalThroughputThreshold));
     }
 
     @Test void rejectsAmbiguousWorkloadAndClosedOnlyOptionsWithSourceDiagnostics() throws Exception {
@@ -104,6 +116,8 @@ class LoadScenarioTest {
             assertThrows(IllegalArgumentException.class, () -> a.context().put("EXEC.LOAD.MODEL", "arrivalRate"));
             assertEquals("i-1", a.context().resolve("CASE.VARS.iteration"));
             assertEquals("i-2", b.context().resolve("CASE.VARS.iteration"));
+            assertFalse(Files.exists(a.outputDirectory()), "successful load iterations should not materialize case workspaces by default");
+            assertFalse(Files.exists(b.outputDirectory()), "successful load iterations should not materialize case workspaces by default");
 
             IterationResult arrival = executor.execute(IterationRequest.arrivalRate("run-29", "arrival-1", 3, "RAMP_UP", Instant.now(), Collections.singletonMap("input", "arrival")));
             assertEquals(ResultStatus.PASS, arrival.status());

@@ -27,6 +27,8 @@ public final class DbHelperConfig {
     private final String evidenceSql;
     private final String evidenceParameters;
     private final Path sourceFile;
+    private final int poolMaxSize, poolMinIdle;
+    private final long poolConnectionTimeoutMs;
 
     public DbHelperConfig(String id, String name, String description,
                           String url, String username, String password, String driverClass,
@@ -34,6 +36,18 @@ public final class DbHelperConfig {
                           int timeoutSeconds, String transactionScope, String transactionOnEnd,
                           int maxRows, int maxCellBytes, int maxBytes,
                           String evidenceSql, String evidenceParameters, Path sourceFile) {
+        this(id, name, description, url, username, password, driverClass, properties, readOnly, isolation,
+                timeoutSeconds, transactionScope, transactionOnEnd, maxRows, maxCellBytes, maxBytes,
+                evidenceSql, evidenceParameters, 20, 0, 2000L, sourceFile);
+    }
+
+    public DbHelperConfig(String id, String name, String description,
+                          String url, String username, String password, String driverClass,
+                          Map<String, String> properties, boolean readOnly, String isolation,
+                          int timeoutSeconds, String transactionScope, String transactionOnEnd,
+                          int maxRows, int maxCellBytes, int maxBytes,
+                          String evidenceSql, String evidenceParameters,
+                          int poolMaxSize, int poolMinIdle, long poolConnectionTimeoutMs, Path sourceFile) {
         this.id = id;
         this.name = name;
         this.description = description;
@@ -53,6 +67,9 @@ public final class DbHelperConfig {
         this.maxBytes = maxBytes;
         this.evidenceSql = evidenceSql;
         this.evidenceParameters = evidenceParameters;
+        if (poolMaxSize < 1 || poolMinIdle < 0 || poolMinIdle > poolMaxSize || poolConnectionTimeoutMs < 250L)
+            throw new IllegalArgumentException("Invalid DB pool configuration");
+        this.poolMaxSize = poolMaxSize; this.poolMinIdle = poolMinIdle; this.poolConnectionTimeoutMs = poolConnectionTimeoutMs;
         this.sourceFile = sourceFile;
     }
 
@@ -75,4 +92,7 @@ public final class DbHelperConfig {
     public String evidenceSql() { return evidenceSql; }
     public String evidenceParameters() { return evidenceParameters; }
     public Path sourceFile() { return sourceFile; }
+    public int poolMaxSize() { return poolMaxSize; }
+    public int poolMinIdle() { return poolMinIdle; }
+    public long poolConnectionTimeoutMs() { return poolConnectionTimeoutMs; }
 }

@@ -1,6 +1,6 @@
 # ATT Load Scenario Examples
 
-本目錄的 scenario 使用 `att-load/v1.0`。在 `3.5.0-alpha.1` 中，`att load` 會完成 schema、語義、target 解析及依賴驗證；它會在 scheduler 啟動前停止，尚未執行實際 load scheduler。真正執行 iteration 時，load adapter 使用與普通 run/debug 相同的 `EXEC`/`META` Context，只有 scheduler state 放在 `EXEC.LOAD`。
+本目錄的 scenario 使用 `att-load/v1.0`。`att load` 會先完成 schema、語義、target 解析及依賴驗證，再啟動 3.5.0 的 closed-VU 或 fixed-arrival-rate scheduler。兩種 scheduler 共用同一個 `IterationExecutor` 和普通 run/debug 的 `EXEC`/`META` Context；只有 scheduler identity 放在 `EXEC.LOAD`。
 
 ## 1. 最小 closed workload
 
@@ -225,4 +225,12 @@ execution:
   thinkTime: 500ms     # arrival-rate 不允許
 ```
 
-修改 scenario 後，先執行 `att load`，再交給後續 scheduler；`att run` 的普通 Excel Case lifecycle 不會因 load scenario 而改變。
+修改 scenario 後可直接執行 `att load`。結果會寫到 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`；成功 iteration 預設只保留 metrics，失敗 iteration 和明確設定的 sample 才保留 evidence。`att run` 的普通 Excel Case lifecycle 不會因 load scenario 而改變。
+
+## 9. Runtime、metrics 和 report
+
+closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，完成一個 iteration 後才進入 think time；arrival-rate workload 按絕對 planned due time 送出 arrival，超過 `maxConcurrent` 時記錄 `dropped`，不排隊，也不把 generator saturation 算成 SUT error。warm-up traffic 會執行，但預設不納入 thresholds 的 measured aggregates。
+
+每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、in-flight、scheduled/started/completed/dropped。threshold failure 會使命令以非零狀態結束；validation/configuration failure 與 runtime failure 保持不同的診斷類別。
+
+DB pool 的 `maxSize`/`connectionTimeout` 與 VU 或 `maxConcurrent` 無關；MQ pool 的 `maxSize`/`borrowTimeout` 同樣獨立。DB/MQ physical resources 由 load-run owner 管理，queue handles 仍然是 invocation-scoped，pool timeout 會分別標示為 `DB_POOL_TIMEOUT` / `MQ_POOL_TIMEOUT`，不會冒充 SQL、MQRC 2033 或 SUT failure。

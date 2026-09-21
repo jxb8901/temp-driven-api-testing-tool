@@ -91,7 +91,20 @@ public final class LoadScenario {
     }
 
     private static Map<String, Object> immutable(Map<String, Object> source) {
-        return source == null || source.isEmpty() ? Collections.<String, Object>emptyMap()
-                : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(source));
+        if (source == null || source.isEmpty()) return Collections.emptyMap();
+        return Collections.unmodifiableMap(deepMap(LoadIsolation.deepCopyMap(source)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> deepMap(Map<String, Object> source) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : source.entrySet()) result.put(entry.getKey(), deepValue(entry.getValue()));
+        return result;
+    }
+    @SuppressWarnings("unchecked")
+    private static Object deepValue(Object value) {
+        if (value instanceof Map) return Collections.unmodifiableMap(deepMap((Map<String, Object>) value));
+        if (value instanceof java.util.List) { java.util.List<Object> list = new java.util.ArrayList<Object>(); for (Object item : (java.util.List<?>) value) list.add(deepValue(item)); return Collections.unmodifiableList(list); }
+        return value;
     }
 }

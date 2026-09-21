@@ -28,6 +28,7 @@ public class CaseExecutionLog implements AutoCloseable {
     private final java.util.function.Consumer<String> mirror;
     private final BufferedWriter writer;
     private final Yaml yaml;
+    private final StringBuilder deferred;
 
     public CaseExecutionLog(Path path) throws IOException {
         this(path, false);
@@ -38,12 +39,35 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     public CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror) throws IOException {
+        this(path, yamlAnchors, mirror, true);
+    }
+
+    private CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror, boolean physical) throws IOException {
         this.path = path;
         this.yamlAnchors = yamlAnchors;
         this.mirror = mirror;
-        Files.createDirectories(path.getParent());
-        this.writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+        if (physical) {
+            if (path.getParent() != null) Files.createDirectories(path.getParent());
+            this.writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+            this.deferred = null;
+        } else {
+            this.writer = null;
+            this.deferred = new StringBuilder();
+        }
         this.yaml = new Yaml();
+    }
+
+    /**
+     * Creates an in-memory log for high-volume load successes.  The path is a
+     * logical destination only; no directory or file is created until
+     * {@link #materialize(Path)} is called for a retained failure/sample.
+     */
+    public static CaseExecutionLog lightweight(Path logicalPath, boolean yamlAnchors) throws IOException {
+        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false);
+    }
+
+    public static CaseExecutionLog lightweight(Path logicalPath) throws IOException {
+        return lightweight(logicalPath, false);
     }
 
     public Path path() {
@@ -110,16 +134,29 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     private void write(String text) throws IOException {
-        writer.write(text);
-        writer.flush();
+        if (writer != null) {
+            writer.write(text);
+            writer.flush();
+        } else {
+            deferred.append(text);
+        }
         if (mirror != null) mirror.accept(text);
+    }
+
+    /** Materializes an in-memory log into a caller-selected retained location. */
+    public synchronized Path materialize(Path destination) throws IOException {
+        if (writer != null) return path;
+        Path target = destination == null ? path : destination.toAbsolutePath().normalize();
+        if (target.getParent() != null) Files.createDirectories(target.getParent());
+        Files.write(target, deferred.toString().getBytes(StandardCharsets.UTF_8));
+        return target;
     }
 
     private String normalizeLines(String value) {
         return value.replace("\r\n", "\n").replace('\r', '\n');
     }
 
-    @Override public synchronized void close() throws IOException { writer.close(); }
+    @Override public synchronized void close() throws IOException { if (writer != null) writer.close(); }
 
     /** Writes the human-readable action log without repeating the complete state retained in case.yaml. */
     public void appendAction(String section, Map<String, Object> action) throws IOException {
