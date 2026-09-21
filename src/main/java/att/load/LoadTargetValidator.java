@@ -1,14 +1,9 @@
 package att.load;
 
 import att.config.FrameworkConfig;
-import att.core.StageCaseData;
-import att.core.TestCase;
 import att.validation.PackageValidator;
 
 import java.nio.file.Path;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /** Performs selected Template/Flow/Tool dependency validation before scheduling. */
 public final class LoadTargetValidator {
@@ -17,13 +12,12 @@ public final class LoadTargetValidator {
     public LoadTargetValidator(Path projectRoot, FrameworkConfig config) { this.projectRoot = projectRoot; this.config = config; }
 
     public void validate(LoadScenario scenario, LoadTarget target) throws Exception {
-        Map<String, Object> data = caseData(scenario.inputs());
-        if (!data.containsKey("caseName")) data.put("caseName", "LOAD " + scenario.targetType() + " " + scenario.targetId());
-        StageCaseData stage = new StageCaseData("LOAD", target.template().name(), Collections.<String, Object>emptyMap());
-        TestCase testCase = new TestCase(1, "LOAD", scenario.targetType(), "iteration-validation", Collections.<String>emptyList(), data,
-                Collections.singletonMap("LOAD", stage), "");
+        LoadExecutionContextAdapter adapter = new LoadExecutionContextAdapter(projectRoot, config, target);
+        att.core.TestCase testCase = adapter.testCase("iteration-validation", scenario.inputs());
+        att.core.StageCaseData stage = adapter.stage();
         try {
-            new PackageValidator(projectRoot, config).validateDebugTarget(target.template(), testCase, stage, target.flows(), scenario.source());
+            new PackageValidator(projectRoot, config).validateDebugTarget(target.template(), testCase, stage, target.flows(),
+                    scenario.source(), "load", scenario.inputs());
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed != null) throw typed;
@@ -34,13 +28,4 @@ public final class LoadTargetValidator {
         }
     }
 
-    private Map<String, Object> caseData(Map<String, Object> inputs) {
-        Map<String, Object> data = new LinkedHashMap<String, Object>(inputs);
-        if (!inputs.isEmpty()) {
-            data.put("inputs", new LinkedHashMap<String, Object>(inputs));
-            for (Map.Entry<String, Object> entry : inputs.entrySet())
-                if (!data.containsKey(entry.getKey())) data.put(entry.getKey(), entry.getValue());
-        }
-        return data;
-    }
 }

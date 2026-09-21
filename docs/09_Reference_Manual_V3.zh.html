@@ -2542,8 +2542,10 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href=
 <div class="sourceCode" id="cb75"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug flow common.compose.v1</span></code></pre></div>
 <p>Flow 可用 <code>${EXEC.INPUT.source}</code> 读取
-<code>inputs</code>；如果没有同名 Case 字段，也可以用兼容 alias
-<code>${EXEC.INPUT.source}</code> 读取。</p>
+<code>inputs</code>；如果没有名为 <code>inputs</code>
+的业务字段，旧定义仍可用只读兼容视图
+<code>${CASE.inputs.source}</code>，但不会把整棵 <code>inputs</code>
+子树重复写入 <code>EXEC.INPUT</code>。</p>
 <p>分组 Tool sidecar（<code>fpp.invokeApi</code> 对应
 <code>config/tools/fpp.debug.yaml</code>）：</p>
 <div class="sourceCode" id="cb76"><pre
@@ -3370,8 +3372,11 @@ transient view；当前 Action 使用 local
 scope 值必须写入 <code>EXEC.VARS</code>。Stage/template 的
 status、timing 和 history 属于 execution result/evidence model，并由旧的
 <code>CASE.STAGES</code> view 提供读取。普通 3.4.2 TestCase 和 debug
-执行没有 <code>EXEC.LOAD</code>；3.5.0 的 <code>att-load/v1.0</code>
-adapter 会按下述 contract 增加 load-only 的 <code>EXEC.LOAD</code>。</p>
+执行没有 <code>EXEC.LOAD</code>；严格的
+<code>${EXEC.LOAD.&lt;field&gt;}</code> 在这些模式会 validation
+error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；3.5.0
+的 <code>att-load/v1.0</code> adapter 会按下述 contract 增加 load-only
+的 <code>EXEC.LOAD</code>。</p>
 <h3 id="load-v1-context3.5.0">Load V1 Context（3.5.0）</h3>
 <p>每个 load iteration 使用与普通执行相同的
 <code>EXEC</code>／<code>META</code> tree 和 Action 局部
@@ -3426,13 +3431,13 @@ adapter 会按下述 contract 增加 load-only 的 <code>EXEC.LOAD</code>。</p>
 </tr>
 </tbody>
 </table>
-<p>Scenario <code>inputs</code> 会复制到
+<p>Scenario <code>inputs</code> 只会复制到
 <code>EXEC.INPUT.*</code>；可复用的 Template、Flow 和 Tool 必须使用
 canonical input
 tree、<code>EXEC.VARS.*</code>、<code>EXEC.ACTIONS.*</code> 及当前
-<code>output.*</code>。<code>META.SOURCE</code> 标识 load
-scenario，<code>META.TARGET</code> 标识选中的
-Template／Flow／Tool，同时不暴露完整配置或 secrets。根层
+<code>output.*</code>。<code>META.SOURCE</code> 只标识 load scenario 的
+type、名称和 path；iteration identity 保留在 <code>EXEC.ID</code> 与
+<code>EXEC.LOAD.*</code>，并排除 secrets。根层
 <code>LOAD.*</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code> 和
 <code>EXEC.INVOCATION</code> 不是公开的 load API。完整的
 closed／arrival-rate 配置、CLI override、target

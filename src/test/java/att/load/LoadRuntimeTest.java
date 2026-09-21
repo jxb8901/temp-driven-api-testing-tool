@@ -64,4 +64,11 @@ class LoadRuntimeTest {
         assertTrue(summary.passed());
         assertEquals("99.0000%", summary.results().get(0).actual());
     }
+
+    @Test void iterationWorkspaceNamesRemainDistinctAfterPathSanitization() {
+        assertNotEquals(LoadIsolation.workspaceName("run", "vu/a", 1),
+                LoadIsolation.workspaceName("run", "vu_a", 1));
+        assertNotEquals(LoadIsolation.workspaceName("run", "same", 1),
+                LoadIsolation.workspaceName("run", "same", 2));
+    }
 }

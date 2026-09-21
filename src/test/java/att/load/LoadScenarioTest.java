@@ -4,7 +4,9 @@ import att.config.FrameworkConfig;
 import att.config.ToolConfig;
 import att.core.ExecutionOptions;
 import att.core.ResultStatus;
+import att.core.TestCase;
 import att.validation.DiagnosticException;
+import att.validation.PackageValidator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -124,9 +126,18 @@ class LoadScenarioTest {
             assertEquals("VU-1", a.context().resolve("EXEC.LOAD.USER_ID"));
             assertEquals("VU-2", b.context().resolve("EXEC.LOAD.USER_ID"));
             assertEquals("one", a.context().resolve("EXEC.INPUT.input"));
+            assertEquals("closed/STEADY/one", a.context().resolve("EXEC.ACTIONS.phase.output.result"));
+            assertEquals("closed/STEADY/two", b.context().resolve("EXEC.ACTIONS.phase.output.result"));
+            assertEquals("one", a.context().resolve("EXEC.VARS.flowInput"));
+            assertEquals("two", b.context().resolve("EXEC.VARS.flowInput"));
+            assertNull(a.context().resolve("output.result"));
+            assertNull(a.context().resolve("EXEC.INPUT.inputs.input"));
+            assertEquals("one", a.context().resolve("CASE.inputs.input"));
             assertEquals("LOAD_TEMPLATE", a.context().resolve("META.TARGET.id"));
             assertEquals("load", a.context().resolve("META.SOURCE.type"));
             assertEquals("closed", a.context().resolve("META.SOURCE.scenario"));
+            assertNull(a.context().resolve("META.SOURCE.caseId"));
+            assertFalse(a.context().metadataTree().toString().contains("i-1"));
             assertEquals("closed", a.context().resolve("EXEC.LOAD.MODEL"));
             assertNull(a.context().resolve("LOAD.model"));
             assertThrows(IllegalArgumentException.class, () -> a.context().put("EXEC.LOAD.MODEL", "arrivalRate"));
@@ -140,6 +151,61 @@ class LoadScenarioTest {
             assertEquals("arrivalRate", arrival.context().resolve("EXEC.LOAD.MODEL"));
             assertNull(arrival.context().resolve("EXEC.LOAD.USER_ID"));
         } finally { pool.shutdownNow(); }
+    }
+
+    @Test void loadValidationIsModeAwareAndOptionalLoadPathsRemainPortable() throws Exception {
+        Path project = project();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        Files.createDirectories(project.resolve("templates/STRICT_TEMPLATE"));
+        Files.createDirectories(project.resolve("templates/OPTIONAL_TEMPLATE"));
+        write(project, "templates/STRICT_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: STRICT_TEMPLATE\ndescription: strict load context\nactions:\n"
+                + "  strict:\n    type: log\n    message: \"${EXEC.LOAD.MODEL}\"\n");
+        write(project, "templates/OPTIONAL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: OPTIONAL_TEMPLATE\ndescription: optional load context\nactions:\n"
+                + "  optional:\n    type: log\n    message: \"${EXEC.LOAD.USER_ID?}/${EXEC.INPUT.input}\"\n");
+
+        Path strictFile = write(project, "strict.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: STRICT_TEMPLATE}\ninputs: {input: strict}\nload: {users: 1, duration: 1s}\n");
+        LoadScenario strict = new LoadScenarioLoader(project).load(strictFile);
+        LoadTarget strictTarget = new LoadTargetResolver(project, config).resolve(strict);
+        LoadExecutionContextAdapter strictAdapter = new LoadExecutionContextAdapter(project, config, strictTarget);
+        TestCase strictCase = strictAdapter.testCase("debug-strict", strict.inputs());
+        DiagnosticException error = assertThrows(DiagnosticException.class, () -> new PackageValidator(project, config)
+                .validateDebugTarget(strictTarget.template(), strictCase, strictAdapter.stage(), strictTarget.flows(),
+                        strict.source(), "debug", strict.inputs()));
+        assertTrue(error.format().contains("EXEC.LOAD.MODEL"), error.format());
+        new LoadTargetValidator(project, config).validate(strict, strictTarget);
+
+        Path optionalFile = write(project, "optional.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: OPTIONAL_TEMPLATE}\ninputs: {input: optional}\nload: {users: 1, duration: 1s}\n");
+        LoadScenario optional = new LoadScenarioLoader(project).load(optionalFile);
+        LoadTarget optionalTarget = new LoadTargetResolver(project, config).resolve(optional);
+        LoadExecutionContextAdapter optionalAdapter = new LoadExecutionContextAdapter(project, config, optionalTarget);
+        TestCase optionalCase = optionalAdapter.testCase("debug-optional", optional.inputs());
+        new PackageValidator(project, config).validateDebugTarget(optionalTarget.template(), optionalCase, optionalAdapter.stage(),
+                optionalTarget.flows(), optional.source(), "debug", optional.inputs());
+        new LoadTargetValidator(project, config).validate(optional, optionalTarget);
+    }
+
+    @Test void loadInputNamedInputsRemainsAFlatBusinessField() throws Exception {
+        Path project = project();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        Path scenarioFile = write(project, "collision.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Map<String, Object> inputs = new LinkedHashMap<String, Object>();
+        inputs.put("inputs", "business-value");
+        inputs.put("input", "ordinary-value");
+        LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(project, config, target)
+                .prepare(IterationRequest.closed("run-inputs", "iteration-inputs", 1, "STEADY", Instant.now(), "VU-1", inputs),
+                        temp.resolve("iteration-inputs"), temp.resolve("iteration-inputs/case.log"));
+        assertEquals("business-value", prepared.context().resolve("EXEC.INPUT.inputs"));
+        assertEquals("business-value", prepared.context().resolve("CASE.inputs"));
+        assertNull(prepared.context().resolve("EXEC.INPUT.inputs.value"));
     }
 
     @Test void resolvesAndExecutesAConfiguredToolTargetThroughTheSameExecutor() throws Exception {
@@ -177,10 +243,11 @@ class LoadScenarioTest {
         Files.write(project.resolve("templates/LOAD_TEMPLATE/template.yaml"), (
                 "schemaVersion: att-template/v3.0\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
                 + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.LOAD.ITERATION_ID}\"\n"
-                + "  phase:\n    type: log\n    message: \"${EXEC.LOAD.MODEL}/${EXEC.LOAD.PHASE}/${EXEC.INPUT.input}\"\n").getBytes(StandardCharsets.UTF_8));
+                + "  phase:\n    type: log\n    message: \"${EXEC.LOAD.MODEL}/${EXEC.LOAD.PHASE}/${EXEC.INPUT.input}\"\n"
+                + "  nested:\n    type: flow\n    use: load.echo.v1\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/load/echo/flow.yaml"), (
                 "schemaVersion: att-flow/v3.0\nid: load.echo.v1\nname: Load Echo\ndescription: load flow\nactions:\n"
-                + "  echo:\n    type: log\n    message: \"${EXEC.LOAD.ITERATION_ID}\"\n").getBytes(StandardCharsets.UTF_8));
+                + "  echo:\n    type: assign\n    name: flowInput\n    expression: \"${EXEC.INPUT.input}\"\n").getBytes(StandardCharsets.UTF_8));
         return project;
     }
 

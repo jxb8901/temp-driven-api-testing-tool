@@ -7,8 +7,6 @@ import att.core.CaseRuntimeContext;
 import att.core.IdentifierValidator;
 import att.core.ResultAggregator;
 import att.core.ResultStatus;
-import att.core.StageCaseData;
-import att.core.TestCase;
 import att.core.ValidationResult;
 import att.exec.DbHelperExecutor;
 import att.exec.MqHelperExecutor;
@@ -23,9 +21,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Workload-agnostic execution layer. Schedulers provide timing and identity;
@@ -67,19 +63,12 @@ public final class IterationExecutor {
         try {
             iterationDirectory = iterationDirectory(request, retainedWorkspace);
             Path logPath = iterationDirectory.resolve("case.log");
-            TestCase testCase = testCase(request);
-            StageCaseData stage = new StageCaseData("LOAD", target.template().name(), Collections.<String, Object>emptyMap());
-            context = new CaseRuntimeContext(testCase, iterationDirectory, request.iterationId(), iterationDirectory, logPath,
-                    "load", request.startedAt().toString());
-            context.setProject(projectRoot);
-            context.setSourceMetadata("load", target.scenarioSource(), request.iterationId(), target.scenarioName());
-            context.setTargetMetadata(target.type(), target.id());
-            context.put("CASE.environment", config.environment());
-            context.setLoad(request.runId(), request.model(), request.iterationId(), request.iteration(), request.phase(),
-                    request.startedAt().toString(), request.userId(), request.runStartedAt().toString());
+            LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(projectRoot, config, target)
+                    .prepare(request, iterationDirectory, logPath);
+            context = prepared.context();
             log = retainedWorkspace ? new CaseExecutionLog(logPath, config.caseLogYamlAnchors())
                     : CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
-            context.beginStage(stage, target.template().name(), target.template().directory());
+            context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();
             ToolInvoker tools = new ToolInvoker(projectRoot, config);
@@ -115,19 +104,6 @@ public final class IterationExecutor {
             catch (Exception ignored) { }
         }
         return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic);
-    }
-
-    private TestCase testCase(IterationRequest request) {
-        String rowId = request.iterationId().replaceAll("[^A-Za-z0-9_.-]", "_");
-        Map<String, Object> data = new java.util.LinkedHashMap<String, Object>(request.inputs());
-        if (!request.inputs().isEmpty()) {
-            data.put("inputs", new java.util.LinkedHashMap<String, Object>(request.inputs()));
-            for (Map.Entry<String, Object> entry : request.inputs().entrySet())
-                if (!data.containsKey(entry.getKey())) data.put(entry.getKey(), entry.getValue());
-        }
-        if (!data.containsKey("caseName")) data.put("caseName", "LOAD " + target.type() + " " + target.id());
-        return new TestCase(1, "LOAD", target.type(), rowId, Collections.<String>emptyList(), data,
-                Collections.singletonMap("LOAD", new StageCaseData("LOAD", target.template().name(), Collections.<String, Object>emptyMap())), "");
     }
 
     private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {

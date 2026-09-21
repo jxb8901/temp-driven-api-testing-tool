@@ -51,10 +51,17 @@ public final class PackageValidator {
     /** Validates only the selected debug target and its Flow dependency closure. */
     public void validateDebugTarget(StageTemplate template, TestCase testCase, StageCaseData stage,
                                     att.flow.FlowRegistry selectedFlows, Path debugInput) throws Exception {
+        validateDebugTarget(template, testCase, stage, selectedFlows, debugInput, "debug", null);
+    }
+
+    /** Validates a selected target against the Context tree for its execution mode. */
+    public void validateDebugTarget(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                    att.flow.FlowRegistry selectedFlows, Path debugInput,
+                                    String executionMode, Map<String, Object> legacyInputs) throws Exception {
         this.flows = selectedFlows;
         validateTemplate(template, global);
         validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
-        validateTemplateValues(template, testCase, stage, global, debugInput, new LinkedHashSet<String>());
+        validateTemplateValues(template, testCase, stage, global, debugInput, new LinkedHashSet<String>(), executionMode, legacyInputs);
     }
 
     private void validateReferencedToolsClosure(StageTemplate template, FrameworkConfig config, Set<String> visitedFlows) {
@@ -137,7 +144,7 @@ public final class PackageValidator {
                             StageTemplate template = loader.load(stage.templateName());
                             addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
                                     resolved, assignedCaseVariables);
-                            validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables);
+                            validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables, "testcase", null);
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
                             validateTemplate(template, config);
@@ -1228,24 +1235,35 @@ public final class PackageValidator {
     }
 
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage, FrameworkConfig config) {
-        validateTemplateValues(template, testCase, stage, config, null, new LinkedHashSet<String>());
+        validateTemplateValues(template, testCase, stage, config, null, new LinkedHashSet<String>(), "testcase", null);
     }
 
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
                                         FrameworkConfig config, Path caseFile) {
-        validateTemplateValues(template, testCase, stage, config, caseFile, new LinkedHashSet<String>());
+        validateTemplateValues(template, testCase, stage, config, caseFile, new LinkedHashSet<String>(), "testcase", null);
+    }
+
+    /** Retained for package-validation reflection tests and internal callers. */
+    private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                        FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables) {
+        validateTemplateValues(template, testCase, stage, config, caseFile, assignedCaseVariables, "testcase", null);
     }
 
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
-                                        FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables) {
-        att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
+                                        FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables,
+                                        String executionMode, Map<String, Object> legacyInputs) {
+        att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot,
+                projectRoot.resolve(".att-validation.log"), executionMode);
         context.setProject(projectRoot);
         context.put("CASE.environment", config.environment());
+        context.setLegacyInputsView(legacyInputs);
         // Load-only fields are scheduler-owned. Their names and nested paths
         // are validated here, while values remain deferred until a load
         // iteration creates EXEC.LOAD.
-        for (String field : new String[] {"RUN_ID", "MODEL", "USER_ID", "ITERATION_ID", "ITERATION", "PHASE", "RUN_STARTED_AT"}) {
-            context.putValidationPlaceholder("EXEC.LOAD." + field);
+        if ("load".equalsIgnoreCase(executionMode)) {
+            for (String field : new String[] {"RUN_ID", "MODEL", "USER_ID", "ITERATION_ID", "ITERATION", "PHASE", "RUN_STARTED_AT"}) {
+                context.putValidationPlaceholder("EXEC.LOAD." + field);
+            }
         }
         for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
         context.beginStage(stage, template.name(), template.directory());

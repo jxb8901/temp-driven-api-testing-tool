@@ -2938,10 +2938,13 @@ run require an explicit selection.</p>
 outputs</h3>
 <p>Debug input files use <code>att-debug/v1.0</code>. <code>case</code>
 values become synthetic <code>CASE</code> data, <code>stage.key</code>
-and <code>stage.values</code> declare the one debug stage,
-<code>inputs</code> is available below <code>CASE.inputs</code> and as
-direct case keys when there is no collision, and Tool arguments come
-from the root <code>arguments</code> map or
+and <code>stage.values</code> declare the one debug stage, and
+<code>inputs</code> is adapted directly into canonical
+<code>EXEC.INPUT.*</code>. For compatibility,
+<code>${CASE.inputs.&lt;field&gt;}</code> remains a read-only view when
+no business field is literally named <code>inputs</code>; it is not
+duplicated below <code>EXEC.INPUT</code>. Tool arguments come from the
+root <code>arguments</code> map or
 <code>tools.&lt;localKey&gt;.arguments</code>. An explicit
 <code>--input</code> always wins over auto-discovery.</p>
 <p>Before execution ATT validates only the selected Template or Flow
@@ -4500,13 +4503,13 @@ absent for arrival-rate.</td>
 </tr>
 </tbody>
 </table>
-<p>Scenario <code>inputs</code> are copied into
+<p>Scenario <code>inputs</code> are copied only into
 <code>EXEC.INPUT.*</code>; reusable Templates, Flows, and Tools must use
 that canonical input tree, <code>EXEC.VARS.*</code>,
 <code>EXEC.ACTIONS.*</code>, and current <code>output.*</code>.
-<code>META.SOURCE</code> identifies the load scenario and
-<code>META.TARGET</code> identifies the selected Template/Flow/Tool
-without exposing the full configuration or secrets. Root-level
+<code>META.SOURCE</code> identifies the load scenario by type, scenario
+name, and path; iteration identity remains under <code>EXEC.ID</code>
+and <code>EXEC.LOAD.*</code>, and secrets are excluded. Root-level
 <code>LOAD.*</code>, <code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
 and <code>EXEC.INVOCATION</code> are not public load APIs. See <a
 href="../examples/load/README.md"><code>examples/load/README.md</code></a>

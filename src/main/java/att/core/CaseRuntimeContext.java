@@ -38,6 +38,8 @@ public final class CaseRuntimeContext {
     /** Current Stage's published Action results; history is retained below CASE.STAGES. */
     private final Map<String, Object> actionsView = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseDbNode = new LinkedHashMap<String, Object>();
+    /** Optional legacy CASE.inputs compatibility view; never part of EXEC.INPUT. */
+    private Map<String, Object> legacyInputsView = Collections.emptyMap();
     /**
      * Previous values temporarily hidden by the current Stage's input overlay.
      * The overlay is an adapter view, not a second public Context store.
@@ -523,6 +525,7 @@ public final class CaseRuntimeContext {
     private Map<String, Object> legacyCaseView(boolean includeStageHistory) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.putAll(inputNode);
+        if (!inputNode.containsKey("inputs") && !legacyInputsView.isEmpty()) result.put("inputs", legacyInputsView);
         result.putAll(caseNode);
         if (!includeStageHistory) result.remove("STAGES");
         result.put("status", statusPublished || !inputNode.containsKey("status")
@@ -574,10 +577,15 @@ public final class CaseRuntimeContext {
     public void setSourceMetadata(String type, Path source, String caseId, String scenario) {
         Map<String, Object> values = new LinkedHashMap<String, Object>();
         values.put("type", type);
-        values.put("caseId", caseId);
+        if (caseId != null && !caseId.trim().isEmpty()) values.put("caseId", caseId);
         if (scenario != null && !scenario.trim().isEmpty()) values.put("scenario", scenario);
         if (source != null) values.put("path", source.toAbsolutePath().normalize().toString());
         setComponentMetadata("SOURCE", values);
+    }
+
+    /** Publishes load source metadata without mutable per-iteration identity. */
+    public void setLoadSourceMetadata(Path source, String scenario) {
+        setSourceMetadata("load", source, null, scenario);
     }
 
     public void setComponentMetadata(String key, Map<String, Object> values) {
@@ -645,6 +653,13 @@ public final class CaseRuntimeContext {
     public void putValidationPlaceholder(String key) {
         if (key != null && key.startsWith("EXEC.")) putExecutionPath(key.substring("EXEC.".length()), DEFERRED_VALIDATION_VALUE, true);
         else put(key, DEFERRED_VALIDATION_VALUE);
+    }
+
+    /** Adds a read-only legacy CASE.inputs compatibility view without duplicating EXEC.INPUT. */
+    public void setLegacyInputsView(Map<String, Object> inputs) {
+        legacyInputsView = inputs == null || inputs.isEmpty()
+                ? Collections.<String, Object>emptyMap()
+                : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(inputs));
     }
 
     @SuppressWarnings("unchecked")
