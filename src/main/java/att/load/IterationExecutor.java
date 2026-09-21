@@ -27,7 +27,7 @@ import java.util.List;
  * Workload-agnostic execution layer. Schedulers provide timing and identity;
  * this class creates all mutable ATT runtime state for exactly one iteration.
  */
-public final class IterationExecutor {
+public final class IterationExecutor implements LoadIterationRunner {
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final LoadTarget target;
