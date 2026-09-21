@@ -704,6 +704,10 @@ result:
 evidence:
   sql: full
   parameters: values
+pool:
+  maxSize: 20
+  minIdle: 2
+  connectionTimeout: 2s
 ```
 
 `connection.url` 必填；username、password 和 properties 中的值可写成完整的 `${ENV:NAME}` 环境变量引用。`driverClass` 可选，优先使用 JDBC service discovery。`readOnly` 是 ATT 的 update 拒绝边界，也会传给 JDBC Connection；它不能防止 vendor side effect。`isolation` 可为 `driverDefault`、`readUncommitted`、`readCommitted`、`repeatableRead` 或 `serializable`。
@@ -747,10 +751,11 @@ connection:
   password: "${ENV:MQ_PASSWORD}"
 message: {ccsid: 1208, format: MQSTR, persistence: asQueue}
 requestReply: {waitMs: 10000}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 evidence: {payload: metadata}
 ```
 
-MQ 仅可作为 `type: tool` Action 的主要 call：`mq.orders.send(queue=..., file=...)`、`mq.orders.receive(queue=..., waitMs=..., correlationId=...)` 或 `mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)`。Payload 按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion 判断 `replyReceived`。连接与 queue 按 invocation 创建并关闭，syncpoint 固定为 none；reply 文件只写一次到 Case output，evidence 不保存完整 payload 或 credential。IBM client jar 通过 Maven `ibm-mq` profile 或 package `lib/` 提供，默认 ATT build 不内置 vendor client。
+MQ 仅可作为 `type: tool` Action 的主要 call：`mq.orders.send(queue=..., file=...)`、`mq.orders.receive(queue=..., waitMs=..., correlationId=...)` 或 `mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)`。Payload 按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion 判断 `replyReceived`。MQ queue handle 仍是 invocation-scoped，不使用 syncpoint；load 模式会通过有界 pool 复用 physical Connection，并独占借用 lease，只会让失败的 Connection 失效，无消息的健康 Connection 会归还。`MQ_POOL_TIMEOUT` 与 MQ operation error 分开报告。Pool metrics 提供 active、idle、total、waiting、wait duration、create/failure、replacement 和 timeout 计数，且不包含 credentials。reply 文件只写一次到 Case output，evidence 不保存完整 payload 或 credential。IBM client jar 通过 Maven `ibm-mq` profile 或 package `lib/` 提供，默认 ATT build 不内置 vendor client。
 
 ##### DB Action
 
@@ -883,9 +888,9 @@ error: null
 
 update 使用 `rows: []`、`rowCount: 0` 与整数 `affectedRows`。重复 column label 是 ERROR，需在 SQL 加 alias。binary 使用 Base64，temporal 使用可移植字符串；LOB/cell/row/result 超限会失败而非截断。
 
-失败仍保留相同顶层形状：`success: false`、空 rows、零 rowCount、null affectedRows，以及经净化的 `error`（`type`、`message`、`sqlState`、`vendorCode`）。类型包括 `CONNECTION_ERROR`、`BIND_ERROR`、`SQL_ERROR`、`TIMEOUT`、`LIMIT_EXCEEDED`、`ROLLBACK_ONLY` 与 `FINALIZE_ERROR`。
+失败仍保留相同顶层形状：`success: false`、空 rows、零 rowCount、null affectedRows，以及经净化的 `error`（`type`、`message`、`sqlState`、`vendorCode`）。类型包括 `CONNECTION_ERROR`、`DB_POOL_TIMEOUT`、`BIND_ERROR`、`SQL_ERROR`、`TIMEOUT`、`LIMIT_EXCEEDED`、`ROLLBACK_ONLY` 与 `FINALIZE_ERROR`。
 
-Connection 的生命周期只与 dbhelper 实例和执行 thread 有关，与 Case 无关。ATT 为每个实例/thread 重用一个 Connection。Case 完成时对该 Case 已使用实例执行配置的 commit/rollback，但不关闭 Connection；thread 结束或 run 结束才关闭。
+Connection 的生命周期只与 dbhelper 实例和执行 thread 有关，与 Case 无关。ATT 为每个实例/thread 重用一个 Connection。Case 完成时对该 Case 已使用实例执行配置的 commit/rollback，但不关闭 Connection；thread 结束或 run 结束才关闭。load 模式下，每个 dbhelper 在 load-run owner 内拥有一个 HikariCP pool；Connection 按需借用，由一个 iteration thread 独占，在 Case finalize 或 abort 后归还。`DB_POOL_TIMEOUT` 与 SQL/SUT error 分开报告；pool metrics 提供 active、idle、total、waiting、borrow wait duration、borrow timeout 和 borrow failure，且不包含 credentials。
 
 新 Case 开始前，ATT 对该 thread 上每个已打开的 non-auto-commit Connection 做一次 rollback，以隔离不同 Case。若 rollback 异常，ATT 丢弃旧 Connection 并立即尝试 reconnect；这不会改变新 Case 状态。数据库仍不可用时，第一个实际 DB Action 才成为 ERROR。
 
@@ -1721,6 +1726,7 @@ tools: {}
 | `result.maxBytes` | `10485760` | 整数 1–1073741824，且不小于 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
 | `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感业务数据 |
+| `pool` | 默认值 | `maxSize` 默认 20、`minIdle` 默认 0、`connectionTimeout` 默认 2s；`maxSize` 为 1–10000，`minIdle` 不可大于 `maxSize`，timeout 至少 250ms |
 
 validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 会在执行前校验。
 

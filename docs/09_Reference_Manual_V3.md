@@ -735,6 +735,11 @@ result:
 evidence:
   sql: full
   parameters: values
+
+pool:
+  maxSize: 20
+  minIdle: 2
+  connectionTimeout: 2s
 ```
 
 `id` is package-global, case-insensitive for uniqueness, and matches `^[A-Za-z_][A-Za-z0-9_-]*$`. The file requires `schemaVersion`, `id`, `name`, `description`, and `connection.url`. `statement`, `transaction`, `result`, and `evidence` are optional. Unknown fields are rejected except `x-*`. Referenced paths must remain inside the package, exist, and be unique after normalization.
@@ -890,9 +895,9 @@ error: null
 
 Updates use `rows: []`, `rowCount: 0`, and an integer `affectedRows`. Duplicate column labels are errors; add SQL aliases. Binary values use Base64, temporal values use portable strings, and LOB/cell/row/result limits fail instead of truncating.
 
-Failures keep the same object shape with `success: false`, empty rows, zero row count, null affected rows, and a sanitized `error` containing `type`, `message`, `sqlState`, and `vendorCode`. Types are `CONNECTION_ERROR`, `BIND_ERROR`, `SQL_ERROR`, `TIMEOUT`, `LIMIT_EXCEEDED`, `ROLLBACK_ONLY`, and `FINALIZE_ERROR`.
+Failures keep the same object shape with `success: false`, empty rows, zero row count, null affected rows, and a sanitized `error` containing `type`, `message`, `sqlState`, and `vendorCode`. Types are `CONNECTION_ERROR`, `DB_POOL_TIMEOUT`, `BIND_ERROR`, `SQL_ERROR`, `TIMEOUT`, `LIMIT_EXCEEDED`, `ROLLBACK_ONLY`, and `FINALIZE_ERROR`.
 
-Connections belong to a dbhelper instance and execution thread, not a Case. ATT reuses one Connection per instance/thread. Case completion applies the configured transaction action to instances used by that Case but does not close them. Before the next Case, every open non-auto-commit Connection on that thread is rolled back for isolation. A rollback exception discards the old Connection and triggers reconnect without changing the new Case status; failure of the first subsequent DB operation becomes `ERROR`.
+Connections belong to a dbhelper instance and execution thread, not a Case. ATT reuses one Connection per instance/thread. Case completion applies the configured transaction action to instances used by that Case but does not close them. Before the next Case, every open non-auto-commit Connection on that thread is rolled back for isolation. A rollback exception discards the old Connection and triggers reconnect without changing the new Case status; failure of the first subsequent DB operation becomes `ERROR`. In load mode, one HikariCP pool is created per dbhelper within the load-run owner; a Connection is borrowed lazily, exclusively held by one iteration thread, and returned after Case finalization or abort. `DB_POOL_TIMEOUT` is reported separately from SQL and SUT errors. Pool metrics expose active, idle, total, waiting, borrow wait duration, borrow timeouts, and borrow failures without exposing credentials.
 
 For Case-scope transactions, any SQL/JDBC error marks the instance rollback-only. Later calls in that Case return `ERROR` without executing, and finalization rolls back. Final outcomes appear at the fixed `${CASE.DB.<instance>}` path. Connections close when their worker thread shuts down or the run ends. Vendor DDL may commit implicitly despite ATT transaction settings.
 
@@ -947,6 +952,7 @@ connection:
   password: "${ENV:MQ_PASSWORD}"
 message: {ccsid: 1208, format: MQSTR, persistence: asQueue}
 requestReply: {waitMs: 10000}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 evidence: {payload: metadata}
 ```
 
@@ -964,7 +970,7 @@ requestOrder:
     )}
 ```
 
-`send` accepts `queue` and `file`; `receive` accepts `queue`, optional `waitMs`, and optional `correlationId`; `request` accepts `requestQueue`, `replyQueue`, `file`, and optional `waitMs`. Payloads are read as exact bytes. Request PUT captures MsgId and GET matches CorrelId. Reason 2033 is a successful no-message result (`received: false` or `replyReceived: false`), so a required reply must be asserted explicitly. MQ connections and queues are invocation-scoped and use no syncpoint. Reply bytes are written once below the Case output directory; structured evidence contains paths, lengths, IDs, status, duration, and safe reason metadata, never full payloads or credentials.
+`send` accepts `queue` and `file`; `receive` accepts `queue`, optional `waitMs`, and optional `correlationId`; `request` accepts `requestQueue`, `replyQueue`, `file`, and optional `waitMs`. Payloads are read as exact bytes. Request PUT captures MsgId and GET matches CorrelId. Reason 2033 is a successful no-message result (`received: false` or `replyReceived: false`), so a required reply must be asserted explicitly. MQ queue handles remain invocation-scoped and use no syncpoint; in load mode the configured pool reuses bounded physical connections with exclusive leases, invalidating only failed connections and returning healthy no-message connections. `MQ_POOL_TIMEOUT` is distinct from MQ operation errors. Pool metrics expose active, idle, total, waiting, wait duration, creation/failure, replacement, and timeout counts without credentials. Reply bytes are written once below the Case output directory; structured evidence contains paths, lengths, IDs, status, duration, and safe reason metadata, never full payloads or credentials.
 
 #### Call-backed Tools (V2.6)
 
@@ -1889,12 +1895,13 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
-| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `statement`, `transaction`, `result`, `evidence`, `x-*` |
+| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `statement`, `transaction`, `result`, `evidence`, `pool`, `x-*` |
 | `connection` | required | required `url`; optional `username`, `password`, `driverClass`, `properties`, `readOnly`, `isolation`, `x-*` |
 | `statement` | defaults | `timeoutSeconds` defaults to 30, integer 1–3600 |
 | `transaction` | defaults | `scope: case|statement`, `onEnd: commit|rollback`; defaults `case`/`rollback` |
 | `result` | defaults | `maxRows` 1000, `maxCellBytes` 1048576, `maxBytes` 10485760; positive bounded integers |
 | `evidence` | defaults | `sql: full|hash` defaults full; `parameters: values|types|masked` defaults values |
+| `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `connectionTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize`, timeout is at least 250ms |
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [Database helpers](#database-helpers) for Action, expression, result, security, and lifecycle behaviour.
 
@@ -1904,11 +1911,12 @@ Each path in global `mqhelpers` resolves from the package root and contains one 
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
-| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `message`, `requestReply`, `evidence`, `x-*` |
+| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `message`, `requestReply`, `evidence`, `pool`, `x-*` |
 | `connection` | required | `queueManager`, `host`, `port`, and `channel` required; optional `username`, `password`; port 1–65535 |
 | `message` | defaults | `ccsid` defaults to 1208; `format` is `MQSTR`, `MQHRF2`, `MQFMT_STRING`, `MQFMT_NONE`, or `NONE`; `persistence` is `asQueue`, `persistent`, `notPersistent`, or `nonPersistent` |
 | `requestReply` | defaults | `waitMs` defaults to 10000 and is 0–3600000 milliseconds |
 | `evidence` | defaults | `payload: metadata` is the only V1 mode; full payload bytes are never placed in structured evidence |
+| `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `borrowTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize` |
 
 Connection credentials may be complete `${ENV:NAME}` references. The loader resolves them without putting the secret or the environment variable value in diagnostics, metadata, or Case evidence. Queue names supplied in calls are non-blank, at most 48 characters, and restricted to IBM MQ queue-name characters. A helper instance is selected case-insensitively by its `id`; configured paths and IDs must be unique.
 

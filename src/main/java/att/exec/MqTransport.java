@@ -72,6 +72,9 @@ public final class MqTransport {
         public Exception(String message, Integer completionCode, Integer reasonCode, String reason, Throwable cause) {
             super(message, cause); this.completionCode = completionCode; this.reasonCode = reasonCode; this.reason = reason;
         }
+        public static Exception poolTimeout(Throwable cause) {
+            return new Exception("MQ connection pool borrow timed out", null, null, "MQ_POOL_TIMEOUT", cause);
+        }
         public Integer completionCode() { return completionCode; }
         public Integer reasonCode() { return reasonCode; }
         public String reason() { return reason; }

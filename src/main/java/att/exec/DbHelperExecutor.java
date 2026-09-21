@@ -246,6 +246,7 @@ public final class DbHelperExecutor implements AutoCloseable {
                                                  String sql, List<?> params, List<String> parameterNames, Long timeoutMs) throws DbFailure {
         Connection connection;
         try { connection = managed.connection(); }
+        catch (DbConnectionProvider.PoolTimeoutException error) { throw new DbFailure("DB_POOL_TIMEOUT", error); }
         catch (Exception error) {
             String message = error.getMessage() == null ? "" : error.getMessage();
             String type = connectionProvider != null && message.toLowerCase(Locale.ROOT).contains("connection is not available")

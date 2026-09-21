@@ -133,15 +133,15 @@ public final class MqHelperExecutor {
                 }
             } else throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         } catch (MqTransport.Exception error) {
-            success = false; addError(result, evidence, error);
+            success = false; addError(result, evidence, error, helper);
         } catch (Exception error) {
-            success = false; addError(result, evidence, error);
+            success = false; addError(result, evidence, error, helper);
         } finally {
             String cleanup = closeQueue(requestQueue);
             if (cleanup == null) cleanup = closeQueue(replyQueue);
             else { String next = closeQueue(replyQueue); if (next != null) cleanup += "; " + next; }
             if (connection != null) {
-                try { connection.disconnect(); } catch (Exception error) { cleanup = append(cleanup, "disconnect=" + safe(error)); }
+                try { connection.disconnect(); } catch (Exception error) { cleanup = append(cleanup, "disconnect=" + safe(error, helper)); }
             }
             if (cleanup != null) { evidence.put("cleanupWarning", cleanup); if (success) success = false; }
         }
@@ -246,23 +246,27 @@ public final class MqHelperExecutor {
         if (error.reason() != null) { result.put("reason", error.reason()); evidence.put("reason", error.reason()); }
     }
 
-    private void addError(Map<String, Object> result, Map<String, Object> evidence, Exception error) {
+    private void addError(Map<String, Object> result, Map<String, Object> evidence, Exception error, MqHelperConfig helper) {
         Map<String, Object> detail = new LinkedHashMap<String, Object>();
         if (error instanceof MqTransport.Exception) {
             MqTransport.Exception mq = (MqTransport.Exception) error;
-            detail.put("type", "MQ_ERROR"); detail.put("message", safe(error));
+            detail.put("type", "MQ_POOL_TIMEOUT".equals(mq.reason()) ? "MQ_POOL_TIMEOUT" : "MQ_ERROR"); detail.put("message", safe(error, helper));
             if (mq.completionCode() != null) detail.put("completionCode", mq.completionCode());
             if (mq.reasonCode() != null) detail.put("reasonCode", mq.reasonCode());
             if (mq.reason() != null) detail.put("reason", mq.reason());
-        } else { detail.put("type", error.getClass().getName()); detail.put("message", safe(error)); }
+        } else { detail.put("type", error.getClass().getName()); detail.put("message", safe(error, helper)); }
         result.put("error", detail); evidence.put("error", detail);
     }
 
     private String closeQueue(MqTransport.Queue queue) {
         if (queue == null) return null;
-        try { queue.close(); return null; } catch (Exception error) { return "queueClose=" + safe(error); }
+        try { queue.close(); return null; } catch (Exception error) { return "queueClose=" + safe(error, null); }
     }
     private String append(String first, String second) { return first == null ? second : first + "; " + second; }
-    private String safe(Exception error) { return error.getMessage() == null || error.getMessage().trim().isEmpty() ? error.getClass().getSimpleName() : error.getMessage(); }
+    private String safe(Exception error, MqHelperConfig helper) {
+        String message = error.getMessage() == null || error.getMessage().trim().isEmpty() ? error.getClass().getSimpleName() : error.getMessage();
+        if (helper != null && !helper.password().isEmpty()) message = message.replace(helper.password(), "<redacted>");
+        return message;
+    }
     private String portable(Path path) { try { return projectRoot.relativize(path.toAbsolutePath().normalize()).toString().replace('\\', '/'); } catch (Exception error) { return path.toString(); } }
 }

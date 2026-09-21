@@ -1351,7 +1351,12 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb31-1"><a href=
 <span id="cb31-28"><a href="#cb31-28" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb31-29"><a href="#cb31-29" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
 <span id="cb31-30"><a href="#cb31-30" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> full</span></span>
-<span id="cb31-31"><a href="#cb31-31" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">parameters</span><span class="kw">:</span><span class="at"> values</span></span></code></pre></div>
+<span id="cb31-31"><a href="#cb31-31" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">parameters</span><span class="kw">:</span><span class="at"> values</span></span>
+<span id="cb31-32"><a href="#cb31-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-33"><a href="#cb31-33" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span></span>
+<span id="cb31-34"><a href="#cb31-34" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
+<span id="cb31-35"><a href="#cb31-35" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">minIdle</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span></span>
+<span id="cb31-36"><a href="#cb31-36" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectionTimeout</span><span class="kw">:</span><span class="at"> 2s</span></span></code></pre></div>
 <p><code>id</code> is package-global, case-insensitive for uniqueness,
 and matches <code>^[A-Za-z_][A-Za-z0-9_-]*$</code>. The file requires
 <code>schemaVersion</code>, <code>id</code>, <code>name</code>,
@@ -1584,8 +1589,8 @@ strings, and LOB/cell/row/result limits fail instead of truncating.</p>
 empty rows, zero row count, null affected rows, and a sanitized
 <code>error</code> containing <code>type</code>, <code>message</code>,
 <code>sqlState</code>, and <code>vendorCode</code>. Types are
-<code>CONNECTION_ERROR</code>, <code>BIND_ERROR</code>,
-<code>SQL_ERROR</code>, <code>TIMEOUT</code>,
+<code>CONNECTION_ERROR</code>, <code>DB_POOL_TIMEOUT</code>,
+<code>BIND_ERROR</code>, <code>SQL_ERROR</code>, <code>TIMEOUT</code>,
 <code>LIMIT_EXCEEDED</code>, <code>ROLLBACK_ONLY</code>, and
 <code>FINALIZE_ERROR</code>.</p>
 <p>Connections belong to a dbhelper instance and execution thread, not a
@@ -1595,7 +1600,13 @@ but does not close them. Before the next Case, every open
 non-auto-commit Connection on that thread is rolled back for isolation.
 A rollback exception discards the old Connection and triggers reconnect
 without changing the new Case status; failure of the first subsequent DB
-operation becomes <code>ERROR</code>.</p>
+operation becomes <code>ERROR</code>. In load mode, one HikariCP pool is
+created per dbhelper within the load-run owner; a Connection is borrowed
+lazily, exclusively held by one iteration thread, and returned after
+Case finalization or abort. <code>DB_POOL_TIMEOUT</code> is reported
+separately from SQL and SUT errors. Pool metrics expose active, idle,
+total, waiting, borrow wait duration, borrow timeouts, and borrow
+failures without exposing credentials.</p>
 <p>For Case-scope transactions, any SQL/JDBC error marks the instance
 rollback-only. Later calls in that Case return <code>ERROR</code>
 without executing, and finalization rolls back. Final outcomes appear at
@@ -1686,7 +1697,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb43-1"><a href=
 <span id="cb43-12"><a href="#cb43-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">password</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ENV:MQ_PASSWORD}&quot;</span></span>
 <span id="cb43-13"><a href="#cb43-13" aria-hidden="true" tabindex="-1"></a><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">ccsid</span><span class="kw">:</span><span class="at"> </span><span class="dv">1208</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> MQSTR</span><span class="kw">,</span><span class="at"> </span><span class="fu">persistence</span><span class="kw">:</span><span class="at"> asQueue</span><span class="kw">}</span></span>
 <span id="cb43-14"><a href="#cb43-14" aria-hidden="true" tabindex="-1"></a><span class="fu">requestReply</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">waitMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span><span class="kw">}</span></span>
-<span id="cb43-15"><a href="#cb43-15" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span></code></pre></div>
+<span id="cb43-15"><a href="#cb43-15" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span><span class="kw">,</span><span class="at"> </span><span class="fu">minIdle</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">borrowTimeout</span><span class="kw">:</span><span class="at"> 2s</span><span class="kw">}</span></span>
+<span id="cb43-16"><a href="#cb43-16" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span></code></pre></div>
 <p>Only a primary <code>type: tool</code> call may invoke MQ:</p>
 <div class="sourceCode" id="cb44"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">requestOrder</span><span class="kw">:</span></span>
@@ -1707,10 +1719,16 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href=
 captures MsgId and GET matches CorrelId. Reason 2033 is a successful
 no-message result (<code>received: false</code> or
 <code>replyReceived: false</code>), so a required reply must be asserted
-explicitly. MQ connections and queues are invocation-scoped and use no
-syncpoint. Reply bytes are written once below the Case output directory;
-structured evidence contains paths, lengths, IDs, status, duration, and
-safe reason metadata, never full payloads or credentials.</p>
+explicitly. MQ queue handles remain invocation-scoped and use no
+syncpoint; in load mode the configured pool reuses bounded physical
+connections with exclusive leases, invalidating only failed connections
+and returning healthy no-message connections.
+<code>MQ_POOL_TIMEOUT</code> is distinct from MQ operation errors. Pool
+metrics expose active, idle, total, waiting, wait duration,
+creation/failure, replacement, and timeout counts without credentials.
+Reply bytes are written once below the Case output directory; structured
+evidence contains paths, lengths, IDs, status, duration, and safe reason
+metadata, never full payloads or credentials.</p>
 <h4 id="call-backed-tools-v2.6">Call-backed Tools (V2.6)</h4>
 <p>Call-backed Tools give repeated DB operations a short business name
 while preserving first-class dbhelper behavior. They are façades, not a
@@ -3552,7 +3570,7 @@ root and contains one <code>att-dbhelper/v2.5</code> object:</p>
 <td><code>schemaVersion</code>, <code>id</code>, <code>name</code>,
 <code>description</code>, <code>connection</code>; optional
 <code>statement</code>, <code>transaction</code>, <code>result</code>,
-<code>evidence</code>, <code>x-*</code></td>
+<code>evidence</code>, <code>pool</code>, <code>x-*</code></td>
 </tr>
 <tr class="even">
 <td><code>connection</code></td>
@@ -3585,6 +3603,14 @@ root and contains one <code>att-dbhelper/v2.5</code> object:</p>
 <td>defaults</td>
 <td><code>sql: full|hash</code> defaults full;
 <code>parameters: values|types|masked</code> defaults values</td>
+</tr>
+<tr class="odd">
+<td><code>pool</code></td>
+<td>defaults</td>
+<td><code>maxSize</code> defaults 20, <code>minIdle</code> defaults 0,
+<code>connectionTimeout</code> defaults 2s; <code>maxSize</code>
+1–10000, <code>minIdle</code> cannot exceed <code>maxSize</code>,
+timeout is at least 250ms</td>
 </tr>
 </tbody>
 </table>
@@ -3621,7 +3647,7 @@ root and contains one <code>att-mqhelper/v1.0</code> object:</p>
 <td><code>schemaVersion</code>, <code>id</code>, <code>name</code>,
 <code>description</code>, <code>connection</code>; optional
 <code>message</code>, <code>requestReply</code>, <code>evidence</code>,
-<code>x-*</code></td>
+<code>pool</code>, <code>x-*</code></td>
 </tr>
 <tr class="even">
 <td><code>connection</code></td>
@@ -3650,6 +3676,13 @@ milliseconds</td>
 <td>defaults</td>
 <td><code>payload: metadata</code> is the only V1 mode; full payload
 bytes are never placed in structured evidence</td>
+</tr>
+<tr class="even">
+<td><code>pool</code></td>
+<td>defaults</td>
+<td><code>maxSize</code> defaults 20, <code>minIdle</code> defaults 0,
+<code>borrowTimeout</code> defaults 2s; <code>maxSize</code> 1–10000,
+<code>minIdle</code> cannot exceed <code>maxSize</code></td>
 </tr>
 </tbody>
 </table>

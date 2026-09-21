@@ -42,6 +42,42 @@ class LoadRuntimeTest {
         assertEquals(1, created.get()); assertEquals(1, closed.get());
     }
 
+    @Test void resourcePoolHonorsMinIdleAndClosesBorrowedResourcesOnShutdown() throws Exception {
+        AtomicInteger created = new AtomicInteger(); AtomicInteger closed = new AtomicInteger();
+        LoadResourcePool<Object> pool = new LoadResourcePool<Object>(2, 1, 50L,
+                () -> { created.incrementAndGet(); return new Object(); }, value -> closed.incrementAndGet());
+        assertEquals(1, pool.total());
+        assertEquals(1, pool.idle());
+        LoadResourcePool<Object>.Lease first = pool.borrow();
+        LoadResourcePool<Object>.Lease second = pool.borrow();
+        assertEquals(2, pool.active());
+        pool.close();
+        assertEquals(2, created.get());
+        assertEquals(2, closed.get());
+        assertEquals(0, pool.total());
+        first.close(); second.close();
+        assertEquals(2, closed.get(), "leases must not close resources twice after pool shutdown");
+    }
+
+    @Test void resourcePoolInvalidationWakesCapacityAndTracksDiscard() throws Exception {
+        AtomicInteger created = new AtomicInteger(); AtomicInteger closed = new AtomicInteger();
+        LoadResourcePool<Object> pool = new LoadResourcePool<Object>(1, 500L,
+                () -> { created.incrementAndGet(); return new Object(); }, value -> closed.incrementAndGet());
+        LoadResourcePool<Object>.Lease first = pool.borrow();
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            java.util.concurrent.Future<LoadResourcePool<Object>.Lease> waiting = executor.submit(pool::borrow);
+            Thread.sleep(20L);
+            first.invalidate();
+            LoadResourcePool<Object>.Lease replacement = waiting.get(1L, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(2, created.get());
+            assertEquals(1, pool.discarded());
+            replacement.close();
+            pool.close();
+            assertEquals(2, closed.get());
+        } finally { executor.shutdownNow(); pool.close(); }
+    }
+
     @Test void evidenceDoesNotMisclassifyDroppedArrivalsAsSutFailures() {
         long now = System.currentTimeMillis();
         LoadEvidencePolicy policy = new LoadEvidencePolicy(LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10);
