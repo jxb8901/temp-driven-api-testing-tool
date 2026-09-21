@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -197,6 +198,62 @@ class LoadScenarioTest {
             assertEquals("iterations/" + expectedWorkspace.getFileName(), reference.get("workspace"));
             assertEquals("iterations/" + expectedWorkspace.getFileName() + "/case.log", reference.get("caseLog"));
         } finally { resources.close(); }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void concurrentIterationsIsolateNestedMapAndListInputMutation() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/NESTED_TEMPLATE"));
+        write(project, "templates/NESTED_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: NESTED_TEMPLATE\ndescription: nested input isolation\nactions:\n"
+                + "  mapValue: {type: log, message: \"${EXEC.INPUT.payload.value}\"}\n"
+                + "  listValue: {type: log, message: \"${EXEC.INPUT.payload.items[0].value}\"}\n");
+        Path scenarioFile = write(project, "nested.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: NESTED_TEMPLATE}\nload: {users: 2, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+
+        Map<String, Object> source = new LinkedHashMap<String, Object>();
+        Map<String, Object> sourcePayload = new LinkedHashMap<String, Object>();
+        sourcePayload.put("value", "original");
+        List<Object> sourceItems = new ArrayList<Object>();
+        Map<String, Object> sourceItem = new LinkedHashMap<String, Object>(); sourceItem.put("value", "original-list");
+        sourceItems.add(sourceItem); sourcePayload.put("items", sourceItems); source.put("payload", sourcePayload);
+        IterationRequest first = IterationRequest.closed("nested-run", "nested-a", 1, "STEADY", Instant.now(), "VU-1", source);
+        IterationRequest second = IterationRequest.closed("nested-run", "nested-b", 2, "STEADY", Instant.now(), "VU-2", source);
+
+        Map<String, Object> firstPayload = (Map<String, Object>) first.inputs().get("payload");
+        ((Map<String, Object>) ((List<?>) firstPayload.get("items")).get(0)).put("value", "A-list");
+        firstPayload.put("value", "A");
+        Map<String, Object> secondPayload = (Map<String, Object>) second.inputs().get("payload");
+        ((Map<String, Object>) ((List<?>) secondPayload.get("items")).get(0)).put("value", "B-list");
+        secondPayload.put("value", "B");
+
+        assertEquals("original", sourcePayload.get("value"));
+        assertEquals("original-list", ((Map<?, ?>) sourceItems.get(0)).get("value"));
+        assertEquals("A", firstPayload.get("value"));
+        assertEquals("B", secondPayload.get("value"));
+
+        LoadRunResources resources = new LoadRunResources(project, config);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources);
+            Future<IterationResult> firstResult = pool.submit(() -> executor.execute(first));
+            Future<IterationResult> secondResult = pool.submit(() -> executor.execute(second));
+            IterationResult a = firstResult.get(); IterationResult b = secondResult.get();
+            assertEquals(ResultStatus.PASS, a.status()); assertEquals(ResultStatus.PASS, b.status());
+            assertEquals("A", a.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("A-list", a.context().resolve("EXEC.INPUT.payload.items[0].value"));
+            assertEquals("B", b.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("B-list", b.context().resolve("EXEC.INPUT.payload.items[0].value"));
+            assertEquals("original", sourcePayload.get("value"));
+            assertEquals("original-list", ((Map<?, ?>) sourceItems.get(0)).get("value"));
+        } finally {
+            pool.shutdownNow();
+            resources.close();
+        }
     }
 
     @Test void cancellationRetainsFailureEvidenceAndStopsActiveToolIteration() throws Exception {
