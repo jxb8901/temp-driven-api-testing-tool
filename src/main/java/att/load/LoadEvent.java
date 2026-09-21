@@ -12,16 +12,18 @@ public final class LoadEvent {
     private final long sequence, scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs;
     private final boolean scheduled, started, completed, dropped;
     private final ResultStatus status;
+    private final String errorType;
     private final EvidenceRef evidence;
 
     private LoadEvent(String runId, String model, String phase, String iterationId, String userId, long sequence,
                       long scheduledAtEpochMs, long startedAtEpochMs, long completedAtEpochMs, long schedulerLagMs,
                       long latencyMs, boolean scheduled, boolean started, boolean completed, boolean dropped,
-                      ResultStatus status, EvidenceRef evidence) {
+                      ResultStatus status, String errorType, EvidenceRef evidence) {
         this.runId = runId; this.model = model; this.phase = phase; this.iterationId = iterationId; this.userId = userId;
         this.sequence = sequence; this.scheduledAtEpochMs = scheduledAtEpochMs; this.startedAtEpochMs = startedAtEpochMs;
         this.completedAtEpochMs = completedAtEpochMs; this.schedulerLagMs = schedulerLagMs; this.latencyMs = latencyMs;
-        this.scheduled = scheduled; this.started = started; this.completed = completed; this.dropped = dropped; this.status = status; this.evidence = evidence;
+        this.scheduled = scheduled; this.started = started; this.completed = completed; this.dropped = dropped; this.status = status;
+        this.errorType = errorType; this.evidence = evidence;
     }
 
     /** Legacy combined scheduled/start/completion event retained for compatibility. */
@@ -33,36 +35,48 @@ public final class LoadEvent {
     public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
                                       long sequence, long scheduledAt, long startedAt, long completedAt,
                                       ResultStatus status, EvidenceRef evidence) {
+        return completed(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null, evidence);
+    }
+
+    public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
+                                      long sequence, long scheduledAt, long startedAt, long completedAt,
+                                      ResultStatus status, String errorType, EvidenceRef evidence) {
         return new LoadEvent(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt,
-                Math.max(0L, startedAt - scheduledAt), Math.max(0L, completedAt - startedAt), true, true, true, false, status, evidence);
+                Math.max(0L, startedAt - scheduledAt), Math.max(0L, completedAt - startedAt), true, true, true, false, status, errorType, evidence);
     }
 
     /** Publishes admission/start without coupling it to the eventual completion event. */
     public static LoadEvent started(String runId, String model, String phase, String iterationId, String userId,
                                     long sequence, long scheduledAt, long startedAt) {
         return new LoadEvent(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, 0L,
-                Math.max(0L, startedAt - scheduledAt), 0L, true, true, false, false, null, null);
+                Math.max(0L, startedAt - scheduledAt), 0L, true, true, false, false, null, null, null);
     }
 
     /** Publishes completion for an iteration whose admission/start was already observed. */
     public static LoadEvent completion(String runId, String model, String phase, String iterationId, String userId,
                                        long sequence, long scheduledAt, long startedAt, long completedAt,
                                        ResultStatus status) {
-        return completion(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null);
+        return completion(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null, null);
     }
 
     /** Publishes completion for an iteration whose admission/start was already observed. */
     public static LoadEvent completion(String runId, String model, String phase, String iterationId, String userId,
                                        long sequence, long scheduledAt, long startedAt, long completedAt,
                                        ResultStatus status, EvidenceRef evidence) {
+        return completion(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null, evidence);
+    }
+
+    public static LoadEvent completion(String runId, String model, String phase, String iterationId, String userId,
+                                       long sequence, long scheduledAt, long startedAt, long completedAt,
+                                       ResultStatus status, String errorType, EvidenceRef evidence) {
         return new LoadEvent(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt,
-                Math.max(0L, startedAt - scheduledAt), Math.max(0L, completedAt - startedAt), false, false, true, false, status, evidence);
+                Math.max(0L, startedAt - scheduledAt), Math.max(0L, completedAt - startedAt), false, false, true, false, status, errorType, evidence);
     }
 
     public static LoadEvent dropped(String runId, String model, String phase, String iterationId, long sequence,
                                     long scheduledAt, long observedAt) {
         return new LoadEvent(runId, model, phase, iterationId, null, sequence, scheduledAt, 0L, 0L,
-                Math.max(0L, observedAt - scheduledAt), 0L, true, false, false, true, null, null);
+                Math.max(0L, observedAt - scheduledAt), 0L, true, false, false, true, null, null, null);
     }
 
     public String runId() { return runId; }
@@ -81,6 +95,7 @@ public final class LoadEvent {
     public boolean completed() { return completed; }
     public boolean dropped() { return dropped; }
     public ResultStatus status() { return status; }
+    public String errorType() { return errorType; }
     public EvidenceRef evidence() { return evidence; }
     public boolean success() { return status == ResultStatus.PASS; }
 
@@ -96,6 +111,7 @@ public final class LoadEvent {
         result.put("schedulerLagMs", schedulerLagMs); result.put("latencyMs", latencyMs);
         result.put("scheduled", scheduled); result.put("started", started); result.put("completed", completed);
         result.put("dropped", dropped); if (status != null) result.put("status", status.name());
+        if (errorType != null) result.put("errorType", errorType);
         if (evidence != null) result.put("evidence", evidence.toMap(base));
         return result;
     }

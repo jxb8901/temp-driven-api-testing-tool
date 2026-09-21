@@ -233,4 +233,36 @@ closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，
 
 每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、current/max in-flight、scheduled/started/completed/dropped。arrival-rate 的 `achievedArrivalRate` 若以 `%` 作 threshold，表示 `started / scheduled`；`scheduled` 是 warmup、ramp-up、steady 和 ramp-down 的 integrated planned arrivals，因此 ramped profile 不會被 steady-state rate 稀釋。若以 `/s` 讀取，則是整個 phase window 的實際平均 started rate。threshold failure 會使命令以非零狀態結束；validation/configuration failure 與 runtime failure 保持不同的診斷類別。
 
+`load-summary.json` 的 `metrics` 是 machine-readable contract。全局 metrics 包含 `configuredUsers`、`configuredArrivalRatePerSecond`、`configuredMaxConcurrent`、`iterations`、`scheduled`、`started`、`completed`、`success`、`failure`、`runtimeError`、`dropped`、`activeVus`/`maxActiveVus`、`currentInFlight`/`maxInFlight`、`warmupCompleted`、`measuredCompleted`、`sutErrorRate`、`runtimeErrorRate`、`droppedRate`、`completedThroughput`、`achievedArrivalRate`、`schedulerLagMeanMs`/`schedulerLagMaxMs`、`errorClassifications` 及 bounded latency sample/percentile fields。`runtimeError` 不計入 `sutErrorRate`；`dropped` 是 generator saturation，不是 SUT failure。成功 iteration 不會把完整 Context 或 Case evidence 放入 metrics。
+
+`metrics.buckets` 以一秒的 epoch-millisecond key 排序，每個 bucket 包含 `bucketStart`、`model`、`phase`、configured rate/concurrency、scheduled/started/completed/success/failure/runtimeError/dropped、`completedThroughput`/`completedTps`、`p95Ms`/`p99Ms`、`sutErrorRate`、`droppedRate`、active/in-flight、scheduler lag 和 error classifications。latency reservoir 最多保留 4096 個全局值、每 bucket 256 個值；time-series 最多保留 4096 個 bucket，超出的最舊 bucket 會被淘汰。
+
+示例：
+
+```json
+{
+  "metrics": {
+    "configuredArrivalRatePerSecond": 100.0,
+    "scheduled": 1000,
+    "started": 980,
+    "completed": 970,
+    "dropped": 20,
+    "completedThroughput": 96.5,
+    "p95Ms": 420,
+    "p99Ms": 730,
+    "sutErrorRate": 0.002,
+    "buckets": {
+      "1700000000000": {
+        "model": "arrivalRate",
+        "phase": "STEADY",
+        "completedTps": 97,
+        "p95Ms": 415,
+        "p99Ms": 710,
+        "dropped": 2
+      }
+    }
+  }
+}
+```
+
 DB pool 的 `maxSize`/`connectionTimeout` 與 VU 或 `maxConcurrent` 無關；MQ pool 的 `maxSize`/`borrowTimeout` 同樣獨立。DB/MQ physical resources 由 load-run owner 管理，queue handles 仍然是 invocation-scoped，pool timeout 會分別標示為 `DB_POOL_TIMEOUT` / `MQ_POOL_TIMEOUT`，不會冒充 SQL、MQRC 2033 或 SUT failure。

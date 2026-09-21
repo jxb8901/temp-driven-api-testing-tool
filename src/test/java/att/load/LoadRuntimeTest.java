@@ -9,6 +9,9 @@ import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -27,7 +30,103 @@ class LoadRuntimeTest {
         assertEquals(1L, snapshot.longValue("dropped"));
         assertEquals(1L, snapshot.longValue("measuredCompleted"));
         assertEquals(0.0, snapshot.doubleValue("sutErrorRate"), 0.00001);
+        assertEquals(1L, snapshot.longValue("runtimeError"));
+        assertEquals(0L, snapshot.longValue("measuredRuntimeError"));
         assertEquals(100L, snapshot.longValue("p95Ms"));
+    }
+
+    @Test void metricsExposeStablePercentilesClassificationsAndArrivalDimensions() {
+        long now = 1_700_000_000_000L;
+        LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 2_000L, 0, 100.0, 4);
+        for (int latency = 1; latency <= 100; latency++) {
+            metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "i-" + latency, null, latency,
+                    now + 1_000L, now + 1_000L, now + 1_000L + latency, ResultStatus.PASS));
+        }
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "sut-failure", null, 101,
+                now + 1_000L, now + 1_000L, now + 1_120L, ResultStatus.FAIL, "ASSERTION", null));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "runtime-failure", null, 102,
+                now + 1_000L, now + 1_000L, now + 1_130L, ResultStatus.ERROR, "DB_TIMEOUT", null));
+        metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "dropped", 103, now + 1_000L, now + 1_015L));
+        metrics.finish(now + 2_000L);
+
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(100.0, snapshot.doubleValue("configuredArrivalRatePerSecond"), 0.00001);
+        assertEquals(4L, snapshot.longValue("configuredMaxConcurrent"));
+        assertEquals(103L, snapshot.longValue("scheduled"));
+        assertEquals(102L, snapshot.longValue("started"));
+        assertEquals(102L, snapshot.longValue("completed"));
+        assertEquals(1L, snapshot.longValue("dropped"));
+        assertEquals(102L, snapshot.longValue("measuredCompleted"));
+        assertEquals(1L, snapshot.longValue("measuredFailure"));
+        assertEquals(1L, snapshot.longValue("measuredRuntimeError"));
+        assertEquals(1.0 / 102.0, snapshot.doubleValue("sutErrorRate"), 0.00001);
+        assertEquals(1.0 / 102.0, snapshot.doubleValue("runtimeErrorRate"), 0.00001);
+        assertEquals(51L, snapshot.longValue("p50Ms"));
+        assertEquals(97L, snapshot.longValue("p95Ms"));
+        assertEquals(120L, snapshot.longValue("p99Ms"));
+        assertEquals(130L, snapshot.longValue("latencyMaxMs"));
+        assertEquals(1L, ((Number) ((Map<?, ?>) snapshot.value("errorClassifications")).get("ASSERTION")).longValue());
+        assertEquals(1L, ((Number) ((Map<?, ?>) snapshot.value("errorClassifications")).get("DB_TIMEOUT")).longValue());
+        assertEquals(1, snapshot.buckets().size());
+        Map<String, Object> bucket = snapshot.buckets().get(String.valueOf(now + 1_000L));
+        assertNotNull(bucket);
+        assertEquals("STEADY", bucket.get("phase"));
+        assertEquals(97L, ((Number) bucket.get("p95Ms")).longValue());
+        assertEquals(120L, ((Number) bucket.get("p99Ms")).longValue());
+        assertEquals(1L, ((Number) bucket.get("dropped")).longValue());
+    }
+
+    @Test void metricsTrackClosedVusAndBoundBothLatencyAndTimeSeriesMemory() {
+        long now = 1_700_100_000_000L;
+        LoadMetrics metrics = new LoadMetrics("closed", now, 0L, 2, 0.0, 0);
+        metrics.onEvent(LoadEvent.started("r", "closed", "STEADY", "one", "VU-1", 1, now, now));
+        metrics.onEvent(LoadEvent.started("r", "closed", "STEADY", "two", "VU-2", 2, now, now + 1));
+        metrics.onEvent(LoadEvent.completion("r", "closed", "STEADY", "one", "VU-1", 1, now, now, now + 10, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completion("r", "closed", "STEADY", "two", "VU-2", 2, now, now + 1, now + 20, ResultStatus.PASS));
+        for (int i = 0; i < LoadMetrics.MAX_LATENCIES + 100; i++) {
+            long timestamp = now + 10_000L + i * 1_000L;
+            metrics.onEvent(LoadEvent.completed("r", "closed", "STEADY", "many-" + i, "VU-1", i + 3,
+                    timestamp, timestamp, timestamp + 1, ResultStatus.PASS));
+        }
+        metrics.finish(now + (LoadMetrics.MAX_BUCKETS + 100L) * 1_000L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(2L, snapshot.longValue("configuredUsers"));
+        assertEquals(2L, snapshot.longValue("maxActiveVus"));
+        assertEquals(0L, snapshot.longValue("activeVus"));
+        assertEquals(LoadMetrics.MAX_LATENCIES, snapshot.longValue("latencySampleCapacity"));
+        assertTrue(snapshot.longValue("latencySampleCount") <= LoadMetrics.MAX_LATENCIES);
+        assertEquals(LoadMetrics.MAX_BUCKETS, snapshot.longValue("timeSeriesBucketCapacity"));
+        assertTrue(snapshot.buckets().size() <= LoadMetrics.MAX_BUCKETS);
+    }
+
+    @Test void metricsRemainAccurateWhenEventsArePublishedConcurrently() throws Exception {
+        long now = 1_700_200_000_000L;
+        LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 10_000L, 0, 80.0, 8);
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        int perThread = 100;
+        try {
+            for (int thread = 0; thread < 8; thread++) {
+                final int threadNumber = thread;
+                executor.submit(() -> {
+                    for (int index = 0; index < perThread; index++) {
+                        int sequence = threadNumber * perThread + index;
+                        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "parallel-" + sequence, null,
+                                sequence, now, now, now + 5L, ResultStatus.PASS));
+                    }
+                });
+            }
+        } finally {
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+        metrics.finish(now + 10_000L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(800L, snapshot.longValue("scheduled"));
+        assertEquals(800L, snapshot.longValue("started"));
+        assertEquals(800L, snapshot.longValue("completed"));
+        assertEquals(0L, snapshot.longValue("currentInFlight"));
+        assertEquals(0.0, snapshot.doubleValue("sutErrorRate"), 0.00001);
+        assertEquals(800L, snapshot.longValue("schedulerLagCount"));
     }
 
     @Test void resourcePoolIsBoundedAndClassifiesBorrowTimeout() throws Exception {

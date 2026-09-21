@@ -46,7 +46,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
 
     @Override public LoadRunResult run() throws Exception {
         long startedAt = timing.now(); Instant start = LoadSchedulerSupport.instant(startedAt);
-        final LoadMetrics metrics = new LoadMetrics(scenario.model().wireName(), startedAt, LoadPhase.totalMs(scenario));
+        final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
         workers = Executors.newFixedThreadPool(scenario.maxConcurrent(), new NamedFactory("att-load-arrival"));
         long scheduledCount = 0L;
         try {
@@ -78,6 +78,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             workers.submit(() -> {
                 long iterationStarted = timing.now();
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
+                String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;
                 try {
                     LoadSchedulerSupport.emit(metrics, listener, LoadEvent.started(runId, "arrivalRate", phase, id, null,
@@ -85,12 +86,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
                     IterationResult result = executor.execute(request);
-                    status = result.status(); evidence = result.evidenceRef();
-                } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; }
+                    status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
+                } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
                 finally {
                     long completedAt = timing.now(); inFlight.decrementAndGet();
                     LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completion(runId, "arrivalRate", phase, id, null,
-                            sequenceValue, dueAt, iterationStarted, completedAt, status, evidence));
+                            sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence));
                 }
             });
         } catch (RejectedExecutionException rejected) {

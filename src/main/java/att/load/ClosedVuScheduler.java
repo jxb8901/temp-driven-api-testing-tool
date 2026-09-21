@@ -42,7 +42,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
 
     @Override public LoadRunResult run() throws Exception {
         final long startedAt = timing.now(); final Instant start = LoadSchedulerSupport.instant(startedAt);
-        final LoadMetrics metrics = new LoadMetrics(scenario.model().wireName(), startedAt);
+        final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
         workers = Executors.newFixedThreadPool(scenario.users(), new NamedFactory("att-load-vu"));
         java.util.List<Future<?>> futures = new java.util.ArrayList<Future<?>>();
         for (int user = 0; user < scenario.users(); user++) {
@@ -71,17 +71,18 @@ public final class ClosedVuScheduler implements LoadScheduler {
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
                 long iterationStarted = timing.now();
                 att.core.ResultStatus status;
+                String errorType = null;
                 EvidenceRef evidence = null;
                 LoadSchedulerSupport.emit(metrics, listener, LoadEvent.started(runId, "closed", phase, iterationId, userId,
                         sequenceValue, scheduledAt, iterationStarted));
                 try {
                     IterationResult result = executor.execute(request);
-                    status = result.status(); evidence = result.evidenceRef();
+                    status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 }
-                catch (RuntimeException failure) { status = att.core.ResultStatus.ERROR; }
+                catch (RuntimeException failure) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
                 long completedAt = timing.now();
                 LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completion(runId, "closed", phase, iterationId, userId,
-                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, evidence));
+                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence));
                 long remaining = LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
                 if (cancelled.get() || remaining <= 0L) return;
                 timing.sleep(Math.min(scenario.thinkTime().toMillis(), remaining));

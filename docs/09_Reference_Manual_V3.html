@@ -4562,6 +4562,30 @@ Warm-up is real traffic but is excluded from measured threshold
 aggregates by default. Successful iterations retain metrics only unless
 evidence sampling is configured; failures retain bounded diagnostic
 links.</p>
+<p>The machine-readable <code>metrics</code> object reports configured
+load (<code>configuredUsers</code>,
+<code>configuredArrivalRatePerSecond</code>,
+<code>configuredMaxConcurrent</code>), iteration/scheduling counts
+(<code>iterations</code>, <code>scheduled</code>, <code>started</code>,
+<code>completed</code>, <code>success</code>, <code>failure</code>,
+<code>runtimeError</code>, <code>dropped</code>), concurrency
+(<code>activeVus</code>, <code>maxActiveVus</code>,
+<code>currentInFlight</code>, <code>maxInFlight</code>), measured-phase
+results (<code>warmupCompleted</code>, <code>measuredCompleted</code>,
+<code>sutErrorRate</code>, <code>runtimeErrorRate</code>,
+<code>droppedRate</code>, <code>completedThroughput</code>), latency
+percentiles (<code>p50Ms</code>, <code>p95Ms</code>,
+<code>p99Ms</code>), scheduler lag, and grouped
+<code>errorClassifications</code>. Runtime errors are separate from SUT
+failures, and generator drops never increase <code>sutErrorRate</code>.
+The <code>buckets</code> map is sorted by one-second epoch-millisecond
+key; each bucket includes <code>model</code>, <code>phase</code>,
+configured rate/concurrency, completed TPS, p95/p99, SUT/drop rates,
+active/in-flight counts, scheduler lag, and error classifications.
+Latency storage is capped at 4096 global samples and 256 samples per
+bucket; time-series storage is capped at 4096 buckets and evicts the
+oldest bucket, so memory does not grow linearly with run duration or raw
+latency values.</p>
 <p>Load thresholds use the common <code>errorRate</code>
 (<code>%</code>), <code>p95</code>/<code>p99</code> (<code>ms</code>),
 and <code>minThroughput</code> (<code>/s</code> or <code>/m</code>)

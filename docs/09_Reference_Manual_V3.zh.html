@@ -3477,6 +3477,21 @@ time，<code>maxConcurrent</code> 已满时记录 generator
 和 <code>report/index.html</code>。warm-up 是真实 traffic，但默认不计入
 measured threshold aggregates；成功 iteration 默认只保留
 metrics，失败和显式 sample 才保留 bounded diagnostic links。</p>
+<p>machine-readable 的 <code>metrics</code>
+会输出配置负载（<code>configuredUsers</code>、<code>configuredArrivalRatePerSecond</code>、<code>configuredMaxConcurrent</code>）、iteration/scheduling
+计数（<code>iterations</code>、<code>scheduled</code>、<code>started</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured
+结果（<code>warmupCompleted</code>、<code>measuredCompleted</code>、<code>sutErrorRate</code>、<code>runtimeErrorRate</code>、<code>droppedRate</code>、<code>completedThroughput</code>）、latency
+percentiles（<code>p50Ms</code>、<code>p95Ms</code>、<code>p99Ms</code>）、scheduler
+lag 及 grouped <code>errorClassifications</code>。runtime error 与 SUT
+failure 分开；generator drop 不会增加
+<code>sutErrorRate</code>。<code>buckets</code> 以一秒 epoch-millisecond
+key 排序，每个 bucket 包含
+<code>model</code>、<code>phase</code>、配置的
+rate/concurrency、completed TPS、p95/p99、SUT/drop
+rate、active/in-flight、scheduler lag 和 error classifications。全局
+latency 最多保留 4096 个 sample，每个 bucket 最多 256 个；time-series
+最多保留 4096 个 bucket，超过后淘汰最旧 bucket，因此 memory 不会随 run
+时长或 raw latency values 线性增长。</p>
 <p>Load threshold 中，<code>errorRate</code> 使用
 <code>%</code>，<code>p95</code>／<code>p99</code> 使用
 <code>ms</code>，<code>minThroughput</code> 使用 <code>/s</code> 或
