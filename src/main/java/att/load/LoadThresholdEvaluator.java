@@ -22,7 +22,7 @@ public final class LoadThresholdEvaluator {
 
     private ThresholdResult evaluateOne(LoadScenario scenario, LoadMetricsSnapshot metrics, String name, String expression) {
         Matcher matcher = EXPRESSION.matcher(expression); if (!matcher.matches()) throw new IllegalArgumentException("Threshold must use operator and %, ms, /s, or /m");
-        double expected = Double.parseDouble(matcher.group(2)); String unit = matcher.group(3); double actual = actual(name, metrics);
+        double expected = Double.parseDouble(matcher.group(2)); String unit = matcher.group(3); double actual = actual(scenario, name, unit, metrics);
         if ("%".equals(unit)) expected /= 100.0;
         else if ("/m".equals(unit)) expected /= 60.0;
         boolean passed = compare(actual, matcher.group(1), expected);
@@ -30,13 +30,16 @@ public final class LoadThresholdEvaluator {
         return new ThresholdResult(name, expression, actualText, passed, passed ? null : "Measured value did not satisfy the required threshold");
     }
 
-    private double actual(String name, LoadMetricsSnapshot metrics) {
+    private double actual(LoadScenario scenario, String name, String unit, LoadMetricsSnapshot metrics) {
         if ("errorRate".equals(name)) return metrics.doubleValue("sutErrorRate");
         if ("droppedRate".equals(name)) return metrics.doubleValue("droppedRate");
         if ("p95".equals(name)) return metrics.doubleValue("p95Ms");
         if ("p99".equals(name)) return metrics.doubleValue("p99Ms");
         if ("minThroughput".equals(name)) return metrics.doubleValue("completedThroughput");
-        if ("achievedArrivalRate".equals(name)) return metrics.doubleValue("achievedArrivalRate");
+        if ("achievedArrivalRate".equals(name)) {
+            double achieved = metrics.doubleValue("achievedArrivalRate");
+            return "%".equals(unit) ? (scenario.arrivalRatePerSecond() == 0.0 ? 0.0 : achieved / scenario.arrivalRatePerSecond()) : achieved;
+        }
         throw new IllegalArgumentException("Unsupported threshold: " + name);
     }
     private boolean compare(double actual, String operator, double expected) {

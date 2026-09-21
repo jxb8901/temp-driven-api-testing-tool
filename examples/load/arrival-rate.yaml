@@ -12,4 +12,4 @@ load:
   overloadPolicy: drop
 thresholds:
   droppedRate: "== 0%"
-  achievedArrivalRate: ">= 99/s"
+  achievedArrivalRate: ">= 99%"

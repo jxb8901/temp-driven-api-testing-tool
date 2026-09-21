@@ -39,9 +39,15 @@ public final class LoadScenarioLoader {
             return semantic(source, map);
         } catch (DiagnosticException e) {
             throw e;
-        } catch (JsonSchemaVerifier.SchemaValidationException e) {
+        } catch (SemanticFailure e) {
             DiagnosticException diagnostic = new DiagnosticException(DiagnosticCodes.LOAD_INVALID,
                     "Invalid load scenario", e.getMessage(), source.toString(), e.field(), null, null, null,
+                    null, null, "Correct the referenced load scenario field and rerun att load.", e);
+            throw YamlSupport.locate(diagnostic, source, e.field());
+        } catch (JsonSchemaVerifier.SchemaValidationException e) {
+            String field = normalizeField(e.field());
+            DiagnosticException diagnostic = new DiagnosticException(DiagnosticCodes.LOAD_INVALID,
+                    "Invalid load scenario", e.getMessage(), source.toString(), field, null, null, null,
                     null, null, "Correct the scenario field and validate it against schemas/att-load-v1.0.schema.json.", e);
             throw YamlSupport.locateSchema(diagnostic, source, e.structuredViolations());
         } catch (Exception e) {
@@ -64,7 +70,7 @@ public final class LoadScenarioLoader {
         Map<String, Object> thresholds = mapOptional(root.get("thresholds"), "thresholds");
         Map<String, Object> evidence = mapOptional(root.get("evidence"), "evidence");
         if (("template".equals(type) || "flow".equals(type)) && !arguments.isEmpty())
-            throw new IllegalArgumentException("target.arguments is supported only for Tool targets in V1");
+            throw failure("target.arguments", "target.arguments is supported only for Tool targets in V1");
 
         Object usersValue = load.get("users");
         Object rateValue = load.get("arrivalRate");
@@ -79,8 +85,8 @@ public final class LoadScenarioLoader {
             rate = parseRate(rateText, "load.arrivalRate");
             maxConcurrent = integer(load.get("maxConcurrent"), "load.maxConcurrent", 1);
             overload = string(load.get("overloadPolicy"), "load.overloadPolicy").toLowerCase(java.util.Locale.ROOT);
-            if (!"drop".equals(overload)) throw new IllegalArgumentException("load.overloadPolicy supports only drop in V1");
-            if (execution.get("thinkTime") != null) throw new IllegalArgumentException("execution.thinkTime is valid only for closed users workloads");
+            if (!"drop".equals(overload)) throw failure("load.overloadPolicy", "load.overloadPolicy supports only drop in V1");
+            if (execution.get("thinkTime") != null) throw failure("execution.thinkTime", "execution.thinkTime is valid only for closed users workloads");
         }
         Duration warmup = duration(load.get("warmup"), "load.warmup", false);
         Duration rampUp = duration(load.get("rampUp"), "load.rampUp", false);
@@ -112,58 +118,63 @@ public final class LoadScenarioLoader {
 
     private Duration duration(Object value, String field, boolean positive) {
         if (value == null) return Duration.ZERO;
-        if (!(value instanceof String)) throw new IllegalArgumentException(field + " must use a duration such as 500ms, 30s, or 5m");
+        if (!(value instanceof String)) throw failure(field, field + " must use a duration such as 500ms, 30s, or 5m");
         Matcher matcher = DURATION.matcher(((String) value).trim());
-        if (!matcher.matches()) throw new IllegalArgumentException(field + " must use <integer><ms|s|m|h>");
+        if (!matcher.matches()) throw failure(field, field + " must use <integer><ms|s|m|h>");
         long amount;
-        try { amount = Long.parseLong(matcher.group(1)); } catch (NumberFormatException e) { throw new IllegalArgumentException(field + " is too large", e); }
-        if (positive && amount == 0) throw new IllegalArgumentException(field + " must be greater than zero");
+        try { amount = Long.parseLong(matcher.group(1)); } catch (NumberFormatException e) { throw failure(field, field + " is too large"); }
+        if (positive && amount == 0) throw failure(field, field + " must be greater than zero");
         long multiplier = "ms".equals(matcher.group(2)) ? 1L : "s".equals(matcher.group(2)) ? 1000L : "m".equals(matcher.group(2)) ? 60000L : 3600000L;
         try { return Duration.ofMillis(Math.multiplyExact(amount, multiplier)); }
-        catch (ArithmeticException e) { throw new IllegalArgumentException(field + " is too large", e); }
+        catch (ArithmeticException e) { throw failure(field, field + " is too large"); }
     }
 
     private double parseRate(String value, String field) {
         Matcher matcher = RATE.matcher(value.trim());
-        if (!matcher.matches()) throw new IllegalArgumentException(field + " must use a documented rate such as 100/s or 6000/m");
+        if (!matcher.matches()) throw failure(field, field + " must use a documented rate such as 100/s or 6000/m");
         double amount = Double.parseDouble(matcher.group(1));
         double perSecond = "m".equals(matcher.group(2)) ? amount / 60.0 : amount;
         if (Double.isInfinite(perSecond) || Double.isNaN(perSecond) || perSecond <= 0.0)
-            throw new IllegalArgumentException(field + " is too large or is not positive");
+            throw failure(field, field + " is too large or is not positive");
         return perSecond;
     }
 
     private void validateThresholds(LoadScenario.Model model, Map<String, Object> thresholds) {
         for (Map.Entry<String, Object> entry : thresholds.entrySet()) {
             if (model == LoadScenario.Model.CLOSED && ("droppedRate".equals(entry.getKey()) || "achievedArrivalRate".equals(entry.getKey())))
-                throw new IllegalArgumentException("thresholds." + entry.getKey() + " is valid only for arrivalRate workloads");
-            if (model == LoadScenario.Model.ARRIVAL_RATE && "minThroughput".equals(entry.getKey()))
-                throw new IllegalArgumentException("thresholds.minThroughput is valid only for closed workloads");
+                throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " is valid only for arrivalRate workloads");
             String value = String.valueOf(entry.getValue()).trim();
-            if (!(value.matches("^(<|<=|>|>=|==)\\s*[0-9]+(?:\\.[0-9]+)?(%|ms|/s|/m)$")))
-                throw new IllegalArgumentException("thresholds." + entry.getKey() + " must use an operator and %, ms, /s, or /m");
-            if (value.endsWith("%")) {
-                String numeric = value.replaceFirst("^(<|<=|>|>=|==)\\s*", "").replace("%", "").trim();
-                if (Double.parseDouble(numeric) > 100.0) throw new IllegalArgumentException("thresholds." + entry.getKey() + " percentage must be between 0% and 100%");
+            Matcher matcher = Pattern.compile("^(<|<=|>|>=|==)\\s*([0-9]+(?:\\.[0-9]+)?)(%|ms|/s|/m)$").matcher(value);
+            if (!matcher.matches()) throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use its documented operator and unit");
+            String unit = matcher.group(3);
+            if (("errorRate".equals(entry.getKey()) || "droppedRate".equals(entry.getKey()) || "achievedArrivalRate".equals(entry.getKey())) && !"%".equals(unit))
+                throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use %");
+            if (("p95".equals(entry.getKey()) || "p99".equals(entry.getKey())) && !"ms".equals(unit))
+                throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use ms");
+            if ("minThroughput".equals(entry.getKey()) && !("/s".equals(unit) || "/m".equals(unit)))
+                throw failure("thresholds.minThroughput", "thresholds.minThroughput must use /s or /m");
+            if ("%".equals(unit)) {
+                if (Double.parseDouble(matcher.group(2)) > 100.0)
+                    throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " percentage must be between 0% and 100%");
             }
         }
     }
 
     private static int integer(Object value, String field, int minimum) {
         if (!(value instanceof Number) || value instanceof Float || value instanceof Double)
-            throw new IllegalArgumentException(field + " must be an integer");
+            throw failure(field, field + " must be an integer");
         long result = ((Number) value).longValue();
         if (result < minimum || result > Integer.MAX_VALUE)
-            throw new IllegalArgumentException(field + " must be between " + minimum + " and " + Integer.MAX_VALUE);
+            throw failure(field, field + " must be between " + minimum + " and " + Integer.MAX_VALUE);
         return (int) result;
     }
 
     private static String string(Object value, String field) {
-        if (!(value instanceof String) || ((String) value).trim().isEmpty()) throw new IllegalArgumentException(field + " must be a non-blank string");
+        if (!(value instanceof String) || ((String) value).trim().isEmpty()) throw failure(field, field + " must be a non-blank string");
         return ((String) value).trim();
     }
     private static Map<String, Object> map(Object value, String field) {
-        if (!(value instanceof Map)) throw new IllegalArgumentException(field + " must be a map");
+        if (!(value instanceof Map)) throw failure(field, field + " must be a map");
         return objectMap((Map<?, ?>) value);
     }
     private static Map<String, Object> mapOptional(Object value, String field) {
@@ -177,5 +188,17 @@ public final class LoadScenarioLoader {
     }
     private DiagnosticException invalid(Path source, String summary, String field, String suggestion, Throwable cause) {
         return new DiagnosticException(DiagnosticCodes.LOAD_INVALID, summary, null, source.toString(), field, null, null, null, null, null, suggestion, cause);
+    }
+
+    private static SemanticFailure failure(String field, String message) { return new SemanticFailure(field, message); }
+
+    private static String normalizeField(String field) {
+        return field != null && field.startsWith("$.") ? field.substring(2) : field;
+    }
+
+    private static final class SemanticFailure extends IllegalArgumentException {
+        private final String field;
+        private SemanticFailure(String field, String message) { super(message); this.field = field; }
+        private String field() { return field; }
     }
 }

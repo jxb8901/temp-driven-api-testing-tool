@@ -4526,6 +4526,15 @@ Warm-up is real traffic but is excluded from measured threshold
 aggregates by default. Successful iterations retain metrics only unless
 evidence sampling is configured; failures retain bounded diagnostic
 links.</p>
+<p>Load thresholds use the common <code>errorRate</code>
+(<code>%</code>), <code>p95</code>/<code>p99</code> (<code>ms</code>),
+and <code>minThroughput</code> (<code>/s</code> or <code>/m</code>)
+fields for both workload models. Arrival-rate scenarios additionally
+support <code>droppedRate</code> (<code>%</code>) and
+<code>achievedArrivalRate</code> (<code>%</code>), where achieved
+arrival rate is measured as a percentage of the configured arrival rate.
+<code>target.arguments</code> is valid only for Tool targets; Template
+and Flow targets reject it with a field-specific diagnostic.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>

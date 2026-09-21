@@ -3449,6 +3449,16 @@ time，<code>maxConcurrent</code> 已满时记录 generator
 和 <code>report/index.html</code>。warm-up 是真实 traffic，但默认不计入
 measured threshold aggregates；成功 iteration 默认只保留
 metrics，失败和显式 sample 才保留 bounded diagnostic links。</p>
+<p>Load threshold 中，<code>errorRate</code> 使用
+<code>%</code>，<code>p95</code>／<code>p99</code> 使用
+<code>ms</code>，<code>minThroughput</code> 使用 <code>/s</code> 或
+<code>/m</code>，这些 common thresholds 对两种 workload
+都适用。arrival-rate 另外支持 <code>droppedRate</code> 和
+<code>achievedArrivalRate</code>，两者都使用 <code>%</code>；其中
+achieved arrival rate
+表示实际到达率相对于配置到达率的百分比。<code>target.arguments</code>
+只适用于 Tool target；Template 和 Flow target 会以带准确 field path 的
+diagnostic 拒绝。</p>
 <p>常见作用域包括：</p>
 <table>
 <colgroup>

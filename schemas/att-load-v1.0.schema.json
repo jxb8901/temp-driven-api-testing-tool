@@ -51,7 +51,7 @@
         "p99": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?ms$"},
         "minThroughput": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?/(s|m)$"},
         "droppedRate": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$"},
-        "achievedArrivalRate": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?/(s|m)$"}
+        "achievedArrivalRate": {"type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$"}
       },
       "additionalProperties": false
     },

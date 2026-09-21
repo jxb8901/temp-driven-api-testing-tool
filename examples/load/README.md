@@ -93,7 +93,7 @@ load:
 
 thresholds:
   droppedRate: "== 0%"
-  achievedArrivalRate: ">= 99/s"
+  achievedArrivalRate: ">= 99%"
 
 evidence:
   mode: metrics
@@ -137,7 +137,7 @@ Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/
 | `schemaVersion` | 是 | 固定為 `att-load/v1.0`。 |
 | `target.type` | 是 | `template`、`flow` 或 `tool`。 |
 | `target.id` | 是 | 目標 Template 名稱、Flow canonical ID 或 Tool key。 |
-| `target.arguments` | 否 | Tool target 的 named arguments；Template/Flow 通常不需要。 |
+| `target.arguments` | 否 | 只支持 Tool target 的 named arguments；Template/Flow target 会被拒绝。 |
 | `inputs` | 否 | 傳入每個 iteration 的 `EXEC.INPUT.*`；`CASE.*` 只保留為相容 alias。 |
 | `load.users` | closed 必填 | 正整數 Virtual User 數量。 |
 | `load.arrivalRate` | arrival 必填 | 正數速率，格式為 `number/s` 或 `number/m`。 |
@@ -145,7 +145,7 @@ Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/
 | `load.maxConcurrent` | arrival 必填 | 大於零的並發上限。 |
 | `load.overloadPolicy` | arrival 必填 | V1 只支持 `drop`。 |
 | `execution.thinkTime` | 否 | closed iteration 之間的 think time；arrival-rate 禁止。 |
-| `thresholds.*` | 否 | `errorRate`/`droppedRate` 用 `%`，`p95`/`p99` 用 `ms`，吞吐率用 `/s` 或 `/m`。 |
+| `thresholds.*` | 否 | `errorRate`/`droppedRate`/`achievedArrivalRate` 用 `%`，`p95`/`p99` 用 `ms`，`minThroughput` 用 `/s` 或 `/m`；`minThroughput` 对两种 workload 都适用。 |
 | `evidence.mode` | 否 | `metrics`、`failures`、`samples` 或 `all`。 |
 | `evidence.sampleRate` | 否 | `0` 到 `1` 之間的 sample fraction。 |
 | `evidence.maxSamples` | 否 | 非負整數 sample 上限。 |

@@ -51,14 +51,17 @@ class LoadScenarioTest {
         Path closedArrivalThreshold = write(project, "closed-arrival-threshold.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "load: {users: 1, duration: 1s}\n"
-                + "thresholds: {achievedArrivalRate: '>= 1/s'}\n");
-        assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(closedArrivalThreshold));
+                + "thresholds: {achievedArrivalRate: '>= 1%'}\n");
+        DiagnosticException closedThresholdError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(closedArrivalThreshold));
+        assertEquals("thresholds.achievedArrivalRate", closedThresholdError.field());
 
         Path arrivalThroughputThreshold = write(project, "arrival-throughput-threshold.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
-                + "thresholds: {minThroughput: '>= 1/s'}\n");
-        assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(arrivalThroughputThreshold));
+                + "thresholds: {minThroughput: '>= 1/s', achievedArrivalRate: '>= 99%'}\n");
+        LoadScenario arrivalThresholds = new LoadScenarioLoader(project).load(arrivalThroughputThreshold);
+        assertEquals(">= 1/s", arrivalThresholds.thresholds().get("minThroughput"));
+        assertEquals(">= 99%", arrivalThresholds.thresholds().get("achievedArrivalRate"));
     }
 
     @Test void rejectsAmbiguousWorkloadAndClosedOnlyOptionsWithSourceDiagnostics() throws Exception {
@@ -75,7 +78,20 @@ class LoadScenarioTest {
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "execution: {thinkTime: 10ms}\n");
-        assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidThink));
+        DiagnosticException thinkError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidThink));
+        assertEquals("execution.thinkTime", thinkError.field());
+
+        Path invalidArguments = write(project, "invalid-arguments.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE, arguments: {ignored: true}}\n"
+                + "load: {users: 1, duration: 1s}\n");
+        DiagnosticException argumentsError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidArguments));
+        assertEquals("target.arguments", argumentsError.field());
+
+        Path invalidMaxConcurrent = write(project, "invalid-max-concurrent.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: invalid, overloadPolicy: drop}\n");
+        DiagnosticException maxConcurrentError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidMaxConcurrent));
+        assertEquals("load.maxConcurrent", maxConcurrentError.field());
     }
 
     @Test void iterationExecutorIsolatesLoadAndCaseStateForClosedAndArrivalIterations() throws Exception {

@@ -4,6 +4,11 @@ import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.time.Duration;
+import java.nio.file.Paths;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -43,5 +48,20 @@ class LoadRuntimeTest {
         store.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "failed-1", null, 2, now, now, now + 1, ResultStatus.FAIL));
         assertEquals(1, store.events().size());
         assertEquals("failed-1", store.events().get(0).iterationId());
+    }
+
+    @Test void achievedArrivalRatePercentageIsComparedWithConfiguredRate() {
+        Map<String, Object> thresholds = new LinkedHashMap<String, Object>();
+        thresholds.put("achievedArrivalRate", ">= 99%");
+        LoadScenario scenario = new LoadScenario(Paths.get("arrival.yaml"), "template", "LOAD_TEMPLATE", Collections.emptyMap(),
+                Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 100.0, "100/s", Duration.ZERO,
+                Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO, 1, "drop", thresholds, Collections.emptyMap());
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("achievedArrivalRate", 99.0);
+        values.put("runtimeError", 0L);
+        LoadThresholdSummary summary = new LoadThresholdEvaluator().evaluate(scenario,
+                new LoadMetricsSnapshot(values, Collections.emptyMap()));
+        assertTrue(summary.passed());
+        assertEquals("99.0000%", summary.results().get(0).actual());
     }
 }
