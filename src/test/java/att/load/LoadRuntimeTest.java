@@ -263,6 +263,28 @@ class LoadRuntimeTest {
         assertEquals("100.0000%", summary.results().get(0).actual());
     }
 
+    @Test void achievedArrivalRateSupportsPerSecondAndPerMinuteThresholds() {
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("achievedArrivalRate", 100.0);
+        values.put("runtimeError", 0L);
+
+        Map<String, Object> perSecond = new LinkedHashMap<String, Object>();
+        perSecond.put("achievedArrivalRate", ">= 95/s");
+        LoadScenario perSecondScenario = thresholdScenario(LoadScenario.Model.ARRIVAL_RATE, perSecond);
+        LoadThresholdSummary perSecondSummary = new LoadThresholdEvaluator().evaluate(perSecondScenario,
+                new LoadMetricsSnapshot(values, Collections.emptyMap()));
+        assertTrue(perSecondSummary.passed(), perSecondSummary.toMap().toString());
+        assertEquals("100.000/s", perSecondSummary.results().get(0).actual());
+
+        Map<String, Object> perMinute = new LinkedHashMap<String, Object>();
+        perMinute.put("achievedArrivalRate", ">= 5700/m");
+        LoadScenario perMinuteScenario = thresholdScenario(LoadScenario.Model.ARRIVAL_RATE, perMinute);
+        LoadThresholdSummary perMinuteSummary = new LoadThresholdEvaluator().evaluate(perMinuteScenario,
+                new LoadMetricsSnapshot(values, Collections.emptyMap()));
+        assertTrue(perMinuteSummary.passed(), perMinuteSummary.toMap().toString());
+        assertEquals("100.000/s", perMinuteSummary.results().get(0).actual());
+    }
+
     @Test void thresholdsHonorMeasuredPhaseUnitsBoundariesAndIndependentResults() {
         Map<String, Object> thresholds = new LinkedHashMap<String, Object>();
         thresholds.put("errorRate", "<= 1%");

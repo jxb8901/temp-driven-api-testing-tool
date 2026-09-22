@@ -145,7 +145,7 @@ Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/
 | `load.maxConcurrent` | arrival 必填 | 大於零的並發上限。 |
 | `load.overloadPolicy` | arrival 必填 | V1 只支持 `drop`。 |
 | `execution.thinkTime` | 否 | closed iteration 之間的 think time；arrival-rate 禁止。 |
-| `thresholds.*` | 否 | `errorRate`/`droppedRate`/`achievedArrivalRate` 用 `%`，`p95`/`p99` 用 `ms`，`minThroughput` 用 `/s` 或 `/m`；`minThroughput` 对两种 workload 都适用。 |
+| `thresholds.*` | 否 | `errorRate`/`droppedRate` 用 `%`，`achievedArrivalRate` 用 `%`、`/s` 或 `/m`，`p95`/`p99` 用 `ms`，`minThroughput` 用 `/s` 或 `/m`；`minThroughput` 对两种 workload 都适用。 |
 | `evidence.mode` | 否 | `metrics`、`failures`、`samples` 或 `all`。 |
 | `evidence.sampleRate` | 否 | `0` 到 `1` 之間的 sample fraction。 |
 | `evidence.maxSamples` | 否 | 非負整數 sample 上限。 |
@@ -231,7 +231,7 @@ execution:
 
 closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，完成一個 iteration 後才進入 think time；arrival-rate workload 按絕對 planned due time 送出 arrival，超過 `maxConcurrent` 時記錄 `dropped`，不排隊，也不把 generator saturation 算成 SUT error。warm-up traffic 會執行，但預設不納入 thresholds 的 measured aggregates。
 
-每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、current/max in-flight、scheduled/started/completed/dropped。arrival-rate 的 `achievedArrivalRate` 若以 `%` 作 threshold，表示 measured phase 的 `measuredStarted / measuredScheduled`；warmup 不計入這兩個 measured counters，ramp-up、steady 和 ramp-down 仍按 integrated planned arrivals 保持可比較。若以 `/s` 讀取，則是整個 phase window 的實際平均 started rate。threshold failure 會以 exit code `1` 結束；load runtime/infrastructure error 以 `3` 結束；validation/configuration failure 以 `2` 結束；只有 PASS 返回 `0`。JSON 與 load summary 會同時輸出 `status`、`exitCode` 及每個 threshold 的 expected/actual/status/diagnostic。
+每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、current/max in-flight、scheduled/started/completed/dropped。arrival-rate 的 `achievedArrivalRate` 若以 `%` 作 threshold，表示 measured phase 的 `measuredStarted / measuredScheduled`；warmup 不計入這兩個 measured counters，ramp-up、steady 和 ramp-down 仍按 integrated planned arrivals 保持可比較。若以 `/s` 或 `/m` 作 threshold，則比較整個 phase window 的實際平均 started rate；`/m` 會先換算成每秒。threshold failure 會以 exit code `1` 結束；load runtime/infrastructure error 以 `3` 結束；validation/configuration failure 以 `2` 結束；只有 PASS 返回 `0`。JSON 與 load summary 會同時輸出 `status`、`exitCode` 及每個 threshold 的 expected/actual/status/diagnostic。
 
 `load-summary.json` 的 `metrics` 是 machine-readable contract。全局 metrics 包含 `configuredUsers`、`configuredArrivalRatePerSecond`、`configuredMaxConcurrent`、`iterations`、`scheduled`、`measuredScheduled`、`started`、`measuredStarted`、`completed`、`success`、`failure`、`runtimeError`、`dropped`、`measuredDropped`、`activeVus`/`maxActiveVus`、`currentInFlight`/`maxInFlight`、`warmupCompleted`、`measuredCompleted`、`sutErrorRate`、`runtimeErrorRate`、`droppedRate`、`completedThroughput`、`achievedArrivalRate`、`schedulerLagMeanMs`/`schedulerLagMaxMs`、`errorClassifications` 及 bounded latency sample/percentile fields。`p50Ms`/`p95Ms`/`p99Ms` 来自 bounded reservoir；`latencyMinMs`、`latencyMeanMs`、`latencyMaxMs` 和 `latencyObservationCount` 则跨全部 measured observations exact。`runtimeError` 不計入 `sutErrorRate`；`dropped` 是 generator saturation，不是 SUT failure。成功 iteration 不會把完整 Context 或 Case evidence 放入 metrics。
 

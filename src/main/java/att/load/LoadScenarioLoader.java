@@ -149,8 +149,10 @@ public final class LoadScenarioLoader {
             Matcher matcher = Pattern.compile("^(<|<=|>|>=|==)\\s*([0-9]+(?:\\.[0-9]+)?)(%|ms|/s|/m)$").matcher(value);
             if (!matcher.matches()) throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use its documented operator and unit");
             String unit = matcher.group(3);
-            if (("errorRate".equals(entry.getKey()) || "droppedRate".equals(entry.getKey()) || "achievedArrivalRate".equals(entry.getKey())) && !"%".equals(unit))
+            if (("errorRate".equals(entry.getKey()) || "droppedRate".equals(entry.getKey())) && !"%".equals(unit))
                 throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use %");
+            if ("achievedArrivalRate".equals(entry.getKey()) && !("%".equals(unit) || "/s".equals(unit) || "/m".equals(unit)))
+                throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use %, /s, or /m");
             if (("p95".equals(entry.getKey()) || "p99".equals(entry.getKey())) && !"ms".equals(unit))
                 throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " must use ms");
             if ("minThroughput".equals(entry.getKey()) && !("/s".equals(unit) || "/m".equals(unit)))

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>09_Reference_Manual_V3</title>
+  <title>ATT V3.4.1 User Manual and Reference</title>
   <style>
     html {
       color: #1a1a1a;
@@ -232,6 +232,9 @@
   <![endif]-->
 </head>
 <body>
+<header id="title-block-header">
+<h1 class="title">ATT V3.4.1 User Manual and Reference</h1>
+</header>
 <h1 id="att-v3.4.2-user-manual-and-reference">ATT V3.4.2 User Manual and
 Reference</h1>
 <p>Author: Jeffrey + ChatGPT Version: 3.4.2 Status: Normative end-user
@@ -4596,12 +4599,13 @@ grow linearly with run duration or raw latency values.</p>
 and <code>minThroughput</code> (<code>/s</code> or <code>/m</code>)
 fields for both workload models. Arrival-rate scenarios additionally
 support <code>droppedRate</code> (<code>%</code>) and
-<code>achievedArrivalRate</code> (<code>%</code>). For the percentage
-form, achieved arrival rate is measured
-<code>measuredStarted / measuredScheduled</code>; warm-up is excluded,
-while ramp-up, steady, and ramp-down remain part of the integrated
-measured schedule. The <code>/s</code> form remains the actual average
-started rate over the full phase window. Each threshold is reported
+<code>achievedArrivalRate</code> (<code>%</code>, <code>/s</code>, or
+<code>/m</code>). For the percentage form, achieved arrival rate is
+measured <code>measuredStarted / measuredScheduled</code>; warm-up is
+excluded, while ramp-up, steady, and ramp-down remain part of the
+integrated measured schedule. The rate forms compare the actual average
+started rate over the full phase window; <code>/m</code> thresholds are
+normalized to per-second before comparison. Each threshold is reported
 independently with expected expression, formatted actual value,
 PASS/FAIL status, and failure diagnostic. The load result then uses exit
 code <code>0</code> for PASS, <code>1</code> for a completed run with

@@ -31,13 +31,27 @@ public final class LoadThresholdEvaluator {
 
     private ThresholdResult evaluateOne(LoadScenario scenario, LoadMetricsSnapshot metrics, String name, String expression) {
         Matcher matcher = EXPRESSION.matcher(expression); if (!matcher.matches()) throw new IllegalArgumentException("Threshold must use operator and %, ms, /s, or /m");
-        double expected = Double.parseDouble(matcher.group(2)); String unit = matcher.group(3); double actual = actual(scenario, name, unit, metrics);
+        double expected = Double.parseDouble(matcher.group(2)); String unit = matcher.group(3);
+        validateUnit(name, unit);
+        double actual = actual(scenario, name, unit, metrics);
         if ("%".equals(unit)) expected /= 100.0;
         else if ("/m".equals(unit)) expected /= 60.0;
         boolean passed = compare(actual, matcher.group(1), expected);
         String actualText = "%".equals(unit) ? String.format(Locale.ROOT, "%.4f%%", actual * 100.0) : "ms".equals(unit) ? String.format(Locale.ROOT, "%.3fms", actual) : String.format(Locale.ROOT, "%.3f/s", actual);
         String diagnostic = passed ? null : String.format(Locale.ROOT, "%s measured %s; expected %s", name, actualText, expression);
         return new ThresholdResult(name, expression, actualText, passed, diagnostic);
+    }
+
+    private void validateUnit(String name, String unit) {
+        if (("errorRate".equals(name) || "droppedRate".equals(name)) && !"%".equals(unit))
+            throw new IllegalArgumentException(name + " threshold must use %");
+        if (("p95".equals(name) || "p99".equals(name)) && !"ms".equals(unit))
+            throw new IllegalArgumentException(name + " threshold must use ms");
+        if ("minThroughput".equals(name) && !("/s".equals(unit) || "/m".equals(unit)))
+            throw new IllegalArgumentException("minThroughput threshold must use /s or /m");
+        if ("achievedArrivalRate".equals(name)
+                && !("%".equals(unit) || "/s".equals(unit) || "/m".equals(unit)))
+            throw new IllegalArgumentException("achievedArrivalRate threshold must use %, /s, or /m");
     }
 
     private double actual(LoadScenario scenario, String name, String unit, LoadMetricsSnapshot metrics) {

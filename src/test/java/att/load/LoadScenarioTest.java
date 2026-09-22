@@ -68,6 +68,20 @@ class LoadScenarioTest {
         LoadScenario arrivalThresholds = new LoadScenarioLoader(project).load(arrivalThroughputThreshold);
         assertEquals(">= 1/s", arrivalThresholds.thresholds().get("minThroughput"));
         assertEquals(">= 99%", arrivalThresholds.thresholds().get("achievedArrivalRate"));
+
+        Path arrivalRateThreshold = write(project, "arrival-rate-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
+                + "thresholds: {achievedArrivalRate: '>= 95/s'}\n");
+        LoadScenario arrivalRateThresholdScenario = new LoadScenarioLoader(project).load(arrivalRateThreshold);
+        assertEquals(">= 95/s", arrivalRateThresholdScenario.thresholds().get("achievedArrivalRate"));
+
+        Path arrivalPerMinuteThreshold = write(project, "arrival-per-minute-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
+                + "thresholds: {achievedArrivalRate: '>= 5700/m'}\n");
+        LoadScenario arrivalPerMinuteThresholdScenario = new LoadScenarioLoader(project).load(arrivalPerMinuteThreshold);
+        assertEquals(">= 5700/m", arrivalPerMinuteThresholdScenario.thresholds().get("achievedArrivalRate"));
     }
 
     @Test void rejectsAmbiguousWorkloadAndClosedOnlyOptionsWithSourceDiagnostics() throws Exception {

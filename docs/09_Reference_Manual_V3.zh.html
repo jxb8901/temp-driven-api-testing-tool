@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>09_Reference_Manual_V3.zh</title>
+  <title>ATT V3.4.1 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -232,6 +232,9 @@
   <![endif]-->
 </head>
 <body>
+<header id="title-block-header">
+<h1 class="title">ATT V3.4.1 使用手冊與參考</h1>
+</header>
 <h1 id="att-v3.4.2-中文用户手册与参考手册">ATT V3.4.2
 中文用户手册与参考手册</h1>
 <p>作者：Jeffrey + ChatGPT 版本：3.4.2 状态：规范性终端用户文档</p>
@@ -3499,15 +3502,18 @@ latency 最多保留 4096 个 sample，每个 bucket 最多 256 个；time-serie
 <code>%</code>，<code>p95</code>／<code>p99</code> 使用
 <code>ms</code>，<code>minThroughput</code> 使用 <code>/s</code> 或
 <code>/m</code>，这些 common thresholds 对两种 workload
-都适用。arrival-rate 另外支持 <code>droppedRate</code> 和
-<code>achievedArrivalRate</code>。<code>achievedArrivalRate</code> 使用
-<code>%</code> 时表示 measured phase 的
+都适用。arrival-rate 另外支持
+<code>droppedRate</code>（<code>%</code>）和
+<code>achievedArrivalRate</code>（<code>%</code>、<code>/s</code> 或
+<code>/m</code>）。<code>achievedArrivalRate</code> 使用 <code>%</code>
+时表示 measured phase 的
 <code>measuredStarted / measuredScheduled</code>；warm-up
 不计入，ramp-up、steady 和 ramp-down 仍纳入 integrated measured
-schedule。若使用 <code>/s</code>，则表示整个 phase window 内实际 started
-的平均速率。每个 threshold 都独立输出 expected expression、格式化
-actual、PASS/FAIL status 和 failure diagnostic。load result 的 exit code
-为：PASS <code>0</code>、已完成但 SLA threshold 失败
+schedule。使用 <code>/s</code> 或 <code>/m</code> 时表示整个 phase
+window 内实际 started 的平均速率，<code>/m</code> threshold
+会先换算成每秒再比较。每个 threshold 都独立输出 expected
+expression、格式化 actual、PASS/FAIL status 和 failure diagnostic。load
+result 的 exit code 为：PASS <code>0</code>、已完成但 SLA threshold 失败
 <code>1</code>、validation/configuration failure <code>2</code>、load
 runtime/infrastructure error
 <code>3</code>。<code>target.arguments</code> 只适用于 Tool
