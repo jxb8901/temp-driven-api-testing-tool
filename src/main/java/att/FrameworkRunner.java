@@ -70,7 +70,7 @@ public final class FrameworkRunner {
                         att.load.LoadOverrides.from(options));
                 att.load.LoadTarget target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
                 new att.load.LoadTargetValidator(root, config).validate(scenario, target);
-                runLoad(root, config, options, scenario, target);
+                runLoad(root, config, options, scenario, target, profile);
                 return;
             }
             if ("docs".equals(options.command())) {
@@ -167,7 +167,8 @@ public final class FrameworkRunner {
     }
 
     private static void runLoad(Path root, FrameworkConfig config, ExecutionOptions options,
-                                att.load.LoadScenario scenario, att.load.LoadTarget target) throws Exception {
+                                att.load.LoadScenario scenario, att.load.LoadTarget target,
+                                PerformanceProfile profile) throws Exception {
         Path outputRoot = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
         String runId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty() ? "load-" + System.currentTimeMillis() : options.runId());
         java.nio.file.Path loadRoot = outputRoot.resolve("load").toAbsolutePath().normalize();
@@ -178,6 +179,7 @@ public final class FrameworkRunner {
         att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario));
         att.load.LoadRunResult result;
         java.util.Map<String, Object> resourceMetrics;
+        long loadExecutionPhase = profile.begin();
         try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
             att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
             att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
@@ -186,13 +188,21 @@ public final class FrameworkRunner {
             try { result = scheduler.run(); } finally { scheduler.close(); }
             resourceMetrics = resources.metrics();
         }
+        profile.end("loadExecutionMs", loadExecutionPhase);
         java.nio.file.Path runDirectory = reservedRunDirectory;
         java.nio.file.Files.createDirectories(runDirectory);
         java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
         result = result.withResources(resourceMetrics)
                 .withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics()))
                 .withEvidence(retainedEvidence);
+        long loadReportPhase = profile.begin();
         java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
+        profile.end("loadReportMs", loadReportPhase);
+        profile.counter("loadScheduled", result.metrics().longValue("scheduled"));
+        profile.counter("loadStarted", result.metrics().longValue("started"));
+        profile.counter("loadCompleted", result.metrics().longValue("completed"));
+        profile.counter("loadDropped", result.metrics().longValue("dropped"));
+        profile.write(runDirectory);
         int exitCode = result.exitCode();
         if ("json".equals(options.format())) {
             java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());

@@ -76,18 +76,38 @@ class LoadAcceptanceTest {
         assertTrue(html.contains("Dropped arrivals"));
     }
 
+    @Test void loadProfileWritesRepeatablePerformanceEvidence() throws Exception {
+        Path root = projectRoot();
+        Path scenario = writeScenario("profile-cli.yaml",
+                "schemaVersion: att-load/v1.0\n"
+                        + "target: {type: tool, id: sample.getAcDate}\n"
+                        + "load: {users: 1, duration: 25ms}\n");
+        Path output = temp.resolve("profile-output");
+        runCli(root, scenario, output, "issue17-profile", "--profile");
+
+        Path performance = output.resolve("load/issue17-profile/performance.json");
+        assertTrue(Files.isRegularFile(performance), "load --profile must write performance.json");
+        @SuppressWarnings("unchecked") Map<String, Object> profile = JsonSupport.mapper().readValue(performance.toFile(), Map.class);
+        assertEquals("3.5.0", profile.get("attVersion"));
+        assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadExecutionMs"));
+        assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadReportMs"));
+        assertEquals(1L, ((Number) ((Map<?, ?>) profile.get("counters")).get("loadCompleted")).longValue());
+    }
+
     private void assertCliLoad(Path root, Path scenario, Path output, String runId, String model) throws Exception {
         Map<String, Object> summary = runCli(root, scenario, output, runId);
         assertEquals("PASS", summary.get("status"));
         assertEquals(model, ((Map<?, ?>) summary.get("metrics")).get("model"));
     }
 
-    private Map<String, Object> runCli(Path root, Path scenario, Path output, String runId) throws Exception {
+    private Map<String, Object> runCli(Path root, Path scenario, Path output, String runId, String... extra) throws Exception {
         Path stdout = temp.resolve(runId + ".stdout");
         Path stderr = temp.resolve(runId + ".stderr");
-        ProcessBuilder command = new ProcessBuilder(javaExecutable(), "-cp", System.getProperty("java.class.path"),
+        List<String> arguments = new java.util.ArrayList<String>(Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"),
                 "att.FrameworkRunner", "load", scenario.toString(), "--output-dir", output.toString(),
-                "--run-id", runId, "--format", "json");
+                "--run-id", runId, "--format", "json"));
+        arguments.addAll(Arrays.asList(extra));
+        ProcessBuilder command = new ProcessBuilder(arguments);
         command.directory(root.toFile());
         command.redirectOutput(stdout.toFile());
         command.redirectError(stderr.toFile());

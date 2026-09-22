@@ -3544,6 +3544,11 @@ drops；drop 不属于 SUT error。报告链接到旁边的 JSON/YAML
 summary，但不嵌入 raw per-iteration samples 或
 secrets；<code>window.ATT_LOAD_SUMMARY</code> 为离线工具提供同一份
 bounded summary。</p>
+<p><code>att load --profile</code> 沿用既有 profile 诊断契约，并在 load
+summary 同目录写出 <code>performance.json</code>。它记录 load
+execution/report phases、bounded load counters，以及共用的
+schema、Template、payload 和 process counters，使 self-overhead gate
+可重复执行；它不是 target CPU 或 memory benchmark。</p>
 <p>machine-readable 的 <code>metrics</code>
 会输出配置负载（<code>configuredUsers</code>、<code>configuredArrivalRatePerSecond</code>、<code>configuredMaxConcurrent</code>）、iteration/scheduling
 计数（<code>iterations</code>、<code>scheduled</code>、<code>measuredScheduled</code>、<code>started</code>、<code>measuredStarted</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>、<code>measuredDropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured

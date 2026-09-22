@@ -267,7 +267,7 @@ output/load/<runId>/load-summary.yaml
 output/load/<runId>/report/index.html
 ```
 
-summary 會分開 configured/achieved/completed rate、SUT error、runtime error 和 generator drops；`--format json` 的 stdout 可直接交給 CI。完整整合/self-overhead gate 可重複執行：
+summary 會分開 configured/achieved/completed rate、SUT error、runtime error 和 generator drops；`--format json` 的 stdout 可直接交給 CI。`att load --profile` 會在同一個 `output/load/<runId>/` 寫出 `performance.json`，記錄 load execution/report phases、bounded metric counters 和既有 schema/template/process counters；它沿用既有 `--profile` 的診斷語義，不是 SUT microbenchmark。完整整合/self-overhead gate 可重複執行：
 
 ```sh
 mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test

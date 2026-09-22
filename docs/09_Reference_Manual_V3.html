@@ -4631,6 +4631,12 @@ generator drops; drops are not SUT errors. The report links to the
 adjacent JSON/YAML summaries but does not embed raw per-iteration
 samples or secrets; <code>window.ATT_LOAD_SUMMARY</code> exposes the
 same bounded summary for offline tooling.</p>
+<p><code>att load --profile</code> keeps the existing profiling contract
+and writes <code>performance.json</code> beside the load summary. It
+records load execution/report phases, bounded load counters, and the
+shared schema/Template/payload/process counters, so the documented
+self-overhead gate is reproducible without turning ATT into a target CPU
+or memory benchmark.</p>
 <p>The machine-readable <code>metrics</code> object reports configured
 load (<code>configuredUsers</code>,
 <code>configuredArrivalRatePerSecond</code>,
