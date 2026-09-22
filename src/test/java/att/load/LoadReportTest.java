@@ -45,6 +45,9 @@ class LoadReportTest {
         Map<String, Object> dbHelper = new LinkedHashMap<String, Object>();
         dbHelper.put("timeoutCount", 2L); dbHelper.put("waiting", 1);
         resources.put("db", Collections.<String, Object>singletonMap("orders", dbHelper));
+        Map<String, Object> mqHelper = new LinkedHashMap<String, Object>();
+        mqHelper.put("timeoutCount", 3L); mqHelper.put("active", 0); mqHelper.put("idle", 1);
+        resources.put("mq", Collections.<String, Object>singletonMap("broker", mqHelper));
         LoadRunResult result = new LoadRunResult("run-24", scenario, started, started.plusSeconds(5), snapshot,
                 thresholds, evidence, resources);
 
@@ -68,6 +71,9 @@ class LoadReportTest {
         @SuppressWarnings("unchecked") Map<String, Object> jsonMetrics = (Map<String, Object>) json.get("metrics");
         assertTrue(jsonMetrics.containsKey("phases"));
         assertTrue(jsonMetrics.containsKey("buckets"));
+        @SuppressWarnings("unchecked") Map<String, Object> jsonResources = (Map<String, Object>) json.get("resources");
+        assertEquals(2L, ((Number) ((Map<?, ?>) ((Map<?, ?>) jsonResources.get("db")).get("orders")).get("timeoutCount")).longValue());
+        assertEquals(3L, ((Number) ((Map<?, ?>) ((Map<?, ?>) jsonResources.get("mq")).get("broker")).get("timeoutCount")).longValue());
         Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
         missingReport.remove("report");
         assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
@@ -82,6 +88,9 @@ class LoadReportTest {
         assertTrue(html.contains("SUT failures"));
         assertTrue(html.contains("Phase timing and warm-up separation"));
         assertTrue(html.contains("Resource diagnostics"));
+        assertTrue(html.contains("orders"));
+        assertTrue(html.contains("broker"));
+        assertTrue(html.contains("timeoutCount"));
         assertTrue(html.contains("../samples/00001-deadbeef.json"));
         assertTrue(html.contains("window.ATT_LOAD_SUMMARY"));
     }

@@ -49,7 +49,40 @@ class LoadAcceptanceTest {
         assertCliLoad(root, arrivalScenario, temp.resolve("arrival-output"), "issue25-arrival", "arrivalRate");
     }
 
+    @Test void arrivalRateCliPersistsCapDropAndRateDimensionsThroughReport() throws Exception {
+        Path root = projectRoot();
+        Path scenario = writeScenario("arrival-saturation-cli.yaml",
+                "schemaVersion: att-load/v1.0\n"
+                        + "target:\n"
+                        + "  type: tool\n"
+                        + "  id: fpp.exehelper\n"
+                        + "  arguments: {command: sleep, arguments: [0.25]}\n"
+                        + "load: {arrivalRate: 100/s, duration: 150ms, maxConcurrent: 1, overloadPolicy: drop}\n");
+        Path output = temp.resolve("arrival-saturation-output");
+        Map<String, Object> summary = runCli(root, scenario, output, "issue25-arrival-saturation");
+        @SuppressWarnings("unchecked") Map<String, Object> metrics = (Map<String, Object>) summary.get("metrics");
+        assertEquals("PASS", summary.get("status"));
+        assertEquals("arrivalRate", metrics.get("model"));
+        assertEquals(100.0, ((Number) metrics.get("configuredArrivalRatePerSecond")).doubleValue(), 0.00001);
+        assertEquals(1, ((Number) metrics.get("configuredMaxConcurrent")).intValue());
+        assertTrue(((Number) metrics.get("scheduled")).longValue() > ((Number) metrics.get("started")).longValue());
+        assertTrue(((Number) metrics.get("dropped")).longValue() > 0L);
+        assertTrue(((Number) metrics.get("measuredAchievedArrivalRate")).doubleValue() > 0.0);
+        assertTrue(((Number) metrics.get("completedThroughput")).doubleValue() > 0.0);
+        String html = read(output.resolve("load/issue25-arrival-saturation/report/index.html"));
+        assertTrue(html.contains("Configured arrival rate"));
+        assertTrue(html.contains("Achieved scheduling rate"));
+        assertTrue(html.contains("Completed TPS"));
+        assertTrue(html.contains("Dropped arrivals"));
+    }
+
     private void assertCliLoad(Path root, Path scenario, Path output, String runId, String model) throws Exception {
+        Map<String, Object> summary = runCli(root, scenario, output, runId);
+        assertEquals("PASS", summary.get("status"));
+        assertEquals(model, ((Map<?, ?>) summary.get("metrics")).get("model"));
+    }
+
+    private Map<String, Object> runCli(Path root, Path scenario, Path output, String runId) throws Exception {
         Path stdout = temp.resolve(runId + ".stdout");
         Path stderr = temp.resolve(runId + ".stderr");
         ProcessBuilder command = new ProcessBuilder(javaExecutable(), "-cp", System.getProperty("java.class.path"),
@@ -68,10 +101,9 @@ class LoadAcceptanceTest {
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.yaml")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("report/index.html")));
         @SuppressWarnings("unchecked") Map<String, Object> summary = JsonSupport.mapper().readValue(summaryFile.toFile(), Map.class);
-        assertEquals("PASS", summary.get("status"));
-        assertEquals(model, ((Map<?, ?>) summary.get("metrics")).get("model"));
         assertEquals("report/index.html", summary.get("report"));
         assertTrue(read(runDirectory.resolve("report/index.html")).contains("ATT Load " + runId));
+        return summary;
     }
 
     private Path writeScenario(String name, String content) throws IOException {

@@ -4682,16 +4682,18 @@ and Flow targets reject it with a field-specific diagnostic.</p>
 <p>The release gate is deliberately reproducible rather than a SUT
 microbenchmark:</p>
 <div class="sourceCode" id="cb97"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> <span class="at">-q</span> <span class="at">-Dtest</span><span class="op">=</span>LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test</span></code></pre></div>
-<p>It checks the CLI-to-report path for both schedulers, Context
-deep-copy and iteration isolation, lazy success/failure workspaces,
-bounded evidence and metric reservoirs, scheduler lag accounting,
-process/file artifact behavior, pool cleanup, threshold PASS/FAIL,
-summary schema, report rendering, and compatibility of the existing
-run/debug/validation test suite. Load V1 does not claim distributed
-execution, Poisson/random pacing, weighted multi-scenario, rendezvous,
-adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory
-benchmarking.</p>
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> <span class="at">-q</span> <span class="at">-Dtest</span><span class="op">=</span>LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test</span></code></pre></div>
+<p>It checks the CLI-to-report path for both schedulers, including
+deterministic arrival-rate cap/drop and
+configured-versus-achieved-versus-completed metrics; Context deep-copy
+and iteration isolation; lazy success/failure workspaces; bounded
+evidence and metric reservoirs; scheduler lag accounting; process/file
+artifact behavior; DB/MQ reuse, timeout, pool diagnostics, and cleanup;
+threshold PASS/FAIL; summary schema; report rendering; and compatibility
+of the existing run/debug/validation test suite. Load V1 does not claim
+distributed execution, Poisson/random pacing, weighted multi-scenario,
+rendezvous, adaptive pools, MQ handle pooling, XA/affinity, or target
+CPU/memory benchmarking.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>

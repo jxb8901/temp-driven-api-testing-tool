@@ -257,7 +257,7 @@ load:
   overloadPolicy: drop
 ```
 
-每個 load iteration 都有獨立的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 output workspace；只可從 `EXEC.LOAD.*` 讀取 `RUN_ID`、`MODEL`、`USER_ID`、`ITERATION_ID`、sequence 和 phase。root-level `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是 public contract。Tool target 可用 `target.arguments` 傳 named arguments；[`examples/load/README.md`](../examples/load/README.md) 包含 Template、Flow、Tool、DB/MQ pool 和 threshold 例子。
+每個 load iteration 都有獨立的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 output workspace；只可從 `EXEC.LOAD.*` 讀取 `RUN_ID`、`MODEL`、`USER_ID`、`ITERATION_ID`、`ITERATION` sequence number 和 phase。root-level `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是 public contract。Tool target 可用 `target.arguments` 傳 named arguments；[`examples/load/README.md`](../examples/load/README.md) 包含 Template、Flow、Tool、DB/MQ pool 和 threshold 例子。
 
 執行結果固定寫入：
 
@@ -270,7 +270,7 @@ output/load/<runId>/report/index.html
 summary 會分開 configured/achieved/completed rate、SUT error、runtime error 和 generator drops；`--format json` 的 stdout 可直接交給 CI。完整整合/self-overhead gate 可重複執行：
 
 ```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test
+mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
 ```
 
 這個 gate 驗證所有例子、兩種 scheduler 的 CLI-to-report 路徑、Context isolation、bounded metrics/evidence、resource cleanup、threshold PASS/FAIL 和 report schema；它不是 distributed/Poisson/target-resource microbenchmark。

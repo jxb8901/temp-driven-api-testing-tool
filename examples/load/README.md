@@ -292,9 +292,9 @@ DB pool 的 `maxSize`/`connectionTimeout` 與 VU 或 `maxConcurrent` 無關；MQ
 Issue #25 的整合檢查由 Maven 測試自動執行：
 
 ```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test
+mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
 ```
 
-`LoadAcceptanceTest` 會先解析並驗證本目錄全部四個例子，再以真正的 CLI entry point 執行短版 closed 和 arrival-rate workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出。`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection 和 HTML。
+`LoadAcceptanceTest` 會先解析並驗證本目錄全部四個例子，再以真正的 CLI entry point 執行 closed、普通 arrival-rate 及 cap/drop saturation workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出，並檢查 configured arrival、achieved scheduling、completed TPS、scheduled/started/dropped 會一路保留到最終 report。`LoadCrossModeTest`、`ClosedVuSchedulerTest` 和 `FixedArrivalRateSchedulerTest` 覆蓋相同 component 的跨模式及兩種 scheduler lifecycle；`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection、DB/MQ resource diagnostics 和 HTML；DB/MQ pooling suites 覆蓋 reuse、timeout、exclusive lease、cancellation cleanup 和 deterministic shutdown。
 
 這是可重複的 ATT self-overhead gate，不是 SUT microbenchmark：它檢查每成功 iteration 不產生無界 Case/log churn、Context 不跨 iteration 共享、scheduler lag/metrics 保持有界、pool/resource cleanup 及 report/evidence retention 受策略控制。V1 不承諾 distributed/Poisson/weighted multi-scenario、rendezvous、adaptive pool 或 target CPU/memory benchmarking。

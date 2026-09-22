@@ -2265,10 +2265,10 @@ Load thresholds use the common `errorRate` (`%`), `p95`/`p99` (`ms`), and `minTh
 The release gate is deliberately reproducible rather than a SUT microbenchmark:
 
 ```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test
+mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
 ```
 
-It checks the CLI-to-report path for both schedulers, Context deep-copy and iteration isolation, lazy success/failure workspaces, bounded evidence and metric reservoirs, scheduler lag accounting, process/file artifact behavior, pool cleanup, threshold PASS/FAIL, summary schema, report rendering, and compatibility of the existing run/debug/validation test suite. Load V1 does not claim distributed execution, Poisson/random pacing, weighted multi-scenario, rendezvous, adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory benchmarking.
+It checks the CLI-to-report path for both schedulers, including deterministic arrival-rate cap/drop and configured-versus-achieved-versus-completed metrics; Context deep-copy and iteration isolation; lazy success/failure workspaces; bounded evidence and metric reservoirs; scheduler lag accounting; process/file artifact behavior; DB/MQ reuse, timeout, pool diagnostics, and cleanup; threshold PASS/FAIL; summary schema; report rendering; and compatibility of the existing run/debug/validation test suite. Load V1 does not claim distributed execution, Poisson/random pacing, weighted multi-scenario, rendezvous, adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory benchmarking.
 
 Common properties include:
 
