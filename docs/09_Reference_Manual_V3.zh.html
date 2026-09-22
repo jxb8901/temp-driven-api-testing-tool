@@ -3479,7 +3479,7 @@ measured threshold aggregates；成功 iteration 默认只保留
 metrics，失败和显式 sample 才保留 bounded diagnostic links。</p>
 <p>machine-readable 的 <code>metrics</code>
 会输出配置负载（<code>configuredUsers</code>、<code>configuredArrivalRatePerSecond</code>、<code>configuredMaxConcurrent</code>）、iteration/scheduling
-计数（<code>iterations</code>、<code>scheduled</code>、<code>started</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured
+计数（<code>iterations</code>、<code>scheduled</code>、<code>measuredScheduled</code>、<code>started</code>、<code>measuredStarted</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>、<code>measuredDropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured
 结果（<code>warmupCompleted</code>、<code>measuredCompleted</code>、<code>sutErrorRate</code>、<code>runtimeErrorRate</code>、<code>droppedRate</code>、<code>completedThroughput</code>）、latency
 percentiles（<code>p50Ms</code>、<code>p95Ms</code>、<code>p99Ms</code>）、scheduler
 lag 及 grouped <code>errorClassifications</code>。percentiles 来自
@@ -3501,13 +3501,18 @@ latency 最多保留 4096 个 sample，每个 bucket 最多 256 个；time-serie
 <code>/m</code>，这些 common thresholds 对两种 workload
 都适用。arrival-rate 另外支持 <code>droppedRate</code> 和
 <code>achievedArrivalRate</code>。<code>achievedArrivalRate</code> 使用
-<code>%</code> 时表示 <code>started / scheduled</code>；其中
-<code>scheduled</code> 是 warm-up、ramp-up、steady 和 ramp-down 各阶段
-integrated planned arrivals 的总数，因此正确执行的 ramped profile
-不会因为平均到达率低于 steady-state rate 而被稀释。若使用
-<code>/s</code>，则表示整个 phase window 内实际 started
-的平均速率。<code>target.arguments</code> 只适用于 Tool target；Template
-和 Flow target 会以带准确 field path 的 diagnostic 拒绝。</p>
+<code>%</code> 时表示 measured phase 的
+<code>measuredStarted / measuredScheduled</code>；warm-up
+不计入，ramp-up、steady 和 ramp-down 仍纳入 integrated measured
+schedule。若使用 <code>/s</code>，则表示整个 phase window 内实际 started
+的平均速率。每个 threshold 都独立输出 expected expression、格式化
+actual、PASS/FAIL status 和 failure diagnostic。load result 的 exit code
+为：PASS <code>0</code>、已完成但 SLA threshold 失败
+<code>1</code>、validation/configuration failure <code>2</code>、load
+runtime/infrastructure error
+<code>3</code>。<code>target.arguments</code> 只适用于 Tool
+target；Template 和 Flow target 会以带准确 field path 的 diagnostic
+拒绝。</p>
 <p>常见作用域包括：</p>
 <table>
 <colgroup>

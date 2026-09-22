@@ -25,7 +25,8 @@ public final class LoadReportWriter {
         Map<String, Object> metrics = result.metrics().values(); StringBuilder html = new StringBuilder();
         html.append("<!doctype html><meta charset=\"utf-8\"><title>ATT Load ").append(escape(result.runId())).append("</title>");
         html.append("<style>body{font:14px sans-serif;margin:2em}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.35em}.pass{color:green}.fail{color:#b00}</style>");
-        html.append("<h1>ATT Load ").append(escape(result.runId())).append("</h1><p>Model: <b>").append(escape(result.scenario().model().wireName())).append("</b> | Status: <b class=\"").append(result.passed() ? "pass\">PASS" : "fail\">FAIL").append("</b></p>");
+        String status = result.status().name();
+        html.append("<h1>ATT Load ").append(escape(result.runId())).append("</h1><p>Model: <b>").append(escape(result.scenario().model().wireName())).append("</b> | Status: <b class=\"").append(result.passed() ? "pass\">" : "fail\">").append(escape(status)).append("</b> | Exit code: <b>").append(result.exitCode()).append("</b></p>");
         html.append("<h2>Metrics</h2><table><tr><th>Metric</th><th>Value</th></tr>");
         for (Map.Entry<String, Object> entry : metrics.entrySet()) html.append("<tr><td>").append(escape(entry.getKey())).append("</td><td>").append(escape(String.valueOf(entry.getValue()))).append("</td></tr>");
         html.append("</table><h2>Thresholds</h2><table><tr><th>Name</th><th>Expected</th><th>Actual</th><th>Status</th></tr>");

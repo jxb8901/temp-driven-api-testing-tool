@@ -4566,9 +4566,11 @@ links.</p>
 load (<code>configuredUsers</code>,
 <code>configuredArrivalRatePerSecond</code>,
 <code>configuredMaxConcurrent</code>), iteration/scheduling counts
-(<code>iterations</code>, <code>scheduled</code>, <code>started</code>,
-<code>completed</code>, <code>success</code>, <code>failure</code>,
-<code>runtimeError</code>, <code>dropped</code>), concurrency
+(<code>iterations</code>, <code>scheduled</code>,
+<code>measuredScheduled</code>, <code>started</code>,
+<code>measuredStarted</code>, <code>completed</code>,
+<code>success</code>, <code>failure</code>, <code>runtimeError</code>,
+<code>dropped</code>, <code>measuredDropped</code>), concurrency
 (<code>activeVus</code>, <code>maxActiveVus</code>,
 <code>currentInFlight</code>, <code>maxInFlight</code>), measured-phase
 results (<code>warmupCompleted</code>, <code>measuredCompleted</code>,
@@ -4595,14 +4597,18 @@ and <code>minThroughput</code> (<code>/s</code> or <code>/m</code>)
 fields for both workload models. Arrival-rate scenarios additionally
 support <code>droppedRate</code> (<code>%</code>) and
 <code>achievedArrivalRate</code> (<code>%</code>). For the percentage
-form, achieved arrival rate is <code>started / scheduled</code>, where
-<code>scheduled</code> is the integrated planned arrival count across
-warm-up, ramp-up, steady, and ramp-down; this keeps a correctly executed
-ramped profile from being diluted by its lower average rate. The
-<code>/s</code> form remains the actual average started rate over the
-full phase window. <code>target.arguments</code> is valid only for Tool
-targets; Template and Flow targets reject it with a field-specific
-diagnostic.</p>
+form, achieved arrival rate is measured
+<code>measuredStarted / measuredScheduled</code>; warm-up is excluded,
+while ramp-up, steady, and ramp-down remain part of the integrated
+measured schedule. The <code>/s</code> form remains the actual average
+started rate over the full phase window. Each threshold is reported
+independently with expected expression, formatted actual value,
+PASS/FAIL status, and failure diagnostic. The load result then uses exit
+code <code>0</code> for PASS, <code>1</code> for a completed run with
+failed SLA thresholds, <code>2</code> for validation/configuration
+failure, and <code>3</code> for load runtime/infrastructure error.
+<code>target.arguments</code> is valid only for Tool targets; Template
+and Flow targets reject it with a field-specific diagnostic.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>

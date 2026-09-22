@@ -141,6 +141,8 @@ public final class LoadScenarioLoader {
 
     private void validateThresholds(LoadScenario.Model model, Map<String, Object> thresholds) {
         for (Map.Entry<String, Object> entry : thresholds.entrySet()) {
+            if (!LoadThresholdEvaluator.isSupportedName(entry.getKey()))
+                throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " is not a supported V1 threshold");
             if (model == LoadScenario.Model.CLOSED && ("droppedRate".equals(entry.getKey()) || "achievedArrivalRate".equals(entry.getKey())))
                 throw failure("thresholds." + entry.getKey(), "thresholds." + entry.getKey() + " is valid only for arrivalRate workloads");
             String value = String.valueOf(entry.getValue()).trim();

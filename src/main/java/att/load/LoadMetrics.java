@@ -29,9 +29,9 @@ public final class LoadMetrics implements LoadEventListener {
     private final Object bucketLock = new Object();
     private final Map<String, AtomicLong> errorClassifications = new ConcurrentHashMap<String, AtomicLong>();
     private final Set<String> activeUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
-    private final AtomicLong scheduled = new AtomicLong(), started = new AtomicLong(), completed = new AtomicLong();
+    private final AtomicLong scheduled = new AtomicLong(), measuredScheduled = new AtomicLong(), started = new AtomicLong(), completed = new AtomicLong();
     private final AtomicLong success = new AtomicLong(), failure = new AtomicLong(), runtimeError = new AtomicLong(), dropped = new AtomicLong();
-    private final AtomicLong measuredCompleted = new AtomicLong(), measuredFailure = new AtomicLong(), measuredSuccess = new AtomicLong(), measuredRuntimeError = new AtomicLong();
+    private final AtomicLong measuredCompleted = new AtomicLong(), measuredFailure = new AtomicLong(), measuredSuccess = new AtomicLong(), measuredRuntimeError = new AtomicLong(), measuredDropped = new AtomicLong();
     private final AtomicInteger inFlight = new AtomicInteger(), maxInFlight = new AtomicInteger();
     private final AtomicInteger activeVus = new AtomicInteger(), maxActiveVus = new AtomicInteger();
     private final AtomicLong measuredLatencyCount = new AtomicLong(), warmupCompleted = new AtomicLong(), measuredStarted = new AtomicLong();
@@ -73,8 +73,14 @@ public final class LoadMetrics implements LoadEventListener {
 
     @Override public void onEvent(LoadEvent event) {
         if (event == null) return;
-        if (event.scheduled()) scheduled.incrementAndGet();
-        if (event.dropped()) dropped.incrementAndGet();
+        if (event.scheduled()) {
+            scheduled.incrementAndGet();
+            if (!isWarmup(event)) measuredScheduled.incrementAndGet();
+        }
+        if (event.dropped()) {
+            dropped.incrementAndGet();
+            if (!isWarmup(event)) measuredDropped.incrementAndGet();
+        }
         if (event.started()) {
             started.incrementAndGet();
             if (!isWarmup(event)) measuredStarted.incrementAndGet();
@@ -101,7 +107,7 @@ public final class LoadMetrics implements LoadEventListener {
             if (event.status() == ResultStatus.PASS) {
                 success.incrementAndGet();
                 if (!isWarmup(event)) measuredSuccess.incrementAndGet();
-            } else if (event.status() == ResultStatus.ERROR) {
+            } else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) {
                 runtimeError.incrementAndGet();
                 if (!isWarmup(event)) measuredRuntimeError.incrementAndGet();
             } else {
@@ -155,13 +161,16 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("configuredArrivalRatePerSecond", configuredArrivalRatePerSecond);
         result.put("configuredMaxConcurrent", configuredMaxConcurrent);
         result.put("scheduled", scheduled.get());
+        result.put("measuredScheduled", measuredScheduled.get());
         result.put("started", started.get());
+        result.put("measuredStarted", measuredStarted.get());
         result.put("completed", completed.get());
         result.put("iterations", completed.get());
         result.put("success", success.get());
         result.put("failure", failure.get());
         result.put("runtimeError", runtimeError.get());
         result.put("dropped", dropped.get());
+        result.put("measuredDropped", measuredDropped.get());
         result.put("currentInFlight", inFlight.get());
         result.put("maxInFlight", maxInFlight.get());
         result.put("activeVus", activeVus.get());
@@ -173,13 +182,14 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("measuredRuntimeError", measuredRuntimeError.get());
         result.put("sutErrorRate", measuredCompleted.get() == 0L ? 0.0 : ((double) measuredFailure.get()) / measuredCompleted.get());
         result.put("runtimeErrorRate", measuredCompleted.get() == 0L ? 0.0 : ((double) measuredRuntimeError.get()) / measuredCompleted.get());
-        result.put("droppedRate", scheduled.get() == 0L ? 0.0 : ((double) dropped.get()) / scheduled.get());
+        result.put("droppedRate", measuredScheduled.get() == 0L ? 0.0 : ((double) measuredDropped.get()) / measuredScheduled.get());
+        result.put("allDroppedRate", scheduled.get() == 0L ? 0.0 : ((double) dropped.get()) / scheduled.get());
         result.put("completedThroughput", measuredCompleted.get() / measuredElapsedSeconds);
         result.put("measuredCompletedThroughput", measuredCompleted.get() / measuredElapsedSeconds);
         result.put("allCompletedThroughput", completed.get() / elapsedSeconds);
         result.put("achievedArrivalRate", started.get() / elapsedSeconds);
         result.put("measuredAchievedArrivalRate", measuredStarted.get() / measuredElapsedSeconds);
-        result.put("achievedArrivalRatePercent", scheduled.get() == 0L ? 0.0 : ((double) started.get() * 100.0) / scheduled.get());
+        result.put("achievedArrivalRatePercent", measuredScheduled.get() == 0L ? 0.0 : ((double) measuredStarted.get() * 100.0) / measuredScheduled.get());
         result.put("schedulerLagCount", schedulerLagCount.get());
         result.put("schedulerLagMeanMs", schedulerLagCount.get() == 0L ? 0.0 : ((double) schedulerLagSumMs.get()) / schedulerLagCount.get());
         result.put("schedulerLagMaxMs", schedulerLagMaxMs.get());
@@ -300,7 +310,7 @@ public final class LoadMetrics implements LoadEventListener {
         private final List<Long> latencies = new ArrayList<Long>();
         private final Map<String, Long> errors = new LinkedHashMap<String, Long>();
         private String phase;
-        private long scheduled, started, completed, success, failure, dropped, warmupCompleted, sutFailure, runtimeError;
+        private long scheduled, measuredScheduled, started, completed, success, failure, dropped, measuredDropped, warmupCompleted, sutFailure, runtimeError;
         private long schedulerLagCount, schedulerLagSumMs, schedulerLagMaxMs, latencyCount, latencySumMs;
         private long latencyMinMs = Long.MAX_VALUE, latencyMaxMs;
         private int currentInFlight, maxInFlight, activeVus, maxActiveVus;
@@ -318,7 +328,10 @@ public final class LoadMetrics implements LoadEventListener {
                 if (phase == null) phase = event.phase();
                 else if (!phase.equals(event.phase())) phase = "MIXED";
             }
-            if (event.scheduled()) scheduled++;
+            if (event.scheduled()) {
+                scheduled++;
+                if (!isWarmup(event)) measuredScheduled++;
+            }
             if (event.started()) {
                 started++;
                 schedulerLagCount++;
@@ -327,6 +340,7 @@ public final class LoadMetrics implements LoadEventListener {
             }
             if (event.dropped()) {
                 dropped++;
+                if (!isWarmup(event)) measuredDropped++;
                 if (!event.started()) {
                     schedulerLagCount++;
                     schedulerLagSumMs += Math.max(0L, event.schedulerLagMs());
@@ -381,16 +395,19 @@ public final class LoadMetrics implements LoadEventListener {
             result.put("configuredArrivalRatePerSecond", configuredArrivalRatePerSecond);
             result.put("configuredMaxConcurrent", configuredMaxConcurrent);
             result.put("scheduled", scheduled);
+            result.put("measuredScheduled", measuredScheduled);
             result.put("started", started);
             result.put("completed", completed);
             result.put("success", success);
             result.put("failure", failure);
             result.put("runtimeError", runtimeError);
             result.put("dropped", dropped);
+            result.put("measuredDropped", measuredDropped);
             result.put("warmupCompleted", warmupCompleted);
             result.put("measuredCompleted", completed - warmupCompleted);
             result.put("sutErrorRate", completed - warmupCompleted == 0L ? 0.0 : ((double) sutFailure) / (completed - warmupCompleted));
-            result.put("droppedRate", scheduled == 0L ? 0.0 : ((double) dropped) / scheduled);
+            result.put("droppedRate", measuredScheduled == 0L ? 0.0 : ((double) measuredDropped) / measuredScheduled);
+            result.put("allDroppedRate", scheduled == 0L ? 0.0 : ((double) dropped) / scheduled);
             result.put("completedThroughput", completed - warmupCompleted);
             result.put("completedTps", completed - warmupCompleted);
             result.put("currentInFlight", currentInFlight);

@@ -189,12 +189,12 @@ public final class FrameworkRunner {
         java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
         result = result.withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics())).withEvidence(retainedEvidence);
         java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
-        int exitCode = result.passed() ? 0 : 1;
+        int exitCode = result.exitCode();
         if ("json".equals(options.format())) {
             java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());
             output.put("report", report.toString()); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
         } else if (!options.quiet()) {
-            System.out.println("LOAD " + (result.passed() ? "PASS" : "FAIL") + " | model=" + scenario.model().wireName() + " | runId=" + result.runId());
+            System.out.println("LOAD " + result.status().name() + " | model=" + scenario.model().wireName() + " | runId=" + result.runId());
             System.out.println("Report: " + report);
             System.out.println("Metrics: " + result.metrics().values());
         }

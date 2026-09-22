@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.time.Duration;
+import java.time.Instant;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -242,7 +243,7 @@ class LoadRuntimeTest {
         values.put("runtimeError", 0L);
         LoadThresholdSummary summary = new LoadThresholdEvaluator().evaluate(scenario,
                 new LoadMetricsSnapshot(values, Collections.emptyMap()));
-        assertTrue(summary.passed());
+        assertTrue(summary.passed(), summary.toMap().toString());
         assertEquals("99.0000%", summary.results().get(0).actual());
     }
 
@@ -262,10 +263,102 @@ class LoadRuntimeTest {
         assertEquals("100.0000%", summary.results().get(0).actual());
     }
 
+    @Test void thresholdsHonorMeasuredPhaseUnitsBoundariesAndIndependentResults() {
+        Map<String, Object> thresholds = new LinkedHashMap<String, Object>();
+        thresholds.put("errorRate", "<= 1%");
+        thresholds.put("p95", "== 100ms");
+        thresholds.put("p99", "> 99ms");
+        thresholds.put("minThroughput", ">= 60/m");
+        thresholds.put("droppedRate", "== 0%");
+        thresholds.put("achievedArrivalRate", ">= 99%");
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("sutErrorRate", 0.01);
+        values.put("p95Ms", 100L);
+        values.put("p99Ms", 100L);
+        values.put("completedThroughput", 1.0);
+        values.put("droppedRate", 0.0);
+        values.put("measuredScheduled", 100L);
+        values.put("measuredStarted", 99L);
+        LoadThresholdSummary summary = new LoadThresholdEvaluator().evaluate(
+                thresholdScenario(LoadScenario.Model.ARRIVAL_RATE, thresholds),
+                new LoadMetricsSnapshot(values, Collections.emptyMap()));
+        assertTrue(summary.passed(), summary.toMap().toString());
+        assertEquals(6, summary.results().size());
+        for (ThresholdResult result : summary.results()) assertEquals("PASS", result.toMap().get("status"));
+
+        Map<String, Object> failing = new LinkedHashMap<String, Object>();
+        failing.put("p95", "< 100ms");
+        LoadThresholdSummary failed = new LoadThresholdEvaluator().evaluate(
+                thresholdScenario(LoadScenario.Model.CLOSED, failing),
+                new LoadMetricsSnapshot(values, Collections.emptyMap()));
+        assertFalse(failed.passed());
+        assertTrue(failed.results().get(0).diagnostic().contains("p95 measured 100.000ms"));
+        assertTrue(failed.results().get(0).diagnostic().contains("expected < 100ms"));
+    }
+
+    @Test void measuredArrivalAndDropRatesExcludeWarmup() {
+        long now = 1_700_500_000_000L;
+        LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 2_000L);
+        metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "WARMUP", "warmup-drop", 1, now, now + 1));
+        metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "steady-drop", 2, now + 1_000L, now + 1_001L));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "steady-pass", null, 3,
+                now + 1_000L, now + 1_000L, now + 1_010L, ResultStatus.PASS));
+        metrics.finish(now + 2_000L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(3L, snapshot.longValue("scheduled"));
+        assertEquals(2L, snapshot.longValue("measuredScheduled"));
+        assertEquals(1L, snapshot.longValue("measuredDropped"));
+        assertEquals(0.5, snapshot.doubleValue("droppedRate"), 0.00001);
+        assertEquals(2.0 / 3.0, snapshot.doubleValue("allDroppedRate"), 0.00001);
+    }
+
+    @Test void loadExitCodesSeparateRuntimeErrorThresholdFailureAndPass() {
+        Map<String, Object> noThresholds = Collections.emptyMap();
+        Map<String, Object> runtimeValues = new LinkedHashMap<String, Object>();
+        runtimeValues.put("runtimeError", 1L);
+        LoadRunResult runtime = new LoadRunResult("runtime", thresholdScenario(LoadScenario.Model.CLOSED, noThresholds),
+                Instant.parse("2026-09-22T00:00:00Z"), Instant.parse("2026-09-22T00:00:01Z"),
+                new LoadMetricsSnapshot(runtimeValues, Collections.emptyMap()));
+        assertEquals(ResultStatus.ERROR, runtime.status());
+        assertEquals(3, runtime.exitCode());
+        assertEquals("ERROR", runtime.toMap().get("status"));
+
+        Map<String, Object> failingThreshold = new LinkedHashMap<String, Object>();
+        failingThreshold.put("p95", "< 100ms");
+        Map<String, Object> thresholdValues = new LinkedHashMap<String, Object>();
+        thresholdValues.put("runtimeError", 0L);
+        thresholdValues.put("p95Ms", 100L);
+        LoadRunResult failed = new LoadRunResult("failed", thresholdScenario(LoadScenario.Model.CLOSED, failingThreshold),
+                Instant.parse("2026-09-22T00:00:00Z"), Instant.parse("2026-09-22T00:00:01Z"),
+                new LoadMetricsSnapshot(thresholdValues, Collections.emptyMap()))
+                .withThresholds(new LoadThresholdEvaluator().evaluate(thresholdScenario(LoadScenario.Model.CLOSED, failingThreshold),
+                        new LoadMetricsSnapshot(thresholdValues, Collections.emptyMap())));
+        assertEquals(ResultStatus.FAIL, failed.status());
+        assertEquals(1, failed.exitCode());
+
+        Map<String, Object> passingThreshold = new LinkedHashMap<String, Object>();
+        passingThreshold.put("p95", "<= 100ms");
+        LoadRunResult passed = new LoadRunResult("passed", thresholdScenario(LoadScenario.Model.CLOSED, passingThreshold),
+                Instant.parse("2026-09-22T00:00:00Z"), Instant.parse("2026-09-22T00:00:01Z"),
+                new LoadMetricsSnapshot(thresholdValues, Collections.emptyMap()))
+                .withThresholds(new LoadThresholdEvaluator().evaluate(thresholdScenario(LoadScenario.Model.CLOSED, passingThreshold),
+                        new LoadMetricsSnapshot(thresholdValues, Collections.emptyMap())));
+        assertEquals(ResultStatus.PASS, passed.status());
+        assertEquals(0, passed.exitCode());
+    }
+
     @Test void iterationWorkspaceNamesRemainDistinctAfterPathSanitization() {
         assertNotEquals(LoadIsolation.workspaceName("run", "vu/a", 1),
                 LoadIsolation.workspaceName("run", "vu_a", 1));
         assertNotEquals(LoadIsolation.workspaceName("run", "same", 1),
                 LoadIsolation.workspaceName("run", "same", 2));
+    }
+
+    private LoadScenario thresholdScenario(LoadScenario.Model model, Map<String, Object> thresholds) {
+        boolean arrival = model == LoadScenario.Model.ARRIVAL_RATE;
+        return new LoadScenario(Paths.get("threshold.yaml"), "template", "LOAD_TEMPLATE", Collections.emptyMap(),
+                Collections.emptyMap(), model, arrival ? 0 : 1, arrival ? 100.0 : 0.0, arrival ? "100/s" : null,
+                Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                arrival ? 2 : 0, arrival ? "drop" : "", thresholds, Collections.emptyMap());
     }
 }

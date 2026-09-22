@@ -1,15 +1,24 @@
 package att.load;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Deterministic measured-phase threshold evaluator. */
 public final class LoadThresholdEvaluator {
     private static final Pattern EXPRESSION = Pattern.compile("^(<|<=|>|>=|==)\\s*([0-9]+(?:\\.[0-9]+)?)(%|ms|/s|/m)$");
+    private static final Set<String> SUPPORTED = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
+            "errorRate", "p95", "p99", "minThroughput", "droppedRate", "achievedArrivalRate")));
+
+    static boolean isSupportedName(String name) { return SUPPORTED.contains(name); }
+
     public LoadThresholdSummary evaluate(LoadScenario scenario, LoadMetricsSnapshot metrics) {
         List<ThresholdResult> results = new ArrayList<ThresholdResult>();
         for (Map.Entry<String, Object> entry : scenario.thresholds().entrySet()) {
@@ -27,27 +36,35 @@ public final class LoadThresholdEvaluator {
         else if ("/m".equals(unit)) expected /= 60.0;
         boolean passed = compare(actual, matcher.group(1), expected);
         String actualText = "%".equals(unit) ? String.format(Locale.ROOT, "%.4f%%", actual * 100.0) : "ms".equals(unit) ? String.format(Locale.ROOT, "%.3fms", actual) : String.format(Locale.ROOT, "%.3f/s", actual);
-        return new ThresholdResult(name, expression, actualText, passed, passed ? null : "Measured value did not satisfy the required threshold");
+        String diagnostic = passed ? null : String.format(Locale.ROOT, "%s measured %s; expected %s", name, actualText, expression);
+        return new ThresholdResult(name, expression, actualText, passed, diagnostic);
     }
 
     private double actual(LoadScenario scenario, String name, String unit, LoadMetricsSnapshot metrics) {
+        if (!isSupportedName(name)) throw new IllegalArgumentException("Unsupported threshold: " + name);
         if ("errorRate".equals(name)) return metrics.doubleValue("sutErrorRate");
         if ("droppedRate".equals(name)) return metrics.doubleValue("droppedRate");
         if ("p95".equals(name)) return metrics.doubleValue("p95Ms");
         if ("p99".equals(name)) return metrics.doubleValue("p99Ms");
         if ("minThroughput".equals(name)) return metrics.doubleValue("completedThroughput");
         if ("achievedArrivalRate".equals(name)) {
-            double achieved = metrics.doubleValue("achievedArrivalRate");
-            if (!"%".equals(unit)) return achieved;
-            Object scheduledValue = metrics.value("scheduled");
-            Object startedValue = metrics.value("started");
-            if (scheduledValue instanceof Number && startedValue instanceof Number) {
-                double scheduled = ((Number) scheduledValue).doubleValue();
-                return scheduled == 0.0 ? 0.0 : ((Number) startedValue).doubleValue() / scheduled;
+            if ("%".equals(unit)) {
+                Object scheduledValue = metrics.value("measuredScheduled");
+                Object startedValue = metrics.value("measuredStarted");
+                if (!(scheduledValue instanceof Number) || !(startedValue instanceof Number)) {
+                    scheduledValue = metrics.value("scheduled");
+                    startedValue = metrics.value("started");
+                }
+                if (scheduledValue instanceof Number && startedValue instanceof Number) {
+                    double scheduled = ((Number) scheduledValue).doubleValue();
+                    return scheduled == 0.0 ? 0.0 : ((Number) startedValue).doubleValue() / scheduled;
+                }
+                Object achievedValue = metrics.value("achievedArrivalRate");
+                if (achievedValue instanceof Number)
+                    return scenario.arrivalRatePerSecond() == 0.0 ? 0.0 : ((Number) achievedValue).doubleValue() / scenario.arrivalRatePerSecond();
+                throw new IllegalArgumentException("achievedArrivalRate requires scheduled/started or achievedArrivalRate metrics");
             }
-            // Keep snapshots assembled by older callers readable while all
-            // scheduler-produced snapshots use started/scheduled coverage.
-            return scenario.arrivalRatePerSecond() == 0.0 ? 0.0 : achieved / scenario.arrivalRatePerSecond();
+            return metrics.doubleValue("achievedArrivalRate");
         }
         throw new IllegalArgumentException("Unsupported threshold: " + name);
     }
