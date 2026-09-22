@@ -3482,10 +3482,13 @@ metrics，失败和显式 sample 才保留 bounded diagnostic links。</p>
 计数（<code>iterations</code>、<code>scheduled</code>、<code>started</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured
 结果（<code>warmupCompleted</code>、<code>measuredCompleted</code>、<code>sutErrorRate</code>、<code>runtimeErrorRate</code>、<code>droppedRate</code>、<code>completedThroughput</code>）、latency
 percentiles（<code>p50Ms</code>、<code>p95Ms</code>、<code>p99Ms</code>）、scheduler
-lag 及 grouped <code>errorClassifications</code>。runtime error 与 SUT
-failure 分开；generator drop 不会增加
-<code>sutErrorRate</code>。<code>buckets</code> 以一秒 epoch-millisecond
-key 排序，每个 bucket 包含
+lag 及 grouped <code>errorClassifications</code>。percentiles 来自
+bounded
+reservoir；<code>latencyMinMs</code>、<code>latencyMeanMs</code>、<code>latencyMaxMs</code>
+和 <code>latencyObservationCount</code> 始终覆盖全部 measured
+observations 并保持 exact。runtime error 与 SUT failure 分开；generator
+drop 不会增加 <code>sutErrorRate</code>。<code>buckets</code> 以一秒
+epoch-millisecond key 排序，每个 bucket 包含
 <code>model</code>、<code>phase</code>、配置的
 rate/concurrency、completed TPS、p95/p99、SUT/drop
 rate、active/in-flight、scheduler lag 和 error classifications。全局

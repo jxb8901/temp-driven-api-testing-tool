@@ -35,6 +35,8 @@ public final class LoadMetrics implements LoadEventListener {
     private final AtomicInteger inFlight = new AtomicInteger(), maxInFlight = new AtomicInteger();
     private final AtomicInteger activeVus = new AtomicInteger(), maxActiveVus = new AtomicInteger();
     private final AtomicLong measuredLatencyCount = new AtomicLong(), warmupCompleted = new AtomicLong(), measuredStarted = new AtomicLong();
+    private final AtomicLong latencySumMs = new AtomicLong();
+    private final AtomicLong latencyMinMs = new AtomicLong(Long.MAX_VALUE), latencyMaxMs = new AtomicLong();
     private final AtomicLong schedulerLagCount = new AtomicLong(), schedulerLagSumMs = new AtomicLong(), schedulerLagMaxMs = new AtomicLong();
     private final AtomicLong measuredWindowStartMs = new AtomicLong(NO_TIMESTAMP);
     private final String model;
@@ -111,8 +113,12 @@ public final class LoadMetrics implements LoadEventListener {
             } else {
                 measuredCompleted.incrementAndGet();
                 recordMeasuredTimestamp(event.completedAtEpochMs() > 0L ? event.completedAtEpochMs() : event.scheduledAtEpochMs(), event.phase());
-                measuredLatencyCount.incrementAndGet();
-                recordLatency(event.latencyMs());
+                long latencyMs = Math.max(0L, event.latencyMs());
+                long observation = measuredLatencyCount.incrementAndGet();
+                latencySumMs.addAndGet(latencyMs);
+                updateMin(latencyMinMs, latencyMs);
+                updateMax(latencyMaxMs, latencyMs);
+                recordLatency(latencyMs, observation);
             }
             if (event.status() != null && event.status() != ResultStatus.PASS) recordError(event);
         }
@@ -143,8 +149,6 @@ public final class LoadMetrics implements LoadEventListener {
         long measuredStart = measuredWindowStartMs.get();
         long measuredElapsedMs = measuredStart == NO_TIMESTAMP ? elapsedMs : Math.max(1L, ended - measuredStart);
         double measuredElapsedSeconds = Math.max(0.001, measuredElapsedMs / 1000.0);
-        long sum = 0L; for (Long value : sorted) sum += value.longValue();
-
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("model", model);
         result.put("configuredUsers", configuredUsers);
@@ -182,13 +186,14 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("errorClassifications", classificationSnapshot());
         result.put("latencySampleCount", sorted.size());
         result.put("latencySampleCapacity", MAX_LATENCIES);
-        result.put("latencyMinMs", sorted.isEmpty() ? 0L : sorted.get(0));
-        result.put("latencyMeanMs", sorted.isEmpty() ? 0.0 : ((double) sum) / sorted.size());
+        result.put("latencyObservationCount", measuredLatencyCount.get());
+        result.put("latencyMinMs", measuredLatencyCount.get() == 0L ? 0L : latencyMinMs.get());
+        result.put("latencyMeanMs", measuredLatencyCount.get() == 0L ? 0.0 : ((double) latencySumMs.get()) / measuredLatencyCount.get());
         result.put("p50Ms", percentile(sorted, 0.50));
         result.put("p90Ms", percentile(sorted, 0.90));
         result.put("p95Ms", percentile(sorted, 0.95));
         result.put("p99Ms", percentile(sorted, 0.99));
-        result.put("latencyMaxMs", sorted.isEmpty() ? 0L : sorted.get(sorted.size() - 1));
+        result.put("latencyMaxMs", measuredLatencyCount.get() == 0L ? 0L : latencyMaxMs.get());
         result.put("timeSeriesBucketCapacity", MAX_BUCKETS);
         Map<String, Map<String, Object>> bucketMap = new TreeMap<String, Map<String, Object>>();
         synchronized (bucketLock) {
@@ -215,12 +220,11 @@ public final class LoadMetrics implements LoadEventListener {
         }
     }
 
-    private void recordLatency(long latencyMs) {
+    private void recordLatency(long latencyMs, long observation) {
         synchronized (latencies) {
-            long count = measuredLatencyCount.get();
-            if (latencies.size() < MAX_LATENCIES) latencies.add(Math.max(0L, latencyMs));
+            if (latencies.size() < MAX_LATENCIES) latencies.add(latencyMs);
             else {
-                long slot = Math.floorMod(count * 1103515245L + 12345L, count);
+                long slot = reservoirSlot(observation, observation);
                 if (slot < MAX_LATENCIES) latencies.set((int) slot, Math.max(0L, latencyMs));
             }
         }
@@ -271,6 +275,17 @@ public final class LoadMetrics implements LoadEventListener {
     private static void updateMax(AtomicLong target, long candidate) {
         for (;;) { long previous = target.get(); if (candidate <= previous || target.compareAndSet(previous, candidate)) return; }
     }
+    private static void updateMin(AtomicLong target, long candidate) {
+        for (;;) { long previous = target.get(); if (candidate >= previous || target.compareAndSet(previous, candidate)) return; }
+    }
+    /** SplitMix64-based deterministic draw for Algorithm R; unlike a linear expression it mixes the observation index. */
+    private static long reservoirSlot(long observation, long bound) {
+        long value = observation + 0x9E3779B97F4A7C15L;
+        value = (value ^ (value >>> 30)) * 0xBF58476D1CE4E5B9L;
+        value = (value ^ (value >>> 27)) * 0x94D049BB133111EBL;
+        value ^= value >>> 31;
+        return Math.floorMod(value, bound);
+    }
     private static long percentile(List<Long> sorted, double percentile) {
         if (sorted.isEmpty()) return 0L;
         int index = (int) Math.ceil(percentile * sorted.size()) - 1;
@@ -286,7 +301,8 @@ public final class LoadMetrics implements LoadEventListener {
         private final Map<String, Long> errors = new LinkedHashMap<String, Long>();
         private String phase;
         private long scheduled, started, completed, success, failure, dropped, warmupCompleted, sutFailure, runtimeError;
-        private long schedulerLagCount, schedulerLagSumMs, schedulerLagMaxMs, latencyCount;
+        private long schedulerLagCount, schedulerLagSumMs, schedulerLagMaxMs, latencyCount, latencySumMs;
+        private long latencyMinMs = Long.MAX_VALUE, latencyMaxMs;
         private int currentInFlight, maxInFlight, activeVus, maxActiveVus;
 
         private Bucket(long bucketStart, String model, int configuredUsers, double configuredArrivalRatePerSecond, int configuredMaxConcurrent) {
@@ -343,9 +359,12 @@ public final class LoadMetrics implements LoadEventListener {
         private void addLatency(long latencyMs) {
             latencyCount++;
             long value = Math.max(0L, latencyMs);
+            latencySumMs += value;
+            latencyMinMs = Math.min(latencyMinMs, value);
+            latencyMaxMs = Math.max(latencyMaxMs, value);
             if (latencies.size() < MAX_BUCKET_LATENCIES) latencies.add(value);
             else {
-                long slot = Math.floorMod(latencyCount * 1103515245L + 12345L, latencyCount);
+                long slot = reservoirSlot(latencyCount, latencyCount);
                 if (slot < MAX_BUCKET_LATENCIES) latencies.set((int) slot, value);
             }
         }
@@ -383,8 +402,12 @@ public final class LoadMetrics implements LoadEventListener {
             result.put("schedulerLagMaxMs", schedulerLagMaxMs);
             result.put("latencySampleCount", sorted.size());
             result.put("latencySampleCapacity", MAX_BUCKET_LATENCIES);
+            result.put("latencyObservationCount", latencyCount);
+            result.put("latencyMinMs", latencyCount == 0L ? 0L : latencyMinMs);
+            result.put("latencyMeanMs", latencyCount == 0L ? 0.0 : ((double) latencySumMs) / latencyCount);
             result.put("p95Ms", percentile(sorted, 0.95));
             result.put("p99Ms", percentile(sorted, 0.99));
+            result.put("latencyMaxMs", latencyCount == 0L ? 0L : latencyMaxMs);
             result.put("errorClassifications", new LinkedHashMap<String, Long>(errors));
             return result;
         }

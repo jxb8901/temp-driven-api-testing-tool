@@ -99,6 +99,50 @@ class LoadRuntimeTest {
         assertTrue(snapshot.buckets().size() <= LoadMetrics.MAX_BUCKETS);
     }
 
+    @Test void latencyReservoirKeepsSamplingAfterCapacityAndExactAggregatesStayExact() {
+        long now = 1_700_300_000_000L;
+        LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 1_000L);
+        int observations = 50_000;
+        for (int latency = 1; latency <= observations; latency++) {
+            metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "latency-" + latency, null, latency,
+                    now + 1_000L, now + 1_000L, now + 1_000L + latency, ResultStatus.PASS));
+        }
+        metrics.finish(now + 2_000L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(observations, snapshot.longValue("latencyObservationCount"));
+        assertEquals(LoadMetrics.MAX_LATENCIES, snapshot.longValue("latencySampleCount"));
+        assertEquals(1L, snapshot.longValue("latencyMinMs"));
+        assertEquals(observations, snapshot.longValue("latencyMaxMs"));
+        assertEquals((observations + 1) / 2.0, snapshot.doubleValue("latencyMeanMs"), 0.00001);
+        assertTrue(snapshot.longValue("p95Ms") > 45_000L, "post-cap p95 must include late samples");
+        assertTrue(snapshot.longValue("p99Ms") > 48_000L, "post-cap p99 must include late samples");
+        Map<String, Object> bucket = snapshot.buckets().get(String.valueOf(now + 1_000L));
+        assertNotNull(bucket);
+        assertEquals(observations, ((Number) bucket.get("latencyObservationCount")).longValue());
+        assertEquals(1L, ((Number) bucket.get("latencyMinMs")).longValue());
+        assertEquals(observations, ((Number) bucket.get("latencyMaxMs")).longValue());
+        assertEquals((observations + 1) / 2.0, ((Number) bucket.get("latencyMeanMs")).doubleValue(), 0.00001);
+        assertTrue(((Number) bucket.get("p95Ms")).longValue() > 45_000L, "bucket p95 must include late samples");
+    }
+
+    @Test void throughputAndBucketTpsUseDeterministicMeasuredCounts() {
+        long now = 1_700_400_000_000L;
+        LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 3_000L);
+        for (int sequence = 1; sequence <= 3; sequence++) {
+            metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "first-" + sequence, null, sequence,
+                    now + 1_000L, now + 1_000L, now + 1_010L, ResultStatus.PASS));
+        }
+        for (int sequence = 4; sequence <= 5; sequence++) {
+            metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "second-" + sequence, null, sequence,
+                    now + 2_000L, now + 2_000L, now + 2_020L, ResultStatus.PASS));
+        }
+        metrics.finish(now + 3_000L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(2.5, snapshot.doubleValue("completedThroughput"), 0.00001);
+        assertEquals(3L, ((Number) snapshot.buckets().get(String.valueOf(now + 1_000L)).get("completedTps")).longValue());
+        assertEquals(2L, ((Number) snapshot.buckets().get(String.valueOf(now + 2_000L)).get("completedTps")).longValue());
+    }
+
     @Test void metricsRemainAccurateWhenEventsArePublishedConcurrently() throws Exception {
         long now = 1_700_200_000_000L;
         LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 10_000L, 0, 80.0, 8);
