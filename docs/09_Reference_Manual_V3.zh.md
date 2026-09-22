@@ -1656,6 +1656,112 @@ case:
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
+### 3.5.x 多环境 DB/MQ 选择
+
+ATT 3.5.x 不通过修改 Action 或增加环境专用 Tool ID 来选择环境，而是使用 `--config` 选择一份完整 global config；该 config 再引用对应环境的 DBHelper 和 MQHelper descriptor。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+
+```text
+Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
+```
+
+推荐目录：
+
+```text
+config/
+├── environments/{sit,uat}.yaml
+├── dbhelpers/{sit,uat}/orders.yaml
+└── mqhelpers/{sit,uat}/payment.yaml
+```
+
+以下是一个使用直接 DB/MQ Action 的 package 所需的最小完整 `att-config/v2.6` 配置；如果 package 已有 `tools` 或 `toolGroups`，两份文件都应保持相同的 registry：
+
+```yaml
+# config/environments/sit.yaml
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: SIT
+timeoutMs: 10000
+templates: {root: templates}
+testcase: {root: testcase}
+dbhelpers: [config/dbhelpers/sit/orders.yaml]
+mqhelpers: [config/mqhelpers/sit/payment.yaml]
+tools: {}
+```
+
+```yaml
+# config/environments/uat.yaml
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: UAT
+timeoutMs: 10000
+templates: {root: templates}
+testcase: {root: testcase}
+dbhelpers: [config/dbhelpers/uat/orders.yaml]
+mqhelpers: [config/mqhelpers/uat/payment.yaml]
+tools: {}
+```
+
+SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../examples/environments/README.md)。
+
+两种环境使用完全相同的 Action 定义：
+
+```yaml
+actions:
+  renderRequest:
+    type: render
+    payload: payment/request.json
+    renderAs: file
+
+  queryOrder:
+    type: db
+    db: orders
+    query:
+      sql: "select * from orders where order_id = ?"
+      params:
+        - "${EXEC.INPUT.orderId}"
+
+  paymentRequest:
+    type: tool
+    call: >-
+      #{mq.payment.request(
+        requestQueue='PAYMENT.REQUEST',
+        replyQueue='PAYMENT.REPLY',
+        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        waitMs=5000
+      )}
+```
+
+四种执行模式只改变 config path：
+
+```sh
+# SIT
+./att.sh validate --config config/environments/sit.yaml --package
+./att.sh run --config config/environments/sit.yaml --all
+./att.sh debug template PAYMENT_INVOKE --config config/environments/sit.yaml
+./att.sh load examples/load/closed-smoke.yaml --config config/environments/sit.yaml
+
+# UAT
+./att.sh validate --config config/environments/uat.yaml --package
+./att.sh run --config config/environments/uat.yaml --all
+./att.sh debug template PAYMENT_INVOKE --config config/environments/uat.yaml
+./att.sh load examples/load/closed-smoke.yaml --config config/environments/uat.yaml
+```
+
+CI 对每个目标环境分别执行 `validate --package` 和 `run --all`：
+
+```sh
+./att.sh validate --config config/environments/sit.yaml --package
+./att.sh run --config config/environments/sit.yaml --all
+./att.sh validate --config config/environments/uat.yaml --package
+./att.sh run --config config/environments/uat.yaml --all
+```
+
+这个设计使 Testcase、Template、Flow 和 Action 可以从 SIT promotion 到 UAT，不需要编辑；selected config 在 execution 前定义完整 resource registry，因此 validation 也是 deterministic 的。`orders`、`payment` 等 logical ID 表示能力，不表示 physical endpoint；topology 应属于配置层。不要仅为选择 endpoint 而创建 `orders_sit`、`orders_uat` 或在 Action 中加入环境条件。若 testcase/template root、report policy 或 package structure 确实不同，才使用不同 top-level config。
+
+YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 应使用 `${ENV:NAME}`，由本地环境或 CI secret store 提供。DBHelper 对 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 3.5.x 仅对 username/password 支持该解析，host、queue manager、channel 和 numeric port 通常直接写在 selected descriptor 中。不要提交 credentials，也不要暗示 runtime 支持更广泛的 MQ interpolation。
+
+当前支持的选择方式明确是 `--config config/environments/<env>.yaml`。issue #36 未来可能加入 `--env SIT`／`--env UAT` profile 机制，但 3.5.x 尚不存在该 runtime option；未来实现也必须保留 stable logical helper IDs。
+
 ### Schema catalog
 
 [`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v2.6`。当前主配置、Tool group、sidecar 与 template 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v2.6`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。

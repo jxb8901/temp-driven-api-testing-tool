@@ -169,3 +169,12 @@ Load scenarios are validated before scheduling and write isolated summaries and 
 ```
 
 Use `load.users` for the closed-VU model, or `load.arrivalRate` with `maxConcurrent` and `overloadPolicy: drop` for fixed arrivals. Reusable Templates, Flows, and Tools read `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and action-local `output`; load identity is only under `EXEC.LOAD.*`. See [`examples/load/README.md`](examples/load/README.md) for copyable configurations, CLI overrides, thresholds, evidence, DB/MQ pooling, and the release-gate checks.
+
+### Multi-environment configuration (3.5.x)
+
+Select SIT/UAT/PREPROD by selecting a complete global config with `--config`; keep the same logical DB/MQ helper IDs and Action definitions in every environment. The selected config points those IDs to environment-specific resource descriptors, while credentials stay in `${ENV:NAME}` variables where supported. This is the current 3.5.x pattern; it does not add a new `--env` selector. See [`examples/environments/README.md`](examples/environments/README.md) for copyable SIT/UAT configs, identical DB/MQ Actions, all CLI modes, CI guidance, and the future #36 boundary.
+
+```sh
+./att.sh validate --config config/environments/sit.yaml --package
+./att.sh run --config config/environments/uat.yaml --all
+```

@@ -1790,6 +1790,112 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
+### Multi-environment DB/MQ selection in 3.5.x
+
+ATT 3.5.x does not select an environment by changing an Action or by adding an environment-specific Tool ID. Select a complete global configuration with `--config`; that configuration references the environment's DBHelper and MQHelper descriptor files. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+
+```text
+Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
+```
+
+The supported package layout is:
+
+```text
+config/
+├── environments/{sit,uat}.yaml
+├── dbhelpers/{sit,uat}/orders.yaml
+└── mqhelpers/{sit,uat}/payment.yaml
+```
+
+The following are complete minimal `att-config/v2.6` files for a package whose resources are used directly by Actions. Keep any existing `tools` or `toolGroups` definitions identical in both files:
+
+```yaml
+# config/environments/sit.yaml
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: SIT
+timeoutMs: 10000
+templates: {root: templates}
+testcase: {root: testcase}
+dbhelpers: [config/dbhelpers/sit/orders.yaml]
+mqhelpers: [config/mqhelpers/sit/payment.yaml]
+tools: {}
+```
+
+```yaml
+# config/environments/uat.yaml
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: UAT
+timeoutMs: 10000
+templates: {root: templates}
+testcase: {root: testcase}
+dbhelpers: [config/dbhelpers/uat/orders.yaml]
+mqhelpers: [config/mqhelpers/uat/payment.yaml]
+tools: {}
+```
+
+The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../examples/environments/README.md).
+
+The Action definitions remain identical:
+
+```yaml
+actions:
+  renderRequest:
+    type: render
+    payload: payment/request.json
+    renderAs: file
+
+  queryOrder:
+    type: db
+    db: orders
+    query:
+      sql: "select * from orders where order_id = ?"
+      params:
+        - "${EXEC.INPUT.orderId}"
+
+  paymentRequest:
+    type: tool
+    call: >-
+      #{mq.payment.request(
+        requestQueue='PAYMENT.REQUEST',
+        replyQueue='PAYMENT.REPLY',
+        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        waitMs=5000
+      )}
+```
+
+Use the same package with every supported execution mode by changing only the config path:
+
+```sh
+# SIT
+./att.sh validate --config config/environments/sit.yaml --package
+./att.sh run --config config/environments/sit.yaml --all
+./att.sh debug template PAYMENT_INVOKE --config config/environments/sit.yaml
+./att.sh load examples/load/closed-smoke.yaml --config config/environments/sit.yaml
+
+# UAT
+./att.sh validate --config config/environments/uat.yaml --package
+./att.sh run --config config/environments/uat.yaml --all
+./att.sh debug template PAYMENT_INVOKE --config config/environments/uat.yaml
+./att.sh load examples/load/closed-smoke.yaml --config config/environments/uat.yaml
+```
+
+For CI, run the same validation and execution stages once per selected environment:
+
+```sh
+./att.sh validate --config config/environments/sit.yaml --package
+./att.sh run --config config/environments/sit.yaml --all
+./att.sh validate --config config/environments/uat.yaml --package
+./att.sh run --config config/environments/uat.yaml --all
+```
+
+This design keeps Testcases, Templates, Flows, and Actions reusable and makes validation deterministic because the selected config defines the complete resource registry before execution. Logical IDs such as `orders` and `payment` represent capabilities, not physical endpoints; infrastructure topology belongs in configuration. Do not introduce `orders_sit`, `orders_uat`, or environment conditionals solely to choose endpoints. Separate top-level configs are appropriate when testcase/template roots, report policy, or package structure intentionally differ.
+
+Keep non-secret topology in YAML: JDBC URL, MQ host/port, queue manager, channel, pool sizes, and timeouts. Keep DB/MQ usernames and passwords in `${ENV:NAME}` references backed by the local environment or CI secret store. DBHelper resolves complete `${ENV:NAME}` values for the URL, username, password, and string-valued connection properties. MQHelper 3.5.x resolves `${ENV:NAME}` only for username/password; host, queue manager, channel, and numeric port are normally literal values in the selected descriptor. Do not commit credentials or imply broader interpolation support.
+
+The current selector is explicitly `--config config/environments/<env>.yaml`. Issue #36 may introduce a future `--env SIT`/`--env UAT` profile mechanism, but no such runtime option exists in 3.5.x and it must preserve stable logical helper IDs if implemented.
+
 ### Schema catalog
 
 V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 adds `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy. The dbhelper schema remains V2.5.

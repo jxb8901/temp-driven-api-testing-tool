@@ -275,6 +275,90 @@ mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedAr
 
 這個 gate 驗證所有例子、兩種 scheduler 的 CLI-to-report 路徑、Context isolation、bounded metrics/evidence、resource cleanup、threshold PASS/FAIL 和 report schema；它不是 distributed/Poisson/target-resource microbenchmark。
 
+## 1.4 SIT/UAT 多環境配置
+
+3.5.x 現行的多環境做法是為每個環境選擇一份完整 global config，而不是修改 Template、Flow 或 Action。配置中的 DB/MQ descriptor 可以不同，但 logical helper ID 保持不變：Actions 永遠寫 `db: orders` 和 `mq.payment...`，不寫 `orders_sit`、`orders_uat`、`payment_sit` 或 `payment_uat`。
+
+推薦目錄：
+
+```text
+config/
+├── environments/sit.yaml
+├── environments/uat.yaml
+├── dbhelpers/sit/orders.yaml
+├── dbhelpers/uat/orders.yaml
+├── mqhelpers/sit/payment.yaml
+└── mqhelpers/uat/payment.yaml
+```
+
+SIT 與 UAT 的 global config 只改 environment label 和 resource descriptor path：
+
+```yaml
+# config/environments/sit.yaml
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: SIT
+timeoutMs: 10000
+templates: {root: templates}
+testcase: {root: testcase}
+dbhelpers: [config/dbhelpers/sit/orders.yaml]
+mqhelpers: [config/mqhelpers/sit/payment.yaml]
+tools: {}
+```
+
+```yaml
+# config/environments/uat.yaml
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: UAT
+timeoutMs: 10000
+templates: {root: templates}
+testcase: {root: testcase}
+dbhelpers: [config/dbhelpers/uat/orders.yaml]
+mqhelpers: [config/mqhelpers/uat/payment.yaml]
+tools: {}
+```
+
+若 package 有既有 `tools` 或 `toolGroups`，兩份 config 都保留相同的 registry；不要因環境而複製 Tool/Action ID。DB descriptors 保持 `id: orders`，只改 JDBC URL 等 topology；MQ descriptors 保持 `id: payment`，只改 host、queue manager、port、channel。DB 的 URL、username/password 和 string-valued connection properties 支援完整 `${ENV:NAME}`；MQ 3.5.x 只有 username/password 支援該解析，host、queue manager、channel 和 numeric port 應直接寫在環境 descriptor。
+
+相同的 Action 可同時用於 SIT 和 UAT：
+
+```yaml
+actions:
+  queryOrder:
+    type: db
+    db: orders
+    query:
+      sql: "select * from orders where order_id = ?"
+      params: ["${EXEC.INPUT.orderId}"]
+
+  paymentRequest:
+    type: tool
+    call: >-
+      #{mq.payment.request(
+        requestQueue='PAYMENT.REQUEST',
+        replyQueue='PAYMENT.REPLY',
+        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        waitMs=5000
+      )}
+```
+
+執行時只選 config path：
+
+```sh
+./att.sh validate --config config/environments/sit.yaml --package
+./att.sh run --config config/environments/sit.yaml --all
+./att.sh debug template PAYMENT_INVOKE --config config/environments/sit.yaml
+./att.sh load examples/load/closed-smoke.yaml --config config/environments/sit.yaml
+
+./att.sh validate --config config/environments/uat.yaml --package
+./att.sh run --config config/environments/uat.yaml --all
+./att.sh debug template PAYMENT_INVOKE --config config/environments/uat.yaml
+./att.sh load examples/load/closed-smoke.yaml --config config/environments/uat.yaml
+```
+
+CI 可以對同一 package 依次執行 SIT 與 UAT 的 `validate --package` 和 `run --all`。PREPROD 或 production-like validation 也沿用相同原則；只有 package root、report policy 等真正不同時，才另設 top-level config。不要把環境分支塞入 Action DSL。完整可複製的 descriptor、pool、secret 和 CI 例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
+
 ## 2. 先理解執行方式
 
 一次正常 run 會依序完成：
