@@ -2,15 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:att:schema:load-summary:v1.0",
   "type": "object",
-  "required": ["status", "runId", "startedAt", "endedAt", "scenario", "metrics", "thresholds"],
+  "required": ["schemaVersion", "status", "exitCode", "runId", "startedAt", "endedAt", "durationMs", "scenario", "timing", "metrics", "thresholds", "resources"],
   "properties": {
-    "status": {"enum": ["PASS", "FAIL"]},
+    "schemaVersion": {"const": "att-load-summary/v1.0"},
+    "status": {"enum": ["PASS", "FAIL", "ERROR"]},
+    "exitCode": {"type": "integer"},
     "runId": {"type": "string", "minLength": 1},
     "startedAt": {"type": "string"},
     "endedAt": {"type": "string"},
+    "durationMs": {"type": "integer", "minimum": 0},
     "scenario": {"type": "object"},
+    "timing": {"type": "object"},
     "metrics": {"type": "object"},
     "thresholds": {"type": "object"},
+    "resources": {"type": "object"},
+    "report": {"const": "report/index.html"},
     "evidence": {"type": "object"}
   },
   "additionalProperties": true

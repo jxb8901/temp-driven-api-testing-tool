@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.4.1 User Manual and Reference</title>
+  <title>ATT V3.4.2 User Manual and Reference</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,7 +233,7 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.4.1 User Manual and Reference</h1>
+<h1 class="title">ATT V3.4.2 User Manual and Reference</h1>
 </header>
 <h1 id="att-v3.4.2-user-manual-and-reference">ATT V3.4.2 User Manual and
 Reference</h1>
@@ -4569,6 +4569,49 @@ physical iteration workspace with <code>case.log</code> and
 when its diagnostic is retained. Evidence links are written below the
 load run’s <code>samples/</code> or <code>failures/</code> directories
 and never enter ordinary functional-run artifacts.</p>
+<h3 id="load-summary-and-html-report-contract">Load summary and HTML
+report contract</h3>
+<p><code>load-summary.json</code> and <code>load-summary.yaml</code>
+share the stable <code>att-load-summary/v1.0</code> contract. Root
+fields are <code>schemaVersion</code>, <code>status</code>
+(<code>PASS</code>, <code>FAIL</code>, or <code>ERROR</code>),
+<code>exitCode</code>, <code>runId</code>, <code>startedAt</code>,
+<code>endedAt</code>, <code>durationMs</code>, <code>scenario</code>,
+<code>timing</code>, <code>metrics</code>, <code>thresholds</code>,
+<code>resources</code>, optional <code>evidence</code>, and
+<code>report: report/index.html</code> relative to the run directory.
+The JSON schema is
+<code>schemas/att-load-summary-v1.0.schema.json</code>, registered in
+the schema catalog as <code>att-load-summary/v1.0</code>.</p>
+<p><code>timing.phases</code> lists configured <code>WARMUP</code>,
+<code>RAMP_UP</code>, <code>STEADY</code>, and <code>RAMP_DOWN</code>
+start/end/duration windows. <code>metrics.phases</code> contains
+observed scheduled/started/completed/failure/drop counts, throughput,
+latency, scheduler lag, and concurrency aggregates per phase. Warm-up
+has <code>measured: false</code>: its traffic remains visible in the run
+history, but measured SLA aggregates exclude it. Other phases remain
+measured. A phase with no events still appears in
+<code>timing.phases</code>, so empty and edge runs have a stable
+machine-readable shape.</p>
+<p><code>resources.db</code> and <code>resources.mq</code> contain only
+bounded pool diagnostics such as pool size, active/idle, waiting, and
+timeout/acquisition counts; they never contain connections, queue
+handles, credentials, or other live objects. Pool saturation and
+acquisition timeouts are separate from SUT failures.
+<code>evidence.items[].path</code> points to retained evidence below
+<code>&lt;runId&gt;/samples/</code> or
+<code>&lt;runId&gt;/failures/</code>; the HTML report renders each path
+as a relative link.</p>
+<p><code>report/index.html</code> is self-contained and can be opened
+offline. It shows run identity/status, closed or arrival-rate semantics,
+phase and warm-up separation, aggregate metrics, threshold diagnostics,
+resource diagnostics, retained evidence links, and bounded one-second
+time-series buckets. Arrival-rate reports explicitly distinguish
+configured arrival rate, achieved scheduling rate, completed TPS, and
+generator drops; drops are not SUT errors. The report links to the
+adjacent JSON/YAML summaries but does not embed raw per-iteration
+samples or secrets; <code>window.ATT_LOAD_SUMMARY</code> exposes the
+same bounded summary for offline tooling.</p>
 <p>The machine-readable <code>metrics</code> object reports configured
 load (<code>configuredUsers</code>,
 <code>configuredArrivalRatePerSecond</code>,

@@ -177,17 +177,21 @@ public final class FrameworkRunner {
             throw new IllegalArgumentException("Load run ID already exists: " + runId + " (" + reservedRunDirectory + "). Choose a different --run-id.");
         att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario));
         att.load.LoadRunResult result;
+        java.util.Map<String, Object> resourceMetrics;
         try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
             att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
             att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
                     ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
                     : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
             try { result = scheduler.run(); } finally { scheduler.close(); }
+            resourceMetrics = resources.metrics();
         }
         java.nio.file.Path runDirectory = reservedRunDirectory;
         java.nio.file.Files.createDirectories(runDirectory);
         java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
-        result = result.withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics())).withEvidence(retainedEvidence);
+        result = result.withResources(resourceMetrics)
+                .withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics()))
+                .withEvidence(retainedEvidence);
         java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
         int exitCode = result.exitCode();
         if ("json".equals(options.format())) {

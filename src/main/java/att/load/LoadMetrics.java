@@ -26,6 +26,8 @@ public final class LoadMetrics implements LoadEventListener {
     private final List<Long> latencies = new ArrayList<Long>();
     /* Bucket lookup is lock-free; creation/eviction is short-lived and individual updates are per bucket. */
     private final ConcurrentHashMap<Long, Bucket> buckets = new ConcurrentHashMap<Long, Bucket>();
+    /* The phase set is fixed by the load contract, so this remains bounded independently of run duration. */
+    private final ConcurrentHashMap<String, PhaseStats> phases = new ConcurrentHashMap<String, PhaseStats>();
     private final Object bucketLock = new Object();
     private final Map<String, AtomicLong> errorClassifications = new ConcurrentHashMap<String, AtomicLong>();
     private final Set<String> activeUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
@@ -129,6 +131,7 @@ public final class LoadMetrics implements LoadEventListener {
             if (event.status() != null && event.status() != ResultStatus.PASS) recordError(event);
         }
 
+        if (event.phase() != null) phase(event.phase()).accept(event, inFlight.get(), activeVus.get());
         long bucketStart = Math.floorDiv(event.scheduledAtEpochMs(), 1000L) * 1000L;
         Bucket bucket = bucket(bucketStart);
         bucket.accept(event, inFlight.get(), activeVus.get());
@@ -210,7 +213,21 @@ public final class LoadMetrics implements LoadEventListener {
             result.put("timeSeriesBucketCount", buckets.size());
             for (Map.Entry<Long, Bucket> entry : buckets.entrySet()) bucketMap.put(String.valueOf(entry.getKey()), entry.getValue().toMap());
         }
-        return new LoadMetricsSnapshot(result, bucketMap);
+        Map<String, Map<String, Object>> phaseMap = new LinkedHashMap<String, Map<String, Object>>();
+        String[] phaseOrder = {"WARMUP", "RAMP_UP", "STEADY", "RAMP_DOWN"};
+        for (String phase : phaseOrder) {
+            PhaseStats value = phases.get(phase);
+            if (value != null) phaseMap.put(phase, value.toMap());
+        }
+        return new LoadMetricsSnapshot(result, bucketMap, phaseMap);
+    }
+
+    private PhaseStats phase(String name) {
+        PhaseStats value = phases.get(name);
+        if (value != null) return value;
+        PhaseStats created = new PhaseStats(name);
+        PhaseStats previous = phases.putIfAbsent(name, created);
+        return previous == null ? created : previous;
     }
 
     private Bucket bucket(long bucketStart) {
@@ -300,6 +317,96 @@ public final class LoadMetrics implements LoadEventListener {
         if (sorted.isEmpty()) return 0L;
         int index = (int) Math.ceil(percentile * sorted.size()) - 1;
         return sorted.get(Math.max(0, Math.min(sorted.size() - 1, index)));
+    }
+
+    private static final class PhaseStats {
+        private final String name;
+        private final List<Long> latencies = new ArrayList<Long>();
+        private long startAt = Long.MAX_VALUE, endAt;
+        private long scheduled, started, completed, success, failure, runtimeError, dropped;
+        private long measuredScheduled, measuredStarted, measuredCompleted, measuredSuccess, measuredFailure, measuredRuntimeError, measuredDropped;
+        private long schedulerLagCount, schedulerLagSumMs, schedulerLagMaxMs, latencyCount, latencySumMs;
+        private long latencyMinMs = Long.MAX_VALUE, latencyMaxMs;
+        private int currentInFlight, maxInFlight, activeVus, maxActiveVus;
+
+        private PhaseStats(String name) { this.name = name; }
+
+        private synchronized void accept(LoadEvent event, int currentInFlight, int activeVus) {
+            long eventStart = event.scheduledAtEpochMs() > 0L ? event.scheduledAtEpochMs() : event.startedAtEpochMs();
+            if (eventStart > 0L) startAt = Math.min(startAt, eventStart);
+            long eventEnd = event.completedAtEpochMs() > 0L ? event.completedAtEpochMs()
+                    : event.startedAtEpochMs() > 0L ? event.startedAtEpochMs() : event.scheduledAtEpochMs();
+            if (eventEnd > 0L) endAt = Math.max(endAt, eventEnd);
+            boolean measured = !"WARMUP".equals(name);
+            if (event.scheduled()) { scheduled++; if (measured) measuredScheduled++; }
+            if (event.started()) {
+                started++; if (measured) measuredStarted++;
+                recordLag(event);
+            } else if (event.dropped()) {
+                recordLag(event);
+            }
+            if (event.dropped()) { dropped++; if (measured) measuredDropped++; }
+            if (event.completed()) {
+                completed++;
+                if (event.status() == ResultStatus.PASS) { success++; if (measured) measuredSuccess++; }
+                else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) {
+                    runtimeError++; if (measured) measuredRuntimeError++;
+                } else { failure++; if (measured) measuredFailure++; }
+                if (measured) {
+                    measuredCompleted++;
+                    long latency = Math.max(0L, event.latencyMs());
+                    latencyCount++; latencySumMs += latency;
+                    latencyMinMs = Math.min(latencyMinMs, latency); latencyMaxMs = Math.max(latencyMaxMs, latency);
+                    if (latencies.size() < MAX_BUCKET_LATENCIES) latencies.add(latency);
+                    else {
+                        long slot = reservoirSlot(latencyCount, latencyCount);
+                        if (slot < MAX_BUCKET_LATENCIES) latencies.set((int) slot, latency);
+                    }
+                }
+            }
+            this.currentInFlight = Math.max(0, currentInFlight);
+            this.activeVus = Math.max(0, activeVus);
+            this.maxInFlight = Math.max(this.maxInFlight, this.currentInFlight);
+            this.maxActiveVus = Math.max(this.maxActiveVus, this.activeVus);
+        }
+
+        private void recordLag(LoadEvent event) {
+            long lag = Math.max(0L, event.schedulerLagMs());
+            schedulerLagCount++; schedulerLagSumMs += lag; schedulerLagMaxMs = Math.max(schedulerLagMaxMs, lag);
+        }
+
+        private synchronized Map<String, Object> toMap() {
+            List<Long> sorted = new ArrayList<Long>(latencies); Collections.sort(sorted);
+            long durationMs = startAt == Long.MAX_VALUE ? 0L : Math.max(0L, endAt - startAt);
+            double seconds = Math.max(0.001, durationMs / 1000.0);
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("phase", name); result.put("startAtEpochMs", startAt == Long.MAX_VALUE ? 0L : startAt);
+            result.put("endAtEpochMs", endAt); result.put("durationMs", durationMs);
+            result.put("measured", !"WARMUP".equals(name));
+            result.put("scheduled", scheduled); result.put("measuredScheduled", measuredScheduled);
+            result.put("started", started); result.put("measuredStarted", measuredStarted);
+            result.put("completed", completed); result.put("measuredCompleted", measuredCompleted);
+            result.put("success", success); result.put("measuredSuccess", measuredSuccess);
+            result.put("failure", failure); result.put("measuredFailure", measuredFailure);
+            result.put("runtimeError", runtimeError); result.put("measuredRuntimeError", measuredRuntimeError);
+            result.put("dropped", dropped); result.put("measuredDropped", measuredDropped);
+            result.put("completedThroughput", measuredCompleted / seconds);
+            result.put("sutErrorRate", measuredCompleted == 0L ? 0.0 : ((double) measuredFailure) / measuredCompleted);
+            result.put("runtimeErrorRate", measuredCompleted == 0L ? 0.0 : ((double) measuredRuntimeError) / measuredCompleted);
+            result.put("droppedRate", measuredScheduled == 0L ? 0.0 : ((double) measuredDropped) / measuredScheduled);
+            result.put("schedulerLagCount", schedulerLagCount);
+            result.put("schedulerLagMeanMs", schedulerLagCount == 0L ? 0.0 : ((double) schedulerLagSumMs) / schedulerLagCount);
+            result.put("schedulerLagMaxMs", schedulerLagMaxMs);
+            result.put("currentInFlight", currentInFlight); result.put("maxInFlight", maxInFlight);
+            result.put("activeVus", activeVus); result.put("maxActiveVus", maxActiveVus);
+            result.put("latencyObservationCount", latencyCount); result.put("latencySampleCount", sorted.size());
+            result.put("latencyMinMs", latencyCount == 0L ? 0L : latencyMinMs);
+            result.put("latencyMeanMs", latencyCount == 0L ? 0.0 : ((double) latencySumMs) / latencyCount);
+            result.put("p50Ms", percentile(sorted, 0.50)); result.put("p90Ms", percentile(sorted, 0.90));
+            result.put("p95Ms", percentile(sorted, 0.95)); result.put("p99Ms", percentile(sorted, 0.99));
+            result.put("latencyMaxMs", latencyCount == 0L ? 0L : latencyMaxMs);
+            return result;
+        }
     }
 
     private static final class Bucket {

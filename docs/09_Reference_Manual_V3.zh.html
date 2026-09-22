@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.4.1 使用手冊與參考</title>
+  <title>ATT V3.4.2 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,7 +233,7 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.4.1 使用手冊與參考</h1>
+<h1 class="title">ATT V3.4.2 使用手冊與參考</h1>
 </header>
 <h1 id="att-v3.4.2-中文用户手册与参考手册">ATT V3.4.2
 中文用户手册与参考手册</h1>
@@ -3484,6 +3484,46 @@ sampling 后只为有界 sampled success 创建带 <code>case.log</code> 和
 diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的
 <code>samples/</code> 或 <code>failures/</code>，不会污染普通 functional
 run artifacts。</p>
+<h3 id="load-summary-与-html-report-contract">Load summary 与 HTML
+report contract</h3>
+<p><code>load-summary.json</code> 和 <code>load-summary.yaml</code>
+共用稳定的 <code>att-load-summary/v1.0</code> contract。root-level
+字段包括
+<code>schemaVersion</code>、<code>status</code>（<code>PASS</code>、<code>FAIL</code>
+或
+<code>ERROR</code>）、<code>exitCode</code>、<code>runId</code>、<code>startedAt</code>、<code>endedAt</code>、<code>durationMs</code>、<code>scenario</code>、<code>timing</code>、<code>metrics</code>、<code>thresholds</code>、<code>resources</code>、可选的
+<code>evidence</code>，以及相对于 run directory 的
+<code>report: report/index.html</code>。JSON schema 位于
+<code>schemas/att-load-summary-v1.0.schema.json</code>，schema catalog
+以 <code>att-load-summary/v1.0</code> 注册。</p>
+<p><code>timing.phases</code> 按
+<code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code>、<code>RAMP_DOWN</code>
+顺序列出 configured start/end/duration
+window；<code>metrics.phases</code> 则提供实际 observed 的
+scheduled/started/completed/failure/drop、throughput、latency、scheduler
+lag 和 concurrency aggregates。<code>WARMUP</code> 的
+<code>measured</code> 是 <code>false</code>：traffic 仍保留在 run
+history，但 measured SLA aggregates 不包含它；其他 phase 仍属于
+measured。没有事件的 phase 也会出现在 <code>timing.phases</code>，使
+empty/edge run 具有稳定的 machine-readable shape。</p>
+<p><code>resources.db</code> 和 <code>resources.mq</code> 只包含 bounded
+pool diagnostics，例如 pool size、active/idle、waiting 和
+timeout/acquisition counts；不会包含 connection、queue
+handle、credential 或其他 live object。pool saturation 和 acquisition
+timeout 必须与 SUT failure 分开解读。<code>evidence.items[].path</code>
+指向 <code>&lt;runId&gt;/samples/</code> 或
+<code>&lt;runId&gt;/failures/</code> 下的 retained evidence，HTML report
+会把每个 path 渲染为相对链接。</p>
+<p><code>report/index.html</code> 是 self-contained、可离线打开的
+performance report，显示 run identity/status、closed 或 arrival-rate
+semantics、phase/warm-up 分隔、aggregate metrics、threshold
+diagnostics、resource diagnostics、retained evidence links 和 bounded
+一秒 time-series buckets。arrival-rate report 会明确区分 configured
+arrival rate、achieved scheduling rate、completed TPS 和 generator
+drops；drop 不属于 SUT error。报告链接到旁边的 JSON/YAML
+summary，但不嵌入 raw per-iteration samples 或
+secrets；<code>window.ATT_LOAD_SUMMARY</code> 为离线工具提供同一份
+bounded summary。</p>
 <p>machine-readable 的 <code>metrics</code>
 会输出配置负载（<code>configuredUsers</code>、<code>configuredArrivalRatePerSecond</code>、<code>configuredMaxConcurrent</code>）、iteration/scheduling
 计数（<code>iterations</code>、<code>scheduled</code>、<code>measuredScheduled</code>、<code>started</code>、<code>measuredStarted</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>、<code>measuredDropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured
