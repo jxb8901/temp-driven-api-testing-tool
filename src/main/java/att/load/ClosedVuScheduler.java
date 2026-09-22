@@ -85,6 +85,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
                 Path sampleRoot = sampleOutputRoot(iterationId);
                 if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
+                request = request.withFailureEvidence(evidenceStore == null || evidenceStore.retainsFailureEvidence());
                 long iterationStarted = timing.now();
                 att.core.ResultStatus status;
                 String errorType = null;

@@ -240,6 +240,79 @@ class LoadScenarioTest {
         } finally { resources.close(); }
     }
 
+    @Test void metricsOnlyFailureDoesNotMaterializeOrLinkEvidence() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/METRICS_FAIL_TEMPLATE"));
+        write(project, "templates/METRICS_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: METRICS_FAIL_TEMPLATE\ndescription: metrics-only failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "metrics-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: METRICS_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: metrics}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("metrics-only-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("metrics-run", "metrics-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withFailureEvidence(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(Files.exists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.yaml")));
+            assertNull(result.evidenceRef());
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("metrics-run", "closed", "STEADY", "metrics-failure-1", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            assertTrue(evidence.events().isEmpty());
+            assertEquals(0, evidence.write(outputRoot.resolve("load/metrics-run")).get("count"));
+            assertFalse(Files.exists(outputRoot.resolve("load/metrics-run")));
+        } finally { resources.close(); }
+    }
+
+    @Test void reservedSuccessFailureDoesNotOverrideFailureNone() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/RESERVED_FAIL_TEMPLATE"));
+        write(project, "templates/RESERVED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: RESERVED_FAIL_TEMPLATE\ndescription: reserved sample failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "reserved-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: RESERVED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: sample, failure: none, sampleRate: 1.0, maxSamples: 1}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("reserved-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            assertTrue(evidence.reserveSuccess("reserved-run-1"));
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("reserved-run", "reserved-run-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withOutputDirectory(outputRoot.resolve("load/reserved-run/iterations"))
+                            .withFailureEvidence(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(Files.exists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.yaml")));
+            assertNull(result.evidenceRef());
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("reserved-run", "closed", "STEADY", "reserved-run-1", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            assertTrue(evidence.events().isEmpty());
+            assertEquals(0, evidence.write(outputRoot.resolve("load/reserved-run")).get("count"));
+            assertFalse(Files.exists(outputRoot.resolve("load/reserved-run")));
+        } finally { resources.close(); }
+    }
+
     @Test void sampledSuccessRetainsBoundedEvidenceWithoutChangingResult() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/SAMPLE_TEMPLATE"));

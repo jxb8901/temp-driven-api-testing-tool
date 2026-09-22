@@ -66,6 +66,7 @@ public final class IterationExecutor implements LoadIterationRunner {
         Instant started = Instant.now();
         Path iterationDirectory = null;
         boolean retainedWorkspace = request.outputDirectory() != null;
+        boolean retainFailureEvidence = request.retainFailureEvidence();
         CaseRuntimeContext context = null;
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         CaseExecutionLog log = null;
@@ -78,8 +79,10 @@ public final class IterationExecutor implements LoadIterationRunner {
             LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(projectRoot, config, target)
                     .prepare(request, iterationDirectory, logPath);
             context = prepared.context();
-            log = retainedWorkspace ? new CaseExecutionLog(logPath, config.caseLogYamlAnchors())
-                    : CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
+            // Keep the log in memory until the outcome is known. A reserved
+            // success sample may fail, and failure:none must not create a
+            // failure-only case.log merely because it had a sample slot.
+            log = CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();
@@ -112,18 +115,20 @@ public final class IterationExecutor implements LoadIterationRunner {
             if (log != null) try { log.close(); } catch (Exception ignored) { }
         }
         Duration duration = Duration.between(started, Instant.now());
-        if (!retainedWorkspace && status != ResultStatus.PASS && log != null) {
+        boolean retainEvidence = status == ResultStatus.PASS ? retainedWorkspace : retainFailureEvidence;
+        if (retainEvidence && log != null) {
             try { log.materialize(iterationDirectory.resolve("case.log")); iterationDirectory = iterationDirectory.resolve("case.log").getParent(); }
             catch (Exception ignored) { }
         }
-        if (context != null && iterationDirectory != null && (status != ResultStatus.PASS || retainedWorkspace)) {
+        if (context != null && iterationDirectory != null && retainEvidence) {
             try {
                 Files.createDirectories(iterationDirectory);
                 Files.write(iterationDirectory.resolve("case.yaml"),
                         new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
             } catch (Exception ignored) { }
         }
-        return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic);
+        return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic,
+                retainEvidence);
     }
 
     private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {
@@ -132,10 +137,8 @@ public final class IterationExecutor implements LoadIterationRunner {
                     .resolve("iterations").resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
         }
         Path root = request.outputDirectory().toAbsolutePath().normalize();
-        Files.createDirectories(root);
         Path candidate = root.resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration())).normalize();
         if (!candidate.startsWith(root)) throw new IllegalArgumentException("Load iteration directory escapes output root");
-        Files.createDirectories(candidate);
         return candidate;
     }
 

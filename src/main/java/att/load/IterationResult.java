@@ -19,12 +19,20 @@ public final class IterationResult {
     private final List<ValidationResult> validations;
     private final Path outputDirectory;
     private final att.validation.Diagnostic diagnostic;
+    private final boolean evidenceRetained;
 
     IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
                     List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic) {
+        this(iterationId, status, duration, context, validations, outputDirectory, diagnostic,
+                status != ResultStatus.PASS);
+    }
+
+    IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
+                    List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic,
+                    boolean evidenceRetained) {
         this.iterationId = iterationId; this.status = status; this.duration = duration; this.context = context;
         this.validations = Collections.unmodifiableList(new ArrayList<ValidationResult>(validations));
-        this.outputDirectory = outputDirectory; this.diagnostic = diagnostic;
+        this.outputDirectory = outputDirectory; this.diagnostic = diagnostic; this.evidenceRetained = evidenceRetained;
     }
     public String iterationId() { return iterationId; }
     public ResultStatus status() { return status; }
@@ -34,7 +42,7 @@ public final class IterationResult {
     public Path outputDirectory() { return outputDirectory; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
     public EvidenceRef evidenceRef() {
-        if (outputDirectory == null && status == ResultStatus.PASS && diagnostic == null) return null;
+        if (!evidenceRetained) return null;
         Path caseLog = outputDirectory == null ? null : outputDirectory.resolve("case.log");
         return new EvidenceRef(outputDirectory, caseLog, diagnostic);
     }

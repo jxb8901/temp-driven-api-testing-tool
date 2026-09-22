@@ -20,6 +20,7 @@ public final class LoadEvidenceStore implements LoadEventListener {
     private final List<LoadEvent> retained = new ArrayList<LoadEvent>();
     private final Set<String> reservedSuccesses = new LinkedHashSet<String>();
     public LoadEvidenceStore(LoadEvidencePolicy policy) { this.policy = policy; }
+    public boolean retainsFailureEvidence() { return policy.failure() == LoadEvidencePolicy.Failure.FULL; }
     /** Reserves one bounded success-sample slot before the iteration starts. */
     public synchronized boolean reserveSuccess(String iterationId) {
         if (iterationId == null || reservedSuccesses.contains(iterationId)) return false;
@@ -32,6 +33,13 @@ public final class LoadEvidenceStore implements LoadEventListener {
         if (event == null || event.dropped() || !event.completed()) return;
         boolean reserved = reservedSuccesses.remove(event.iterationId());
         if (retained.size() >= policy.maxSamples()) return;
+        // A reservation only predicts a success. Once the outcome is known,
+        // the outcome-specific policy is authoritative and a failed reserved
+        // iteration must never be retained as a sample.
+        if (!event.success()) {
+            if (policy.failure() == LoadEvidencePolicy.Failure.FULL) retained.add(event);
+            return;
+        }
         if (reserved || policy.retain(event, retained.size())) retained.add(event);
     }
     public synchronized List<LoadEvent> events() { return Collections.unmodifiableList(new ArrayList<LoadEvent>(retained)); }

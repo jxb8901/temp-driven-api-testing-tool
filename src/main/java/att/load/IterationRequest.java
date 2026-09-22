@@ -13,20 +13,27 @@ public final class IterationRequest {
     private final Instant startedAt, runStartedAt;
     private final Map<String, Object> inputs;
     private final Path outputDirectory;
+    private final boolean retainFailureEvidence;
 
     public IterationRequest(String model, String iterationId, long iteration, String phase,
                             Instant startedAt, String userId, Map<String, Object> inputs, Path outputDirectory) {
-        this("LOAD", null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory);
+        this("LOAD", null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory, true);
     }
 
     public IterationRequest(String runId, String model, String iterationId, long iteration, String phase,
                             Instant startedAt, String userId, Map<String, Object> inputs, Path outputDirectory) {
-        this(runId, null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory);
+        this(runId, null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory, true);
     }
 
     public IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
                             String phase, Instant startedAt, String userId, Map<String, Object> inputs,
                             Path outputDirectory) {
+        this(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory, true);
+    }
+
+    private IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
+                             String phase, Instant startedAt, String userId, Map<String, Object> inputs,
+                             Path outputDirectory, boolean retainFailureEvidence) {
         if (runId == null || runId.trim().isEmpty()) throw new IllegalArgumentException("Load runId must not be blank");
         if (!("closed".equals(model) || "arrivalRate".equals(model))) throw new IllegalArgumentException("LOAD.model must be closed or arrivalRate");
         if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.iterationId must not be blank");
@@ -42,6 +49,7 @@ public final class IterationRequest {
         this.inputs = inputs == null || inputs.isEmpty() ? Collections.<String, Object>emptyMap()
                 : Collections.unmodifiableMap(LoadIsolation.deepCopyMap(inputs));
         this.outputDirectory = outputDirectory;
+        this.retainFailureEvidence = retainFailureEvidence;
     }
 
     public static IterationRequest closed(String iterationId, long iteration, String phase, Instant startedAt,
@@ -61,7 +69,12 @@ public final class IterationRequest {
         return new IterationRequest(runId, "arrivalRate", iterationId, iteration, phase, startedAt, null, inputs, null);
     }
     public IterationRequest withOutputDirectory(Path directory) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory);
+        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
+                retainFailureEvidence);
+    }
+    public IterationRequest withFailureEvidence(boolean enabled) {
+        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, enabled);
     }
     public String runId() { return runId; }
     public String model() { return model; }
@@ -73,4 +86,5 @@ public final class IterationRequest {
     public String userId() { return userId; }
     public Map<String, Object> inputs() { return inputs; }
     public Path outputDirectory() { return outputDirectory; }
+    public boolean retainFailureEvidence() { return retainFailureEvidence; }
 }

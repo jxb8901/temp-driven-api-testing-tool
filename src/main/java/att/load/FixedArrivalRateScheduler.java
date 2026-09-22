@@ -101,6 +101,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
                     Path sampleRoot = sampleOutputRoot(id);
                     if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
+                    request = request.withFailureEvidence(evidenceStore == null || evidenceStore.retainsFailureEvidence());
                     IterationResult result = executor.execute(request);
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
