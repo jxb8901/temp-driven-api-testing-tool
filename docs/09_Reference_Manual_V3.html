@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.4.2 User Manual and Reference</title>
+  <title>ATT V3.5.0 User Manual and Reference</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,11 +233,11 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.4.2 User Manual and Reference</h1>
+<h1 class="title">ATT V3.5.0 User Manual and Reference</h1>
 </header>
-<h1 id="att-v3.4.2-user-manual-and-reference">ATT V3.4.2 User Manual and
+<h1 id="att-v3.5.0-user-manual-and-reference">ATT V3.5.0 User Manual and
 Reference</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.4.2 Status: Normative end-user
+<p>Author: Jeffrey + ChatGPT Version: 3.5.0 Status: Normative end-user
 documentation</p>
 <p>This manual is designed to be read in two ways:</p>
 <ul>
@@ -3057,9 +3057,9 @@ Framework-owned values such as <code>EXEC.ID</code>,
 corresponding <code>CASE.*</code>, <code>RUN.*</code>,
 <code>ACTIONS.*</code>, <code>TOOL.*</code>, and <code>DB.*</code>
 aliases, remain authoritative even if they appear in the input
-<code>case</code> map. <code>EXEC.STAGES</code> is not a 3.4.2 Context
-node; Stage history remains in the legacy <code>CASE.STAGES</code>
-evidence view.</p>
+<code>case</code> map. <code>EXEC.STAGES</code> is not a canonical
+Context node; Stage history remains in the legacy
+<code>CASE.STAGES</code> evidence view.</p>
 <p>Each invocation writes:</p>
 <pre class="text"><code>output/debug/&lt;debugId&gt;/
 ├── case.log
@@ -4107,7 +4107,7 @@ containment before reads and writes.</p>
 <div class="sourceCode" id="cb90"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.4.2&quot;</span><span class="fu">,</span></span>
+<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.5.0&quot;</span><span class="fu">,</span></span>
 <span id="cb90-4"><a href="#cb90-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb90-5"><a href="#cb90-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb90-6"><a href="#cb90-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -4461,28 +4461,28 @@ META
 └── TOOL, DBHELPER, MQHELPER (curated invocation metadata)
 output
 └── current Action/attempt-local result; unavailable outside that Action scope</code></pre>
-<p><code>EXEC.MODE</code> is <code>testcase</code> for a normal run and
-<code>debug</code> for standalone debug. <code>EXEC.INPUT</code>,
-<code>EXEC.VARS</code>, and <code>EXEC.ACTIONS</code> are the same
-mutable runtime state used by both modes, not parallel copies. The
-TestCase adapter overlays current Stage caller/input values onto
-<code>EXEC.INPUT</code> for the active Stage; Stage values win over
-Case-level values on collision and the Case-level values are restored
-after the Stage. Framework-owned fields such as <code>EXEC.ID</code>,
-<code>EXEC.MODE</code>, <code>EXEC.OUTPUT_DIR</code>,
-<code>EXEC.INPUT</code>, <code>EXEC.VARS</code>, and
-<code>EXEC.ACTIONS</code> cannot be overwritten by Case or sidecar
-input. There is intentionally no <code>EXEC.TOOL</code>,
-<code>EXEC.DB</code>, <code>EXEC.MQ</code>, <code>EXEC.OUTPUT</code>,
-<code>EXEC.CALL</code>, <code>EXEC.INVOCATION</code>,
-<code>EXEC.STAGE</code>, or <code>EXEC.STAGES</code>: helper/resource
-state remains internal, root-level <code>TOOL.*</code> /
-<code>DB.*</code> remain compatibility or transient views, and Action
-result/evidence is consumed through local <code>output</code> while
-active and <code>EXEC.ACTIONS</code> after publication. Stage/Template
-status, timing, and history remain in the execution result/evidence
-model and legacy <code>CASE.STAGES</code>. Ordinary 3.4.2 TestCase and
-debug execution has no <code>EXEC.LOAD</code>; the 3.5.0
+<p><code>EXEC.MODE</code> is <code>testcase</code>, <code>debug</code>,
+or <code>load</code>. <code>EXEC.LOAD</code> exists only when
+<code>EXEC.MODE=load</code>; ordinary TestCase and debug execution do
+not materialize it. <code>EXEC.INPUT</code>, <code>EXEC.VARS</code>, and
+<code>EXEC.ACTIONS</code> are the same mutable runtime state used by all
+modes, not parallel copies. The TestCase adapter overlays current Stage
+caller/input values onto <code>EXEC.INPUT</code> for the active Stage;
+Stage values win over Case-level values on collision and the Case-level
+values are restored after the Stage. Framework-owned fields such as
+<code>EXEC.ID</code>, <code>EXEC.MODE</code>,
+<code>EXEC.OUTPUT_DIR</code>, <code>EXEC.INPUT</code>,
+<code>EXEC.VARS</code>, and <code>EXEC.ACTIONS</code> cannot be
+overwritten by Case or sidecar input. There is intentionally no
+<code>EXEC.TOOL</code>, <code>EXEC.DB</code>, <code>EXEC.MQ</code>,
+<code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
+<code>EXEC.INVOCATION</code>, <code>EXEC.STAGE</code>, or
+<code>EXEC.STAGES</code>: helper/resource state remains internal,
+root-level <code>TOOL.*</code> / <code>DB.*</code> remain compatibility
+or transient views, and Action result/evidence is consumed through local
+<code>output</code> while active and <code>EXEC.ACTIONS</code> after
+publication. Stage/Template status, timing, and history remain in the
+execution result/evidence model and legacy <code>CASE.STAGES</code>. The
 <code>att-load/v1.0</code> adapter adds the load-only
 <code>EXEC.LOAD</code> namespace described below.</p>
 <h3 id="load-v1-context-3.5.0">Load V1 Context (3.5.0)</h3>
@@ -4571,12 +4571,12 @@ load run’s <code>samples/</code> or <code>failures/</code> directories
 and never enter ordinary functional-run artifacts.</p>
 <p>The shortest end-to-end smoke commands are:</p>
 <div class="sourceCode" id="cb96"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb96-1"><a href="#cb96-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed.yaml</span>
-<span id="cb96-2"><a href="#cb96-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-rate.yaml <span class="at">--format</span> json</span>
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb96-1"><a href="#cb96-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml</span>
+<span id="cb96-2"><a href="#cb96-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--format</span> json</span>
 <span id="cb96-3"><a href="#cb96-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/tool.yaml <span class="at">--duration</span> 100ms <span class="at">--run-id</span> load-tool-example</span></code></pre></div>
 <p><code>examples/load/README.md</code> is the maintained copyable
 reference for Template, Flow, Tool, DB/MQ pool sizing, thresholds,
-evidence, CLI overrides, and invalid configurations. All four examples
+evidence, CLI overrides, and invalid configurations. All six examples
 are schema- and dependency-validated by <code>LoadAcceptanceTest</code>;
 that test also launches the real <code>att.FrameworkRunner load</code>
 CLI for short closed and arrival-rate scenarios and checks the persisted

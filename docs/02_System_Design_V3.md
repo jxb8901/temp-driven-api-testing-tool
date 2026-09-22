@@ -1,13 +1,13 @@
-# ATT V3.4.2 System Design
+# ATT V3.5.0 System Design
 
 **Document Status:** Implemented
 
-**Target Version:** ATT 3.4.2
-**Last Updated:** 2026-09-19
+**Target Version:** ATT 3.5.0
+**Last Updated:** 2026-09-22
 
 ## 1. Purpose
 
-ATT V3.4.2 defines one execution-neutral expression Context for ordinary TestCase and standalone debug execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. Tool, DB, and MQ executors adapt their native outcomes to one operation-result boundary, then the Action runner owns status, retry, and publication into one stable result/evidence envelope. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug invokes the same runtime with a synthetic Case.
+ATT V3.5.0 defines one execution-neutral expression Context for ordinary TestCase, standalone debug, and load execution. `EXEC` and curated immutable `META` are canonical roots; `output` remains Action-local, while deterministic legacy aliases remain readable with migration warnings. Tool, DB, and MQ executors adapt their native outcomes to one operation-result boundary, then the Action runner owns status, retry, and publication into one stable result/evidence envelope. A Flow is called only from a Template, enters a fresh Action scope, and publishes only its aggregate invocation result plus explicit `EXEC.VARS` assignments; debug and load invoke the same runtime with their mode-specific adapters.
 
 ```text
 Excel test case -> Stage -> Template -> Action / Flow -> Action -> Tool / DB / built-in
@@ -46,7 +46,7 @@ V3.4 additionally provides:
 - verbose human `run` output by default, with `--verbose` retained as a compatibility spelling and `--quiet` as the explicit suppression; and
 - all-workbook `snapshot` generation by default when no selector is supplied, with `--all` retained as an explicit spelling.
 
-V3.4.2 additionally provides:
+The V3.4.2 compatibility baseline additionally provides:
 
 - one executor-neutral operation-result boundary for generic Tools, DB operations, MQ operations, and future helpers;
 - helper-native evidence under `output.evidence.<kind>.invocations[]` while the Action is active and under `EXEC.ACTIONS.<id>.output.evidence.<kind>.invocations[]` after publication;
@@ -137,9 +137,13 @@ The canonical execution contract is:
 ```text
 EXEC
 ├── ID, MODE, STARTED_AT, OUTPUT_DIR
-├── INPUT   (TestCase data plus the current Stage caller/input values)
+├── INPUT   (TestCase/load data plus current Stage or iteration input values)
 ├── VARS    (mutable assigned variables)
-└── ACTIONS (current Stage's completed/published Action results)
+├── ACTIONS (current Stage's completed/published Action results)
+└── LOAD    (only when EXEC.MODE=load)
+    ├── RUN_ID, MODEL, USER_ID, ITERATION_ID
+    ├── ITERATION, PHASE
+    └── optional RUN_STARTED_AT
 META
 ├── PROJECT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL
 └── DBHELPER, MQHELPER (curated safe component metadata)
@@ -147,28 +151,30 @@ output
 └── current Action/attempt-local result
 ```
 
-`EXEC` deliberately has no `TOOL`, `DB`, `MQ`, `OUTPUT`, `LOAD`, `CALL`,
-`INVOCATION`, `STAGE`, or `STAGES` child. Helper/resource state remains
-internal; existing root-level `TOOL.*` and `DB.*` structures may remain in
-internal or persisted historical/result compatibility views only and never
-define supported expression APIs or canonical storage. Helper identity may be
-exposed through curated `META.TOOL`, `META.DBHELPER`, and `META.MQHELPER`
+`EXEC.LOAD` is a load-only child; ordinary TestCase and debug contexts do not
+materialize it, and root-level `LOAD.*` remains forbidden. Helper/resource
+state remains internal; existing root-level `TOOL.*` and `DB.*` structures may
+remain in internal or persisted historical/result compatibility views only and
+never define supported expression APIs or canonical storage. Helper identity may
+be exposed through curated `META.TOOL`, `META.DBHELPER`, and `META.MQHELPER`
 metadata where there is a concrete expression use case.
 
-`EXEC.MODE` is `testcase` or `debug`. A TestCase adapter prepares the current
-Stage's `EXEC.INPUT` from Case-level input and current-Stage values; when the
-same key exists at both levels, the current Stage value wins only while that
-Stage is active. There is intentionally no canonical `EXEC.STAGES` or
-`EXEC.STAGE`. Stage/Template status, timing, and execution history remain in
-the execution result/evidence model; `CASE.STAGES.*` is a persisted result view,
-not an expression namespace. `EXEC.ACTIONS` is the current Action scope and is
-cleared when the next Stage starts; the legacy `ACTIONS.*` alias is only the
-compatibility spelling for that same current scope.
+`EXEC.MODE` is `testcase`, `debug`, or `load`; `EXEC.LOAD` exists only when
+`EXEC.MODE=load`. A TestCase adapter prepares the current Stage's `EXEC.INPUT`
+from Case-level input and current-Stage values; when the same key exists at both
+levels, the current Stage value wins only while that Stage is active. There is
+intentionally no canonical `EXEC.STAGES` or `EXEC.STAGE`. Stage/Template
+status, timing, and execution history remain in the execution result/evidence
+model; `CASE.STAGES.*` is a persisted result view, not an expression namespace.
+`EXEC.ACTIONS` is the current Action scope and is cleared when the next Stage
+starts; the legacy `ACTIONS.*` alias is only the compatibility spelling for that
+same current scope.
 
 Lifecycle/result fields such as status, duration, error, diagnostic,
 environment, and debug input remain in the execution result and legacy Case
 adapter. They are not promoted to new `EXEC` fields; the public `EXEC` tree
-stays limited to the seven nodes shown above.
+stays limited to the documented common nodes plus the load-only `EXEC.LOAD`
+node shown above.
 
 | Root | Meaning |
 |---|---|

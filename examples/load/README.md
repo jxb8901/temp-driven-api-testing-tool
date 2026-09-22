@@ -26,6 +26,17 @@ load:
 
 `load.duration` 是唯一必填的 timing 欄位；`warmup`、`rampUp` 和 `rampDown` 可省略，省略時等同於零。實際可直接執行的完整例子見 [`closed.yaml`](closed.yaml)。
 
+## 1.1 最短 smoke commands
+
+以下兩個例子使用包內 deterministic `sample.getAcDate` Tool，約在數秒內完成，適合先確認 CLI、scheduler、summary 和 report 路徑：
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
+```
+
+`closed.yaml` 和 `arrival-rate.yaml` 保留 30 秒 warm-up、1 分鐘 ramp-up、5 分鐘 measured duration 和 30 秒 ramp-down，作為較接近實際 workload 的完整例子。
+
 ## 2. 完整 closed scenario
 
 ```yaml
@@ -212,7 +223,15 @@ Template、Flow 和 Tool 的 reusable component 仍使用 `EXEC.INPUT.*`、`EXEC
 ./att.sh load examples/load/arrival-rate.yaml --format json
 ```
 
-Human output 顯示 validation pass、model、target 和 scenario path。`--format json` 的 stdout 是一個 JSON document，包含 effective `scenario` 和 resolved `target`；錯誤則返回 exit code `2`，並保留 scenario file、field/path 和建議。
+成功執行時，human output 使用固定的三行摘要：
+
+```text
+LOAD PASS | model=closed | runId=<id>
+Report: <absolute path>/output/load/<id>/report/index.html
+Metrics: { ... }
+```
+
+`--format json` 的 stdout 是完整的 load result/summary JSON，包括 `status`、`exitCode`、`runId`、report-safe `scenario`、`timing`、bounded `metrics`、`thresholds`、resource diagnostics 和可選 evidence；它不是另一個獨立的 resolved-target object。錯誤則返回 exit code `2`，並保留 scenario file、field/path 和建議。
 
 以下配置會在 scheduler 前失敗：
 
@@ -295,6 +314,6 @@ Issue #25 的整合檢查由 Maven 測試自動執行：
 mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
 ```
 
-`LoadAcceptanceTest` 會先解析並驗證本目錄全部四個例子，再以真正的 CLI entry point 執行 closed、普通 arrival-rate 及 cap/drop saturation workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出，並檢查 configured arrival、achieved scheduling、completed TPS、scheduled/started/dropped 會一路保留到最終 report。`LoadCrossModeTest`、`ClosedVuSchedulerTest` 和 `FixedArrivalRateSchedulerTest` 覆蓋相同 component 的跨模式及兩種 scheduler lifecycle；`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection、DB/MQ resource diagnostics 和 HTML；DB/MQ pooling suites 覆蓋 reuse、timeout、exclusive lease、cancellation cleanup 和 deterministic shutdown。
+`LoadAcceptanceTest` 會先解析並驗證本目錄全部六個例子，再以真正的 CLI entry point 執行 closed、普通 arrival-rate 及 cap/drop saturation workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出，並檢查 configured arrival、achieved scheduling、completed TPS、scheduled/started/dropped 會一路保留到最終 report。`LoadCrossModeTest`、`ClosedVuSchedulerTest` 和 `FixedArrivalRateSchedulerTest` 覆蓋相同 component 的跨模式及兩種 scheduler lifecycle；`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection、DB/MQ resource diagnostics 和 HTML；DB/MQ pooling suites 覆蓋 reuse、timeout、exclusive lease、cancellation cleanup 和 deterministic shutdown。
 
 這是可重複的 ATT self-overhead gate，不是 SUT microbenchmark：它檢查每成功 iteration 不產生無界 Case/log churn、Context 不跨 iteration 共享、scheduler lag/metrics 保持有界、pool/resource cleanup 及 report/evidence retention 受策略控制。V1 不承諾 distributed/Poisson/weighted multi-scenario、rendezvous、adaptive pool 或 target CPU/memory benchmarking。

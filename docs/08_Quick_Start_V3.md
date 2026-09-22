@@ -1,8 +1,8 @@
-# ATT V3.4.2 新手入門
+# ATT V3.5.0 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.4.2 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V3.5.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug、load 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.4.2 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.5.0 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
@@ -13,7 +13,7 @@ test case --1:n stage--> template --1:n action--> tool
 
 Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
 
-### V3.4.2 Tool 選擇與共同 Action 結果
+### V3.5.0 Tool 選擇與共同 Action 結果
 
 新增 framework-native 或可重用能力時，先使用 call-backed Tool：它在 ATT typed runtime 中執行，保留 String、Number、Boolean、null、List、Context value 及 nested call 的原生型別。
 
@@ -78,7 +78,7 @@ tools:
       requestFile: /tmp/request.xml
 ```
 
-Template 使用 `case` 和 `stage`；Flow 可用 `case`、`stage`、`inputs`；Tool 使用根 `arguments` 或所選 group 下 `tools.<localKey>.arguments`。`--input` 會覆蓋自動發現的 sidecar。ATT 會建立合成 Case，例如 `DEBUG.template.PAYMENT_INVOKE`，但不會讓輸入檔改寫框架擁有的 `EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 或對應的 legacy aliases；`EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.STAGES` 都不是 3.4.2 的 canonical 節點。
+Template 使用 `case` 和 `stage`；Flow 可用 `case`、`stage`、`inputs`；Tool 使用根 `arguments` 或所選 group 下 `tools.<localKey>.arguments`。`--input` 會覆蓋自動發現的 sidecar。ATT 會建立合成 Case，例如 `DEBUG.template.PAYMENT_INVOKE`，但不會讓輸入檔改寫框架擁有的 `EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 或對應的 legacy aliases；`EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.STAGES` 都不是 canonical 節點。
 
 結果只寫入 `output/debug/<debugId>/`（可由 `--output-dir` 覆蓋）：`case.log` 是人可讀執行記錄，`result.yaml` 是機器可讀總結果，`artifacts/` 保存 payload、saveAs 及 `case.yaml`。Exit code 為 `0 PASS`、`1 FAIL`、`2` 輸入／驗證錯誤、`3` runtime 錯誤；debug 不會建立或更新普通 run 的 `latest-run.yaml`。
 
@@ -232,8 +232,8 @@ output/debug/<debugId>/artifacts/case.yaml
 ATT 3.5.0 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
 
 ```sh
-./att.sh load examples/load/closed.yaml
-./att.sh load examples/load/arrival-rate.yaml --format json
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
 ./att.sh load examples/load/tool.yaml --duration 100ms --run-id quick-tool
 ```
 
@@ -289,7 +289,7 @@ validate + plan
 
 只有具有 `COMPLETE` manifest 的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 保留在 `output/<RunID>` 供除錯，但不會成為 latest；重試同一 Run ID 前需先移走或清理該未完成目錄。
 
-V3.4.2 沿用既有狀態及聚合契約，不可混淆：
+V3.4.2 compatibility baseline 沿用既有狀態及聚合契約，不可混淆：
 
 | 狀態 | 意義 | 例子 |
 |---|---|---|
@@ -361,7 +361,7 @@ Flow 不再有 `inputs`、`outputs` 或調用端 `with`。每個 Flow invocation
 
 Action ID 只須在同一個 Stage／Template／Flow scope 內唯一；不同或重複的 Flow invocation 可以重用內部 ID，同一 scope 內重名仍會在 validate 時失敗。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
 
-V3.4.2 最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
+V3.4.2 compatibility baseline 的最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
 
 ### 3.2 使用 V3.4 expression、evidence、console 及命名 SQL
 
@@ -1016,7 +1016,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.4.2",
+  "attVersion": "3.5.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1167,4 +1167,4 @@ assert: "${EXEC.ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、報告、打包及診斷內容見 [ATT V3.4.2 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、load、報告、打包及診斷內容見 [ATT V3.5.0 Reference Manual](09_Reference_Manual_V3.md)。

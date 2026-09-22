@@ -25,7 +25,7 @@ class LoadAcceptanceTest {
     @Test void everyDocumentedExampleResolvesAndValidatesBeforeScheduling() throws Exception {
         Path root = projectRoot();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
-        List<String> examples = Arrays.asList("closed-minimal.yaml", "closed.yaml", "arrival-rate.yaml", "tool.yaml");
+        List<String> examples = Arrays.asList("closed-minimal.yaml", "closed-smoke.yaml", "closed.yaml", "arrival-smoke.yaml", "arrival-rate.yaml", "tool.yaml");
         for (String name : examples) {
             Path scenarioFile = root.resolve("examples/load").resolve(name);
             LoadScenario scenario = new LoadScenarioLoader(root).load(scenarioFile);

@@ -1,0 +1,11 @@
+schemaVersion: att-load/v1.0
+
+target:
+  type: tool
+  id: sample.getAcDate
+
+load:
+  arrivalRate: 2/s
+  duration: 2s
+  maxConcurrent: 2
+  overloadPolicy: drop

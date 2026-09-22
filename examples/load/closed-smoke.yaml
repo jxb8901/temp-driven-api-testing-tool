@@ -1,0 +1,9 @@
+schemaVersion: att-load/v1.0
+
+target:
+  type: tool
+  id: sample.getAcDate
+
+load:
+  users: 1
+  duration: 2s
