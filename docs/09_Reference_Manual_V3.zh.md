@@ -1673,33 +1673,7 @@ config/
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-以下是一个使用直接 DB/MQ Action 的 package 所需的最小完整 `att-config/v2.6` 配置；如果 package 已有 `tools` 或 `toolGroups`，两份文件都应保持相同的 registry：
-
-```yaml
-# config/environments/sit.yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: SIT
-timeoutMs: 10000
-templates: {root: templates}
-testcase: {root: testcase}
-dbhelpers: [config/dbhelpers/sit/orders.yaml]
-mqhelpers: [config/mqhelpers/sit/payment.yaml]
-tools: {}
-```
-
-```yaml
-# config/environments/uat.yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: UAT
-timeoutMs: 10000
-templates: {root: templates}
-testcase: {root: testcase}
-dbhelpers: [config/dbhelpers/uat/orders.yaml]
-mqhelpers: [config/mqhelpers/uat/payment.yaml]
-tools: {}
-```
+可直接使用的完整 global config 已提交在 `config/environments/sit.yaml` 和 `config/environments/uat.yaml`；请直接复制这些文件作为例子。两份文件都保留与 `config/config.yaml` 相同的 `toolGroups` 和 global `tools` registry，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。不要把共享 registry 替换为 `tools: {}` 或 `toolGroups: []`。
 
 SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../examples/environments/README.md)。
 

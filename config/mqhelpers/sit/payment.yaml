@@ -1,0 +1,23 @@
+schemaVersion: att-mqhelper/v1.0
+id: payment
+name: Payment MQ
+description: SIT payment request and reply queues
+connection:
+  queueManager: SITQM1
+  host: sit-mq.example.internal
+  port: 1414
+  channel: SIT.APP.SVRCONN
+  username: "${ENV:PAYMENT_MQ_USERNAME}"
+  password: "${ENV:PAYMENT_MQ_PASSWORD}"
+message:
+  ccsid: 1208
+  format: MQSTR
+  persistence: asQueue
+requestReply:
+  waitMs: 10000
+pool:
+  maxSize: 20
+  minIdle: 2
+  borrowTimeout: 2s
+evidence:
+  payload: metadata

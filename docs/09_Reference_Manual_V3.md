@@ -1807,33 +1807,7 @@ config/
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-The following are complete minimal `att-config/v2.6` files for a package whose resources are used directly by Actions. Keep any existing `tools` or `toolGroups` definitions identical in both files:
-
-```yaml
-# config/environments/sit.yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: SIT
-timeoutMs: 10000
-templates: {root: templates}
-testcase: {root: testcase}
-dbhelpers: [config/dbhelpers/sit/orders.yaml]
-mqhelpers: [config/mqhelpers/sit/payment.yaml]
-tools: {}
-```
-
-```yaml
-# config/environments/uat.yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: UAT
-timeoutMs: 10000
-templates: {root: templates}
-testcase: {root: testcase}
-dbhelpers: [config/dbhelpers/uat/orders.yaml]
-mqhelpers: [config/mqhelpers/uat/payment.yaml]
-tools: {}
-```
+The executable complete configs are checked in at `config/environments/sit.yaml` and `config/environments/uat.yaml`; use those files as the copyable examples. They preserve the same `toolGroups` and global `tools` registry as `config/config.yaml`, including `invokePaymentApi` and the `sample.getAcDate` tool used by `examples/load/closed-smoke.yaml`. Do not replace that shared registry with `tools: {}` or `toolGroups: []`.
 
 The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../examples/environments/README.md).
 

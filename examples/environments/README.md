@@ -19,55 +19,37 @@ All paths are package-relative. Keep any existing package `tools`, `toolGroups`,
 
 ## Complete environment configs
 
-`config/environments/sit.yaml`:
+The executable, checked-in configs are the actual files under `config/environments/`:
+
+- `config/environments/sit.yaml`
+- `config/environments/uat.yaml`
+
+Use those files as the copyable examples; they are intentionally complete package configs, not abbreviated overlays.
+
+Both files preserve the common registry from `config/config.yaml`:
 
 ```yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: SIT
-timeoutMs: 10000
-caseLog: {yamlAnchors: false}
-templates: {root: templates}
-testcase: {root: testcase}
-run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
-execution:
-  processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
-report:
-  mode: append-to-copy
-  fileNamePattern: "${suiteName}.result.xlsx"
-  columns: {}
-xml: {namespaceMode: ignore}
-toolGroups: []
-tools: {}
-dbhelpers: [config/dbhelpers/sit/orders.yaml]
-mqhelpers: [config/mqhelpers/sit/payment.yaml]
+toolGroups:
+  - config/tools/sample.yaml
+  - config/tools/fpp.yaml
+  - config/tools/orders-db.yaml
 ```
 
-`config/environments/uat.yaml` is the same complete config with `environment: UAT` and the two descriptor paths changed to `uat`:
+The global `tools` map is also copied unchanged in both files, including `invokePaymentApi`, `selectCtxn`, `grepFromAppLogs`, `getAppLogs`, `genEndToEndId`, `getAcDate`, and `getSeq`. This is required because `PAYMENT_INVOKE` calls `invokePaymentApi` and `examples/load/closed-smoke.yaml` calls `sample.getAcDate`. Only `environment` and the DB/MQ descriptor paths differ:
 
 ```yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
+# SIT
+environment: SIT
+dbhelpers: [config/dbhelpers/sit/orders.yaml]
+mqhelpers: [config/mqhelpers/sit/payment.yaml]
+
+# UAT
 environment: UAT
-timeoutMs: 10000
-caseLog: {yamlAnchors: false}
-templates: {root: templates}
-testcase: {root: testcase}
-run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
-execution:
-  processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
-report:
-  mode: append-to-copy
-  fileNamePattern: "${suiteName}.result.xlsx"
-  columns: {}
-xml: {namespaceMode: ignore}
-toolGroups: []
-tools: {}
 dbhelpers: [config/dbhelpers/uat/orders.yaml]
 mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-If the package already has global `tools` or `toolGroups`, copy the same definitions into both files. Do not create environment-specific helper or Action IDs.
+Do not replace the shared `toolGroups` or `tools` definitions with `[]` or `{}`. Do not create environment-specific helper or Action IDs.
 
 See the DB/MQ descriptor, identical Action, CLI, CI, and secrets examples below.
 
@@ -189,6 +171,8 @@ actions:
 `db: orders` and `mq.payment...` are logical capability references, not physical endpoint names. Avoid environment-specific Action IDs or branches such as `orders_sit` or `if environment == UAT` solely to choose infrastructure.
 
 ## CLI and CI usage
+
+The package includes `templates/PAYMENT_INVOKE/debug.yaml`, so the documented Template debug command is runnable without creating an additional sidecar. The DB/MQ environment variables shown above must be supplied by the local shell or CI secret store before loading either config.
 
 ```sh
 # SIT

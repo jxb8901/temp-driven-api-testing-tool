@@ -291,35 +291,18 @@ config/
 └── mqhelpers/uat/payment.yaml
 ```
 
-SIT 與 UAT 的 global config 只改 environment label 和 resource descriptor path：
+兩份可直接使用的 global config 已放在 `config/environments/sit.yaml` 和 `config/environments/uat.yaml`；請直接複製這兩個完整檔案，不要建立只有 `tools: {}` 或 `toolGroups: []` 的縮略 overlay。
+
+兩份 config 都保留相同的 Tool registry：
 
 ```yaml
-# config/environments/sit.yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: SIT
-timeoutMs: 10000
-templates: {root: templates}
-testcase: {root: testcase}
-dbhelpers: [config/dbhelpers/sit/orders.yaml]
-mqhelpers: [config/mqhelpers/sit/payment.yaml]
-tools: {}
+toolGroups:
+  - config/tools/sample.yaml
+  - config/tools/fpp.yaml
+  - config/tools/orders-db.yaml
 ```
 
-```yaml
-# config/environments/uat.yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: UAT
-timeoutMs: 10000
-templates: {root: templates}
-testcase: {root: testcase}
-dbhelpers: [config/dbhelpers/uat/orders.yaml]
-mqhelpers: [config/mqhelpers/uat/payment.yaml]
-tools: {}
-```
-
-若 package 有既有 `tools` 或 `toolGroups`，兩份 config 都保留相同的 registry；不要因環境而複製 Tool/Action ID。DB descriptors 保持 `id: orders`，只改 JDBC URL 等 topology；MQ descriptors 保持 `id: payment`，只改 host、queue manager、port、channel。DB 的 URL、username/password 和 string-valued connection properties 支援完整 `${ENV:NAME}`；MQ 3.5.x 只有 username/password 支援該解析，host、queue manager、channel 和 numeric port 應直接寫在環境 descriptor。
+global `tools` map 也必須相同，至少包括 `invokePaymentApi` 和由 `closed-smoke.yaml` 使用的 `sample.getAcDate`。兩份檔案只改 `environment` label 及 DB/MQ descriptor path。DB descriptors 保持 `id: orders`，只改 JDBC URL 等 topology；MQ descriptors 保持 `id: payment`，只改 host、queue manager、port、channel。DB 的 URL、username/password 和 string-valued connection properties 支援完整 `${ENV:NAME}`；MQ 3.5.x 只有 username/password 支援該解析，host、queue manager、channel 和 numeric port 應直接寫在環境 descriptor。
 
 相同的 Action 可同時用於 SIT 和 UAT：
 

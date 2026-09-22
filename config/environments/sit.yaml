@@ -1,0 +1,124 @@
+schemaVersion: att-config/v2.6
+outputDirectory: output
+environment: SIT
+timeoutMs: 10000
+caseLog:
+  yamlAnchors: false
+testcase:
+  root: testcase
+
+run:
+  id:
+    default: timestamp
+    timestampFormat: yyyyMMdd-HHmmss
+
+templates:
+  root: templates
+
+execution:
+  processOutput:
+    memoryLimitBytes: 65536
+    artifactLimitBytes: 104857600
+
+toolGroups:
+  - config/tools/sample.yaml
+  - config/tools/fpp.yaml
+  - config/tools/orders-db.yaml
+
+dbhelpers:
+  - config/dbhelpers/sit/orders.yaml
+mqhelpers:
+  - config/mqhelpers/sit/payment.yaml
+
+report:
+  mode: append-to-copy
+  fileNamePattern: "${suiteName}.result.xlsx"
+  html:
+    caseLogInlineLimitBytes: 32768
+  columns:
+    result: Test Result
+    durationMs: Duration(ms)
+    expectedResult: Expected Result
+    actualResult: Actual Result
+    caseLog: Case Log
+    runTime: Run Time
+
+tools:
+  invokePaymentApi:
+    name: Invoke Payment API
+    description: Invoke the payment API with a rendered request file
+    command: [./tools/invoke_payment_api.sh, "${input.requestFile}", "${input.environment}"]
+    output: xml
+    arguments:
+      requestFile:
+        name: Request File
+        description: Rendered payment request XML file
+        required: true
+      environment:
+        name: Environment
+        description: Target execution environment
+        required: true
+  selectCtxn:
+    name: Select CT records
+    description: Query transaction records
+    command: [./tools/select_ct_txn.sh, "${input.caseId}", "${input.txnRef}"]
+    output: yaml
+    arguments:
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true
+      txnRef:
+        name: Transaction Reference
+        description: Optional transaction reference
+        required: false
+  grepFromAppLogs:
+    name: Grep application logs
+    description: Find one or more keywords in application logs
+    command: [./tools/grep_from_app_logs.sh, "${input.logText}", "${input.keywords}"]
+    output: yaml
+    arguments:
+      logText:
+        name: Log Text
+        description: Application log text to search
+        required: true
+      keywords:
+        name: Keywords
+        description: Ordered YAML array of literal keywords
+        required: true
+  getAppLogs:
+    name: Get application logs
+    description: Collect application logs for a case
+    command: [./tools/get_app_logs.sh, "${input.caseId}"]
+    output: txt
+    arguments:
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true
+  genEndToEndId:
+    name: Generate end-to-end ID
+    description: Generate a unique end-to-end identifier
+    command: [./tools/gen_e2e_id.sh, "${input.caseId}"]
+    output: txt
+    arguments:
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true
+  getAcDate:
+    name: Get account date
+    description: Return the current account date
+    command: [./tools/get_ac_date.sh]
+    output: txt
+    arguments: {}
+  getSeq:
+    name: Get sequence
+    description: Generate a new sequence value
+    command: [./tools/get_seq.sh, "${input.caseId}"]
+    output: txt
+    arguments:
+      caseId:
+        name: Case ID
+        description: Full V2 Case ID
+        required: true

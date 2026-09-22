@@ -1,0 +1,11 @@
+schemaVersion: att-debug/v1.0
+case:
+  caseName: PAYMENT environment debug
+  debitAccount: 1234567890
+  creditAccount: 0987654321
+  amount: 100
+  currency: HKD
+stage:
+  key: invoke
+  values:
+    channel: WEB

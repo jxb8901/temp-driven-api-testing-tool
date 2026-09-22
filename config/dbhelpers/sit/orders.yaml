@@ -1,0 +1,25 @@
+schemaVersion: att-dbhelper/v2.5
+id: orders
+name: Orders database
+description: SIT order database
+connection:
+  url: jdbc:postgresql://sit-db.example.internal:5432/orders
+  username: "${ENV:ORDERS_DB_USERNAME}"
+  password: "${ENV:ORDERS_DB_PASSWORD}"
+  driverClass: org.postgresql.Driver
+  properties:
+    connectTimeout: "10"
+  readOnly: false
+  isolation: readCommitted
+statement:
+  timeoutSeconds: 30
+transaction:
+  scope: case
+  onEnd: rollback
+result:
+  maxRows: 1000
+  maxCellBytes: 1048576
+  maxBytes: 10485760
+evidence:
+  sql: full
+  parameters: masked
