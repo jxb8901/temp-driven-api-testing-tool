@@ -116,6 +116,26 @@ class DbHelperExecutorTest {
         executor.close();
     }
 
+    @Test void hikariLoadPoolIsRunScopedBoundedAndClassifiesAcquisitionTimeout() throws Exception {
+        DbHelperConfig config = new DbHelperConfig("hikari", "Hikari", "Hikari test DB", "jdbc:att-test:hikari",
+                "user", "secret", "", Collections.<String, String>emptyMap(), false, "driverDefault", 5,
+                "case", "rollback", 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+        att.load.HikariDbConnectionProvider provider = new att.load.HikariDbConnectionProvider();
+        att.load.HikariDbPool firstPool = provider.pool(config);
+        assertSame(firstPool, provider.pool(config));
+        Connection first = firstPool.borrow();
+        try {
+            assertEquals(1, firstPool.active());
+            assertThrows(DbConnectionProvider.PoolTimeoutException.class, firstPool::borrow);
+            assertEquals(1L, firstPool.borrowTimeouts());
+            assertTrue(firstPool.metrics().keySet().containsAll(java.util.Arrays.asList("active", "idle", "total", "waiting")));
+        } finally {
+            first.close();
+            provider.close();
+        }
+        assertTrue(driver.states.get("jdbc:att-test:hikari").closes >= 1);
+    }
+
     @Test void keepsRowsAsAListAndReportsLimitsAndDuplicateLabels() throws Exception {
         Map<String, DbHelperConfig> helpers = new LinkedHashMap<String, DbHelperConfig>();
         helpers.put("limited", db("limited", "jdbc:att-test:limits", "statement", "commit", 5, 1));

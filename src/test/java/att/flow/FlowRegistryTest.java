@@ -88,6 +88,27 @@ class FlowRegistryTest {
         assertThrows(IllegalArgumentException.class, () -> registry.get("common.invalid.v1"));
     }
 
+    @Test void freezesSelectedDependencyClosureForConcurrentIterationReads() throws Exception {
+        flow("leaf", valid("common.leaf.v1", "leafAction", "${CASE.value}"));
+        flow("caller", caller("common.caller.v1", "callLeaf", "common.leaf.v1"));
+        FlowRegistry registry = new FlowRegistry(root, root.resolve("templates"), false);
+        java.util.Map<String, Object> raw = new java.util.LinkedHashMap<String, Object>();
+        raw.put("type", "flow"); raw.put("use", "common.caller.v1");
+        att.template.StageTemplate template = new att.template.StageTemplate("Caller", root.resolve("templates/flows/caller"),
+                java.util.Collections.singletonList(new att.template.TemplateAction("call", raw, "att-template/v3.0")),
+                "att-template/v3.0", root.resolve("templates/flows/caller/flow.yaml"));
+
+        FlowRegistry frozen = registry.freezeFor(template);
+        assertEquals(2, frozen.parsedCount());
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(8);
+        try {
+            java.util.List<java.util.concurrent.Future<FlowDefinition>> futures = new java.util.ArrayList<java.util.concurrent.Future<FlowDefinition>>();
+            for (int index = 0; index < 32; index++) futures.add(pool.submit(() -> frozen.get("common.leaf.v1")));
+            for (java.util.concurrent.Future<FlowDefinition> future : futures) assertEquals("common.leaf.v1", future.get().id());
+        } finally { pool.shutdownNow(); }
+        assertNull(frozen.get("common.invalid.v1"));
+    }
+
     @Test void rejectsMalformedNestedFlowUseBeforeRuntime() throws Exception {
         flow("bad-use", "schemaVersion: att-flow/v3.0\nid: common.bad-use.v1\nname: Bad\ndescription: Bad\nactions:\n  call: {type: flow, use: bad}\n");
         IllegalArgumentException invalidUse = assertThrows(IllegalArgumentException.class,

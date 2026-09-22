@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.5.0 - 2026-09-22
+
+- Released `att-load/v1.0` scenario loading, CLI overrides, schema/semantic validation, Template/Flow/Tool target resolution, and compatibility-safe configuration guidance.
+- Unified load iterations with the shared `EXEC`/`META` runtime contract and reusable `IterationExecutor`; load-only scheduler state is exposed as `EXEC.LOAD`, inputs use `EXEC.INPUT`, and concurrent iteration state/output remains isolated.
+- Added a closed-VU scheduler with stable user identity and think-time semantics, plus a fixed arrival-rate scheduler with absolute planned due times, `maxConcurrent` capping, deterministic `drop` overload handling, and separate generator-drop accounting.
+- Added HikariCP database pooling and reusable MQ connection pooling with exclusive leases, bounded diagnostics, timeout classification, cancellation cleanup, and credential-safe resource evidence.
+- Added bounded-memory metrics and one-second time-series buckets, measured/warm-up phase separation, latency percentiles, throughput, concurrency, scheduler lag, and configured-versus-achieved arrival metrics.
+- Added threshold evaluation with stable exit codes (`0` PASS, `1` threshold failure, `2` validation/configuration failure, `3` runtime/infrastructure error) and explicit SUT-error versus generator-drop evidence.
+- Added `att-load-summary/v1.0` JSON/YAML summaries and self-contained offline HTML reports with secret-safe scenario projections, threshold diagnostics, resource diagnostics, and retained evidence links.
+- Added end-to-end CLI/report coverage, copyable closed/arrival/tool/DB/MQ examples, short smoke scenarios, release-gate checks, and compatibility coverage for existing run, debug, validation, and reporting workflows.
+
 ## 3.4.2 - 2026-09-19
 
 - Implemented Issue #32: Tool, DB, and MQ operations now converge on one Action result/evidence envelope. Current Action data remains available through local `output`, completed data through `EXEC.ACTIONS`, and helper-specific evidence is nested under `output.evidence`.

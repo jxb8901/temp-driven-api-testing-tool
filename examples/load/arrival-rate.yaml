@@ -1,0 +1,15 @@
+schemaVersion: att-load/v1.0
+target:
+  type: flow
+  id: common.compose.v1
+load:
+  arrivalRate: 100/s
+  warmup: 30s
+  rampUp: 60s
+  duration: 5m
+  rampDown: 30s
+  maxConcurrent: 500
+  overloadPolicy: drop
+thresholds:
+  droppedRate: "== 0%"
+  achievedArrivalRate: ">= 99%"

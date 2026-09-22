@@ -1,7 +1,7 @@
-# ATT V3.4.2 中文用户手册与参考手册
+# ATT V3.5.0 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.4.2
+版本：3.5.0
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -704,6 +704,10 @@ result:
 evidence:
   sql: full
   parameters: values
+pool:
+  maxSize: 20
+  minIdle: 2
+  connectionTimeout: 2s
 ```
 
 `connection.url` 必填；username、password 和 properties 中的值可写成完整的 `${ENV:NAME}` 环境变量引用。`driverClass` 可选，优先使用 JDBC service discovery。`readOnly` 是 ATT 的 update 拒绝边界，也会传给 JDBC Connection；它不能防止 vendor side effect。`isolation` 可为 `driverDefault`、`readUncommitted`、`readCommitted`、`repeatableRead` 或 `serializable`。
@@ -747,10 +751,11 @@ connection:
   password: "${ENV:MQ_PASSWORD}"
 message: {ccsid: 1208, format: MQSTR, persistence: asQueue}
 requestReply: {waitMs: 10000}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 evidence: {payload: metadata}
 ```
 
-MQ 仅可作为 `type: tool` Action 的主要 call：`mq.orders.send(queue=..., file=...)`、`mq.orders.receive(queue=..., waitMs=..., correlationId=...)` 或 `mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)`。Payload 按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion 判断 `replyReceived`。连接与 queue 按 invocation 创建并关闭，syncpoint 固定为 none；reply 文件只写一次到 Case output，evidence 不保存完整 payload 或 credential。IBM client jar 通过 Maven `ibm-mq` profile 或 package `lib/` 提供，默认 ATT build 不内置 vendor client。
+MQ 仅可作为 `type: tool` Action 的主要 call：`mq.orders.send(queue=..., file=...)`、`mq.orders.receive(queue=..., waitMs=..., correlationId=...)` 或 `mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)`。Payload 按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion 判断 `replyReceived`。MQ queue handle 仍是 invocation-scoped，不使用 syncpoint；load 模式会通过有界 pool 复用 physical Connection，并独占借用 lease，只会让失败的 Connection 失效，无消息的健康 Connection 会归还。`MQ_POOL_TIMEOUT` 与 MQ operation error 分开报告。Pool metrics 提供 active、idle、total、waiting、wait duration、create/failure、replacement 和 timeout 计数，且不包含 credentials。reply 文件只写一次到 Case output，evidence 不保存完整 payload 或 credential。IBM client jar 通过 Maven `ibm-mq` profile 或 package `lib/` 提供，默认 ATT build 不内置 vendor client。
 
 ##### DB Action
 
@@ -883,9 +888,9 @@ error: null
 
 update 使用 `rows: []`、`rowCount: 0` 与整数 `affectedRows`。重复 column label 是 ERROR，需在 SQL 加 alias。binary 使用 Base64，temporal 使用可移植字符串；LOB/cell/row/result 超限会失败而非截断。
 
-失败仍保留相同顶层形状：`success: false`、空 rows、零 rowCount、null affectedRows，以及经净化的 `error`（`type`、`message`、`sqlState`、`vendorCode`）。类型包括 `CONNECTION_ERROR`、`BIND_ERROR`、`SQL_ERROR`、`TIMEOUT`、`LIMIT_EXCEEDED`、`ROLLBACK_ONLY` 与 `FINALIZE_ERROR`。
+失败仍保留相同顶层形状：`success: false`、空 rows、零 rowCount、null affectedRows，以及经净化的 `error`（`type`、`message`、`sqlState`、`vendorCode`）。类型包括 `CONNECTION_ERROR`、`DB_POOL_TIMEOUT`、`BIND_ERROR`、`SQL_ERROR`、`TIMEOUT`、`LIMIT_EXCEEDED`、`ROLLBACK_ONLY` 与 `FINALIZE_ERROR`。
 
-Connection 的生命周期只与 dbhelper 实例和执行 thread 有关，与 Case 无关。ATT 为每个实例/thread 重用一个 Connection。Case 完成时对该 Case 已使用实例执行配置的 commit/rollback，但不关闭 Connection；thread 结束或 run 结束才关闭。
+Connection 的生命周期只与 dbhelper 实例和执行 thread 有关，与 Case 无关。ATT 为每个实例/thread 重用一个 Connection。Case 完成时对该 Case 已使用实例执行配置的 commit/rollback，但不关闭 Connection；thread 结束或 run 结束才关闭。load 模式下，每个 dbhelper 在 load-run owner 内拥有一个 HikariCP pool；Connection 按需借用，由一个 iteration thread 独占，在 Case finalize 或 abort 后归还。`DB_POOL_TIMEOUT` 与 SQL/SUT error 分开报告；pool metrics 提供 active、idle、total、waiting、borrow wait duration、borrow timeout 和 borrow failure，且不包含 credentials。
 
 新 Case 开始前，ATT 对该 thread 上每个已打开的 non-auto-commit Connection 做一次 rollback，以隔离不同 Case。若 rollback 异常，ATT 丢弃旧 Connection 并立即尝试 reconnect；这不会改变新 Case 状态。数据库仍不可用时，第一个实际 DB Action 才成为 ERROR。
 
@@ -1559,7 +1564,7 @@ inputs:
 ./att.sh debug flow common.compose.v1
 ```
 
-Flow 可用 `${EXEC.INPUT.source}` 读取 `inputs`；如果没有同名 Case 字段，也可以用兼容 alias `${EXEC.INPUT.source}` 读取。
+Flow 可用 `${EXEC.INPUT.source}` 读取 `inputs`；如果没有名为 `inputs` 的业务字段，旧定义仍可用只读兼容视图 `${CASE.inputs.source}`，但不会把整棵 `inputs` 子树重复写入 `EXEC.INPUT`。
 
 分组 Tool sidecar（`fpp.invokeApi` 对应 `config/tools/fpp.debug.yaml`）：
 
@@ -1622,7 +1627,7 @@ case:
   STAGES: {shouldNotReplace: true}
 ```
 
-即使输入包含这些字段，`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及对应的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。`EXEC.STAGES` 不是 3.4.2 Context 节点；Stage 历史仍由旧的 `CASE.STAGES` 证据视图保存。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
+即使输入包含这些字段，`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及对应的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。`EXEC.STAGES` 不是 canonical Context 节点；Stage 历史仍由旧的 `CASE.STAGES` 证据视图保存。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
 
 ### 退出码
 
@@ -1721,6 +1726,7 @@ tools: {}
 | `result.maxBytes` | `10485760` | 整数 1–1073741824，且不小于 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
 | `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感业务数据 |
+| `pool` | 默认值 | `maxSize` 默认 20、`minIdle` 默认 0、`connectionTimeout` 默认 2s；`maxSize` 为 1–10000，`minIdle` 不可大于 `maxSize`，timeout 至少 250ms |
 
 validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 会在执行前校验。
 
@@ -1806,7 +1812,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.4.2",
+  "attVersion": "3.5.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1906,7 +1912,61 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是两种执行模式共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.LOAD`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 internal 或 persisted historical/result compatibility view，不是受支持的 general expression API；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。Load-specific state 不属于本 3.4.2 contract。
+`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.0 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
+
+### Load V1 Context（3.5.0）
+
+每个 load iteration 使用与普通执行相同的 `EXEC`／`META` tree 和 Action 局部 `output`。`EXEC.MODE` 是 `load`；`EXEC.ID` 与 `EXEC.LOAD.ITERATION_ID` 相同；`EXEC.STARTED_AT` 是本 iteration 的开始时间；`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 均按 iteration 隔离。scheduler-owned fields 如下：
+
+| 路径 | 含义 |
+|---|---|
+| `EXEC.LOAD.RUN_ID` | enclosing load run identity，同一 load run 的 iterations 共用。 |
+| `EXEC.LOAD.MODEL` | `closed` 或 `arrivalRate`。 |
+| `EXEC.LOAD.USER_ID` | closed model 的稳定 Virtual User identity；arrival-rate 为 `null` 或 absent。 |
+| `EXEC.LOAD.ITERATION_ID` | load run 内全局唯一的 iteration identity。 |
+| `EXEC.LOAD.ITERATION` | scheduler sequence number。 |
+| `EXEC.LOAD.PHASE` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
+| `EXEC.LOAD.RUN_STARTED_AT` | 可选的 enclosing load-run start timestamp。 |
+
+Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；iteration identity 保留在 `EXEC.ID` 与 `EXEC.LOAD.*`，并排除 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../examples/load/README.md)。
+
+`att load` 会在 scheduler 启动前完成 scenario 和 target validation，再选择两个 scheduler 之一。closed mode 为 Virtual User 保持稳定 identity，等待 target 完成后才进入 think time 和下一次 iteration；arrival-rate mode 使用 absolute planned due time，`maxConcurrent` 已满时记录 generator `dropped`，不排队，也不算作 SUT failure。两个 scheduler 都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`。warm-up 是真实 traffic，但默认不计入 measured threshold aggregates；成功 iteration 默认只保留 metrics，配置 sampling 后只为有界 sampled success 创建带 `case.log` 和 `case.yaml` 的 physical iteration workspace；失败则在保留 diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的 `samples/` 或 `failures/`，不会污染普通 functional run artifacts。
+
+最短的端到端 smoke 命令如下：
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+```
+
+[`examples/load/README.md`](../examples/load/README.md) 是维护中的可复制参考，涵盖 Template、Flow、Tool、DB/MQ pool sizing、threshold、evidence、CLI override 和非法配置。`LoadAcceptanceTest` 会先校验全部六个例子的 schema 与 dependencies，再启动真正的 `att.FrameworkRunner load` CLI 执行短版 closed 与 arrival-rate scenario，并检查持久化 JSON、YAML 和离线 HTML report。
+
+### Load summary 与 HTML report contract
+
+`load-summary.json` 和 `load-summary.yaml` 共用稳定的 `att-load-summary/v1.0` contract。root-level 字段包括 `schemaVersion`、`status`（`PASS`、`FAIL` 或 `ERROR`）、`exitCode`、`runId`、`startedAt`、`endedAt`、`durationMs`、`scenario`、`timing`、`metrics`、`thresholds`、`resources`、可选的 `evidence`，以及相对于 run directory 的 `report: report/index.html`。JSON schema 位于 `schemas/att-load-summary-v1.0.schema.json`，schema catalog 以 `att-load-summary/v1.0` 注册。
+
+持久化的 `scenario` 是专用的 report-safe projection，只保留 target type/id、workload 和 execution timing、threshold configuration 与 evidence policy；任意业务 `inputs` 及 Tool `target.arguments` 不会写入 JSON、YAML 或 HTML 的 `window.ATT_LOAD_SUMMARY`。因此 CI 和离线工具可以消费 summary，而不会把 password、token、request body 或其他过大的 payload 写入 durable report artifacts。
+
+`timing.phases` 按 `WARMUP`、`RAMP_UP`、`STEADY`、`RAMP_DOWN` 顺序列出 configured start/end/duration window；`metrics.phases` 则提供实际 observed 的 scheduled/started/completed/failure/drop、throughput、latency、scheduler lag 和 concurrency aggregates。`WARMUP` 的 `measured` 是 `false`：traffic 仍保留在 run history，但 measured SLA aggregates 不包含它；其他 phase 仍属于 measured。没有事件的 phase 也会出现在 `timing.phases`，使 empty/edge run 具有稳定的 machine-readable shape。
+
+`resources.db` 和 `resources.mq` 只包含 bounded pool diagnostics，例如 pool size、active/idle、waiting 和 timeout/acquisition counts；不会包含 connection、queue handle、credential 或其他 live object。pool saturation 和 acquisition timeout 必须与 SUT failure 分开解读。`evidence.items[].path` 指向 `<runId>/samples/` 或 `<runId>/failures/` 下的 retained evidence，HTML report 会把每个 path 渲染为相对链接。
+
+`report/index.html` 是 self-contained、可离线打开的 performance report，显示 run identity/status、closed 或 arrival-rate semantics、phase/warm-up 分隔、aggregate metrics、threshold diagnostics、resource diagnostics、retained evidence links 和 bounded 一秒 time-series buckets。arrival-rate report 会明确区分 configured arrival rate、achieved scheduling rate、completed TPS 和 generator drops；drop 不属于 SUT error。报告链接到旁边的 JSON/YAML summary，但不嵌入 raw per-iteration samples 或 secrets；`window.ATT_LOAD_SUMMARY` 为离线工具提供同一份 bounded summary。
+
+`att load --profile` 沿用既有 profile 诊断契约，并在 load summary 同目录写出 `performance.json`。它记录 load execution/report phases、bounded load counters，以及共用的 schema、Template、payload 和 process counters，使 self-overhead gate 可重复执行；它不是 target CPU 或 memory benchmark。
+
+machine-readable 的 `metrics` 会输出配置负载（`configuredUsers`、`configuredArrivalRatePerSecond`、`configuredMaxConcurrent`）、iteration/scheduling 计数（`iterations`、`scheduled`、`measuredScheduled`、`started`、`measuredStarted`、`completed`、`success`、`failure`、`runtimeError`、`dropped`、`measuredDropped`）、并发（`activeVus`、`maxActiveVus`、`currentInFlight`、`maxInFlight`）、measured 结果（`warmupCompleted`、`measuredCompleted`、`sutErrorRate`、`runtimeErrorRate`、`droppedRate`、`completedThroughput`）、latency percentiles（`p50Ms`、`p95Ms`、`p99Ms`）、scheduler lag 及 grouped `errorClassifications`。percentiles 来自 bounded reservoir；`latencyMinMs`、`latencyMeanMs`、`latencyMaxMs` 和 `latencyObservationCount` 始终覆盖全部 measured observations 并保持 exact。runtime error 与 SUT failure 分开；generator drop 不会增加 `sutErrorRate`。`buckets` 以一秒 epoch-millisecond key 排序，每个 bucket 包含 `model`、`phase`、配置的 rate/concurrency、completed TPS、p95/p99、SUT/drop rate、active/in-flight、scheduler lag 和 error classifications。全局 latency 最多保留 4096 个 sample，每个 bucket 最多 256 个；time-series 最多保留 4096 个 bucket，超过后淘汰最旧 bucket，因此 memory 不会随 run 时长或 raw latency values 线性增长。
+
+Load threshold 中，`errorRate` 使用 `%`，`p95`／`p99` 使用 `ms`，`minThroughput` 使用 `/s` 或 `/m`，这些 common thresholds 对两种 workload 都适用。arrival-rate 另外支持 `droppedRate`（`%`）和 `achievedArrivalRate`（`%`、`/s` 或 `/m`）。`achievedArrivalRate` 使用 `%` 时表示 measured phase 的 `measuredStarted / measuredScheduled`；warm-up 不计入，ramp-up、steady 和 ramp-down 仍纳入 integrated measured schedule。使用 `/s` 或 `/m` 时表示整个 phase window 内实际 started 的平均速率，`/m` threshold 会先换算成每秒再比较。每个 threshold 都独立输出 expected expression、格式化 actual、PASS/FAIL status 和 failure diagnostic。load result 的 exit code 为：PASS `0`、已完成但 SLA threshold 失败 `1`、validation/configuration failure `2`、load runtime/infrastructure error `3`。`target.arguments` 只适用于 Tool target；Template 和 Flow target 会以带准确 field path 的 diagnostic 拒绝。
+
+Release gate 是可重复的整合检查，而不是 SUT microbenchmark：
+
+```sh
+mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
+```
+
+它检查两个 scheduler 的 CLI-to-report 路径，包括确定性的 arrival-rate cap/drop 以及 configured/achieved/completed metrics；Context deep-copy 与 iteration isolation、lazy success/failure workspace、有界 evidence 与 metrics reservoir、scheduler lag、process/file artifact、DB/MQ reuse、timeout、pool diagnostics 与 cleanup、threshold PASS/FAIL、summary schema、report rendering，以及既有 run/debug/validation compatibility test suite。Load V1 不承诺 distributed、Poisson/random pacing、weighted multi-scenario、rendezvous、adaptive pool、MQ handle pooling、XA/affinity 或 target CPU/memory benchmarking。
 
 常见作用域包括：
 

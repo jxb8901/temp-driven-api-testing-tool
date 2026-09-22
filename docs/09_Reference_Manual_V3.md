@@ -1,7 +1,7 @@
-# ATT V3.4.2 User Manual and Reference
+# ATT V3.5.0 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 3.4.2
+Version: 3.5.0
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -735,6 +735,11 @@ result:
 evidence:
   sql: full
   parameters: values
+
+pool:
+  maxSize: 20
+  minIdle: 2
+  connectionTimeout: 2s
 ```
 
 `id` is package-global, case-insensitive for uniqueness, and matches `^[A-Za-z_][A-Za-z0-9_-]*$`. The file requires `schemaVersion`, `id`, `name`, `description`, and `connection.url`. `statement`, `transaction`, `result`, and `evidence` are optional. Unknown fields are rejected except `x-*`. Referenced paths must remain inside the package, exist, and be unique after normalization.
@@ -890,9 +895,9 @@ error: null
 
 Updates use `rows: []`, `rowCount: 0`, and an integer `affectedRows`. Duplicate column labels are errors; add SQL aliases. Binary values use Base64, temporal values use portable strings, and LOB/cell/row/result limits fail instead of truncating.
 
-Failures keep the same object shape with `success: false`, empty rows, zero row count, null affected rows, and a sanitized `error` containing `type`, `message`, `sqlState`, and `vendorCode`. Types are `CONNECTION_ERROR`, `BIND_ERROR`, `SQL_ERROR`, `TIMEOUT`, `LIMIT_EXCEEDED`, `ROLLBACK_ONLY`, and `FINALIZE_ERROR`.
+Failures keep the same object shape with `success: false`, empty rows, zero row count, null affected rows, and a sanitized `error` containing `type`, `message`, `sqlState`, and `vendorCode`. Types are `CONNECTION_ERROR`, `DB_POOL_TIMEOUT`, `BIND_ERROR`, `SQL_ERROR`, `TIMEOUT`, `LIMIT_EXCEEDED`, `ROLLBACK_ONLY`, and `FINALIZE_ERROR`.
 
-Connections belong to a dbhelper instance and execution thread, not a Case. ATT reuses one Connection per instance/thread. Case completion applies the configured transaction action to instances used by that Case but does not close them. Before the next Case, every open non-auto-commit Connection on that thread is rolled back for isolation. A rollback exception discards the old Connection and triggers reconnect without changing the new Case status; failure of the first subsequent DB operation becomes `ERROR`.
+Connections belong to a dbhelper instance and execution thread, not a Case. ATT reuses one Connection per instance/thread. Case completion applies the configured transaction action to instances used by that Case but does not close them. Before the next Case, every open non-auto-commit Connection on that thread is rolled back for isolation. A rollback exception discards the old Connection and triggers reconnect without changing the new Case status; failure of the first subsequent DB operation becomes `ERROR`. In load mode, one HikariCP pool is created per dbhelper within the load-run owner; a Connection is borrowed lazily, exclusively held by one iteration thread, and returned after Case finalization or abort. `DB_POOL_TIMEOUT` is reported separately from SQL and SUT errors. Pool metrics expose active, idle, total, waiting, borrow wait duration, borrow timeouts, and borrow failures without exposing credentials.
 
 For Case-scope transactions, any SQL/JDBC error marks the instance rollback-only. Later calls in that Case return `ERROR` without executing, and finalization rolls back. Final outcomes appear at the fixed `${CASE.DB.<instance>}` path. Connections close when their worker thread shuts down or the run ends. Vendor DDL may commit implicitly despite ATT transaction settings.
 
@@ -947,6 +952,7 @@ connection:
   password: "${ENV:MQ_PASSWORD}"
 message: {ccsid: 1208, format: MQSTR, persistence: asQueue}
 requestReply: {waitMs: 10000}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 evidence: {payload: metadata}
 ```
 
@@ -964,7 +970,7 @@ requestOrder:
     )}
 ```
 
-`send` accepts `queue` and `file`; `receive` accepts `queue`, optional `waitMs`, and optional `correlationId`; `request` accepts `requestQueue`, `replyQueue`, `file`, and optional `waitMs`. Payloads are read as exact bytes. Request PUT captures MsgId and GET matches CorrelId. Reason 2033 is a successful no-message result (`received: false` or `replyReceived: false`), so a required reply must be asserted explicitly. MQ connections and queues are invocation-scoped and use no syncpoint. Reply bytes are written once below the Case output directory; structured evidence contains paths, lengths, IDs, status, duration, and safe reason metadata, never full payloads or credentials.
+`send` accepts `queue` and `file`; `receive` accepts `queue`, optional `waitMs`, and optional `correlationId`; `request` accepts `requestQueue`, `replyQueue`, `file`, and optional `waitMs`. Payloads are read as exact bytes. Request PUT captures MsgId and GET matches CorrelId. Reason 2033 is a successful no-message result (`received: false` or `replyReceived: false`), so a required reply must be asserted explicitly. MQ queue handles remain invocation-scoped and use no syncpoint; in load mode the configured pool reuses bounded physical connections with exclusive leases, invalidating only failed connections and returning healthy no-message connections. `MQ_POOL_TIMEOUT` is distinct from MQ operation errors. Pool metrics expose active, idle, total, waiting, wait duration, creation/failure, replacement, and timeout counts without credentials. Reply bytes are written once below the Case output directory; structured evidence contains paths, lengths, IDs, status, duration, and safe reason metadata, never full payloads or credentials.
 
 #### Call-backed Tools (V2.6)
 
@@ -1664,7 +1670,7 @@ Options are command-specific. Unknown commands/options and missing option values
 
 ### Standalone debug inputs and outputs
 
-Debug input files use `att-debug/v1.0`. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, `inputs` is available below `CASE.inputs` and as direct case keys when there is no collision, and Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`. An explicit `--input` always wins over auto-discovery.
+Debug input files use `att-debug/v1.0`. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, and `inputs` is adapted directly into canonical `EXEC.INPUT.*`. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`. An explicit `--input` always wins over auto-discovery.
 
 Before execution ATT validates only the selected Template or Flow dependency closure, or the selected Tool definition. It does not require unrelated workbook snapshots or unrelated malformed Template descriptors to pass. The selected target still uses the normal Template/Flow/Tool runner, including Context resolution, Flow nesting, Tool retry/timeout, evidence, saveAs, DB finalization, and Case-log behavior.
 
@@ -1742,7 +1748,7 @@ An explicit file overrides sidecar discovery, which is useful for temporary valu
   --output-dir /tmp/att-debug --format json
 ```
 
-The selected input is validated before execution. Missing files, invalid schema, unknown or missing Tool arguments, and other input/configuration errors return exit code `2`. Framework-owned values such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.VARS`, and `EXEC.ACTIONS`, together with the corresponding `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` aliases, remain authoritative even if they appear in the input `case` map. `EXEC.STAGES` is not a 3.4.2 Context node; Stage history remains in the legacy `CASE.STAGES` evidence view.
+The selected input is validated before execution. Missing files, invalid schema, unknown or missing Tool arguments, and other input/configuration errors return exit code `2`. Framework-owned values such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.VARS`, and `EXEC.ACTIONS`, together with the corresponding `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` aliases, remain authoritative even if they appear in the input `case` map. `EXEC.STAGES` is not a canonical Context node; Stage history remains in the legacy `CASE.STAGES` evidence view.
 
 Each invocation writes:
 
@@ -1889,12 +1895,13 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
-| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `statement`, `transaction`, `result`, `evidence`, `x-*` |
+| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `statement`, `transaction`, `result`, `evidence`, `pool`, `x-*` |
 | `connection` | required | required `url`; optional `username`, `password`, `driverClass`, `properties`, `readOnly`, `isolation`, `x-*` |
 | `statement` | defaults | `timeoutSeconds` defaults to 30, integer 1–3600 |
 | `transaction` | defaults | `scope: case|statement`, `onEnd: commit|rollback`; defaults `case`/`rollback` |
 | `result` | defaults | `maxRows` 1000, `maxCellBytes` 1048576, `maxBytes` 10485760; positive bounded integers |
 | `evidence` | defaults | `sql: full|hash` defaults full; `parameters: values|types|masked` defaults values |
+| `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `connectionTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize`, timeout is at least 250ms |
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [Database helpers](#database-helpers) for Action, expression, result, security, and lifecycle behaviour.
 
@@ -1904,11 +1911,12 @@ Each path in global `mqhelpers` resolves from the package root and contains one 
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
-| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `message`, `requestReply`, `evidence`, `x-*` |
+| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `message`, `requestReply`, `evidence`, `pool`, `x-*` |
 | `connection` | required | `queueManager`, `host`, `port`, and `channel` required; optional `username`, `password`; port 1–65535 |
 | `message` | defaults | `ccsid` defaults to 1208; `format` is `MQSTR`, `MQHRF2`, `MQFMT_STRING`, `MQFMT_NONE`, or `NONE`; `persistence` is `asQueue`, `persistent`, `notPersistent`, or `nonPersistent` |
 | `requestReply` | defaults | `waitMs` defaults to 10000 and is 0–3600000 milliseconds |
 | `evidence` | defaults | `payload: metadata` is the only V1 mode; full payload bytes are never placed in structured evidence |
+| `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `borrowTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize` |
 
 Connection credentials may be complete `${ENV:NAME}` references. The loader resolves them without putting the secret or the environment variable value in diagnostics, metadata, or Case evidence. Queue names supplied in calls are non-blank, at most 48 characters, and restricted to IBM MQ queue-name characters. A helper instance is selected case-insensitively by its `id`; configured paths and IDs must be unique.
 
@@ -2070,7 +2078,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.4.2",
+  "attVersion": "3.5.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2208,7 +2216,61 @@ output
 └── current Action/attempt-local result; unavailable outside that Action scope
 ```
 
-`EXEC.MODE` is `testcase` for a normal run and `debug` for standalone debug. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by both modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.LOAD`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` may remain only in internal or persisted historical/result compatibility views and are not supported general expression APIs, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. Load-specific state is outside this 3.4.2 contract.
+`EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
+
+### Load V1 Context (3.5.0)
+
+Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
+
+| Path | Meaning |
+|---|---|
+| `EXEC.LOAD.RUN_ID` | Enclosing load run identity shared by its iterations. |
+| `EXEC.LOAD.MODEL` | `closed` or `arrivalRate`. |
+| `EXEC.LOAD.USER_ID` | Stable closed-model Virtual User identity; `null` or absent for arrival-rate. |
+| `EXEC.LOAD.ITERATION_ID` | Globally unique iteration identity within the load run. |
+| `EXEC.LOAD.ITERATION` | Scheduler sequence number. |
+| `EXEC.LOAD.PHASE` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
+| `EXEC.LOAD.RUN_STARTED_AT` | Optional enclosing load-run start timestamp. |
+
+Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; iteration identity remains under `EXEC.ID` and `EXEC.LOAD.*`, and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
+
+`att load` validates the scenario and target before starting one of two schedulers. Closed mode keeps a stable Virtual User identity and waits for target completion before think time and the next iteration. Arrival-rate mode uses absolute planned due times; when `maxConcurrent` is full, the arrival is recorded as generator `dropped` work rather than queued or counted as a SUT failure. Both schedulers publish compact events to bounded-memory metrics, and both write isolated `output/load/<runId>/load-summary.json`, `load-summary.yaml`, and `report/index.html`. Warm-up is real traffic but is excluded from measured threshold aggregates by default. Successful iterations retain metrics only unless evidence sampling is configured; a bounded sampled success gets a physical iteration workspace with `case.log` and `case.yaml`, while a failure creates that workspace lazily when its diagnostic is retained. Evidence links are written below the load run's `samples/` or `failures/` directories and never enter ordinary functional-run artifacts.
+
+The shortest end-to-end smoke commands are:
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+```
+
+`examples/load/README.md` is the maintained copyable reference for Template, Flow, Tool, DB/MQ pool sizing, thresholds, evidence, CLI overrides, and invalid configurations. All six examples are schema- and dependency-validated by `LoadAcceptanceTest`; that test also launches the real `att.FrameworkRunner load` CLI for short closed and arrival-rate scenarios and checks the persisted JSON, YAML, and offline HTML report.
+
+### Load summary and HTML report contract
+
+`load-summary.json` and `load-summary.yaml` share the stable `att-load-summary/v1.0` contract. Root fields are `schemaVersion`, `status` (`PASS`, `FAIL`, or `ERROR`), `exitCode`, `runId`, `startedAt`, `endedAt`, `durationMs`, `scenario`, `timing`, `metrics`, `thresholds`, `resources`, optional `evidence`, and `report: report/index.html` relative to the run directory. The JSON schema is `schemas/att-load-summary-v1.0.schema.json`, registered in the schema catalog as `att-load-summary/v1.0`.
+
+The persisted `scenario` is a dedicated report-safe projection. It retains target type/id, workload and execution timing, threshold configuration, and evidence policy, but omits arbitrary business `inputs` and Tool `target.arguments` from JSON, YAML, and the HTML `window.ATT_LOAD_SUMMARY`. CI and offline tooling can therefore consume the summary without durable password, token, request-body, or other oversized payload values.
+
+`timing.phases` lists configured `WARMUP`, `RAMP_UP`, `STEADY`, and `RAMP_DOWN` start/end/duration windows. `metrics.phases` contains observed scheduled/started/completed/failure/drop counts, throughput, latency, scheduler lag, and concurrency aggregates per phase. Warm-up has `measured: false`: its traffic remains visible in the run history, but measured SLA aggregates exclude it. Other phases remain measured. A phase with no events still appears in `timing.phases`, so empty and edge runs have a stable machine-readable shape.
+
+`resources.db` and `resources.mq` contain only bounded pool diagnostics such as pool size, active/idle, waiting, and timeout/acquisition counts; they never contain connections, queue handles, credentials, or other live objects. Pool saturation and acquisition timeouts are separate from SUT failures. `evidence.items[].path` points to retained evidence below `<runId>/samples/` or `<runId>/failures/`; the HTML report renders each path as a relative link.
+
+`report/index.html` is self-contained and can be opened offline. It shows run identity/status, closed or arrival-rate semantics, phase and warm-up separation, aggregate metrics, threshold diagnostics, resource diagnostics, retained evidence links, and bounded one-second time-series buckets. Arrival-rate reports explicitly distinguish configured arrival rate, achieved scheduling rate, completed TPS, and generator drops; drops are not SUT errors. The report links to the adjacent JSON/YAML summaries but does not embed raw per-iteration samples or secrets; `window.ATT_LOAD_SUMMARY` exposes the same bounded summary for offline tooling.
+
+`att load --profile` keeps the existing profiling contract and writes `performance.json` beside the load summary. It records load execution/report phases, bounded load counters, and the shared schema/Template/payload/process counters, so the documented self-overhead gate is reproducible without turning ATT into a target CPU or memory benchmark.
+
+The machine-readable `metrics` object reports configured load (`configuredUsers`, `configuredArrivalRatePerSecond`, `configuredMaxConcurrent`), iteration/scheduling counts (`iterations`, `scheduled`, `measuredScheduled`, `started`, `measuredStarted`, `completed`, `success`, `failure`, `runtimeError`, `dropped`, `measuredDropped`), concurrency (`activeVus`, `maxActiveVus`, `currentInFlight`, `maxInFlight`), measured-phase results (`warmupCompleted`, `measuredCompleted`, `sutErrorRate`, `runtimeErrorRate`, `droppedRate`, `completedThroughput`), latency percentiles (`p50Ms`, `p95Ms`, `p99Ms`), scheduler lag, and grouped `errorClassifications`. Percentiles use a bounded reservoir; `latencyMinMs`, `latencyMeanMs`, `latencyMaxMs`, and `latencyObservationCount` remain exact across all measured observations. Runtime errors are separate from SUT failures, and generator drops never increase `sutErrorRate`. The `buckets` map is sorted by one-second epoch-millisecond key; each bucket includes `model`, `phase`, configured rate/concurrency, completed TPS, p95/p99, SUT/drop rates, active/in-flight counts, scheduler lag, and error classifications. Latency storage is capped at 4096 global samples and 256 samples per bucket; time-series storage is capped at 4096 buckets and evicts the oldest bucket, so memory does not grow linearly with run duration or raw latency values.
+
+Load thresholds use the common `errorRate` (`%`), `p95`/`p99` (`ms`), and `minThroughput` (`/s` or `/m`) fields for both workload models. Arrival-rate scenarios additionally support `droppedRate` (`%`) and `achievedArrivalRate` (`%`, `/s`, or `/m`). For the percentage form, achieved arrival rate is measured `measuredStarted / measuredScheduled`; warm-up is excluded, while ramp-up, steady, and ramp-down remain part of the integrated measured schedule. The rate forms compare the actual average started rate over the full phase window; `/m` thresholds are normalized to per-second before comparison. Each threshold is reported independently with expected expression, formatted actual value, PASS/FAIL status, and failure diagnostic. The load result then uses exit code `0` for PASS, `1` for a completed run with failed SLA thresholds, `2` for validation/configuration failure, and `3` for load runtime/infrastructure error. `target.arguments` is valid only for Tool targets; Template and Flow targets reject it with a field-specific diagnostic.
+
+The release gate is deliberately reproducible rather than a SUT microbenchmark:
+
+```sh
+mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
+```
+
+It checks the CLI-to-report path for both schedulers, including deterministic arrival-rate cap/drop and configured-versus-achieved-versus-completed metrics; Context deep-copy and iteration isolation; lazy success/failure workspaces; bounded evidence and metric reservoirs; scheduler lag accounting; process/file artifact behavior; DB/MQ reuse, timeout, pool diagnostics, and cleanup; threshold PASS/FAIL; summary schema; report rendering; and compatibility of the existing run/debug/validation test suite. Load V1 does not claim distributed execution, Poisson/random pacing, weighted multi-scenario, rendezvous, adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory benchmarking.
 
 Common properties include:
 

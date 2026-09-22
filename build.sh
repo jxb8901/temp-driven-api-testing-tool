@@ -32,6 +32,7 @@ com/fasterxml/jackson/core/jackson-annotations/2.17.2/jackson-annotations-2.17.2
 com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar
 com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar
 com/networknt/json-schema-validator/1.4.0/json-schema-validator-1.4.0.jar
+com/zaxxer/HikariCP/4.0.3/HikariCP-4.0.3.jar
 com/github/mwiede/jsch/2.28.2/jsch-2.28.2.jar
 com/ethlo/time/itu/1.8.0/itu-1.8.0.jar
 org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar
@@ -55,7 +56,7 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 2
 fi
 if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to execute the V3.4.2 release gate" >&2
+  echo "mvn is required to execute the V3.5.0 release gate" >&2
   exit 2
 fi
 

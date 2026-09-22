@@ -1,0 +1,15 @@
+schemaVersion: att-load/v1.0
+target:
+  type: template
+  id: V3_FLOW_EXAMPLE
+load:
+  users: 20
+  warmup: 30s
+  rampUp: 60s
+  duration: 5m
+  rampDown: 30s
+execution:
+  thinkTime: 500ms
+thresholds:
+  errorRate: "< 1%"
+  p95: "< 800ms"

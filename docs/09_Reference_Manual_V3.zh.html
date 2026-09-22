@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>09_Reference_Manual_V3.zh</title>
+  <title>ATT V3.5.0 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -232,9 +232,12 @@
   <![endif]-->
 </head>
 <body>
-<h1 id="att-v3.4.2-中文用户手册与参考手册">ATT V3.4.2
+<header id="title-block-header">
+<h1 class="title">ATT V3.5.0 使用手冊與參考</h1>
+</header>
+<h1 id="att-v3.5.0-中文用户手册与参考手册">ATT V3.5.0
 中文用户手册与参考手册</h1>
-<p>作者：Jeffrey + ChatGPT 版本：3.4.2 状态：规范性终端用户文档</p>
+<p>作者：Jeffrey + ChatGPT 版本：3.5.0 状态：规范性终端用户文档</p>
 <p>本手册设计为两种阅读方式：</p>
 <ul>
 <li>如果你是第一次使用 ATT，请按章节 1–4
@@ -1241,7 +1244,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href=
 <span id="cb30-23"><a href="#cb30-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10485760</span></span>
 <span id="cb30-24"><a href="#cb30-24" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
 <span id="cb30-25"><a href="#cb30-25" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> full</span></span>
-<span id="cb30-26"><a href="#cb30-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">parameters</span><span class="kw">:</span><span class="at"> values</span></span></code></pre></div>
+<span id="cb30-26"><a href="#cb30-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">parameters</span><span class="kw">:</span><span class="at"> values</span></span>
+<span id="cb30-27"><a href="#cb30-27" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span></span>
+<span id="cb30-28"><a href="#cb30-28" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
+<span id="cb30-29"><a href="#cb30-29" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">minIdle</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span></span>
+<span id="cb30-30"><a href="#cb30-30" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectionTimeout</span><span class="kw">:</span><span class="at"> 2s</span></span></code></pre></div>
 <p><code>connection.url</code> 必填；username、password 和 properties
 中的值可写成完整的 <code>${ENV:NAME}</code>
 环境变量引用。<code>driverClass</code> 可选，优先使用 JDBC service
@@ -1315,15 +1322,21 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb32-1"><a href=
 <span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">password</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${ENV:MQ_PASSWORD}&quot;</span></span>
 <span id="cb32-12"><a href="#cb32-12" aria-hidden="true" tabindex="-1"></a><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">ccsid</span><span class="kw">:</span><span class="at"> </span><span class="dv">1208</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> MQSTR</span><span class="kw">,</span><span class="at"> </span><span class="fu">persistence</span><span class="kw">:</span><span class="at"> asQueue</span><span class="kw">}</span></span>
 <span id="cb32-13"><a href="#cb32-13" aria-hidden="true" tabindex="-1"></a><span class="fu">requestReply</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">waitMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span><span class="kw">}</span></span>
-<span id="cb32-14"><a href="#cb32-14" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span></code></pre></div>
+<span id="cb32-14"><a href="#cb32-14" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span><span class="kw">,</span><span class="at"> </span><span class="fu">minIdle</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">borrowTimeout</span><span class="kw">:</span><span class="at"> 2s</span><span class="kw">}</span></span>
+<span id="cb32-15"><a href="#cb32-15" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span></code></pre></div>
 <p>MQ 仅可作为 <code>type: tool</code> Action 的主要
 call：<code>mq.orders.send(queue=..., file=...)</code>、<code>mq.orders.receive(queue=..., waitMs=..., correlationId=...)</code>
 或
 <code>mq.orders.request(requestQueue=..., replyQueue=..., file=..., waitMs=...)</code>。Payload
 按原始文件 bytes 读取；request 先 PUT 捕获 MsgId，再以它作为 GET
 CorrelId。reason 2033 是成功但没有消息；需要 reply 时用 Action assertion
-判断 <code>replyReceived</code>。连接与 queue 按 invocation
-创建并关闭，syncpoint 固定为 none；reply 文件只写一次到 Case
+判断 <code>replyReceived</code>。MQ queue handle 仍是
+invocation-scoped，不使用 syncpoint；load 模式会通过有界 pool 复用
+physical Connection，并独占借用 lease，只会让失败的 Connection
+失效，无消息的健康 Connection 会归还。<code>MQ_POOL_TIMEOUT</code> 与 MQ
+operation error 分开报告。Pool metrics 提供
+active、idle、total、waiting、wait duration、create/failure、replacement
+和 timeout 计数，且不包含 credentials。reply 文件只写一次到 Case
 output，evidence 不保存完整 payload 或 credential。IBM client jar 通过
 Maven <code>ibm-mq</code> profile 或 package <code>lib/</code>
 提供，默认 ATT build 不内置 vendor client。</p>
@@ -1472,12 +1485,17 @@ alias。binary 使用 Base64，temporal
 <p>失败仍保留相同顶层形状：<code>success: false</code>、空 rows、零
 rowCount、null affectedRows，以及经净化的
 <code>error</code>（<code>type</code>、<code>message</code>、<code>sqlState</code>、<code>vendorCode</code>）。类型包括
-<code>CONNECTION_ERROR</code>、<code>BIND_ERROR</code>、<code>SQL_ERROR</code>、<code>TIMEOUT</code>、<code>LIMIT_EXCEEDED</code>、<code>ROLLBACK_ONLY</code>
+<code>CONNECTION_ERROR</code>、<code>DB_POOL_TIMEOUT</code>、<code>BIND_ERROR</code>、<code>SQL_ERROR</code>、<code>TIMEOUT</code>、<code>LIMIT_EXCEEDED</code>、<code>ROLLBACK_ONLY</code>
 与 <code>FINALIZE_ERROR</code>。</p>
 <p>Connection 的生命周期只与 dbhelper 实例和执行 thread 有关，与 Case
 无关。ATT 为每个实例/thread 重用一个 Connection。Case 完成时对该 Case
 已使用实例执行配置的 commit/rollback，但不关闭 Connection；thread 结束或
-run 结束才关闭。</p>
+run 结束才关闭。load 模式下，每个 dbhelper 在 load-run owner 内拥有一个
+HikariCP pool；Connection 按需借用，由一个 iteration thread 独占，在
+Case finalize 或 abort 后归还。<code>DB_POOL_TIMEOUT</code> 与 SQL/SUT
+error 分开报告；pool metrics 提供 active、idle、total、waiting、borrow
+wait duration、borrow timeout 和 borrow failure，且不包含
+credentials。</p>
 <p>新 Case 开始前，ATT 对该 thread 上每个已打开的 non-auto-commit
 Connection 做一次 rollback，以隔离不同 Case。若 rollback 异常，ATT
 丢弃旧 Connection 并立即尝试 reconnect；这不会改变新 Case
@@ -2542,8 +2560,10 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href=
 <div class="sourceCode" id="cb75"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug flow common.compose.v1</span></code></pre></div>
 <p>Flow 可用 <code>${EXEC.INPUT.source}</code> 读取
-<code>inputs</code>；如果没有同名 Case 字段，也可以用兼容 alias
-<code>${EXEC.INPUT.source}</code> 读取。</p>
+<code>inputs</code>；如果没有名为 <code>inputs</code>
+的业务字段，旧定义仍可用只读兼容视图
+<code>${CASE.inputs.source}</code>，但不会把整棵 <code>inputs</code>
+子树重复写入 <code>EXEC.INPUT</code>。</p>
 <p>分组 Tool sidecar（<code>fpp.invokeApi</code> 对应
 <code>config/tools/fpp.debug.yaml</code>）：</p>
 <div class="sourceCode" id="cb76"><pre
@@ -2596,7 +2616,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href=
 以及对应的
 <code>CASE.*</code>、<code>RUN.*</code>、<code>ACTIONS.*</code>、<code>TOOL.*</code>
 和 <code>DB.*</code> aliases 仍由框架生成。<code>EXEC.STAGES</code> 不是
-3.4.2 Context 节点；Stage 历史仍由旧的 <code>CASE.STAGES</code>
+canonical Context 节点；Stage 历史仍由旧的 <code>CASE.STAGES</code>
 证据视图保存。诊断时查看
 <code>output/debug/&lt;debugId&gt;/case.log</code>、<code>result.yaml</code>
 和 <code>artifacts/case.yaml</code>。</p>
@@ -2934,6 +2954,14 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb82-1"><a href=
 <td><code>masked</code>、<code>types</code> 或 <code>values</code>；使用
 values 可能暴露敏感业务数据</td>
 </tr>
+<tr class="even">
+<td><code>pool</code></td>
+<td>默认值</td>
+<td><code>maxSize</code> 默认 20、<code>minIdle</code> 默认
+0、<code>connectionTimeout</code> 默认 2s；<code>maxSize</code> 为
+1–10000，<code>minIdle</code> 不可大于 <code>maxSize</code>，timeout
+至少 250ms</td>
+</tr>
 </tbody>
 </table>
 <p>validate、docs、snapshot 与 dry-run 都不会打开 DB
@@ -3186,7 +3214,7 @@ boolean <code>required</code>。Command-backed 参数可使用 argv
 <div class="sourceCode" id="cb84"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb84-1"><a href="#cb84-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb84-2"><a href="#cb84-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb84-3"><a href="#cb84-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.4.2&quot;</span><span class="fu">,</span></span>
+<span id="cb84-3"><a href="#cb84-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.5.0&quot;</span><span class="fu">,</span></span>
 <span id="cb84-4"><a href="#cb84-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb84-5"><a href="#cb84-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb84-6"><a href="#cb84-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -3352,25 +3380,228 @@ META
 output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见</code></pre>
 <p><code>EXEC.MODE</code> 在普通 run 中是
-<code>testcase</code>，standalone debug 中是
-<code>debug</code>。<code>EXEC.INPUT</code>、<code>EXEC.VARS</code> 与各
-scope 内的 <code>EXEC.ACTIONS</code> 是两种执行模式共用的 runtime
+<code>testcase</code>，standalone debug 中是 <code>debug</code>，load
+iteration 中是 <code>load</code>。<code>EXEC.LOAD</code> 仅在
+<code>EXEC.MODE=load</code> 时存在；普通 TestCase 和 debug execution
+不会物化它。<code>EXEC.INPUT</code>、<code>EXEC.VARS</code> 与各 scope
+内的 <code>EXEC.ACTIONS</code> 是所有 execution mode 共用的 runtime
 state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input
 values 适配到 <code>EXEC.INPUT</code>；同名时 Stage value 在该 Stage
 期间优先，Stage 结束后恢复 Case-level
 value。<code>EXEC.ID</code>、<code>EXEC.MODE</code>、<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>
 和 <code>EXEC.ACTIONS</code> 等框架字段不能被 Case 或 sidecar input
 覆盖。不存在
-<code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.LOAD</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>
+<code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>
 或 <code>EXEC.STAGES</code>：helper/resource state 保持 internal，根层
-<code>TOOL.*</code>／<code>DB.*</code> 只可作为 internal 或 persisted
-historical/result compatibility view，不是受支持的 general expression
-API；当前 Action 使用 local <code>output</code>，完成后只在其所属 scope
-通过 <code>EXEC.ACTIONS</code> 发布。Flow 返回后 parent scope 会恢复，跨
+<code>TOOL.*</code>／<code>DB.*</code> 只可作为 compatibility 或
+transient view；当前 Action 使用 local
+<code>output</code>，完成后只在其所属 scope 通过
+<code>EXEC.ACTIONS</code> 发布。Flow 返回后 parent scope 会恢复，跨
 scope 值必须写入 <code>EXEC.VARS</code>。Stage/template 的
 status、timing 和 history 属于 execution result/evidence model，并由旧的
-<code>CASE.STAGES</code> view 提供读取。Load-specific state 不属于本
-3.4.2 contract。</p>
+<code>CASE.STAGES</code> view 提供读取。严格的
+<code>${EXEC.LOAD.&lt;field&gt;}</code> 在非 load mode 会 validation
+error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；3.5.0
+的 <code>att-load/v1.0</code> adapter 会按下述 contract 增加 load-only
+的 <code>EXEC.LOAD</code>。</p>
+<h3 id="load-v1-context3.5.0">Load V1 Context（3.5.0）</h3>
+<p>每个 load iteration 使用与普通执行相同的
+<code>EXEC</code>／<code>META</code> tree 和 Action 局部
+<code>output</code>。<code>EXEC.MODE</code> 是
+<code>load</code>；<code>EXEC.ID</code> 与
+<code>EXEC.LOAD.ITERATION_ID</code> 相同；<code>EXEC.STARTED_AT</code>
+是本 iteration
+的开始时间；<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>
+和 local <code>output</code> 均按 iteration 隔离。scheduler-owned fields
+如下：</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>路径</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>EXEC.LOAD.RUN_ID</code></td>
+<td>enclosing load run identity，同一 load run 的 iterations 共用。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.MODEL</code></td>
+<td><code>closed</code> 或 <code>arrivalRate</code>。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.USER_ID</code></td>
+<td>closed model 的稳定 Virtual User identity；arrival-rate 为
+<code>null</code> 或 absent。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.ITERATION_ID</code></td>
+<td>load run 内全局唯一的 iteration identity。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.ITERATION</code></td>
+<td>scheduler sequence number。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.LOAD.PHASE</code></td>
+<td><code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code> 或
+<code>RAMP_DOWN</code>。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.LOAD.RUN_STARTED_AT</code></td>
+<td>可选的 enclosing load-run start timestamp。</td>
+</tr>
+</tbody>
+</table>
+<p>Scenario <code>inputs</code> 只会复制到
+<code>EXEC.INPUT.*</code>；可复用的 Template、Flow 和 Tool 必须使用
+canonical input
+tree、<code>EXEC.VARS.*</code>、<code>EXEC.ACTIONS.*</code> 及当前
+<code>output.*</code>。<code>META.SOURCE</code> 只标识 load scenario 的
+type、名称和 path；iteration identity 保留在 <code>EXEC.ID</code> 与
+<code>EXEC.LOAD.*</code>，并排除 secrets。根层
+<code>LOAD.*</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code> 和
+<code>EXEC.INVOCATION</code> 不是公开的 load API。完整的
+closed／arrival-rate 配置、CLI override、target
+形式、threshold、evidence 和 validation 例子见 <a
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
+<p><code>att load</code> 会在 scheduler 启动前完成 scenario 和 target
+validation，再选择两个 scheduler 之一。closed mode 为 Virtual User
+保持稳定 identity，等待 target 完成后才进入 think time 和下一次
+iteration；arrival-rate mode 使用 absolute planned due
+time，<code>maxConcurrent</code> 已满时记录 generator
+<code>dropped</code>，不排队，也不算作 SUT failure。两个 scheduler
+都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的
+<code>output/load/&lt;runId&gt;/load-summary.json</code>、<code>load-summary.yaml</code>
+和 <code>report/index.html</code>。warm-up 是真实 traffic，但默认不计入
+measured threshold aggregates；成功 iteration 默认只保留 metrics，配置
+sampling 后只为有界 sampled success 创建带 <code>case.log</code> 和
+<code>case.yaml</code> 的 physical iteration workspace；失败则在保留
+diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的
+<code>samples/</code> 或 <code>failures/</code>，不会污染普通 functional
+run artifacts。</p>
+<p>最短的端到端 smoke 命令如下：</p>
+<div class="sourceCode" id="cb88"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb88-1"><a href="#cb88-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml</span>
+<span id="cb88-2"><a href="#cb88-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--format</span> json</span>
+<span id="cb88-3"><a href="#cb88-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/tool.yaml <span class="at">--duration</span> 100ms <span class="at">--run-id</span> load-tool-example</span></code></pre></div>
+<p><a
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>
+是维护中的可复制参考，涵盖 Template、Flow、Tool、DB/MQ pool
+sizing、threshold、evidence、CLI override
+和非法配置。<code>LoadAcceptanceTest</code> 会先校验全部六个例子的
+schema 与 dependencies，再启动真正的
+<code>att.FrameworkRunner load</code> CLI 执行短版 closed 与
+arrival-rate scenario，并检查持久化 JSON、YAML 和离线 HTML report。</p>
+<h3 id="load-summary-与-html-report-contract">Load summary 与 HTML
+report contract</h3>
+<p><code>load-summary.json</code> 和 <code>load-summary.yaml</code>
+共用稳定的 <code>att-load-summary/v1.0</code> contract。root-level
+字段包括
+<code>schemaVersion</code>、<code>status</code>（<code>PASS</code>、<code>FAIL</code>
+或
+<code>ERROR</code>）、<code>exitCode</code>、<code>runId</code>、<code>startedAt</code>、<code>endedAt</code>、<code>durationMs</code>、<code>scenario</code>、<code>timing</code>、<code>metrics</code>、<code>thresholds</code>、<code>resources</code>、可选的
+<code>evidence</code>，以及相对于 run directory 的
+<code>report: report/index.html</code>。JSON schema 位于
+<code>schemas/att-load-summary-v1.0.schema.json</code>，schema catalog
+以 <code>att-load-summary/v1.0</code> 注册。</p>
+<p>持久化的 <code>scenario</code> 是专用的 report-safe
+projection，只保留 target type/id、workload 和 execution
+timing、threshold configuration 与 evidence policy；任意业务
+<code>inputs</code> 及 Tool <code>target.arguments</code> 不会写入
+JSON、YAML 或 HTML 的 <code>window.ATT_LOAD_SUMMARY</code>。因此 CI
+和离线工具可以消费 summary，而不会把 password、token、request body
+或其他过大的 payload 写入 durable report artifacts。</p>
+<p><code>timing.phases</code> 按
+<code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code>、<code>RAMP_DOWN</code>
+顺序列出 configured start/end/duration
+window；<code>metrics.phases</code> 则提供实际 observed 的
+scheduled/started/completed/failure/drop、throughput、latency、scheduler
+lag 和 concurrency aggregates。<code>WARMUP</code> 的
+<code>measured</code> 是 <code>false</code>：traffic 仍保留在 run
+history，但 measured SLA aggregates 不包含它；其他 phase 仍属于
+measured。没有事件的 phase 也会出现在 <code>timing.phases</code>，使
+empty/edge run 具有稳定的 machine-readable shape。</p>
+<p><code>resources.db</code> 和 <code>resources.mq</code> 只包含 bounded
+pool diagnostics，例如 pool size、active/idle、waiting 和
+timeout/acquisition counts；不会包含 connection、queue
+handle、credential 或其他 live object。pool saturation 和 acquisition
+timeout 必须与 SUT failure 分开解读。<code>evidence.items[].path</code>
+指向 <code>&lt;runId&gt;/samples/</code> 或
+<code>&lt;runId&gt;/failures/</code> 下的 retained evidence，HTML report
+会把每个 path 渲染为相对链接。</p>
+<p><code>report/index.html</code> 是 self-contained、可离线打开的
+performance report，显示 run identity/status、closed 或 arrival-rate
+semantics、phase/warm-up 分隔、aggregate metrics、threshold
+diagnostics、resource diagnostics、retained evidence links 和 bounded
+一秒 time-series buckets。arrival-rate report 会明确区分 configured
+arrival rate、achieved scheduling rate、completed TPS 和 generator
+drops；drop 不属于 SUT error。报告链接到旁边的 JSON/YAML
+summary，但不嵌入 raw per-iteration samples 或
+secrets；<code>window.ATT_LOAD_SUMMARY</code> 为离线工具提供同一份
+bounded summary。</p>
+<p><code>att load --profile</code> 沿用既有 profile 诊断契约，并在 load
+summary 同目录写出 <code>performance.json</code>。它记录 load
+execution/report phases、bounded load counters，以及共用的
+schema、Template、payload 和 process counters，使 self-overhead gate
+可重复执行；它不是 target CPU 或 memory benchmark。</p>
+<p>machine-readable 的 <code>metrics</code>
+会输出配置负载（<code>configuredUsers</code>、<code>configuredArrivalRatePerSecond</code>、<code>configuredMaxConcurrent</code>）、iteration/scheduling
+计数（<code>iterations</code>、<code>scheduled</code>、<code>measuredScheduled</code>、<code>started</code>、<code>measuredStarted</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>、<code>measuredDropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured
+结果（<code>warmupCompleted</code>、<code>measuredCompleted</code>、<code>sutErrorRate</code>、<code>runtimeErrorRate</code>、<code>droppedRate</code>、<code>completedThroughput</code>）、latency
+percentiles（<code>p50Ms</code>、<code>p95Ms</code>、<code>p99Ms</code>）、scheduler
+lag 及 grouped <code>errorClassifications</code>。percentiles 来自
+bounded
+reservoir；<code>latencyMinMs</code>、<code>latencyMeanMs</code>、<code>latencyMaxMs</code>
+和 <code>latencyObservationCount</code> 始终覆盖全部 measured
+observations 并保持 exact。runtime error 与 SUT failure 分开；generator
+drop 不会增加 <code>sutErrorRate</code>。<code>buckets</code> 以一秒
+epoch-millisecond key 排序，每个 bucket 包含
+<code>model</code>、<code>phase</code>、配置的
+rate/concurrency、completed TPS、p95/p99、SUT/drop
+rate、active/in-flight、scheduler lag 和 error classifications。全局
+latency 最多保留 4096 个 sample，每个 bucket 最多 256 个；time-series
+最多保留 4096 个 bucket，超过后淘汰最旧 bucket，因此 memory 不会随 run
+时长或 raw latency values 线性增长。</p>
+<p>Load threshold 中，<code>errorRate</code> 使用
+<code>%</code>，<code>p95</code>／<code>p99</code> 使用
+<code>ms</code>，<code>minThroughput</code> 使用 <code>/s</code> 或
+<code>/m</code>，这些 common thresholds 对两种 workload
+都适用。arrival-rate 另外支持
+<code>droppedRate</code>（<code>%</code>）和
+<code>achievedArrivalRate</code>（<code>%</code>、<code>/s</code> 或
+<code>/m</code>）。<code>achievedArrivalRate</code> 使用 <code>%</code>
+时表示 measured phase 的
+<code>measuredStarted / measuredScheduled</code>；warm-up
+不计入，ramp-up、steady 和 ramp-down 仍纳入 integrated measured
+schedule。使用 <code>/s</code> 或 <code>/m</code> 时表示整个 phase
+window 内实际 started 的平均速率，<code>/m</code> threshold
+会先换算成每秒再比较。每个 threshold 都独立输出 expected
+expression、格式化 actual、PASS/FAIL status 和 failure diagnostic。load
+result 的 exit code 为：PASS <code>0</code>、已完成但 SLA threshold 失败
+<code>1</code>、validation/configuration failure <code>2</code>、load
+runtime/infrastructure error
+<code>3</code>。<code>target.arguments</code> 只适用于 Tool
+target；Template 和 Flow target 会以带准确 field path 的 diagnostic
+拒绝。</p>
+<p>Release gate 是可重复的整合检查，而不是 SUT microbenchmark：</p>
+<div class="sourceCode" id="cb89"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb89-1"><a href="#cb89-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> <span class="at">-q</span> <span class="at">-Dtest</span><span class="op">=</span>LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test</span></code></pre></div>
+<p>它检查两个 scheduler 的 CLI-to-report 路径，包括确定性的 arrival-rate
+cap/drop 以及 configured/achieved/completed metrics；Context deep-copy
+与 iteration isolation、lazy success/failure workspace、有界 evidence 与
+metrics reservoir、scheduler lag、process/file artifact、DB/MQ
+reuse、timeout、pool diagnostics 与 cleanup、threshold
+PASS/FAIL、summary schema、report rendering，以及既有
+run/debug/validation compatibility test suite。Load V1 不承诺
+distributed、Poisson/random pacing、weighted
+multi-scenario、rendezvous、adaptive pool、MQ handle
+pooling、XA/affinity 或 target CPU/memory benchmarking。</p>
 <p>常见作用域包括：</p>
 <table>
 <colgroup>
@@ -3552,16 +3783,16 @@ id="config.report.filenamepattern"><code>config.report.fileNamePattern</code></h
 <p>配置字符串必须显式引用
 <code>${suiteName}</code>，无论它用于文本插值还是内建函数参数。call
 内的裸 <code>suiteName</code> 会被拒绝。合法示例包括：</p>
-<div class="sourceCode" id="cb88"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb88-1"><a href="#cb88-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb88-2"><a href="#cb88-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb90"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
 <p>以及：</p>
-<div class="sourceCode" id="cb89"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb89-1"><a href="#cb89-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
-<span id="cb89-2"><a href="#cb89-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
-<span id="cb89-3"><a href="#cb89-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
-<span id="cb89-4"><a href="#cb89-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
-<span id="cb89-5"><a href="#cb89-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb91"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
+<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
+<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
+<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
+<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
 <p>但不支持如
 <code>${runId}</code>、<code>${workbookId}</code>、<code>${environment}</code>、<code>${EXEC.INPUT.caseId}</code>
 等运行时值引用。</p>
@@ -3604,25 +3835,25 @@ warning</td>
 会给出精确的 <code>${input.argument}</code> 替换。未声明或有歧义的
 shorthand 会报错。command-backed 与 call-backed Tool 使用相同规则。</p>
 <p>例如：</p>
-<div class="sourceCode" id="cb90"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
-<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
-<span id="cb90-4"><a href="#cb90-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a rendered payment request</span></span>
-<span id="cb90-5"><a href="#cb90-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb90-6"><a href="#cb90-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
-<span id="cb90-7"><a href="#cb90-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.requestFile}&quot;</span></span>
-<span id="cb90-8"><a href="#cb90-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.environment}&quot;</span></span>
-<span id="cb90-9"><a href="#cb90-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb90-10"><a href="#cb90-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb90-11"><a href="#cb90-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span></span>
-<span id="cb90-12"><a href="#cb90-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
-<span id="cb90-13"><a href="#cb90-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
-<span id="cb90-14"><a href="#cb90-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb90-15"><a href="#cb90-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">environment</span><span class="kw">:</span></span>
-<span id="cb90-16"><a href="#cb90-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Environment</span></span>
-<span id="cb90-17"><a href="#cb90-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Target environment</span></span>
-<span id="cb90-18"><a href="#cb90-18" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb92"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb92-2"><a href="#cb92-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
+<span id="cb92-3"><a href="#cb92-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
+<span id="cb92-4"><a href="#cb92-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a rendered payment request</span></span>
+<span id="cb92-5"><a href="#cb92-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb92-6"><a href="#cb92-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
+<span id="cb92-7"><a href="#cb92-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.requestFile}&quot;</span></span>
+<span id="cb92-8"><a href="#cb92-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.environment}&quot;</span></span>
+<span id="cb92-9"><a href="#cb92-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb92-10"><a href="#cb92-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb92-11"><a href="#cb92-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span></span>
+<span id="cb92-12"><a href="#cb92-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
+<span id="cb92-13"><a href="#cb92-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
+<span id="cb92-14"><a href="#cb92-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb92-15"><a href="#cb92-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">environment</span><span class="kw">:</span></span>
+<span id="cb92-16"><a href="#cb92-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Environment</span></span>
+<span id="cb92-17"><a href="#cb92-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Target environment</span></span>
+<span id="cb92-18"><a href="#cb92-18" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>每个 YAML command list item 在 render 后仍是一个 atomic
 argv；值中含空格、引号或类似 shell 的字符也不会再次分词。ATT
 不会启动本地 shell。</p>
@@ -3635,56 +3866,56 @@ escape。Quoted value 内嵌 <code>${...}</code> 会做
 interpolation；未加引号的 canonical Context path 则直接传递 typed
 value。</p>
 <p>以下 Tool 会把每个输入保持为一个 argv：</p>
-<div class="sourceCode" id="cb91"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">writeAudit</span><span class="kw">:</span></span>
-<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Write audit</span></span>
-<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Write one audit message for one source file</span></span>
-<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/write_audit.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${message}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${sourceFile}&quot;</span><span class="kw">]</span></span>
-<span id="cb91-6"><a href="#cb91-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
-<span id="cb91-7"><a href="#cb91-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb91-8"><a href="#cb91-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">message</span><span class="kw">:</span></span>
-<span id="cb91-9"><a href="#cb91-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Message</span></span>
-<span id="cb91-10"><a href="#cb91-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Exact audit message</span></span>
-<span id="cb91-11"><a href="#cb91-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb91-12"><a href="#cb91-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sourceFile</span><span class="kw">:</span></span>
-<span id="cb91-13"><a href="#cb91-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Source file</span></span>
-<span id="cb91-14"><a href="#cb91-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File associated with the message</span></span>
-<span id="cb91-15"><a href="#cb91-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb93"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">writeAudit</span><span class="kw">:</span></span>
+<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Write audit</span></span>
+<span id="cb93-4"><a href="#cb93-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Write one audit message for one source file</span></span>
+<span id="cb93-5"><a href="#cb93-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/write_audit.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${message}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${sourceFile}&quot;</span><span class="kw">]</span></span>
+<span id="cb93-6"><a href="#cb93-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
+<span id="cb93-7"><a href="#cb93-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb93-8"><a href="#cb93-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">message</span><span class="kw">:</span></span>
+<span id="cb93-9"><a href="#cb93-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Message</span></span>
+<span id="cb93-10"><a href="#cb93-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Exact audit message</span></span>
+<span id="cb93-11"><a href="#cb93-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb93-12"><a href="#cb93-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sourceFile</span><span class="kw">:</span></span>
+<span id="cb93-13"><a href="#cb93-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Source file</span></span>
+<span id="cb93-14"><a href="#cb93-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File associated with the message</span></span>
+<span id="cb93-15"><a href="#cb93-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>当 call 同时包含多层引号时，建议使用 YAML block scalar：</p>
-<div class="sourceCode" id="cb92"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="fu">singleQuote</span><span class="kw">:</span></span>
-<span id="cb92-2"><a href="#cb92-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb92-3"><a href="#cb92-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb92-4"><a href="#cb92-4" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb92-5"><a href="#cb92-5" aria-hidden="true" tabindex="-1"></a>        message=&quot;Customer O&#39;Reilly&quot;,</span>
-<span id="cb92-6"><a href="#cb92-6" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb92-7"><a href="#cb92-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb92-8"><a href="#cb92-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb92-9"><a href="#cb92-9" aria-hidden="true" tabindex="-1"></a><span class="fu">doubleQuote</span><span class="kw">:</span></span>
-<span id="cb92-10"><a href="#cb92-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb92-11"><a href="#cb92-11" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb92-12"><a href="#cb92-12" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb92-13"><a href="#cb92-13" aria-hidden="true" tabindex="-1"></a>        message=&#39;status=&quot;READY&quot;&#39;,</span>
-<span id="cb92-14"><a href="#cb92-14" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb92-15"><a href="#cb92-15" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb92-16"><a href="#cb92-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb92-17"><a href="#cb92-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mixedQuotesAndContext</span><span class="kw">:</span></span>
-<span id="cb92-18"><a href="#cb92-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb92-19"><a href="#cb92-19" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb92-20"><a href="#cb92-20" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb92-21"><a href="#cb92-21" aria-hidden="true" tabindex="-1"></a>        message=&quot;O&#39;Reilly said \&quot;READY\&quot; for ${EXEC.INPUT.caseId}&quot;,</span>
-<span id="cb92-22"><a href="#cb92-22" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb92-23"><a href="#cb92-23" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
+<div class="sourceCode" id="cb94"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb94-1"><a href="#cb94-1" aria-hidden="true" tabindex="-1"></a><span class="fu">singleQuote</span><span class="kw">:</span></span>
+<span id="cb94-2"><a href="#cb94-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb94-3"><a href="#cb94-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb94-4"><a href="#cb94-4" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb94-5"><a href="#cb94-5" aria-hidden="true" tabindex="-1"></a>        message=&quot;Customer O&#39;Reilly&quot;,</span>
+<span id="cb94-6"><a href="#cb94-6" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb94-7"><a href="#cb94-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb94-8"><a href="#cb94-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb94-9"><a href="#cb94-9" aria-hidden="true" tabindex="-1"></a><span class="fu">doubleQuote</span><span class="kw">:</span></span>
+<span id="cb94-10"><a href="#cb94-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb94-11"><a href="#cb94-11" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb94-12"><a href="#cb94-12" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb94-13"><a href="#cb94-13" aria-hidden="true" tabindex="-1"></a>        message=&#39;status=&quot;READY&quot;&#39;,</span>
+<span id="cb94-14"><a href="#cb94-14" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb94-15"><a href="#cb94-15" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb94-16"><a href="#cb94-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb94-17"><a href="#cb94-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mixedQuotesAndContext</span><span class="kw">:</span></span>
+<span id="cb94-18"><a href="#cb94-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb94-19"><a href="#cb94-19" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb94-20"><a href="#cb94-20" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb94-21"><a href="#cb94-21" aria-hidden="true" tabindex="-1"></a>        message=&quot;O&#39;Reilly said \&quot;READY\&quot; for ${EXEC.INPUT.caseId}&quot;,</span>
+<span id="cb94-22"><a href="#cb94-22" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb94-23"><a href="#cb94-23" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
 <p>Child process 收到的三条 message 分别是
 <code>Customer O'Reilly</code>、<code>status="READY"</code>，以及例如
 <code>O'Reilly said "READY" for payment.payment.TC001</code>。Context
 value 自身包含任一种引号时，无需 caller 做 shell escaping，仍只占一个
 argv。</p>
 <p>如果坚持把 call 写成单行，还需额外处理独立的 YAML escaping 层：</p>
-<div class="sourceCode" id="cb93"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{writeAudit(message=&#39;status=</span><span class="sc">\&quot;</span><span class="st">READY</span><span class="sc">\&quot;</span><span class="st">&#39;, sourceFile=${EXEC.INPUT.sourceFile})}&quot;</span></span>
-<span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;#{writeAudit(message=&quot;O</span><span class="sc">&#39;&#39;</span><span class="st">Reilly&quot;, sourceFile=${EXEC.INPUT.sourceFile})}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb95"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb95-1"><a href="#cb95-1" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{writeAudit(message=&#39;status=</span><span class="sc">\&quot;</span><span class="st">READY</span><span class="sc">\&quot;</span><span class="st">&#39;, sourceFile=${EXEC.INPUT.sourceFile})}&quot;</span></span>
+<span id="cb95-2"><a href="#cb95-2" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;#{writeAudit(message=&quot;O</span><span class="sc">&#39;&#39;</span><span class="st">Reilly&quot;, sourceFile=${EXEC.INPUT.sourceFile})}&#39;</span></span></code></pre></div>
 <p>第一行是为 YAML double-quoted scalar escape 双引号；第二行是为 YAML
 single-quoted scalar 把 apostrophe 写成两个。之后 expression engine
 才会解析所得的 <code>#{...}</code>。</p>
@@ -3986,8 +4217,8 @@ schema/catalog 版本的 SHA-256 hash。</p>
 <h2 id="故障排查">09 故障排查</h2>
 <h3 id="先从校验开始">先从校验开始</h3>
 <p>在每次工作簿、侧车、模板或工具变更后执行：</p>
-<div class="sourceCode" id="cb95"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb95-1"><a href="#cb95-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb97"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。</p>
 <table>
 <colgroup>

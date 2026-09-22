@@ -23,11 +23,21 @@ public final class MqHelperConfig {
     private final int requestReplyWaitMs;
     private final String evidencePayload;
     private final Path sourceFile;
+    private final int poolMaxSize, poolMinIdle;
+    private final long poolBorrowTimeoutMs;
 
     public MqHelperConfig(String id, String name, String description, String queueManager,
                           String host, int port, String channel, String username, String password,
                           int ccsid, String format, String persistence, int requestReplyWaitMs,
                           String evidencePayload, Path sourceFile) {
+        this(id, name, description, queueManager, host, port, channel, username, password, ccsid, format, persistence,
+                requestReplyWaitMs, evidencePayload, 20, 0, 2000L, sourceFile);
+    }
+
+    public MqHelperConfig(String id, String name, String description, String queueManager,
+                          String host, int port, String channel, String username, String password,
+                          int ccsid, String format, String persistence, int requestReplyWaitMs,
+                          String evidencePayload, int poolMaxSize, int poolMinIdle, long poolBorrowTimeoutMs, Path sourceFile) {
         this.id = id;
         this.name = name;
         this.description = description;
@@ -42,6 +52,8 @@ public final class MqHelperConfig {
         this.persistence = persistence;
         this.requestReplyWaitMs = requestReplyWaitMs;
         this.evidencePayload = evidencePayload;
+        if (poolMaxSize < 1 || poolMinIdle < 0 || poolMinIdle > poolMaxSize || poolBorrowTimeoutMs < 0L) throw new IllegalArgumentException("Invalid MQ pool configuration");
+        this.poolMaxSize = poolMaxSize; this.poolMinIdle = poolMinIdle; this.poolBorrowTimeoutMs = poolBorrowTimeoutMs;
         this.sourceFile = sourceFile;
     }
 
@@ -61,6 +73,9 @@ public final class MqHelperConfig {
     public int requestReplyWaitMs() { return requestReplyWaitMs; }
     public String evidencePayload() { return evidencePayload; }
     public Path sourceFile() { return sourceFile; }
+    public int poolMaxSize() { return poolMaxSize; }
+    public int poolMinIdle() { return poolMinIdle; }
+    public long poolBorrowTimeoutMs() { return poolBorrowTimeoutMs; }
 
     /** Safe diagnostic metadata; credentials are deliberately absent. */
     public Map<String, Object> metadata() {

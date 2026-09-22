@@ -70,7 +70,7 @@ public final class MqHelperConfigLoader {
 
     private MqHelperConfig parse(Map<?, ?> map, Path file) {
         SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA, "mqhelper");
-        SchemaSupport.rejectUnknown(map, "mqhelper", "schemaVersion", "id", "name", "description", "connection", "message", "requestReply", "evidence");
+        SchemaSupport.rejectUnknown(map, "mqhelper", "schemaVersion", "id", "name", "description", "connection", "message", "requestReply", "evidence", "pool");
         String id = SchemaSupport.string(map.get("id"), "mqhelper.id", true);
         if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("mqhelper.id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);
         String name = SchemaSupport.string(map.get("name"), "mqhelper.name", true);
@@ -98,8 +98,13 @@ public final class MqHelperConfigLoader {
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
         SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
         String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "metadata");
+        Map<?, ?> pool = optionalMap(map.get("pool"), "mqhelper.pool");
+        SchemaSupport.rejectUnknown(pool, "mqhelper.pool", "maxSize", "minIdle", "borrowTimeout");
+        int poolMaxSize = integer(pool.get("maxSize"), 20, 1, 10000, "mqhelper.pool.maxSize");
+        int poolMinIdle = integer(pool.get("minIdle"), 0, 0, poolMaxSize, "mqhelper.pool.minIdle");
+        long borrowTimeout = durationMs(pool.get("borrowTimeout"), 2000L, "mqhelper.pool.borrowTimeout");
         return new MqHelperConfig(id, name, description, queueManager, host, port, channel,
-                username, password, ccsid, format, persistence, waitMs, payload, file);
+                username, password, ccsid, format, persistence, waitMs, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
     }
 
     private Map<?, ?> optionalMap(Object value, String owner) {
@@ -131,6 +136,14 @@ public final class MqHelperConfigLoader {
         long integer = number.longValue();
         if (integer < min || integer > max || integer != number.doubleValue()) throw new IllegalArgumentException(owner + " must be an integer from " + min + " to " + max);
         return (int) integer;
+    }
+
+    private long durationMs(Object value, long fallback, String owner) {
+        if (value == null) return fallback;
+        if (value instanceof Number) return Math.max(0L, ((Number) value).longValue());
+        if (!(value instanceof String) || !((String) value).matches("[0-9]+(ms|s|m)")) throw new IllegalArgumentException(owner + " must use <integer>ms, s, or m");
+        String text = (String) value; int suffix = text.endsWith("ms") ? 2 : 1; long amount = Long.parseLong(text.substring(0, text.length() - suffix));
+        if (text.endsWith("ms")) return amount; if (text.endsWith("s")) return Math.multiplyExact(amount, 1000L); return Math.multiplyExact(amount, 60000L);
     }
 
     private String choice(Object value, String fallback, String owner, String... allowed) {

@@ -4,6 +4,7 @@ import att.Version;
 import att.config.SchemaSupport;
 import att.config.YamlSupport;
 import att.template.TemplateAction;
+import att.template.StageTemplate;
 
 import java.io.Reader;
 import java.nio.file.Files;
@@ -26,6 +27,7 @@ public final class FlowRegistry {
     private final Map<String, FlowDefinition> byId = new LinkedHashMap<String, FlowDefinition>();
     private final Map<String, Path> descriptors = new LinkedHashMap<String, Path>();
     private final List<Path> descriptorsWithoutId = new ArrayList<Path>();
+    private final boolean frozen;
     private int parsedCount;
 
     public FlowRegistry(Path projectRoot, Path templatesRoot) throws Exception {
@@ -34,6 +36,7 @@ public final class FlowRegistry {
 
     public FlowRegistry(Path projectRoot, Path templatesRoot, boolean validateAll) throws Exception {
         this.projectRoot = att.core.IdentifierValidator.canonicalPath(projectRoot, "package root");
+        this.frozen = false;
         Path templates = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
         Path canonicalTemplates = att.core.IdentifierValidator.canonicalPath(templates, "templates root");
         if (!canonicalTemplates.startsWith(this.projectRoot)) throw new IllegalArgumentException("Templates root escapes package root: " + templatesRoot);
@@ -55,6 +58,16 @@ public final class FlowRegistry {
         }
     }
 
+    private FlowRegistry(Path projectRoot, Path root, Map<String, FlowDefinition> compiled) {
+        this.projectRoot = projectRoot;
+        this.root = root;
+        this.byId.putAll(compiled);
+        this.descriptors.clear();
+        this.descriptorsWithoutId.clear();
+        this.parsedCount = compiled.size();
+        this.frozen = true;
+    }
+
     public FlowDefinition get(String id) {
         try { return loadId(id); }
         catch (RuntimeException e) { throw e; }
@@ -64,6 +77,20 @@ public final class FlowRegistry {
     public List<FlowDefinition> all() { return Collections.unmodifiableList(new ArrayList<FlowDefinition>(byId.values())); }
     public int size() { return byId.size(); }
     public int parsedCount() { return parsedCount; }
+
+    /**
+     * Compiles the selected Template's Flow dependency closure and returns a
+     * read-only registry safe to share between concurrent load iterations.
+     */
+    public synchronized FlowRegistry freezeFor(StageTemplate template) {
+        if (frozen) return this;
+        if (template != null) {
+            for (TemplateAction action : template.actions()) {
+                if ("flow".equalsIgnoreCase(action.type())) validateInvocation(action);
+            }
+        }
+        return new FlowRegistry(projectRoot, root, byId);
+    }
 
     public static boolean isCanonicalId(String value) {
         return value != null && !value.contains("${") && !value.contains("#{") && ID.matcher(value).matches();
@@ -111,6 +138,7 @@ public final class FlowRegistry {
     }
 
     private FlowDefinition loadId(String id) throws Exception {
+        if (frozen) return byId.get(id);
         if (byId.containsKey(id)) return byId.get(id);
         Path descriptor = descriptors.get(id);
         if (descriptor == null) return null;

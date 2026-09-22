@@ -43,6 +43,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /** First-class V2.5 JDBC executor with one connection per dbhelper instance and execution thread. */
 public final class DbHelperExecutor implements AutoCloseable {
@@ -56,11 +58,18 @@ public final class DbHelperExecutor implements AutoCloseable {
             });
     private final Path projectRoot;
     private final Map<String, DbHelperConfig> helpers;
+    private final DbConnectionProvider connectionProvider;
     private final ThreadLocal<Scope> scopes = new ThreadLocal<Scope>();
+    private final ConcurrentMap<Thread, Scope> allScopes = new ConcurrentHashMap<Thread, Scope>();
 
     public DbHelperExecutor(Path projectRoot, FrameworkConfig config) {
+        this(projectRoot, config, null);
+    }
+
+    public DbHelperExecutor(Path projectRoot, FrameworkConfig config, DbConnectionProvider connectionProvider) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.helpers = config == null ? Collections.<String, DbHelperConfig>emptyMap() : config.dbHelpers();
+        this.connectionProvider = connectionProvider;
     }
 
     public DbHelperConfig helper(String id) {
@@ -202,6 +211,7 @@ public final class DbHelperExecutor implements AutoCloseable {
             return failures;
         } finally {
             for (ManagedConnection managed : scope.connections.values()) managed.usedInCase = false;
+            if (connectionProvider != null) for (ManagedConnection managed : scope.connections.values()) managed.close();
         }
     }
 
@@ -209,17 +219,26 @@ public final class DbHelperExecutor implements AutoCloseable {
         Scope scope = scopes.get();
         if (scope == null) return;
         for (ManagedConnection managed : scope.connections.values()) managed.abortCase();
+        if (connectionProvider != null) for (ManagedConnection managed : scope.connections.values()) managed.close();
     }
 
     @Override public void close() {
         Scope scope = scopes.get();
         if (scope != null) for (ManagedConnection managed : scope.connections.values()) managed.close();
+        if (connectionProvider != null) connectionProvider.close();
         scopes.remove();
+        allScopes.remove(Thread.currentThread());
+    }
+
+    /** Closes every worker-thread scope owned by a load/run resource owner. */
+    public void closeAll() {
+        for (Scope scope : allScopes.values()) for (ManagedConnection managed : scope.connections.values()) managed.close();
+        allScopes.clear(); scopes.remove();
     }
 
     private Scope scope() {
         Scope scope = scopes.get();
-        if (scope == null) { scope = new Scope(); scopes.set(scope); }
+        if (scope == null) { scope = new Scope(); scopes.set(scope); allScopes.put(Thread.currentThread(), scope); }
         return scope;
     }
 
@@ -227,7 +246,13 @@ public final class DbHelperExecutor implements AutoCloseable {
                                                  String sql, List<?> params, List<String> parameterNames, Long timeoutMs) throws DbFailure {
         Connection connection;
         try { connection = managed.connection(); }
-        catch (Exception error) { throw new DbFailure("CONNECTION_ERROR", error); }
+        catch (DbConnectionProvider.PoolTimeoutException error) { throw new DbFailure("DB_POOL_TIMEOUT", error); }
+        catch (Exception error) {
+            String message = error.getMessage() == null ? "" : error.getMessage();
+            String type = connectionProvider != null && message.toLowerCase(Locale.ROOT).contains("connection is not available")
+                    ? "DB_POOL_TIMEOUT" : "CONNECTION_ERROR";
+            throw new DbFailure(type, error);
+        }
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int effectiveTimeoutSeconds = managed.config.timeoutSeconds();
             if (timeoutMs != null) {
@@ -521,12 +546,15 @@ public final class DbHelperExecutor implements AutoCloseable {
 
         Connection connection() throws Exception {
             if (connection != null && !connection.isClosed()) return connection;
-            if (!config.driverClass().isEmpty()) Class.forName(config.driverClass());
-            Properties properties = new Properties();
-            properties.putAll(config.properties());
-            if (!config.username().isEmpty()) properties.setProperty("user", config.username());
-            if (!config.password().isEmpty()) properties.setProperty("password", config.password());
-            connection = DriverManager.getConnection(config.url(), properties);
+            if (connectionProvider != null) connection = connectionProvider.open(config);
+            else {
+                if (!config.driverClass().isEmpty()) Class.forName(config.driverClass());
+                Properties properties = new Properties();
+                properties.putAll(config.properties());
+                if (!config.username().isEmpty()) properties.setProperty("user", config.username());
+                if (!config.password().isEmpty()) properties.setProperty("password", config.password());
+                connection = DriverManager.getConnection(config.url(), properties);
+            }
             boolean autoCommit = "statement".equals(config.transactionScope()) && "commit".equals(config.transactionOnEnd());
             connection.setAutoCommit(autoCommit);
             connection.setReadOnly(config.readOnly());

@@ -93,12 +93,13 @@ public final class DebugEngine {
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                    resolved.flows, input.path);
+                    resolved.flows, input.path, "debug", input.inputs);
 
             context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
             context.setProject(projectRoot);
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
+            context.setLegacyInputsView(input.inputs);
             context.put("CASE.environment", config.environment());
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
@@ -204,10 +205,7 @@ public final class DebugEngine {
 
     private TestCase syntheticCase(String type, String id, DebugInput input, StageCaseData stage) {
         Map<String, Object> caseData = new LinkedHashMap<String, Object>(input.caseValues);
-        if (!input.inputs.isEmpty()) {
-            caseData.put("inputs", new LinkedHashMap<String, Object>(input.inputs));
-            for (Map.Entry<String, Object> entry : input.inputs.entrySet()) if (!caseData.containsKey(entry.getKey())) caseData.put(entry.getKey(), entry.getValue());
-        }
+        for (Map.Entry<String, Object> entry : input.inputs.entrySet()) if (!caseData.containsKey(entry.getKey())) caseData.put(entry.getKey(), entry.getValue());
         if (!caseData.containsKey("caseName")) caseData.put("caseName", "DEBUG " + type + " " + id);
         Map<String, StageCaseData> stages = new LinkedHashMap<String, StageCaseData>();
         stages.put(stage.key(), stage);

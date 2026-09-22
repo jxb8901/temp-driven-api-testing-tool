@@ -18,6 +18,7 @@ public final class ContextPathPolicy {
         CANONICAL_INPUT,
         CANONICAL_VARS,
         CANONICAL_ACTIONS,
+        CANONICAL_LOAD,
         CANONICAL_META,
         LEGACY_STAGE_EVIDENCE,
         LEGACY_ALIAS,
@@ -55,7 +56,7 @@ public final class ContextPathPolicy {
     public static boolean isUnsupportedExecPath(String path) {
         String field = firstSegment(path == null ? "" : path);
         return "TOOL".equals(field) || "DB".equals(field) || "MQ".equals(field)
-                || "OUTPUT".equals(field) || "LOAD".equals(field)
+                || "OUTPUT".equals(field)
                 || "CALL".equals(field) || "INVOCATION".equals(field)
                 || isUnsupportedStagePath(path);
     }
@@ -64,12 +65,18 @@ public final class ContextPathPolicy {
         if (field == null) return false;
         return "ID".equals(field) || "MODE".equals(field) || "STARTED_AT".equals(field)
                 || "OUTPUT_DIR".equals(field) || "INPUT".equals(field) || "VARS".equals(field)
-                || "ACTIONS".equals(field);
+                || "ACTIONS".equals(field) || "LOAD".equals(field);
     }
 
     /** Returns whether the first child below EXEC is part of the public 3.4.2 tree. */
     public static boolean isCanonicalExecField(String field) {
         return isFrameworkOwnedExecField(field);
+    }
+
+    public static boolean isCanonicalLoadField(String field) {
+        return "RUN_ID".equals(field) || "MODEL".equals(field) || "USER_ID".equals(field)
+                || "ITERATION_ID".equals(field) || "ITERATION".equals(field)
+                || "PHASE".equals(field) || "RUN_STARTED_AT".equals(field);
     }
 
     /** Returns whether the first child below META is part of the curated public tree. */
@@ -84,6 +91,7 @@ public final class ContextPathPolicy {
         if (path.startsWith("EXEC.INPUT.") || path.startsWith("EXEC.INPUT[")) return Scope.CANONICAL_INPUT;
         if (path.startsWith("EXEC.VARS.") || path.startsWith("EXEC.VARS[")) return Scope.CANONICAL_VARS;
         if (path.startsWith("EXEC.ACTIONS.") || path.startsWith("EXEC.ACTIONS[")) return Scope.CANONICAL_ACTIONS;
+        if (path.startsWith("EXEC.LOAD.") || path.startsWith("EXEC.LOAD[")) return Scope.CANONICAL_LOAD;
         if (path.equals("META") || path.startsWith("META.")) return Scope.CANONICAL_META;
         if (path.equals("CASE.STAGES") || path.startsWith("CASE.STAGES.") || path.startsWith("CASE.STAGES["))
             return Scope.LEGACY_STAGE_EVIDENCE;
@@ -108,6 +116,7 @@ public final class ContextPathPolicy {
     public static boolean isRuntimeDependent(String path) {
         Scope scope = classify(path);
         if (scope == Scope.LEGACY_STAGE_EVIDENCE || scope == Scope.CANONICAL_ACTIONS
+                || scope == Scope.CANONICAL_LOAD
                 || scope == Scope.TRANSIENT_TOOL || scope == Scope.TRANSIENT_DB
                 || scope == Scope.ACTION_OUTPUT) return true;
         if (scope == Scope.LEGACY_ALIAS && path.startsWith("ACTIONS.")) return true;

@@ -27,6 +27,8 @@ public final class Version {
     public static final String CI_SUMMARY_SCHEMA = "att-ci-summary/v2.1";
     public static final String MQHELPER_SCHEMA = "att-mqhelper/v1.0";
     public static final String DEBUG_SCHEMA = "att-debug/v1.0";
+    public static final String LOAD_SCHEMA = "att-load/v1.0";
+    public static final String LOAD_SUMMARY_SCHEMA = "att-load-summary/v1.0";
 
     private Version() {}
 

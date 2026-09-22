@@ -1,6 +1,6 @@
-# ATT 3.4.2 - Automated Testing Tool
+# ATT 3.5.0 - Automated Testing Tool
 
-ATT V3.4.2 uses one execution-neutral Context for ordinary TestCase execution and standalone debug, with canonical `EXEC`, `META`, and Action-local `output` scopes. Tool, DB, and MQ operations converge through one operation-result boundary and one stable Action result/evidence envelope while retaining legacy aliases and the V3.4 evidence, MQ, diagnostics, and Case-log behavior.
+ATT V3.5.0 uses one execution-neutral Context for ordinary TestCase execution, standalone debug, and load iterations, with canonical `EXEC`, `META`, and Action-local `output` scopes. Tool, DB, and MQ operations converge through one operation-result boundary and one stable Action result/evidence envelope while retaining the compatible V3.4 execution, MQ, diagnostics, and Case-log behavior.
 
 V2.6 retains the V2.5 first-class DB design and adds `call` as a typed alternative to Tool `command`. A call-backed Tool can wrap a DB query/scalar/update or pure built-in while direct DB Actions and expressions remain available.
 
@@ -47,6 +47,8 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 ./att.sh snapshot
 ./att.sh validate --package
 ./att.sh run --all
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
 ./att.sh report --run-id <RunID>
 ./att.sh docs
 ./att.sh build
@@ -59,14 +61,16 @@ Every workbook requires a same-basename YAML sidecar with a package-unique `id` 
 - CI JUnit XML: `output/<RunID>/ci/junit.xml`
 - JUnit HTML report: `output/<RunID>/report/junit.html`
 - Optional performance profile: `output/<RunID>/performance.json` from `run --profile`
+- Load summaries and offline reports: `output/load/<runId>/load-summary.{json,yaml}` and `output/load/<runId>/report/index.html`
+- Load exit codes: `0` PASS, `1` threshold failure, `2` validation/configuration failure, `3` runtime/infrastructure error
 - Package documentation: `build/docs/index.html`
 - Latest completed-run archive: `build/att-run-<RunID>.tar.gz`
 
 `./att.sh docs` always produces one self-contained page at `build/docs/index.html`; Testcases are grouped by workbook and Sheet, and each table includes the validation-time Expected Result assembled from assert actions. Tool, DB helper, and built-in sections have top indexes, and search filters by workbook, sheet, Case ID, template, Tool, or DB helper. `--single-page` is not a supported option. `./att.sh clean` removes the configured `outputDirectory`, `build/docs`, and `build/att-*.tar.gz`, while preserving testcase, template, tool, dbhelper, configuration, and documentation source files.
 
-## V3.4 essentials
+## Compatibility essentials (V3.4 baseline)
 
-- Authoring schemas remain named `att-template/v3.0` and `att-flow/v3.0`; their reusable descriptor shape is unchanged, while V3.4.2 gives each Flow invocation a fresh Action scope. V2.6, V2.5 and V2.3 Templates remain readable without semantic changes.
+- Authoring schemas remain named `att-template/v3.0` and `att-flow/v3.0`; their reusable descriptor shape is unchanged, while the V3.4.2 compatibility baseline gives each Flow invocation a fresh Action scope. V2.6, V2.5 and V2.3 Templates remain readable without semantic changes.
 - Flow descriptors live below `templates/flows/**/flow.yaml`, use a path-independent ID ending in `.vN`, and contain only metadata plus ordered `actions`; `inputs` and `outputs` are invalid.
 - A V3 Template invokes a Flow with `type: flow` and static `use`; `with` is invalid. Flow Actions expose only their standard status outcome.
 - Flow internals use the canonical `EXEC`/`META` Context but each Flow invocation has a fresh `EXEC.ACTIONS` scope. Internal Actions are readable only inside that Flow; publish values needed by the caller through unique `EXEC.VARS` assignments. `CASE`/`RUN`/`ACTIONS` remain compatibility aliases, while `input.*`, lowercase `actions.*`, `runtime.*`, `flow.*`, and `output.outputs` are invalid.
@@ -144,10 +148,24 @@ test case --1:n stage--> template --1:n action--> tool
 - Stage template cells are YAML maps with `name`, or scalar shorthand such as `PAYMENT_INVOKE`.
 - A template selector first resolves a symbolic `template.yaml.name`, then a path relative to `templates.root`.
 - Stage `runWhen` defaults to `normal`; V3 Action `runWhen` is an optional boolean expression. Stage/action `onFailure` defaults to `stop` and accepts only `stop` or `continue`.
-- Template and Flow Actions use canonical `EXEC`/`META` roots plus the current Action's local `output`. Root-level `TOOL.*` and `DB.*` may remain in internal or persisted historical/result compatibility views, but are not supported general expression APIs; `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, and `EXEC.STAGES` are not 3.4.2 Context nodes. The complete property reference is in the V3 Reference Manual.
+- Template and Flow Actions use canonical `EXEC`/`META` roots plus the current Action's local `output`. Root-level `TOOL.*` and `DB.*` may remain in internal or persisted historical/result compatibility views, but are not supported general expression APIs; `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, and `EXEC.STAGES` are not canonical Context nodes. The complete property reference is in the V3 Reference Manual.
 - Current Stage input is exposed through canonical `EXEC.INPUT`; completed Action results are exposed through the current scope's `EXEC.ACTIONS`. A Flow enters a fresh Action scope and restores its parent on return; explicit `EXEC.VARS` assignments are the supported cross-Flow data channel. Curated helper identity may be exposed through `META.TOOL`, `META.DBHELPER`, or `META.MQHELPER`; mutable helper/resource state remains internal. Stage/Template/Flow history is retained as result evidence, not a reusable expression namespace.
 - V2.6 Tool argument descriptors contain `name`, `description`, `required`, optional `argName`, and optional `argNameMode: once|repeat`. Multi-value calls pass YAML arrays directly.
 - `N/A`, `NA`, `NULL`, and `NONE` normalize to blank strings.
 
 See the [V3 System Design](docs/02_System_Design_V3.md), [V2.6.2 Tool System Design](docs/02_System_Design_V2.6.2.md), and [V2.5 Database Helper System Design](docs/history/02_System_Design_V2.5.md) for normative specifications.
-See the [ATT V3.4.2 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.4.2 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.
+See the [ATT V3.5.0 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.5.0 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.
+
+### Load V1 (3.5.0)
+
+For the complete load configuration matrix and copyable target, threshold, evidence, DB/MQ pooling, and diagnostic examples, see [`examples/load/README.md`](examples/load/README.md). The two smoke scenarios above finish in a few seconds; `closed.yaml` and `arrival-rate.yaml` remain realistic longer-running examples.
+
+Load scenarios are validated before scheduling and write isolated summaries and an offline report below `output/load/<runId>/`:
+
+```sh
+./att.sh load examples/load/closed.yaml
+./att.sh load examples/load/arrival-rate.yaml --format json
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+```
+
+Use `load.users` for the closed-VU model, or `load.arrivalRate` with `maxConcurrent` and `overloadPolicy: drop` for fixed arrivals. Reusable Templates, Flows, and Tools read `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and action-local `output`; load identity is only under `EXEC.LOAD.*`. See [`examples/load/README.md`](examples/load/README.md) for copyable configurations, CLI overrides, thresholds, evidence, DB/MQ pooling, and the release-gate checks.
