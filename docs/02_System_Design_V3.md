@@ -54,6 +54,14 @@ V3.4.2 additionally provides:
 - command-backed Tools as a supported external-process extension mechanism, with deterministic argv, process evidence, SSH, and script use cases preserved; and
 - DB transaction/connection state kept internal to the resource scope, with legacy `CASE.DB` finalization retained separately from operation evidence.
 
+V3.5.0 Load V1 additionally provides:
+
+- one `att-load/v1.0` scenario contract with closed-VU and fixed-arrival-rate schedulers;
+- a load adapter that reuses the ordinary Template/Flow/Tool runtime while creating one isolated `EXEC`/`META` Context and action-local `output` per iteration;
+- stable closed-model `EXEC.LOAD.USER_ID`, arrival-rate no-persistent-VU semantics, phase-aware warm-up exclusion, and separate configured/achieved/completed/drop metrics;
+- bounded metrics, evidence sampling, lazy iteration workspaces, and load-only report artifacts below `output/load/<runId>/`; and
+- deterministic examples and automated release-gate checks from CLI scenario through JSON/YAML summary and offline HTML report.
+
 V3.3 does not add namespaces, implicit last-Action output, replacement input/output syntax, loops, parallel branches, dynamic dispatch, Flow timeout/retry, `runAlways`, warning impact, or inheritance.
 
 ## 3. Public configuration

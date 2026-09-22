@@ -4569,6 +4569,18 @@ physical iteration workspace with <code>case.log</code> and
 when its diagnostic is retained. Evidence links are written below the
 load run’s <code>samples/</code> or <code>failures/</code> directories
 and never enter ordinary functional-run artifacts.</p>
+<p>The shortest end-to-end smoke commands are:</p>
+<div class="sourceCode" id="cb96"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb96-1"><a href="#cb96-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed.yaml</span>
+<span id="cb96-2"><a href="#cb96-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-rate.yaml <span class="at">--format</span> json</span>
+<span id="cb96-3"><a href="#cb96-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/tool.yaml <span class="at">--duration</span> 100ms <span class="at">--run-id</span> load-tool-example</span></code></pre></div>
+<p><code>examples/load/README.md</code> is the maintained copyable
+reference for Template, Flow, Tool, DB/MQ pool sizing, thresholds,
+evidence, CLI overrides, and invalid configurations. All four examples
+are schema- and dependency-validated by <code>LoadAcceptanceTest</code>;
+that test also launches the real <code>att.FrameworkRunner load</code>
+CLI for short closed and arrival-rate scenarios and checks the persisted
+JSON, YAML, and offline HTML report.</p>
 <h3 id="load-summary-and-html-report-contract">Load summary and HTML
 report contract</h3>
 <p><code>load-summary.json</code> and <code>load-summary.yaml</code>
@@ -4667,6 +4679,19 @@ failed SLA thresholds, <code>2</code> for validation/configuration
 failure, and <code>3</code> for load runtime/infrastructure error.
 <code>target.arguments</code> is valid only for Tool targets; Template
 and Flow targets reject it with a field-specific diagnostic.</p>
+<p>The release gate is deliberately reproducible rather than a SUT
+microbenchmark:</p>
+<div class="sourceCode" id="cb97"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> <span class="at">-q</span> <span class="at">-Dtest</span><span class="op">=</span>LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test</span></code></pre></div>
+<p>It checks the CLI-to-report path for both schedulers, Context
+deep-copy and iteration isolation, lazy success/failure workspaces,
+bounded evidence and metric reservoirs, scheduler lag accounting,
+process/file artifact behavior, pool cleanup, threshold PASS/FAIL,
+summary schema, report rendering, and compatibility of the existing
+run/debug/validation test suite. Load V1 does not claim distributed
+execution, Poisson/random pacing, weighted multi-scenario, rendezvous,
+adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory
+benchmarking.</p>
 <p>Common properties include:</p>
 <table>
 <colgroup>
@@ -4860,13 +4885,13 @@ id="example-reference-stage-selector-data-from-an-xml-payload">Example:
 reference stage-selector data from an XML payload</h4>
 <p>Suppose the Excel selector cell for stage <code>invoke</code>
 contains this YAML flow map:</p>
-<div class="sourceCode" id="cb97"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> templateName</span><span class="kw">,</span><span class="at"> </span><span class="fu">debitAccount</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;012123456&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">InstrAmt</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;100.00&quot;</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb99"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="kw">{</span><span class="fu">name</span><span class="kw">:</span><span class="at"> templateName</span><span class="kw">,</span><span class="at"> </span><span class="fu">debitAccount</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;012123456&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">InstrAmt</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;100.00&quot;</span><span class="kw">}</span></span></code></pre></div>
 <p>Flow-map entries use commas, not semicolons. Every selector-map key
 is adapted into the current Stage’s <code>EXEC.INPUT</code>, so the
 canonical XML payload reference is:</p>
-<div class="sourceCode" id="cb98"><pre
-class="sourceCode xml"><code class="sourceCode xml"><span id="cb98-1"><a href="#cb98-1" aria-hidden="true" tabindex="-1"></a>&lt;<span class="kw">InstrAmt</span>&gt;${EXEC.INPUT.InstrAmt}&lt;/<span class="kw">InstrAmt</span>&gt;</span></code></pre></div>
+<div class="sourceCode" id="cb100"><pre
+class="sourceCode xml"><code class="sourceCode xml"><span id="cb100-1"><a href="#cb100-1" aria-hidden="true" tabindex="-1"></a>&lt;<span class="kw">InstrAmt</span>&gt;${EXEC.INPUT.InstrAmt}&lt;/<span class="kw">InstrAmt</span>&gt;</span></code></pre></div>
 <p>The old <code>CASE.STAGES</code> path remains available in persisted
 execution evidence and migration material only; it is not readable from
 a Template/Flow expression. When no other currently readable logical
@@ -4976,15 +5001,15 @@ suffix removed; for example,
 explicitly, whether used as text interpolation or as a built-in
 argument. Bare <code>suiteName</code> inside a call is rejected. Legal
 examples include:</p>
-<div class="sourceCode" id="cb99"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb99-2"><a href="#cb99-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
-<div class="sourceCode" id="cb100"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb100-1"><a href="#cb100-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
-<span id="cb100-2"><a href="#cb100-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
-<span id="cb100-3"><a href="#cb100-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
-<span id="cb100-4"><a href="#cb100-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
-<span id="cb100-5"><a href="#cb100-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb101"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb101-1"><a href="#cb101-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb101-2"><a href="#cb101-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb102"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb102-1"><a href="#cb102-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
+<span id="cb102-2"><a href="#cb102-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
+<span id="cb102-3"><a href="#cb102-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
+<span id="cb102-4"><a href="#cb102-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
+<span id="cb102-5"><a href="#cb102-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
 <p>For <code>testcase/payment.xlsx</code>, the first example writes
 <code>output/&lt;RunID&gt;/workbooks/payment.result.xlsx</code>.
 <code>${suiteName}</code> is the physical workbook basename, not the
@@ -4997,10 +5022,10 @@ result filename, so package authors must avoid that collision.</p>
 <h4 id="illegal-or-unsupported-forms">Illegal or unsupported forms</h4>
 <p>These values fail configuration loading because they do not reference
 <code>suiteName</code>:</p>
-<div class="sourceCode" id="cb101"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb101-1"><a href="#cb101-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result.xlsx&quot;</span></span>
-<span id="cb101-2"><a href="#cb101-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${runId}.result.xlsx&quot;</span></span>
-<span id="cb101-3"><a href="#cb101-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${workbookId}.result.xlsx&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb103"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb103-1"><a href="#cb103-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result.xlsx&quot;</span></span>
+<span id="cb103-2"><a href="#cb103-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${runId}.result.xlsx&quot;</span></span>
+<span id="cb103-3"><a href="#cb103-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${workbookId}.result.xlsx&quot;</span></span></code></pre></div>
 <p>No other value reference or Runtime Context path is supported.
 Configured Tool calls are also unavailable in this scope. These forms
 are invalid:</p>
@@ -5057,31 +5082,31 @@ they uniquely match a declared key:</p>
 </tbody>
 </table>
 <p>For example:</p>
-<div class="sourceCode" id="cb103"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb103-1"><a href="#cb103-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb103-2"><a href="#cb103-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
-<span id="cb103-3"><a href="#cb103-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
-<span id="cb103-4"><a href="#cb103-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a rendered payment request</span></span>
-<span id="cb103-5"><a href="#cb103-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb103-6"><a href="#cb103-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
-<span id="cb103-7"><a href="#cb103-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.requestFile}&quot;</span></span>
-<span id="cb103-8"><a href="#cb103-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.environment}&quot;</span></span>
-<span id="cb103-9"><a href="#cb103-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb103-10"><a href="#cb103-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb103-11"><a href="#cb103-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span></span>
-<span id="cb103-12"><a href="#cb103-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
-<span id="cb103-13"><a href="#cb103-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
-<span id="cb103-14"><a href="#cb103-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb103-15"><a href="#cb103-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">environment</span><span class="kw">:</span></span>
-<span id="cb103-16"><a href="#cb103-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Environment</span></span>
-<span id="cb103-17"><a href="#cb103-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Target environment</span></span>
-<span id="cb103-18"><a href="#cb103-18" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb105"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb105-1"><a href="#cb105-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb105-2"><a href="#cb105-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
+<span id="cb105-3"><a href="#cb105-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
+<span id="cb105-4"><a href="#cb105-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a rendered payment request</span></span>
+<span id="cb105-5"><a href="#cb105-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb105-6"><a href="#cb105-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
+<span id="cb105-7"><a href="#cb105-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.requestFile}&quot;</span></span>
+<span id="cb105-8"><a href="#cb105-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.environment}&quot;</span></span>
+<span id="cb105-9"><a href="#cb105-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb105-10"><a href="#cb105-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb105-11"><a href="#cb105-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span></span>
+<span id="cb105-12"><a href="#cb105-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
+<span id="cb105-13"><a href="#cb105-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
+<span id="cb105-14"><a href="#cb105-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb105-15"><a href="#cb105-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">environment</span><span class="kw">:</span></span>
+<span id="cb105-16"><a href="#cb105-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Environment</span></span>
+<span id="cb105-17"><a href="#cb105-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Target environment</span></span>
+<span id="cb105-18"><a href="#cb105-18" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>The action call is the boundary between the general Runtime Context
 and this restricted Tool-input Context:</p>
-<div class="sourceCode" id="cb104"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb104-1"><a href="#cb104-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callApi</span><span class="kw">:</span></span>
-<span id="cb104-2"><a href="#cb104-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb104-3"><a href="#cb104-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb106"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb106-1"><a href="#cb106-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callApi</span><span class="kw">:</span></span>
+<span id="cb106-2"><a href="#cb106-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb106-3"><a href="#cb106-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}&quot;</span></span></code></pre></div>
 <p>The call resolves the explicit <code>${EXEC.ACTIONS...}</code> and
 <code>${EXEC.INPUT...}</code> references first and creates Tool inputs
 named <code>requestFile</code> and <code>environment</code>. The command
@@ -5095,11 +5120,11 @@ remain compatible only when each name is declared and emit
 <p>Each command token also accepts built-in calls through the same
 expression engine. Built-ins see only the declared Tool-input aliases
 shown above, and calls may be nested:</p>
-<div class="sourceCode" id="cb105"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb105-1"><a href="#cb105-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb105-2"><a href="#cb105-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
-<span id="cb105-3"><a href="#cb105-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--environment=#{upper(${input.environment})}&quot;</span></span>
-<span id="cb105-4"><a href="#cb105-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--label=#{concat(&#39;ATT-&#39;, #{lower(${input.requestFile})})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb107"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb107-1"><a href="#cb107-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb107-2"><a href="#cb107-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
+<span id="cb107-3"><a href="#cb107-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--environment=#{upper(${input.environment})}&quot;</span></span>
+<span id="cb107-4"><a href="#cb107-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--label=#{concat(&#39;ATT-&#39;, #{lower(${input.requestFile})})}&quot;</span></span></code></pre></div>
 <p>Inside a command-side built-in call, declared inputs must also use
 placeholders: <code>${input.requestFile}</code> is canonical;
 <code>${TOOL.input.requestFile}</code> and <code>${requestFile}</code>
@@ -5110,11 +5135,11 @@ or <code>input.requestFile</code> is not inferred. Outside
 rule.</p>
 <p>A normal argument placeholder may occupy a complete argv token, which
 is preferred, or be embedded in fixed text:</p>
-<div class="sourceCode" id="cb106"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb106-1"><a href="#cb106-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
-<span id="cb106-2"><a href="#cb106-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
-<span id="cb106-3"><a href="#cb106-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--request=${input.requestFile}&quot;</span></span>
-<span id="cb106-4"><a href="#cb106-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--environment=${input.environment}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb108"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb108-1"><a href="#cb108-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
+<span id="cb108-2"><a href="#cb108-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
+<span id="cb108-3"><a href="#cb108-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--request=${input.requestFile}&quot;</span></span>
+<span id="cb108-4"><a href="#cb108-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;--environment=${input.environment}&quot;</span></span></code></pre></div>
 <p>Because this is a YAML argv list, each list item remains one atomic
 process argument even when its resolved value contains spaces or
 shell-like characters. ATT does not invoke a local shell.</p>
@@ -5129,48 +5154,48 @@ interpolated, while an unquoted canonical Context path passes its typed
 value directly.</p>
 <p>The following configured Tool keeps each declared input as one argv
 value:</p>
-<div class="sourceCode" id="cb107"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb107-1"><a href="#cb107-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb107-2"><a href="#cb107-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">writeAudit</span><span class="kw">:</span></span>
-<span id="cb107-3"><a href="#cb107-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Write audit</span></span>
-<span id="cb107-4"><a href="#cb107-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Write one audit message for one source file</span></span>
-<span id="cb107-5"><a href="#cb107-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/write_audit.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${message}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${sourceFile}&quot;</span><span class="kw">]</span></span>
-<span id="cb107-6"><a href="#cb107-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
-<span id="cb107-7"><a href="#cb107-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb107-8"><a href="#cb107-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">message</span><span class="kw">:</span></span>
-<span id="cb107-9"><a href="#cb107-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Message</span></span>
-<span id="cb107-10"><a href="#cb107-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Exact audit message</span></span>
-<span id="cb107-11"><a href="#cb107-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb107-12"><a href="#cb107-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sourceFile</span><span class="kw">:</span></span>
-<span id="cb107-13"><a href="#cb107-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Source file</span></span>
-<span id="cb107-14"><a href="#cb107-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File associated with the message</span></span>
-<span id="cb107-15"><a href="#cb107-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb109"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb109-1"><a href="#cb109-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb109-2"><a href="#cb109-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">writeAudit</span><span class="kw">:</span></span>
+<span id="cb109-3"><a href="#cb109-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Write audit</span></span>
+<span id="cb109-4"><a href="#cb109-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Write one audit message for one source file</span></span>
+<span id="cb109-5"><a href="#cb109-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/write_audit.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${message}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${sourceFile}&quot;</span><span class="kw">]</span></span>
+<span id="cb109-6"><a href="#cb109-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> yaml</span></span>
+<span id="cb109-7"><a href="#cb109-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb109-8"><a href="#cb109-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">message</span><span class="kw">:</span></span>
+<span id="cb109-9"><a href="#cb109-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Message</span></span>
+<span id="cb109-10"><a href="#cb109-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Exact audit message</span></span>
+<span id="cb109-11"><a href="#cb109-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb109-12"><a href="#cb109-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sourceFile</span><span class="kw">:</span></span>
+<span id="cb109-13"><a href="#cb109-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Source file</span></span>
+<span id="cb109-14"><a href="#cb109-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File associated with the message</span></span>
+<span id="cb109-15"><a href="#cb109-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>Use a YAML block scalar when a call contains several quote
 layers:</p>
-<div class="sourceCode" id="cb108"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb108-1"><a href="#cb108-1" aria-hidden="true" tabindex="-1"></a><span class="fu">singleQuote</span><span class="kw">:</span></span>
-<span id="cb108-2"><a href="#cb108-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb108-3"><a href="#cb108-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb108-4"><a href="#cb108-4" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb108-5"><a href="#cb108-5" aria-hidden="true" tabindex="-1"></a>        message=&quot;Customer O&#39;Reilly&quot;,</span>
-<span id="cb108-6"><a href="#cb108-6" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb108-7"><a href="#cb108-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb108-8"><a href="#cb108-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb108-9"><a href="#cb108-9" aria-hidden="true" tabindex="-1"></a><span class="fu">doubleQuote</span><span class="kw">:</span></span>
-<span id="cb108-10"><a href="#cb108-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb108-11"><a href="#cb108-11" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb108-12"><a href="#cb108-12" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb108-13"><a href="#cb108-13" aria-hidden="true" tabindex="-1"></a>        message=&#39;status=&quot;READY&quot;&#39;,</span>
-<span id="cb108-14"><a href="#cb108-14" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb108-15"><a href="#cb108-15" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb108-16"><a href="#cb108-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb108-17"><a href="#cb108-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mixedQuotesAndContext</span><span class="kw">:</span></span>
-<span id="cb108-18"><a href="#cb108-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb108-19"><a href="#cb108-19" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb108-20"><a href="#cb108-20" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
-<span id="cb108-21"><a href="#cb108-21" aria-hidden="true" tabindex="-1"></a>        message=&quot;O&#39;Reilly said \&quot;READY\&quot; for ${EXEC.INPUT.caseId}&quot;,</span>
-<span id="cb108-22"><a href="#cb108-22" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
-<span id="cb108-23"><a href="#cb108-23" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
+<div class="sourceCode" id="cb110"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb110-1"><a href="#cb110-1" aria-hidden="true" tabindex="-1"></a><span class="fu">singleQuote</span><span class="kw">:</span></span>
+<span id="cb110-2"><a href="#cb110-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb110-3"><a href="#cb110-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb110-4"><a href="#cb110-4" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb110-5"><a href="#cb110-5" aria-hidden="true" tabindex="-1"></a>        message=&quot;Customer O&#39;Reilly&quot;,</span>
+<span id="cb110-6"><a href="#cb110-6" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb110-7"><a href="#cb110-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb110-8"><a href="#cb110-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb110-9"><a href="#cb110-9" aria-hidden="true" tabindex="-1"></a><span class="fu">doubleQuote</span><span class="kw">:</span></span>
+<span id="cb110-10"><a href="#cb110-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb110-11"><a href="#cb110-11" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb110-12"><a href="#cb110-12" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb110-13"><a href="#cb110-13" aria-hidden="true" tabindex="-1"></a>        message=&#39;status=&quot;READY&quot;&#39;,</span>
+<span id="cb110-14"><a href="#cb110-14" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb110-15"><a href="#cb110-15" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb110-16"><a href="#cb110-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb110-17"><a href="#cb110-17" aria-hidden="true" tabindex="-1"></a><span class="fu">mixedQuotesAndContext</span><span class="kw">:</span></span>
+<span id="cb110-18"><a href="#cb110-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb110-19"><a href="#cb110-19" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb110-20"><a href="#cb110-20" aria-hidden="true" tabindex="-1"></a>    #{writeAudit(</span>
+<span id="cb110-21"><a href="#cb110-21" aria-hidden="true" tabindex="-1"></a>        message=&quot;O&#39;Reilly said \&quot;READY\&quot; for ${EXEC.INPUT.caseId}&quot;,</span>
+<span id="cb110-22"><a href="#cb110-22" aria-hidden="true" tabindex="-1"></a>        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}</span>
+<span id="cb110-23"><a href="#cb110-23" aria-hidden="true" tabindex="-1"></a>    )}</span></code></pre></div>
 <p>The child process receives the three messages exactly as
 <code>Customer O'Reilly</code>, <code>status="READY"</code>, and, for
 example, <code>O'Reilly said "READY" for payment.payment.TC001</code>. A
@@ -5178,9 +5203,9 @@ Context value that itself contains either quote needs no caller-side
 shell escaping and still occupies one argv item.</p>
 <p>If a call is kept on one YAML line, YAML escaping is an additional
 and separate layer:</p>
-<div class="sourceCode" id="cb109"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb109-1"><a href="#cb109-1" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{writeAudit(message=&#39;status=</span><span class="sc">\&quot;</span><span class="st">READY</span><span class="sc">\&quot;</span><span class="st">&#39;, sourceFile=${EXEC.INPUT.sourceFile})}&quot;</span></span>
-<span id="cb109-2"><a href="#cb109-2" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;#{writeAudit(message=&quot;O</span><span class="sc">&#39;&#39;</span><span class="st">Reilly&quot;, sourceFile=${EXEC.INPUT.sourceFile})}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb111"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb111-1"><a href="#cb111-1" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{writeAudit(message=&#39;status=</span><span class="sc">\&quot;</span><span class="st">READY</span><span class="sc">\&quot;</span><span class="st">&#39;, sourceFile=${EXEC.INPUT.sourceFile})}&quot;</span></span>
+<span id="cb111-2"><a href="#cb111-2" aria-hidden="true" tabindex="-1"></a><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;#{writeAudit(message=&quot;O</span><span class="sc">&#39;&#39;</span><span class="st">Reilly&quot;, sourceFile=${EXEC.INPUT.sourceFile})}&#39;</span></span></code></pre></div>
 <p>The first line escapes double quotes for the YAML double-quoted
 scalar. The second doubles the apostrophe for the YAML single-quoted
 scalar. The expression engine then evaluates the resulting
@@ -5217,14 +5242,14 @@ contain <code>${...}</code> or <code>#{...}</code>.</p>
 <p>If an argument declares a non-empty <code>argName</code>, its
 placeholder must appear exactly once and occupy one complete command
 token:</p>
-<div class="sourceCode" id="cb112"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb112-1"><a href="#cb112-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/invoke_payment_api.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${input.requestFile}&quot;</span><span class="kw">]</span></span>
-<span id="cb112-2"><a href="#cb112-2" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb112-3"><a href="#cb112-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestFile</span><span class="kw">:</span></span>
-<span id="cb112-4"><a href="#cb112-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
-<span id="cb112-5"><a href="#cb112-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
-<span id="cb112-6"><a href="#cb112-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb112-7"><a href="#cb112-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --request</span></span></code></pre></div>
+<div class="sourceCode" id="cb114"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb114-1"><a href="#cb114-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./tools/invoke_payment_api.sh</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;${input.requestFile}&quot;</span><span class="kw">]</span></span>
+<span id="cb114-2"><a href="#cb114-2" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb114-3"><a href="#cb114-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestFile</span><span class="kw">:</span></span>
+<span id="cb114-4"><a href="#cb114-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request File</span></span>
+<span id="cb114-5"><a href="#cb114-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Rendered XML request path</span></span>
+<span id="cb114-6"><a href="#cb114-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb114-7"><a href="#cb114-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --request</span></span></code></pre></div>
 <p>ATT expands that token to two argv values: <code>--request</code>,
 then the resolved path. An embedded form such as
 <code>--request=${input.requestFile}</code> or a transformed form such
@@ -5536,11 +5561,11 @@ framework packages. V2.6 retains an internal provider boundary for a
 future release, but configuration cannot load custom Java classes.
 Invalid arguments produce action ERROR.</p>
 <p>Typical expressions:</p>
-<div class="sourceCode" id="cb113"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb113-1"><a href="#cb113-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.amount} &gt; 0&quot;</span></span>
-<span id="cb113-2"><a href="#cb113-2" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callApi.output.result.status} == ${EXEC.INPUT.expectedStatus}&quot;</span></span>
-<span id="cb113-3"><a href="#cb113-3" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callApi.output.result.message} like &#39;PAYMENT%SUCCESS&#39;&quot;</span></span>
-<span id="cb113-4"><a href="#cb113-4" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;(${EXEC.INPUT.channel} == &#39;MOBILE&#39;) and (${EXEC.INPUT.amount} &lt;= 1000)&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb115"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb115-1"><a href="#cb115-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.amount} &gt; 0&quot;</span></span>
+<span id="cb115-2"><a href="#cb115-2" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callApi.output.result.status} == ${EXEC.INPUT.expectedStatus}&quot;</span></span>
+<span id="cb115-3"><a href="#cb115-3" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callApi.output.result.message} like &#39;PAYMENT%SUCCESS&#39;&quot;</span></span>
+<span id="cb115-4"><a href="#cb115-4" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;(${EXEC.INPUT.channel} == &#39;MOBILE&#39;) and (${EXEC.INPUT.amount} &lt;= 1000)&quot;</span></span></code></pre></div>
 <h2 id="report-reference">08 Report Reference</h2>
 <h3 id="run-directory">Run directory</h3>
 <pre class="text"><code>&lt;outputDirectory&gt;/&lt;RunID&gt;/
@@ -5707,8 +5732,8 @@ idempotent, and reports what it removed.</p>
 <h2 id="troubleshooting">09 Troubleshooting</h2>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, or tool change:</p>
-<div class="sourceCode" id="cb115"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb115-1"><a href="#cb115-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb117"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb117-1"><a href="#cb117-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>Then use the diagnostic code and structured location. Do not automate
 against message text.</p>
 <table>

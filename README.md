@@ -151,3 +151,15 @@ test case --1:n stage--> template --1:n action--> tool
 
 See the [V3 System Design](docs/02_System_Design_V3.md), [V2.6.2 Tool System Design](docs/02_System_Design_V2.6.2.md), and [V2.5 Database Helper System Design](docs/history/02_System_Design_V2.5.md) for normative specifications.
 See the [ATT V3.4.2 Reference Manual](docs/09_Reference_Manual_V3.md) and [ATT V3.4.2 Quick Start](docs/08_Quick_Start_V3.md) for operation and authoring guidance.
+
+### Load V1 (3.5.0)
+
+Load scenarios are validated before scheduling and write isolated summaries and an offline report below `output/load/<runId>/`:
+
+```sh
+./att.sh load examples/load/closed.yaml
+./att.sh load examples/load/arrival-rate.yaml --format json
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+```
+
+Use `load.users` for the closed-VU model, or `load.arrivalRate` with `maxConcurrent` and `overloadPolicy: drop` for fixed arrivals. Reusable Templates, Flows, and Tools read `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and action-local `output`; load identity is only under `EXEC.LOAD.*`. See [`examples/load/README.md`](examples/load/README.md) for copyable configurations, CLI overrides, thresholds, evidence, DB/MQ pooling, and the release-gate checks.

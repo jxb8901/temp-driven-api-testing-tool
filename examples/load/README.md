@@ -130,6 +130,14 @@ target:
 
 Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/config.yaml` 的全域 Tool 或 `config/tools/*.yaml` 的 Tool group 契約。`fpp.invokeApi` 是包內的 reference Tool，實際整合前要替換 reference script 和 payload 路徑。
 
+要先驗證一個不依賴外部服務的 Tool target，可直接使用 [`tool.yaml`](tool.yaml)：
+
+```sh
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+```
+
+這個例子使用 `sample.getAcDate`，每次 iteration 啟動包內的 deterministic shell Tool；真實整合時只需替換 `target.id` 和其 `arguments`，不需要改 load scheduler 或 Context contract。
+
 ## 5. 欄位說明
 
 | 路徑 | 必填 | 說明 |
@@ -278,3 +286,15 @@ closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，
 ```
 
 DB pool 的 `maxSize`/`connectionTimeout` 與 VU 或 `maxConcurrent` 無關；MQ pool 的 `maxSize`/`borrowTimeout` 同樣獨立。DB/MQ physical resources 由 load-run owner 管理，queue handles 仍然是 invocation-scoped，pool timeout 會分別標示為 `DB_POOL_TIMEOUT` / `MQ_POOL_TIMEOUT`，不會冒充 SQL、MQRC 2033 或 SUT failure。
+
+## 10. Release-gate checks
+
+Issue #25 的整合檢查由 Maven 測試自動執行：
+
+```sh
+mvn -q -Dtest=LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test
+```
+
+`LoadAcceptanceTest` 會先解析並驗證本目錄全部四個例子，再以真正的 CLI entry point 執行短版 closed 和 arrival-rate workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出。`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection 和 HTML。
+
+這是可重複的 ATT self-overhead gate，不是 SUT microbenchmark：它檢查每成功 iteration 不產生無界 Case/log churn、Context 不跨 iteration 共享、scheduler lag/metrics 保持有界、pool/resource cleanup 及 report/evidence retention 受策略控制。V1 不承諾 distributed/Poisson/weighted multi-scenario、rendezvous、adaptive pool 或 target CPU/memory benchmarking。

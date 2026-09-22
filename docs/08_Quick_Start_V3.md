@@ -227,6 +227,54 @@ output/debug/<debugId>/artifacts/case.yaml
 
 `result.yaml` 會記錄目標、合成 Case ID、輸入檔、status、exit code、diagnostic 及證據位置；因此可以先用 debug 反覆調整輸入，再用普通 Excel run 做完整回歸。
 
+## 1.3 Load V1：由 CLI 到 report
+
+ATT 3.5.0 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
+
+```sh
+./att.sh load examples/load/closed.yaml
+./att.sh load examples/load/arrival-rate.yaml --format json
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id quick-tool
+```
+
+closed-VU 配置以 `load.users` 定義長期 Virtual Users；同一 VU 的 `EXEC.LOAD.USER_ID` 穩定，iteration 之間可使用 `execution.thinkTime`。fixed arrival-rate 配置以 `load.arrivalRate`、`maxConcurrent` 和 V1 唯一支援的 `overloadPolicy: drop` 定義到達；不建立 persistent VU，並發已滿時只記錄 generator `dropped`。`warmup` traffic 會實際執行，但預設不納入 measured thresholds。
+
+最小配置：
+
+```yaml
+schemaVersion: att-load/v1.0
+target: {type: template, id: V3_FLOW_EXAMPLE}
+load: {users: 2, duration: 30s}
+```
+
+```yaml
+schemaVersion: att-load/v1.0
+target: {type: flow, id: common.compose.v1}
+load:
+  arrivalRate: 100/s
+  duration: 30s
+  maxConcurrent: 20
+  overloadPolicy: drop
+```
+
+每個 load iteration 都有獨立的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 output workspace；只可從 `EXEC.LOAD.*` 讀取 `RUN_ID`、`MODEL`、`USER_ID`、`ITERATION_ID`、sequence 和 phase。root-level `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是 public contract。Tool target 可用 `target.arguments` 傳 named arguments；[`examples/load/README.md`](../examples/load/README.md) 包含 Template、Flow、Tool、DB/MQ pool 和 threshold 例子。
+
+執行結果固定寫入：
+
+```text
+output/load/<runId>/load-summary.json
+output/load/<runId>/load-summary.yaml
+output/load/<runId>/report/index.html
+```
+
+summary 會分開 configured/achieved/completed rate、SUT error、runtime error 和 generator drops；`--format json` 的 stdout 可直接交給 CI。完整整合/self-overhead gate 可重複執行：
+
+```sh
+mvn -q -Dtest=LoadAcceptanceTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest test
+```
+
+這個 gate 驗證所有例子、兩種 scheduler 的 CLI-to-report 路徑、Context isolation、bounded metrics/evidence、resource cleanup、threshold PASS/FAIL 和 report schema；它不是 distributed/Poisson/target-resource microbenchmark。
+
 ## 2. 先理解執行方式
 
 一次正常 run 會依序完成：
