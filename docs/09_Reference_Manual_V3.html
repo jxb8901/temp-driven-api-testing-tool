@@ -4563,8 +4563,12 @@ metrics, and both write isolated
 <code>load-summary.yaml</code>, and <code>report/index.html</code>.
 Warm-up is real traffic but is excluded from measured threshold
 aggregates by default. Successful iterations retain metrics only unless
-evidence sampling is configured; failures retain bounded diagnostic
-links.</p>
+evidence sampling is configured; a bounded sampled success gets a
+physical iteration workspace with <code>case.log</code> and
+<code>case.yaml</code>, while a failure creates that workspace lazily
+when its diagnostic is retained. Evidence links are written below the
+load run’s <code>samples/</code> or <code>failures/</code> directories
+and never enter ordinary functional-run artifacts.</p>
 <p>The machine-readable <code>metrics</code> object reports configured
 load (<code>configuredUsers</code>,
 <code>configuredArrivalRatePerSecond</code>,

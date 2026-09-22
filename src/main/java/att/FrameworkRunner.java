@@ -180,8 +180,8 @@ public final class FrameworkRunner {
         try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
             att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
             att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
-                    ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence)
-                    : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence);
+                    ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
+                    : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
             try { result = scheduler.run(); } finally { scheduler.close(); }
         }
         java.nio.file.Path runDirectory = reservedRunDirectory;

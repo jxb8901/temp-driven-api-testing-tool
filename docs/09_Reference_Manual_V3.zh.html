@@ -3478,8 +3478,12 @@ time，<code>maxConcurrent</code> 已满时记录 generator
 都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的
 <code>output/load/&lt;runId&gt;/load-summary.json</code>、<code>load-summary.yaml</code>
 和 <code>report/index.html</code>。warm-up 是真实 traffic，但默认不计入
-measured threshold aggregates；成功 iteration 默认只保留
-metrics，失败和显式 sample 才保留 bounded diagnostic links。</p>
+measured threshold aggregates；成功 iteration 默认只保留 metrics，配置
+sampling 后只为有界 sampled success 创建带 <code>case.log</code> 和
+<code>case.yaml</code> 的 physical iteration workspace；失败则在保留
+diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的
+<code>samples/</code> 或 <code>failures/</code>，不会污染普通 functional
+run artifacts。</p>
 <p>machine-readable 的 <code>metrics</code>
 会输出配置负载（<code>configuredUsers</code>、<code>configuredArrivalRatePerSecond</code>、<code>configuredMaxConcurrent</code>）、iteration/scheduling
 计数（<code>iterations</code>、<code>scheduled</code>、<code>measuredScheduled</code>、<code>started</code>、<code>measuredStarted</code>、<code>completed</code>、<code>success</code>、<code>failure</code>、<code>runtimeError</code>、<code>dropped</code>、<code>measuredDropped</code>）、并发（<code>activeVus</code>、<code>maxActiveVus</code>、<code>currentInFlight</code>、<code>maxInFlight</code>）、measured

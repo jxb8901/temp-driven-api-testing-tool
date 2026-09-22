@@ -195,6 +195,7 @@ class LoadScenarioTest {
             assertEquals(expectedWorkspace, result.outputDirectory().toAbsolutePath().normalize());
             assertTrue(Files.isDirectory(expectedWorkspace));
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.log")));
+            assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.yaml")));
             assertNotNull(result.evidenceRef());
 
             LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
@@ -211,6 +212,72 @@ class LoadScenarioTest {
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
             assertEquals("iterations/" + expectedWorkspace.getFileName(), reference.get("workspace"));
             assertEquals("iterations/" + expectedWorkspace.getFileName() + "/case.log", reference.get("caseLog"));
+        } finally { resources.close(); }
+    }
+
+    @Test void fileProducingActionGetsAnIsolatedWorkspaceWithoutEvidenceRetention() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/FILE_TEMPLATE"));
+        write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
+        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
+                + "  render: {type: render, payload: payload.txt, renderAs: file}\n");
+        Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: FILE_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("file-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("payload.txt")));
+            assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
+                    "file-producing actions need a workspace but must not force a case log");
+        } finally { resources.close(); }
+    }
+
+    @Test void sampledSuccessRetainsBoundedEvidenceWithoutChangingResult() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/SAMPLE_TEMPLATE"));
+        write(project, "templates/SAMPLE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: SAMPLE_TEMPLATE\ndescription: sampled success\nactions:\n"
+                + "  record: {type: log, message: sampled}\n");
+        Path scenarioFile = write(project, "sample.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: SAMPLE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: sample, failure: full, sampleRate: 1.0, maxSamples: 1}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("sample-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            assertTrue(evidence.reserveSuccess("sample-run-1"));
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("sample-run", "sample-run-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withOutputDirectory(outputRoot.resolve("load/sample-run/iterations")));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertNotNull(result.evidenceRef());
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("case.log")));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("case.yaml")));
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("sample-run", "closed", "STEADY", "sample-run-1", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            Map<String, Object> written = evidence.write(outputRoot.resolve("load/sample-run"));
+            assertEquals(1, written.get("count"));
+            @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) written.get("items");
+            Path eventFile = outputRoot.resolve("load/sample-run").resolve(String.valueOf(items.get(0).get("path")));
+            @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
+            @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
+            assertTrue(String.valueOf(reference.get("workspace")).startsWith("iterations/"));
+            assertTrue(Files.isRegularFile(outputRoot.resolve("load/sample-run").resolve(String.valueOf(reference.get("caseLog")))));
         } finally { resources.close(); }
     }
 

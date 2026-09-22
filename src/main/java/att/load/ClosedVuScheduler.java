@@ -1,5 +1,6 @@
 package att.load;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -18,6 +19,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
     private final String runId;
     private final Consumer<LoadEvent> listener;
     private final LoadSchedulerTiming timing;
+    private final LoadEvidenceStore evidenceStore;
+    private final Path evidenceOutputRoot;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private final AtomicLong sequence = new AtomicLong();
     private volatile ExecutorService workers;
@@ -28,8 +31,17 @@ public final class ClosedVuScheduler implements LoadScheduler {
     public ClosedVuScheduler(LoadScenario scenario, IterationExecutor executor, String runId, LoadEventListener listener) {
         this(scenario, executor, runId, adapt(listener));
     }
+    public ClosedVuScheduler(LoadScenario scenario, IterationExecutor executor, String runId,
+                             LoadEvidenceStore evidenceStore, Path outputRoot) {
+        this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), evidenceStore, outputRoot);
+    }
     ClosedVuScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                       Consumer<LoadEvent> listener, LoadSchedulerTiming timing) {
+        this(scenario, executor, runId, listener, timing, null, null);
+    }
+    private ClosedVuScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
+                              Consumer<LoadEvent> listener, LoadSchedulerTiming timing,
+                              LoadEvidenceStore evidenceStore, Path evidenceOutputRoot) {
         if (scenario == null || scenario.model() != LoadScenario.Model.CLOSED) throw new IllegalArgumentException("ClosedVuScheduler requires a closed scenario");
         if (executor == null) throw new IllegalArgumentException("ClosedVuScheduler requires an iteration executor");
         this.scenario = scenario;
@@ -37,6 +49,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
         this.runId = LoadSchedulerSupport.runId(runId);
         this.listener = listener;
         this.timing = timing == null ? LoadSchedulerTiming.system() : timing;
+        this.evidenceStore = evidenceStore;
+        this.evidenceOutputRoot = evidenceOutputRoot == null ? null : evidenceOutputRoot.toAbsolutePath().normalize();
     }
     private static Consumer<LoadEvent> adapt(final LoadEventListener listener) { return listener == null ? null : new Consumer<LoadEvent>() { @Override public void accept(LoadEvent event) { listener.onEvent(event); } }; }
 
@@ -69,6 +83,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 String iterationId = runId + "-" + userId + "-" + iteration;
                 IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
+                Path sampleRoot = sampleOutputRoot(iterationId);
+                if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
                 long iterationStarted = timing.now();
                 att.core.ResultStatus status;
                 String errorType = null;
@@ -88,6 +104,11 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 timing.sleep(Math.min(scenario.thinkTime().toMillis(), remaining));
             }
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+    }
+
+    private Path sampleOutputRoot(String iterationId) {
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccess(iterationId)) return null;
+        return evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
     }
 
     int activeUsers(long elapsedMs) {

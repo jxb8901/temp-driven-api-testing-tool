@@ -16,6 +16,7 @@ import att.template.StageTemplateRunner;
 import att.template.UnifiedTemplateEngine;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -114,6 +115,13 @@ public final class IterationExecutor implements LoadIterationRunner {
         if (!retainedWorkspace && status != ResultStatus.PASS && log != null) {
             try { log.materialize(iterationDirectory.resolve("case.log")); iterationDirectory = iterationDirectory.resolve("case.log").getParent(); }
             catch (Exception ignored) { }
+        }
+        if (context != null && iterationDirectory != null && (status != ResultStatus.PASS || retainedWorkspace)) {
+            try {
+                Files.createDirectories(iterationDirectory);
+                Files.write(iterationDirectory.resolve("case.yaml"),
+                        new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
+            } catch (Exception ignored) { }
         }
         return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic);
     }

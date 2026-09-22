@@ -225,7 +225,7 @@ execution:
   thinkTime: 500ms     # arrival-rate 不允許
 ```
 
-修改 scenario 後可直接執行 `att load`。結果會寫到 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`；成功 iteration 預設只保留 metrics，失敗 iteration 和明確設定的 sample 才保留 evidence。`att run` 的普通 Excel Case lifecycle 不會因 load scenario 而改變。
+修改 scenario 後可直接執行 `att load`。結果會寫到 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`；成功 iteration 預設只保留 metrics，不建立 physical workspace，失敗 iteration 只在需要保留 diagnostic 時 lazy 建立 `case.log`/`case.yaml`，明確設定的 success sample 才建立有界的 physical workspace 並寫入 evidence link。所有 load evidence 都留在 `output/load/<runId>/samples` 或 `failures`，`att run` 的普通 Excel Case lifecycle 不會因 load scenario 而改變。
 
 ## 9. Runtime、metrics 和 report
 

@@ -18,11 +18,15 @@ public final class LoadEvidencePolicy {
     }
     private static double number(Object value, double fallback) { return value instanceof Number ? ((Number) value).doubleValue() : fallback; }
     public Success success() { return success; } public Failure failure() { return failure; } public double sampleRate() { return sampleRate; } public int maxSamples() { return maxSamples; }
+    public boolean sampleSuccess(String iterationId) {
+        if (iterationId == null || success != Success.SAMPLE || sampleRate <= 0.0) return false;
+        long hash = ((long) iterationId.hashCode()) & 0xffffffffL;
+        return (hash % 1000000L) < Math.round(sampleRate * 1000000.0);
+    }
     public boolean retain(LoadEvent event, int currentSamples) {
         if (event == null || currentSamples >= maxSamples) return false;
         if (event.dropped() || !event.completed()) return false;
         if (!event.success()) return failure == Failure.FULL;
-        if (success == Success.NONE || sampleRate <= 0.0) return false;
-        long hash = Math.abs((long) event.iterationId().hashCode()); return (hash % 1000000L) < Math.round(sampleRate * 1000000.0);
+        return sampleSuccess(event.iterationId());
     }
 }

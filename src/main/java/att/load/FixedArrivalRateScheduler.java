@@ -1,5 +1,6 @@
 package att.load;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -18,6 +19,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final String runId;
     private final Consumer<LoadEvent> listener;
     private final LoadSchedulerTiming timing;
+    private final LoadEvidenceStore evidenceStore;
+    private final Path evidenceOutputRoot;
     private final Runnable beforeSubmitHook;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private volatile ExecutorService workers;
@@ -27,12 +30,21 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         this(scenario, executor, runId, listener, LoadSchedulerTiming.system());
     }
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId, LoadEventListener listener) { this(scenario, executor, runId, adapt(listener)); }
+    public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId,
+                                     LoadEvidenceStore evidenceStore, Path outputRoot) {
+        this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), null, evidenceStore, outputRoot);
+    }
     FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                               Consumer<LoadEvent> listener, LoadSchedulerTiming timing) {
-        this(scenario, executor, runId, listener, timing, null);
+        this(scenario, executor, runId, listener, timing, null, null, null);
     }
     FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                               Consumer<LoadEvent> listener, LoadSchedulerTiming timing, Runnable beforeSubmitHook) {
+        this(scenario, executor, runId, listener, timing, beforeSubmitHook, null, null);
+    }
+    private FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
+                                      Consumer<LoadEvent> listener, LoadSchedulerTiming timing,
+                                      Runnable beforeSubmitHook, LoadEvidenceStore evidenceStore, Path evidenceOutputRoot) {
         if (scenario == null || scenario.model() != LoadScenario.Model.ARRIVAL_RATE) throw new IllegalArgumentException("FixedArrivalRateScheduler requires an arrivalRate scenario");
         if (executor == null) throw new IllegalArgumentException("FixedArrivalRateScheduler requires an iteration executor");
         this.scenario = scenario;
@@ -41,6 +53,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         this.listener = listener;
         this.timing = timing == null ? LoadSchedulerTiming.system() : timing;
         this.beforeSubmitHook = beforeSubmitHook;
+        this.evidenceStore = evidenceStore;
+        this.evidenceOutputRoot = evidenceOutputRoot == null ? null : evidenceOutputRoot.toAbsolutePath().normalize();
     }
     private static Consumer<LoadEvent> adapt(final LoadEventListener listener) { return listener == null ? null : new Consumer<LoadEvent>() { @Override public void accept(LoadEvent event) { listener.onEvent(event); } }; }
 
@@ -85,6 +99,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                             sequenceValue, dueAt, iterationStarted));
                     IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
+                    Path sampleRoot = sampleOutputRoot(id);
+                    if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
                     IterationResult result = executor.execute(request);
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
@@ -100,6 +116,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             // let the outer loop observe cancellation without turning it into a run error.
             inFlight.decrementAndGet();
         }
+    }
+
+    private Path sampleOutputRoot(String iterationId) {
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccess(iterationId)) return null;
+        return evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
     }
     static long arrivalsDueAt(LoadScenario scenario, long elapsedMs) {
         if (elapsedMs < 0L) return 0L;
