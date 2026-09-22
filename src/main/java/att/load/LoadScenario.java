@@ -58,13 +58,25 @@ public final class LoadScenario {
     public Map<String, Object> evidence() { return evidence; }
 
     public Map<String, Object> toMap() {
+        return toMap(true);
+    }
+
+    /** Returns the report-safe scenario projection; business inputs and tool arguments are never persisted. */
+    public Map<String, Object> toSummaryMap() {
+        Map<String, Object> result = toMap(false);
+        @SuppressWarnings("unchecked") Map<String, Object> load = (Map<String, Object>) result.get("load");
+        load.put("model", model.wireName());
+        return result;
+    }
+
+    private Map<String, Object> toMap(boolean includeExecutionData) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", att.Version.LOAD_SCHEMA);
         Map<String, Object> target = new LinkedHashMap<String, Object>();
         target.put("type", targetType); target.put("id", targetId);
-        if (!targetArguments.isEmpty()) target.put("arguments", targetArguments);
+        if (includeExecutionData && !targetArguments.isEmpty()) target.put("arguments", targetArguments);
         result.put("target", target);
-        if (!inputs.isEmpty()) result.put("inputs", inputs);
+        if (includeExecutionData && !inputs.isEmpty()) result.put("inputs", inputs);
         Map<String, Object> load = new LinkedHashMap<String, Object>();
         if (model == Model.CLOSED) load.put("users", users); else load.put("arrivalRate", arrivalRate);
         load.put("warmup", format(warmup)); load.put("rampUp", format(rampUp));

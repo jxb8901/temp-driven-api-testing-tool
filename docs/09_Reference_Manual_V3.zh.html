@@ -3496,6 +3496,13 @@ report contract</h3>
 <code>report: report/index.html</code>。JSON schema 位于
 <code>schemas/att-load-summary-v1.0.schema.json</code>，schema catalog
 以 <code>att-load-summary/v1.0</code> 注册。</p>
+<p>持久化的 <code>scenario</code> 是专用的 report-safe
+projection，只保留 target type/id、workload 和 execution
+timing、threshold configuration 与 evidence policy；任意业务
+<code>inputs</code> 及 Tool <code>target.arguments</code> 不会写入
+JSON、YAML 或 HTML 的 <code>window.ATT_LOAD_SUMMARY</code>。因此 CI
+和离线工具可以消费 summary，而不会把 password、token、request body
+或其他过大的 payload 写入 durable report artifacts。</p>
 <p><code>timing.phases</code> 按
 <code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code>、<code>RAMP_DOWN</code>
 顺序列出 configured start/end/duration

@@ -64,9 +64,15 @@ class LoadReportTest {
         assertEquals("PASS", json.get("status"));
         assertTrue(json.containsKey("timing"));
         assertTrue(json.containsKey("resources"));
+        assertEquals("report/index.html", json.get("report"));
         @SuppressWarnings("unchecked") Map<String, Object> jsonMetrics = (Map<String, Object>) json.get("metrics");
         assertTrue(jsonMetrics.containsKey("phases"));
         assertTrue(jsonMetrics.containsKey("buckets"));
+        Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
+        missingReport.remove("report");
+        assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
+                Paths.get("schemas/att-load-summary-v1.0.schema.json"),
+                att.validation.JsonSupport.write(missingReport)));
 
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(html.contains("Configured arrival rate"));
@@ -98,5 +104,79 @@ class LoadReportTest {
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(html.contains("No time-series buckets were observed."));
         assertTrue(html.contains("Configured users"));
+    }
+
+    @Test void writesThresholdFailureToAllReportFormats() throws Exception {
+        Instant started = Instant.parse("2026-09-22T02:00:00Z");
+        long startMs = started.toEpochMilli();
+        LoadScenario scenario = new LoadScenario(Paths.get("closed-fail.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, null,
+                Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                0, "", Collections.singletonMap("p95", "<= 100ms"), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 1_000L);
+        metrics.onEvent(LoadEvent.completed("run-24-fail", "closed", "STEADY", "iteration-1", "user-1", 1,
+                startMs, startMs, startMs + 250L, ResultStatus.PASS));
+        metrics.finish(startMs + 1_000L);
+        LoadThresholdSummary thresholds = new LoadThresholdSummary(Collections.singletonList(
+                new ThresholdResult("p95", "<= 100ms", "250.000ms", false, "p95 250.000ms exceeds <= 100ms")));
+        LoadRunResult result = new LoadRunResult("run-24-fail", scenario, started, started.plusSeconds(1), metrics.snapshot(), thresholds,
+                Collections.emptyMap(), Collections.emptyMap());
+
+        Path report = new LoadReportWriter().write(temp, result);
+        Path runDirectory = temp.resolve("load/run-24-fail");
+        String jsonText = new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8);
+        String yamlText = new String(Files.readAllBytes(runDirectory.resolve("load-summary.yaml")), StandardCharsets.UTF_8);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
+        assertEquals("FAIL", json.get("status"));
+        assertEquals(1, ((Number) json.get("exitCode")).intValue());
+        @SuppressWarnings("unchecked") Map<String, Object> jsonThresholds = (Map<String, Object>) json.get("thresholds");
+        assertEquals("FAIL", jsonThresholds.get("status"));
+        assertTrue(jsonText.contains("250.000ms exceeds <= 100ms"));
+        assertTrue(yamlText.contains("250.000ms exceeds <= 100ms"));
+        assertTrue(html.contains("FAIL"));
+        assertTrue(html.contains("250.000ms exceeds &lt;= 100ms"));
+    }
+
+    @Test void reportScenarioOmitsInputsAndToolArguments() throws Exception {
+        Instant started = Instant.parse("2026-09-22T03:00:00Z");
+        Map<String, Object> nestedInputs = new LinkedHashMap<String, Object>();
+        nestedInputs.put("password", "secret-password-value");
+        nestedInputs.put("payload", Collections.<String, Object>singletonMap("authorization", "secret-payload-value"));
+        Map<String, Object> nestedArguments = new LinkedHashMap<String, Object>();
+        nestedArguments.put("token", "secret-token-value");
+        nestedArguments.put("request", Collections.<String, Object>singletonMap("body", "secret-body-value"));
+        LoadScenario scenario = new LoadScenario(Paths.get("safe-summary.yaml"), "tool", "safe-tool",
+                nestedArguments, nestedInputs, LoadScenario.Model.CLOSED, 2, 0.0, null,
+                Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                0, "", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, started.toEpochMilli(), 1_000L);
+        metrics.finish(started.plusSeconds(1).toEpochMilli());
+        LoadRunResult result = new LoadRunResult("safe-summary", scenario, started, started.plusSeconds(1), metrics.snapshot());
+
+        Path report = new LoadReportWriter().write(temp, result);
+        Path runDirectory = temp.resolve("load/safe-summary");
+        String jsonText = new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8);
+        String yamlText = new String(Files.readAllBytes(runDirectory.resolve("load-summary.yaml")), StandardCharsets.UTF_8);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
+        @SuppressWarnings("unchecked") Map<String, Object> summaryScenario = (Map<String, Object>) json.get("scenario");
+        @SuppressWarnings("unchecked") Map<String, Object> summaryTarget = (Map<String, Object>) summaryScenario.get("target");
+        assertEquals("safe-tool", summaryTarget.get("id"));
+        assertFalse(summaryScenario.containsKey("inputs"));
+        assertFalse(summaryTarget.containsKey("arguments"));
+        assertTrue(jsonText.contains("safe-tool"));
+        assertFalse(jsonText.contains("secret-password-value"));
+        assertFalse(jsonText.contains("secret-payload-value"));
+        assertFalse(jsonText.contains("secret-token-value"));
+        assertFalse(jsonText.contains("secret-body-value"));
+        assertFalse(yamlText.contains("secret-password-value"));
+        assertFalse(yamlText.contains("secret-payload-value"));
+        assertFalse(yamlText.contains("secret-token-value"));
+        assertFalse(yamlText.contains("secret-body-value"));
+        assertFalse(html.contains("secret-password-value"));
+        assertFalse(html.contains("secret-payload-value"));
+        assertFalse(html.contains("secret-token-value"));
+        assertFalse(html.contains("secret-body-value"));
     }
 }

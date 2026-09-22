@@ -237,6 +237,8 @@ closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，
 
 `load-summary.json` 和 `load-summary.yaml` 共用穩定的 `att-load-summary/v1.0` contract。root-level 欄位包括 `schemaVersion`、`status`（`PASS`、`FAIL` 或 `ERROR`）、`exitCode`、`runId`、`startedAt`、`endedAt`、`durationMs`、`scenario`、`timing`、`metrics`、`thresholds`、`resources`、可選的 `evidence`，以及相對於 run directory 的 `report: report/index.html`。JSON schema 位於 `schemas/att-load-summary-v1.0.schema.json`，schema catalog 會以 `att-load-summary/v1.0` 對應它。
 
+報告中的 `scenario` 是專用的 report-safe projection，只保留 target type/id、load/execution timing、threshold 和 evidence policy；任意業務 `inputs` 及 Tool `target.arguments` 不會寫入 JSON、YAML 或 HTML `window.ATT_LOAD_SUMMARY`。因此可把 summary 交給 CI 或離線工具，而不會把 password、token、request body 或其他大 payload 帶入 durable report artifacts。
+
 `timing.phases` 以 `WARMUP`、`RAMP_UP`、`STEADY`、`RAMP_DOWN` 順序列出 configured start/end/duration；`metrics.phases` 則提供實際 observed 的 scheduled/started/completed/failure/drop、throughput、latency、scheduler lag 和 concurrency aggregates。`WARMUP` 的 `measured` 是 `false`，其 traffic 仍保留在 run history；其他 phase 的 measured aggregates 才用於 SLA 判斷。沒有事件的 phase 仍會在 `timing.phases` 出現，方便 empty/edge run 被機器穩定解析。
 
 `resources.db` 和 `resources.mq` 只包含 pool 的 bounded diagnostics（例如 pool size、active/idle、waiting、timeout/acquisition counts）；不包含 connection、queue handle、credential 或其他 live object。DB/MQ pool saturation、acquisition timeout 和 SUT failure 必須分開解讀。`evidence.items[].path` 是指向 `<runId>/samples/` 或 `<runId>/failures/` 的 retained evidence path，HTML report 會把它渲染成可點擊的相對連結。

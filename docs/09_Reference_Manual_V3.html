@@ -4583,6 +4583,13 @@ fields are <code>schemaVersion</code>, <code>status</code>
 The JSON schema is
 <code>schemas/att-load-summary-v1.0.schema.json</code>, registered in
 the schema catalog as <code>att-load-summary/v1.0</code>.</p>
+<p>The persisted <code>scenario</code> is a dedicated report-safe
+projection. It retains target type/id, workload and execution timing,
+threshold configuration, and evidence policy, but omits arbitrary
+business <code>inputs</code> and Tool <code>target.arguments</code> from
+JSON, YAML, and the HTML <code>window.ATT_LOAD_SUMMARY</code>. CI and
+offline tooling can therefore consume the summary without durable
+password, token, request-body, or other oversized payload values.</p>
 <p><code>timing.phases</code> lists configured <code>WARMUP</code>,
 <code>RAMP_UP</code>, <code>STEADY</code>, and <code>RAMP_DOWN</code>
 start/end/duration windows. <code>metrics.phases</code> contains
