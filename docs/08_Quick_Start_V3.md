@@ -1,8 +1,8 @@
-# ATT V3.5.0 新手入門
+# ATT V5.3.1 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.5.0 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug、load 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V5.3.1 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug、load、environment profiles 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.5.0 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V5.3.1 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
@@ -13,7 +13,7 @@ test case --1:n stage--> template --1:n action--> tool
 
 Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
 
-### V3.5.0 Tool 選擇與共同 Action 結果
+### V5.3.1 Tool 選擇與共同 Action 結果
 
 新增 framework-native 或可重用能力時，先使用 call-backed Tool：它在 ATT typed runtime 中執行，保留 String、Number、Boolean、null、List、Context value 及 nested call 的原生型別。
 
@@ -229,7 +229,7 @@ output/debug/<debugId>/artifacts/case.yaml
 
 ## 1.3 Load V1：由 CLI 到 report
 
-ATT 3.5.0 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
+ATT 5.3.1 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
 
 ```sh
 ./att.sh load examples/load/closed-smoke.yaml
@@ -275,25 +275,42 @@ mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedAr
 
 這個 gate 驗證所有例子、兩種 scheduler 的 CLI-to-report 路徑、Context isolation、bounded metrics/evidence、resource cleanup、threshold PASS/FAIL 和 report schema；它不是 distributed/Poisson/target-resource microbenchmark。
 
-## 1.4 SIT/UAT 多環境配置
+## 1.4 SIT/UAT environment profiles
 
-3.5.x 現行的多環境做法是為每個環境選擇一份完整 global config，而不是修改 Template、Flow 或 Action。配置中的 DB/MQ descriptor 可以不同，但 logical helper ID 保持不變：Actions 永遠寫 `db: orders` 和 `mq.payment...`，不寫 `orders_sit`、`orders_uat`、`payment_sit` 或 `payment_uat`。
+V5.3.1 使用一份 common global config 加上 `environments` map；`--env` 選擇 effective profile，而不修改 Template、Flow 或 Action。配置中的 DB/MQ descriptor 可以不同，但 logical helper ID 保持不變：Actions 永遠寫 `db: orders` 和 `mq.payment...`，不寫 `orders_sit`、`orders_uat`、`payment_sit` 或 `payment_uat`。
 
 推薦目錄：
 
 ```text
 config/
-├── environments/sit.yaml
-├── environments/uat.yaml
+├── config.yaml
+├── environments/sit.yaml       # legacy complete-config migration source
+├── environments/uat.yaml       # legacy complete-config migration source
 ├── dbhelpers/sit/orders.yaml
 ├── dbhelpers/uat/orders.yaml
 ├── mqhelpers/sit/payment.yaml
 └── mqhelpers/uat/payment.yaml
 ```
 
-兩份可直接使用的 global config 已放在 `config/environments/sit.yaml` 和 `config/environments/uat.yaml`；請直接複製這兩個完整檔案，不要建立只有 `tools: {}` 或 `toolGroups: []` 的縮略 overlay。
+Common `config/config.yaml` 保留相同的 templates、testcase、run、execution、report、Tool registry 和其他 runtime 設定；只有 `dbhelpers`/`mqhelpers` 兩個 typed list 可以在 profile 中覆蓋：
 
-兩份 config 都保留相同的 Tool registry：
+```yaml
+schemaVersion: att-config/v2.6
+environment: SIT
+templates: {root: templates}
+testcase: {root: testcase}
+environments:
+  SIT:
+    dbhelpers: [config/dbhelpers/sit/orders.yaml]
+    mqhelpers: [config/mqhelpers/sit/payment.yaml]
+  UAT:
+    dbhelpers: [config/dbhelpers/uat/orders.yaml]
+    mqhelpers: [config/mqhelpers/uat/payment.yaml]
+```
+
+`environment` 是 default；`--env UAT` 優先於它。profile list 是 shallow replacement，省略的 list 才會繼承 common list；不支援 generic recursive merge，也不允許 profile 修改 report、tool、template 或 testcase 設定。
+
+共用 config 仍保留相同的 Tool registry：
 
 ```yaml
 toolGroups:
@@ -302,7 +319,7 @@ toolGroups:
   - config/tools/orders-db.yaml
 ```
 
-global `tools` map 也必須相同，至少包括 `invokePaymentApi` 和由 `closed-smoke.yaml` 使用的 `sample.getAcDate`。兩份檔案只改 `environment` label 及 DB/MQ descriptor path。DB descriptors 保持 `id: orders`，只改 JDBC URL 等 topology；MQ descriptors 保持 `id: payment`，只改 host、queue manager、port、channel。DB 的 URL、username/password 和 string-valued connection properties 支援完整 `${ENV:NAME}`；MQ 3.5.x 只有 username/password 支援該解析，host、queue manager、channel 和 numeric port 應直接寫在環境 descriptor。
+global `tools` map 也必須相同，至少包括 `invokePaymentApi` 和由 `closed-smoke.yaml` 使用的 `sample.getAcDate`。DB descriptors 保持 `id: orders`，只改 JDBC URL 等 topology；MQ descriptors 保持 `id: payment`，只改 host、queue manager、port、channel。DB 的 URL、username/password 和 string-valued connection properties 支援完整 `${ENV:NAME}`；MQ 只有 username/password 支援該解析，host、queue manager、channel 和 numeric port 應直接寫在環境 descriptor。
 
 相同的 Action 可同時用於 SIT 和 UAT：
 
@@ -326,21 +343,21 @@ actions:
       )}
 ```
 
-執行時只選 config path：
+四種模式都使用同一個 selector：
 
 ```sh
-./att.sh validate --config config/environments/sit.yaml --package
-./att.sh run --config config/environments/sit.yaml --all
-./att.sh debug template PAYMENT_INVOKE --config config/environments/sit.yaml
-./att.sh load examples/load/closed-smoke.yaml --config config/environments/sit.yaml
+./att.sh validate --config config/config.yaml --env SIT --package
+./att.sh run --config config/config.yaml --env SIT --all
+./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
-./att.sh validate --config config/environments/uat.yaml --package
-./att.sh run --config config/environments/uat.yaml --all
-./att.sh debug template PAYMENT_INVOKE --config config/environments/uat.yaml
-./att.sh load examples/load/closed-smoke.yaml --config config/environments/uat.yaml
+./att.sh validate --config config/config.yaml --env UAT --package
+./att.sh run --config config/config.yaml --env UAT --all
+./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
-CI 可以對同一 package 依次執行 SIT 與 UAT 的 `validate --package` 和 `run --all`。PREPROD 或 production-like validation 也沿用相同原則；只有 package root、report policy 等真正不同時，才另設 top-level config。不要把環境分支塞入 Action DSL。完整可複製的 descriptor、pool、secret 和 CI 例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
+CI 可以對同一 package 依次執行 SIT 與 UAT 的 `validate --package` 和 `run --all`；PREPROD 或 production-like validation 從 CI secret store 注入 credentials。從舊版 `--config config/environments/<env>.yaml` 遷移時，只需把 common settings 合併到一份 config、把兩組 helper path 放進 `environments.<NAME>`，Action 不變。若 package root、report policy 或其他 ATT 行為確實不同，才另設 top-level config。完整可複製的 descriptor、pool、secret 和 CI 例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
 
 ## 2. 先理解執行方式
 
@@ -1083,7 +1100,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.0",
+  "attVersion": "5.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1234,4 +1251,4 @@ assert: "${EXEC.ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、load、報告、打包及診斷內容見 [ATT V3.5.0 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、load、報告、打包及診斷內容見 [ATT V5.3.1 Reference Manual](09_Reference_Manual_V3.md)。

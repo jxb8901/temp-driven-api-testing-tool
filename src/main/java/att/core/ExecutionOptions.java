@@ -13,6 +13,7 @@ import java.util.Collections;
 public final class ExecutionOptions {
     private final String command;
     private final Path configPath;
+    private final String environment;
     private final List<Path> suitePaths;
     private final Path suiteDirectory;
     private final Set<String> caseIds;
@@ -91,8 +92,24 @@ public final class ExecutionOptions {
                              Path loadScenario, String loadUsers, String loadArrivalRate, String loadWarmup, String loadRampUp,
                              String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
                              String loadOverloadPolicy) {
+        this(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId, all, rerunFailed,
+                dryRun, failFast, outputDirectory, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
+                updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
+                loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
+                loadOverloadPolicy, null);
+    }
+
+    private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
+                             Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
+                             boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
+                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
+                             boolean updateSnapshot, boolean profile, String debugTargetType, String debugTargetId, Path debugInput,
+                             Path loadScenario, String loadUsers, String loadArrivalRate, String loadWarmup, String loadRampUp,
+                             String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
+                             String loadOverloadPolicy, String environment) {
         this.command = command;
         this.configPath = configPath;
+        this.environment = environment;
         this.suitePaths = new ArrayList<Path>(suitePaths);
         this.suiteDirectory = suiteDirectory;
         this.caseIds = caseIds;
@@ -153,6 +170,7 @@ public final class ExecutionOptions {
             start = 2;
         }
         Path config = Paths.get("config/config.yaml");
+        String environment = null;
         List<Path> suites = new ArrayList<Path>();
         Path suiteDir = null;
         Set<String> caseIds = new LinkedHashSet<String>();
@@ -174,6 +192,10 @@ public final class ExecutionOptions {
             String arg = args[i];
             seenOptions.add(arg);
             if ("--config".equals(arg)) config = Paths.get(value(args, ++i, arg));
+            else if ("--env".equals(arg)) {
+                environment = value(args, ++i, arg);
+                if (environment.trim().isEmpty()) throw new IllegalArgumentException("--env value must not be blank");
+            }
             else if ("--suite".equals(arg)) suites.add(Paths.get(value(args, ++i, arg)));
             else if ("--suite-dir".equals(arg)) suiteDir = Paths.get(value(args, ++i, arg));
             else if ("--case".equals(arg) || "--case-id".equals(arg)) caseIds.add(value(args, ++i, arg));
@@ -228,21 +250,21 @@ public final class ExecutionOptions {
         if (quiet && explicitVerbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         if (quiet) verbose = false;
         validateAllowed(command, seenOptions);
-        ExecutionOptions parsed = new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput);
+        ExecutionOptions parsed = new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, null, null, null, null, null, null, null, null, null, null, environment);
         return "load".equals(command)
-                ? new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy)
+                ? new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all, rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment)
                 : parsed;
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
         Set<String> allowed = new LinkedHashSet<String>(java.util.Arrays.asList("--config", "--help"));
-        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--allow-parallel-runs", "--profile", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot"));
-        else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose"));
+        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--allow-parallel-runs", "--profile", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot", "--env"));
+        else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose", "--env"));
         else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
-        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--output-dir", "--format", "--quiet", "--verbose"));
-        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy"));
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--output-dir", "--format", "--quiet", "--verbose", "--env"));
+        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
 
@@ -253,6 +275,9 @@ public final class ExecutionOptions {
 
     public String command() { return command; }
     public Path configPath() { return configPath; }
+    /** Explicit --env selector; null means use the profile config's declared default. */
+    public String environment() { return environment; }
+    public String environmentSelector() { return environment; }
     public Path suitePath() { return suitePaths.isEmpty() ? null : suitePaths.get(0); }
     public List<Path> suitePaths() { return Collections.unmodifiableList(suitePaths); }
     public Path suiteDirectory() { return suiteDirectory; }

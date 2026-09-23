@@ -15,6 +15,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
 
 /** Loads V2 global configuration. Excel and stages are intentionally rejected here. */
 public final class FrameworkConfigLoader {
@@ -23,11 +24,20 @@ public final class FrameworkConfigLoader {
     }
 
     public FrameworkConfig load(Path path, Path projectRoot) throws IOException {
+        return load(path, projectRoot, null);
+    }
+
+    /**
+     * Loads one effective configuration.  A non-null environment selector is
+     * resolved only by the v2.6 profile mechanism; legacy complete-config
+     * files remain unchanged and do not silently reinterpret --env.
+     */
+    public FrameworkConfig load(Path path, Path projectRoot, String selectedEnvironment) throws IOException {
         try {
             Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
-            Map<?, ?> map = (Map<?, ?>) loaded;
-            String schemaVersion = String.valueOf(map.get("schemaVersion"));
+            Map<?, ?> rawMap = (Map<?, ?>) loaded;
+            String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
             boolean v26 = Version.CONFIG_SCHEMA.equals(schemaVersion);
             boolean v25 = Version.LEGACY_CONFIG_SCHEMA.equals(schemaVersion);
             boolean v22 = "att-config/v2.2".equals(schemaVersion);
@@ -35,14 +45,16 @@ public final class FrameworkConfigLoader {
             projectRoot = projectRoot.toAbsolutePath().normalize();
             String schemaName = v26 ? "att-config-v2.6.schema.json" : (v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json"));
             Path schema = schema(projectRoot, schemaName);
-            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
-            SchemaSupport.rejectUnknown(map, "config", v26
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "ssh", "tools"}
+            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, rawMap); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
+            SchemaSupport.rejectUnknown(rawMap, "config", v26
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "ssh", "tools", "environments"}
                     : v25
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "ssh", "tools"}
                     : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
                     : new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools"});
+            Map<String, Object> map = resolveEnvironment(rawMap, v26, selectedEnvironment);
+            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
@@ -78,6 +90,62 @@ public final class FrameworkConfigLoader {
                             : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
             throw schema == null ? YamlSupport.locate(diagnostic, path, field)
                     : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations());
+        }
+    }
+
+    private static Map<String, Object> resolveEnvironment(Map<?, ?> raw, boolean v26, String requested) {
+        Object configured = raw.get("environments");
+        if (configured == null) {
+            if (requested != null) throw new IllegalArgumentException("--env requires a v2.6 config with an environments map");
+            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) copy.put(String.valueOf(entry.getKey()), entry.getValue());
+            return copy;
+        }
+        if (!v26) throw new IllegalArgumentException("environments profiles require att-config/v2.6");
+        if (!(configured instanceof Map) || ((Map<?, ?>) configured).isEmpty()) throw new IllegalArgumentException("config.environments must be a non-empty map");
+
+        Map<?, ?> profiles = (Map<?, ?>) configured;
+        Map<String, String> names = new LinkedHashMap<String, String>();
+        for (Map.Entry<?, ?> entry : profiles.entrySet()) {
+            if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("config.environments keys must be strings");
+            String name = ((String) entry.getKey()).trim();
+            if (!name.matches("[A-Za-z][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Environment name must match [A-Za-z][A-Za-z0-9_-]*: " + name);
+            String canonical = name.toLowerCase(Locale.ROOT);
+            if (names.containsKey(canonical)) throw new IllegalArgumentException("Duplicate environment name ignoring case: " + name);
+            names.put(canonical, name);
+            if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Environment profile must be a map: " + name);
+            Map<?, ?> profile = (Map<?, ?>) entry.getValue();
+            SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers");
+            if (profile.containsKey("dbhelpers")) validateProfileList(profile.get("dbhelpers"), "config.environments." + name + ".dbhelpers");
+            if (profile.containsKey("mqhelpers")) validateProfileList(profile.get("mqhelpers"), "config.environments." + name + ".mqhelpers");
+        }
+
+        String requestedName = requested;
+        if (requestedName == null) {
+            Object declared = raw.get("environment");
+            if (!(declared instanceof String) || ((String) declared).trim().isEmpty()) {
+                throw new IllegalArgumentException("Profile config requires --env or a root environment default");
+            }
+            requestedName = (String) declared;
+        }
+        String canonical = names.get(requestedName.trim().toLowerCase(Locale.ROOT));
+        if (canonical == null) throw new IllegalArgumentException("Unknown environment '" + requestedName + "'; available environments: " + names.values());
+        Map<?, ?> profile = (Map<?, ?>) profiles.get(canonical);
+        Map<String, Object> effective = new LinkedHashMap<String, Object>();
+        for (Map.Entry<?, ?> entry : raw.entrySet()) {
+            if (!("environments".equals(entry.getKey()))) effective.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        if (profile.containsKey("dbhelpers")) effective.put("dbhelpers", profile.get("dbhelpers"));
+        if (profile.containsKey("mqhelpers")) effective.put("mqhelpers", profile.get("mqhelpers"));
+        effective.put("environment", canonical);
+        return effective;
+    }
+
+    private static void validateProfileList(Object value, String owner) {
+        if (value == null) throw new IllegalArgumentException(owner + " must be a list of package-relative YAML paths");
+        if (!(value instanceof Iterable)) throw new IllegalArgumentException(owner + " must be a list of package-relative YAML paths");
+        for (Object item : (Iterable<?>) value) {
+            if (!(item instanceof String) || ((String) item).trim().isEmpty()) throw new IllegalArgumentException(owner + " paths must be non-blank strings");
         }
     }
 

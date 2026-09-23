@@ -88,7 +88,7 @@ class LoadAcceptanceTest {
         Path performance = output.resolve("load/issue17-profile/performance.json");
         assertTrue(Files.isRegularFile(performance), "load --profile must write performance.json");
         @SuppressWarnings("unchecked") Map<String, Object> profile = JsonSupport.mapper().readValue(performance.toFile(), Map.class);
-        assertEquals("3.5.0", profile.get("attVersion"));
+        assertEquals("5.3.1", profile.get("attVersion"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadExecutionMs"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadReportMs"));
         assertEquals(1L, ((Number) ((Map<?, ?>) profile.get("counters")).get("loadCompleted")).longValue());

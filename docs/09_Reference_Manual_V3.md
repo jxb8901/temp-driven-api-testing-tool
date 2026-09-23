@@ -1,7 +1,7 @@
-# ATT V3.5.0 User Manual and Reference
+# ATT V5.3.1 User Manual and Reference
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.0
+Version: 5.3.1
 Status: Normative end-user documentation
 
 This manual is designed to be read in two ways:
@@ -1790,9 +1790,9 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment DB/MQ selection in 3.5.x
+### Multi-environment profiles in V5.3.1
 
-ATT 3.5.x does not select an environment by changing an Action or by adding an environment-specific Tool ID. Select a complete global configuration with `--config`; that configuration references the environment's DBHelper and MQHelper descriptor files. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT V5.3.1 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1802,12 +1802,33 @@ The supported package layout is:
 
 ```text
 config/
-├── environments/{sit,uat}.yaml
+├── config.yaml
 ├── dbhelpers/{sit,uat}/orders.yaml
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-The executable complete configs are checked in at `config/environments/sit.yaml` and `config/environments/uat.yaml`; use those files as the copyable examples. They preserve the same `toolGroups` and global `tools` registry as `config/config.yaml`, including `invokePaymentApi` and the `sample.getAcDate` tool used by `examples/load/closed-smoke.yaml`. Do not replace that shared registry with `tools: {}` or `toolGroups: []`.
+The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer is deliberately limited to typed DB/MQ descriptor lists:
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.6
+environment: SIT                 # default profile; --env overrides it
+templates: {root: templates}
+testcase: {root: testcase}
+toolGroups:
+  - config/tools/sample.yaml
+  - config/tools/fpp.yaml
+  - config/tools/orders-db.yaml
+environments:
+  SIT:
+    dbhelpers: [config/dbhelpers/sit/orders.yaml]
+    mqhelpers: [config/mqhelpers/sit/payment.yaml]
+  UAT:
+    dbhelpers: [config/dbhelpers/uat/orders.yaml]
+    mqhelpers: [config/mqhelpers/uat/payment.yaml]
+```
+
+Use the executable complete configs in `config/environments/sit.yaml` and `config/environments/uat.yaml` as the migration source for the common registry, including `invokePaymentApi` and the `sample.getAcDate` tool used by `examples/load/closed-smoke.yaml`. Do not replace that shared registry with `tools: {}` or `toolGroups: []` in a real package.
 
 The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../examples/environments/README.md).
 
@@ -1839,36 +1860,36 @@ actions:
       )}
 ```
 
-Use the same package with every supported execution mode by changing only the config path:
+`environment` is the default profile name. A case-insensitive `--env` selector overrides it. Each profile may replace `dbhelpers` and/or `mqhelpers` as a whole list; omitted lists inherit the common list. No generic recursive YAML merge is performed, and profile fields other than `dbhelpers` and `mqhelpers` are rejected. Unknown profile names fail before validation or external execution. Use the same package with every supported execution mode:
 
 ```sh
 # SIT
-./att.sh validate --config config/environments/sit.yaml --package
-./att.sh run --config config/environments/sit.yaml --all
-./att.sh debug template PAYMENT_INVOKE --config config/environments/sit.yaml
-./att.sh load examples/load/closed-smoke.yaml --config config/environments/sit.yaml
+./att.sh validate --config config/config.yaml --env SIT --package
+./att.sh run --config config/config.yaml --env SIT --all
+./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
-./att.sh validate --config config/environments/uat.yaml --package
-./att.sh run --config config/environments/uat.yaml --all
-./att.sh debug template PAYMENT_INVOKE --config config/environments/uat.yaml
-./att.sh load examples/load/closed-smoke.yaml --config config/environments/uat.yaml
+./att.sh validate --config config/config.yaml --env UAT --package
+./att.sh run --config config/config.yaml --env UAT --all
+./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 For CI, run the same validation and execution stages once per selected environment:
 
 ```sh
-./att.sh validate --config config/environments/sit.yaml --package
-./att.sh run --config config/environments/sit.yaml --all
-./att.sh validate --config config/environments/uat.yaml --package
-./att.sh run --config config/environments/uat.yaml --all
+./att.sh validate --config config/config.yaml --env SIT --package
+./att.sh run --config config/config.yaml --env SIT --all
+./att.sh validate --config config/config.yaml --env UAT --package
+./att.sh run --config config/config.yaml --env UAT --all
 ```
 
 This design keeps Testcases, Templates, Flows, and Actions reusable and makes validation deterministic because the selected config defines the complete resource registry before execution. Logical IDs such as `orders` and `payment` represent capabilities, not physical endpoints; infrastructure topology belongs in configuration. Do not introduce `orders_sit`, `orders_uat`, or environment conditionals solely to choose endpoints. Separate top-level configs are appropriate when testcase/template roots, report policy, or package structure intentionally differ.
 
-Keep non-secret topology in YAML: JDBC URL, MQ host/port, queue manager, channel, pool sizes, and timeouts. Keep DB/MQ usernames and passwords in `${ENV:NAME}` references backed by the local environment or CI secret store. DBHelper resolves complete `${ENV:NAME}` values for the URL, username, password, and string-valued connection properties. MQHelper 3.5.x resolves `${ENV:NAME}` only for username/password; host, queue manager, channel, and numeric port are normally literal values in the selected descriptor. Do not commit credentials or imply broader interpolation support.
+Keep non-secret topology in YAML: JDBC URL, MQ host/port, queue manager, channel, pool sizes, and timeouts. Keep DB/MQ usernames and passwords in `${ENV:NAME}` references backed by the local environment or CI secret store. DBHelper resolves complete `${ENV:NAME}` values for the URL, username, password, and string-valued connection properties. MQHelper resolves `${ENV:NAME}` only for username/password; host, queue manager, channel, and numeric port are normally literal values in the selected descriptor. Resolved secrets remain absent from profile metadata, diagnostics, reports, and generated documentation.
 
-The current selector is explicitly `--config config/environments/<env>.yaml`. Issue #36 may introduce a future `--env SIT`/`--env UAT` profile mechanism, but no such runtime option exists in 3.5.x and it must preserve stable logical helper IDs if implemented.
+Use profiles when the same test package is promoted across environments and only infrastructure bindings change. Use separate top-level configs when testcase/template roots, report policy, or package structure intentionally differ. Migration from the 3.5.0 complete-config pattern keeps every descriptor and Action unchanged: move the common settings into `config/config.yaml`, place each descriptor list under `environments.<NAME>`, and replace `--config config/environments/<env>.yaml` with `--config config/config.yaml --env <NAME>`.
 
 ### Schema catalog
 
@@ -1919,13 +1940,20 @@ toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
 mqhelpers: [config/mqhelpers/orders.yaml]
 tools: {}
+environments:
+  SIT:
+    dbhelpers: [config/dbhelpers/sit/orders.yaml]
+    mqhelpers: [config/mqhelpers/sit/payment.yaml]
+  UAT:
+    dbhelpers: [config/dbhelpers/uat/orders.yaml]
+    mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
 | Path | Required/default | Constraints |
 |---|---|---|
 | `schemaVersion` | required | `att-config/v2.6`; V2.1/V2.2/V2.5 remain readable, but only V2.6 Tool descriptors accept `call`/`cache` |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
-| `environment` | `SIT` | Non-empty value exposed as `${EXEC.INPUT.environment}`; it does not choose endpoints by itself |
+| `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
 | `caseLog.yamlAnchors` | `false` | Boolean; false fully expands repeated YAML structures, true permits anchors/aliases |
 | `templates.root` | `templates` | Non-empty package-relative template root |
@@ -1943,6 +1971,7 @@ tools: {}
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` YAML paths; normalized duplicates are rejected |
+| `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -1950,7 +1979,7 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `ssh`, `tools`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `ssh`, `tools`, `environments`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -2158,7 +2187,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.0",
+  "attVersion": "5.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2298,7 +2327,7 @@ output
 
 `EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
 
-### Load V1 Context (3.5.0)
+### Load V1 Context (5.3.1)
 
 Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
 

@@ -1,7 +1,7 @@
-# ATT V3.5.0 中文用户手册与参考手册
+# ATT V5.3.1 中文用户手册与参考手册
 
 作者：Jeffrey + ChatGPT
-版本：3.5.0
+版本：5.3.1
 状态：规范性终端用户文档
 
 本手册设计为两种阅读方式：
@@ -1656,9 +1656,9 @@ case:
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-### 3.5.x 多环境 DB/MQ 选择
+### V5.3.1 多环境 Profile 选择
 
-ATT 3.5.x 不通过修改 Action 或增加环境专用 Tool ID 来选择环境，而是使用 `--config` 选择一份完整 global config；该 config 再引用对应环境的 DBHelper 和 MQHelper descriptor。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+ATT V5.3.1 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1668,12 +1668,33 @@ Action -> logical helper ID -> selected config -> physical descriptor -> endpoin
 
 ```text
 config/
-├── environments/{sit,uat}.yaml
+├── config.yaml
 ├── dbhelpers/{sit,uat}/orders.yaml
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-可直接使用的完整 global config 已提交在 `config/environments/sit.yaml` 和 `config/environments/uat.yaml`；请直接复制这些文件作为例子。两份文件都保留与 `config/config.yaml` 相同的 `toolGroups` 和 global `tools` registry，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。不要把共享 registry 替换为 `tools: {}` 或 `toolGroups: []`。
+common config 保留现有 templates、testcase root、run/execution/report 设置、`toolGroups` 和 global `tools` registry。Profile 层只允许 typed 的 DB/MQ descriptor list：
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.6
+environment: SIT                 # default；--env 会覆盖
+templates: {root: templates}
+testcase: {root: testcase}
+toolGroups:
+  - config/tools/sample.yaml
+  - config/tools/fpp.yaml
+  - config/tools/orders-db.yaml
+environments:
+  SIT:
+    dbhelpers: [config/dbhelpers/sit/orders.yaml]
+    mqhelpers: [config/mqhelpers/sit/payment.yaml]
+  UAT:
+    dbhelpers: [config/dbhelpers/uat/orders.yaml]
+    mqhelpers: [config/mqhelpers/uat/payment.yaml]
+```
+
+可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作为 common registry 的迁移来源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。实际 package 不要把共用 registry 缩减成 `tools: {}` 或 `toolGroups: []`。
 
 SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../examples/environments/README.md)。
 
@@ -1705,36 +1726,36 @@ actions:
       )}
 ```
 
-四种执行模式只改变 config path：
+根级 `environment` 是 default profile；大小写不敏感的 `--env` 会覆盖它。Profile 中的 `dbhelpers` 或 `mqhelpers` 各自是整组 shallow replacement，省略才会继承 common list；不支持 generic recursive merge，其他 profile 字段都会被拒绝。未知 profile 名称会在 validation 或 external execution 前失败。四种执行模式使用同一个 selector：
 
 ```sh
 # SIT
-./att.sh validate --config config/environments/sit.yaml --package
-./att.sh run --config config/environments/sit.yaml --all
-./att.sh debug template PAYMENT_INVOKE --config config/environments/sit.yaml
-./att.sh load examples/load/closed-smoke.yaml --config config/environments/sit.yaml
+./att.sh validate --config config/config.yaml --env SIT --package
+./att.sh run --config config/config.yaml --env SIT --all
+./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
-./att.sh validate --config config/environments/uat.yaml --package
-./att.sh run --config config/environments/uat.yaml --all
-./att.sh debug template PAYMENT_INVOKE --config config/environments/uat.yaml
-./att.sh load examples/load/closed-smoke.yaml --config config/environments/uat.yaml
+./att.sh validate --config config/config.yaml --env UAT --package
+./att.sh run --config config/config.yaml --env UAT --all
+./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 CI 对每个目标环境分别执行 `validate --package` 和 `run --all`：
 
 ```sh
-./att.sh validate --config config/environments/sit.yaml --package
-./att.sh run --config config/environments/sit.yaml --all
-./att.sh validate --config config/environments/uat.yaml --package
-./att.sh run --config config/environments/uat.yaml --all
+./att.sh validate --config config/config.yaml --env SIT --package
+./att.sh run --config config/config.yaml --env SIT --all
+./att.sh validate --config config/config.yaml --env UAT --package
+./att.sh run --config config/config.yaml --env UAT --all
 ```
 
 这个设计使 Testcase、Template、Flow 和 Action 可以从 SIT promotion 到 UAT，不需要编辑；selected config 在 execution 前定义完整 resource registry，因此 validation 也是 deterministic 的。`orders`、`payment` 等 logical ID 表示能力，不表示 physical endpoint；topology 应属于配置层。不要仅为选择 endpoint 而创建 `orders_sit`、`orders_uat` 或在 Action 中加入环境条件。若 testcase/template root、report policy 或 package structure 确实不同，才使用不同 top-level config。
 
-YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 应使用 `${ENV:NAME}`，由本地环境或 CI secret store 提供。DBHelper 对 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 3.5.x 仅对 username/password 支持该解析，host、queue manager、channel 和 numeric port 通常直接写在 selected descriptor 中。不要提交 credentials，也不要暗示 runtime 支持更广泛的 MQ interpolation。
+YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 应使用 `${ENV:NAME}`，由本地环境或 CI secret store 提供。DBHelper 对 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 仅对 username/password 支持该解析，host、queue manager、channel 和 numeric port 通常直接写在 selected descriptor 中。resolved secret 不会进入 profile metadata、diagnostics、reports 或 generated docs。
 
-当前支持的选择方式明确是 `--config config/environments/<env>.yaml`。issue #36 未来可能加入 `--env SIT`／`--env UAT` profile 机制，但 3.5.x 尚不存在该 runtime option；未来实现也必须保留 stable logical helper IDs。
+当同一 package 只在基础设施绑定上不同，应使用 profiles；当 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。从 3.5.0 的完整 config 迁移时，保留所有 descriptor 和 Action，只把 common settings 合并到 `config/config.yaml`，把各环境 descriptor list 放到 `environments.<NAME>`，并将 `--config config/environments/<env>.yaml` 改为 `--config config/config.yaml --env <NAME>`。
 
 ### Schema catalog
 
@@ -1761,13 +1782,20 @@ toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
 mqhelpers: [config/mqhelpers/orders.yaml]
 tools: {}
+environments:
+  SIT:
+    dbhelpers: [config/dbhelpers/sit/orders.yaml]
+    mqhelpers: [config/mqhelpers/sit/payment.yaml]
+  UAT:
+    dbhelpers: [config/dbhelpers/uat/orders.yaml]
+    mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
 | 路径 | 必填/默认值 | 约束 |
 |---|---|---|
 | `schemaVersion` | 必填 | 当前为 `att-config/v2.6`；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool |
 | `outputDirectory` | `output` | 非空包相对输出根 |
-| `environment` | `SIT` | 非空值暴露为 `${EXEC.INPUT.environment}`；它不会单独选择端点 |
+| `environment` | `SIT` | 存在 `environments` 时是 default profile 名称；否则只是 exposed metadata |
 | `timeoutMs` | `10000` | 整数 1–3600000 毫秒 |
 | `caseLog.yamlAnchors` | `false` | 布尔值；false 会完全展开重复的 YAML 结构，true 允许锚点/别名 |
 | `templates.root` | `templates` | 非空包相对模板根 |
@@ -1782,6 +1810,7 @@ tools: {}
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
 | `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` YAML 路径；每个文件声明一个实例 |
+| `environments` | absent | 非空 profile 映射；每个 profile 只可包含 `dbhelpers` 和/或 `mqhelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
@@ -1892,7 +1921,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.0",
+  "attVersion": "5.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1992,9 +2021,9 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.0 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
+`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；5.3.1 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
 
-### Load V1 Context（3.5.0）
+### Load V1 Context（5.3.1）
 
 每个 load iteration 使用与普通执行相同的 `EXEC`／`META` tree 和 Action 局部 `output`。`EXEC.MODE` 是 `load`；`EXEC.ID` 与 `EXEC.LOAD.ITERATION_ID` 相同；`EXEC.STARTED_AT` 是本 iteration 的开始时间；`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 均按 iteration 隔离。scheduler-owned fields 如下：
 

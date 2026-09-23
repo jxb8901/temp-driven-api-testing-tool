@@ -37,7 +37,7 @@ public final class FrameworkRunner {
             PerformanceProfile profile = new PerformanceProfile(options.profile());
             long profilePhase = profile.begin();
             FrameworkConfig config;
-            try { config = new FrameworkConfigLoader().load(options.configPath(), root); }
+            try { config = new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
             catch (att.validation.DiagnosticException e) { throw e; }
             catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(DiagnosticCodes.CONFIG_INVALID,
@@ -216,10 +216,11 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println("Debug: ./att.sh debug template|flow|tool <id> [--config <file>] [--input <debug.yaml>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
-        System.out.println("Load: ./att.sh load <scenario.yaml> [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
+        System.out.println("Debug: ./att.sh debug template|flow|tool <id> [--config <file>] [--env <name>] [--input <debug.yaml>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
+        System.out.println("Load: ./att.sh load <scenario.yaml> [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
+        System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");
         System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 

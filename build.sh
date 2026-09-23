@@ -56,7 +56,7 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 2
 fi
 if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to execute the V3.5.0 release gate" >&2
+  echo "mvn is required to execute the V5.3.1 release gate" >&2
   exit 2
 fi
 
