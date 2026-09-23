@@ -59,7 +59,16 @@ if ! command -v mvn >/dev/null 2>&1; then
   echo "mvn is required to execute the V3.5.1 release gate" >&2
   exit 2
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to generate the modular Reference Manual" >&2
+  exit 2
+fi
+if ! command -v pandoc >/dev/null 2>&1; then
+  echo "pandoc is required to generate the modular Reference Manual" >&2
+  exit 2
+fi
 
+(cd "$ROOT_DIR" && python3 tools/build_reference_manual.py)
 (cd "$ROOT_DIR" && mvn test)
 (cd "$ROOT_DIR" && \
   ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" \
