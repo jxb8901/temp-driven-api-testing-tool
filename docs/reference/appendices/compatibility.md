@@ -1,3 +1,5 @@
 ### 14.2 Compatibility and Deprecated Aliases
 
-This module establishes the target information-architecture location. The detailed normative material is preserved in the migrated legacy sections in this transitional #41 structure and will be moved here by #42 without changing runtime behavior.
+Compatibility exists to read established packages without creating a second current model. New authoring uses canonical `EXEC`, `META`, Action-local `output`, current schema versions, `--env`, and current Tool/DB/MQ contracts.
+
+Deterministic legacy aliases may remain readable with migration warnings. Aliases are not created where old semantics conflict with scope isolation or the common result/evidence contract. Deprecated CLI/authoring forms remain documented in their owning chapter or CHANGELOG only when users still need a migration path.

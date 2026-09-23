@@ -1,10 +1,6 @@
 ## 07 Expressions and Built-ins
 
-<!-- Transitional placement produced by issue #41. #42 owns semantic reorganization. -->
-
-### 07 Expression Reference
-
-#### Unified expression engine
+### Unified expression engine
 
 V3.4 uses one engine with two deliberately separate roles:
 
@@ -85,7 +81,7 @@ assert: "#{${EXEC.INPUT.status} in ${EXEC.INPUT.allowedStatuses}}"
 
 The first block returns a Boolean directly; ATT does not stringify and reparse it. A configured Tool or DB query called from a Case-runtime field is a real external invocation and produces evidence; do not use either merely for formatting when a built-in or existing Context value is sufficient.
 
-#### Runtime Context
+### Runtime Context
 
 The execution-neutral Context has two canonical roots and one Action-local binding:
 
@@ -105,7 +101,7 @@ output
 
 `EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
 
-#### Load V1 Context (3.5.1)
+### Load V1 Context (3.5.1)
 
 Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
 
@@ -133,7 +129,7 @@ The shortest end-to-end smoke commands are:
 
 `examples/load/README.md` is the maintained copyable reference for Template, Flow, Tool, DB/MQ pool sizing, thresholds, evidence, CLI overrides, and invalid configurations. All six examples are schema- and dependency-validated by `LoadAcceptanceTest`; that test also launches the real `att.FrameworkRunner load` CLI for short closed and arrival-rate scenarios and checks the persisted JSON, YAML, and offline HTML report.
 
-#### Load summary and HTML report contract
+### Load summary and HTML report contract
 
 `load-summary.json` and `load-summary.yaml` share the stable `att-load-summary/v1.0` contract. Root fields are `schemaVersion`, `status` (`PASS`, `FAIL`, or `ERROR`), `exitCode`, `runId`, `startedAt`, `endedAt`, `durationMs`, `scenario`, `timing`, `metrics`, `thresholds`, `resources`, optional `evidence`, and `report: report/index.html` relative to the run directory. The JSON schema is `schemas/att-load-summary-v1.0.schema.json`, registered in the schema catalog as `att-load-summary/v1.0`.
 
@@ -206,7 +202,7 @@ ${EXEC.ACTIONS.callApi.output.result.items[0].status}
 
 Dot notation navigates simple map keys. Lists accept bracket or numeric-dot indexes, so `${EXEC.INPUT.items[0].status}` and `${EXEC.INPUT.items.0.status}` are equivalent. Indexes are zero-based. Map keys containing dots, spaces, braces, or colons use quoted brackets, for example `${EXEC.INPUT.response['{urn:payment}Status'].text}`.
 
-##### Example: reference stage-selector data from an XML payload
+#### Example: reference stage-selector data from an XML payload
 
 Suppose the Excel selector cell for stage `invoke` contains this YAML flow map:
 
@@ -235,9 +231,9 @@ If another readable path also ends in `InstrAmt`, the shortest form raises `ATT-
 
 Validation resolves available static values and preserves only values that are legitimately runtime-dependent. Runtime resolves every remaining reference at its defined execution point. Canonical `EXEC`/`META` roots and supported legacy aliases are traversed strictly; `CASE.STAGES` and cross-scope Action reads are rejected as incompatible scope references. References without an explicit root use the unique-suffix rule above; when validation can identify the canonical current-scope replacement, it emits `CONTEXT_LEGACY_PATH` and should be migrated. Tool definitions have a separate rule described below. An unknown Context path is never converted silently to empty text: `ATT-CTX-001` reports the exact `requestedPath`, deepest successfully reached `currentNode`, first `missingSegment`, and source location. `ATT-CTX-002` reports the requested shorthand and all candidate paths. Neither diagnostic dumps the complete Context tree, preventing large failed Action/Tool/DB structures from being copied repeatedly into logs and reports. A declared optional Case field whose actual value is blank remains a valid empty string. An Action may read only Case data, its local `output` where supported, and Action outputs that exist in its current scope; validation rejects current/future or cross-scope Action references.
 
-#### `config.report.fileNamePattern`
+### `config.report.fileNamePattern`
 
-##### Context and legal forms
+#### Context and legal forms
 
 `report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has one case-sensitive value reference:
 
@@ -262,7 +258,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 
 For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
 
-##### Illegal or unsupported forms
+#### Illegal or unsupported forms
 
 These values fail configuration loading because they do not reference `suiteName`:
 
@@ -286,9 +282,9 @@ ${EXEC.ID}
 
 A pattern such as `${suiteName}-${runId}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
-#### Tool-definition `command` expressions
+### Tool-definition `command` expressions
 
-##### Context and legal forms
+#### Context and legal forms
 
 A configured Tool `command` also has its own restricted Context. It may reference only keys declared by that Tool's `arguments` map. The canonical placeholder is `${input.argument}`. `${TOOL.input.argument}` and the exact `${argument}` spelling remain compatible legacy forms and both produce `CONTEXT_TOOL_INPUT_SHORTHAND` when they uniquely match a declared key:
 
@@ -353,7 +349,7 @@ command:
 
 Because this is a YAML argv list, each list item remains one atomic process argument even when its resolved value contains spaces or shell-like characters. ATT does not invoke a local shell.
 
-##### Quotes, Context values, and atomic argv
+#### Quotes, Context values, and atomic argv
 
 Quotes inside a Tool call belong to the ATT expression grammar; they are not shell quotes. The outer `'...'` or `"..."` delimiters are removed before invocation, the opposite quote is literal, and a matching quote can be escaped with a backslash. A `${...}` reference embedded in a quoted value is interpolated, while an unquoted canonical Context path passes its typed value directly.
 
@@ -418,7 +414,7 @@ The first line escapes double quotes for the YAML double-quoted scalar. The seco
 
 Ordinary process-backed Tools never ask a shell to reinterpret resolved inputs. Text such as `$HOME`, `$(date)`, `a*.xml`, `|`, `>`, and quotes carried by a Context value is passed literally. Use an explicitly reviewed wrapper when shell-like behavior is required; the shipped `fpp.exehelper` and `fpp.loghelper` provide only the narrowly documented pathname expansion above.
 
-##### Illegal forms and token restrictions
+#### Illegal forms and token restrictions
 
 Tool commands cannot directly read the general Runtime Context, use unique-suffix navigation, or navigate argument fields with bracket syntax. These `${...}` forms are rejected during configuration or package validation:
 
@@ -454,7 +450,7 @@ arguments:
 
 ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${input.requestFile}` or a transformed form such as `#{str.upper(${input.requestFile})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
 
-#### Operators
+### Operators
 
 Supported assertion operators are `==`, `!=`, `>`, `>=`, `<`, `<=`, `like`, `is null`, `is not null`, `not`, `and`, and `or`. Use parentheses when mixing logical operators so intent is explicit.
 
@@ -468,7 +464,7 @@ The current implementation translates `%` to Java regular-expression `.*` and `_
 
 Comparison first recognizes boolean literals. If both operands are valid decimal numbers, ATT compares them as arbitrary-precision decimals, including ordinary Excel strings such as `"100"`; numeric equality also uses this coercion, so `1.0 == 1` is true. Otherwise ATT compares the rendered strings lexicographically and case-sensitively. A present blank value compares as an empty string; a missing Context path is `ATT-CTX-001`, not an implicit null/empty value. Use `is null` only for a path that exists with a null value, and use `#{number(...)}` when invalid numeric text should become an explicit evaluation error instead of a string comparison.
 
-#### Built-in functions
+### Built-in functions
 
 Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, and `misc.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
 

@@ -1,12 +1,8 @@
 ## 09 配置參考
 
-<!-- Transitional placement produced by issue #41. #42 owns semantic reorganization. -->
-
-### 06 配置参考
-
 本章是作者编写配置时的权威阅读参考。下面提到的 [`schemas/`](../schemas/) 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。
 
-#### 配置层与优先级
+### 配置层与优先级
 
 | 层级 | 来源 | 所管辖内容 |
 |---|---|---|
@@ -20,7 +16,7 @@
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-#### V3.5.1 多环境 Profile 选择
+### V3.5.1 多环境 Profile 选择
 
 ATT V3.5.1 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
@@ -121,11 +117,11 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 当同一 package 只在基础设施绑定上不同，应使用 profiles；当 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。从 3.5.0 的完整 config 迁移时，保留所有 descriptor 和 Action，只把 common settings 合并到 `config/config.yaml`，把各环境 descriptor list 放到 `environments.<NAME>`，并将 `--config config/environments/<env>.yaml` 改为 `--config config/config.yaml --env <NAME>`。
 
-#### Schema catalog
+### Schema catalog
 
 [`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v2.6`。当前主配置、Tool group、sidecar 与 template 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v2.6`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。
 
-#### 全局配置
+### 全局配置
 
 ```yaml
 schemaVersion: att-config/v2.6
@@ -178,7 +174,7 @@ environments:
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
-#### Dbhelper 配置
+### Dbhelper 配置
 
 | 路径 | 必填/默认值 | 约束 |
 |---|---|---|
@@ -203,7 +199,7 @@ environments:
 
 validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 会在执行前校验。
 
-#### 工作簿侧车
+### 工作簿侧车
 
 | 对象 | 允许属性 | 必填/约束 |
 |---|---|---|
@@ -214,7 +210,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 
 只有侧车根对象允许 `x-*`；`excel`、stages 和侧车 `report` 拒绝扩展和其他未知字段。侧车不能覆盖 timeout、retry、工具、模板根、环境或输出根。
 
-#### 模板与动作
+### 模板与动作
 
 | 对象/类型 | 允许/必需契约 |
 |---|---|
@@ -230,11 +226,11 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 
 `renderAs` 允许 `file`、`text`、`json`、`yaml`、`xml`。retry `maxAttempts` 为 2–10，`intervalMs` 为 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
 
-##### Assign 变量唯一性与生命周期
+#### Assign 变量唯一性与生命周期
 
 assign 动作会在 `EXEC.VARS` 下创建一个不可变、Case 作用域的条目。一个 Case 内每个变量名必须唯一。重复声明会导致校验失败。
 
-##### Action `saveAs`
+#### Action `saveAs`
 
 V2.6 的 Tool 与 DB Action 共用一个 object shape：
 
@@ -266,13 +262,13 @@ Tool／built-in 的 `text` 使用 `String.valueOf(output.result)`；直接 DB Ac
 
 `att-template/v2.3` 保持读取兼容：旧式 Tool `saveAs: response.json` 加 sibling `overwrite` 会内部归一化并维持原行为；新模板必须使用 V2.5 object form。
 
-#### 工具契约
+### 工具契约
 
 每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`；可选 descriptor `timeoutMs` 提供 Tool 默认值。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode`。V2.6 不定义 `delimit`；多值直接在调用中传 typed array。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
 
 每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。
 
-#### 标识符和路径约束
+### 标识符和路径约束
 
 Run ID 和完整 Case ID 会直接用作目录名，ATT 不会对合法标识做 slug 化或哈希处理。
 
@@ -280,7 +276,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 
 `workbookId`、`groupId`、`rowCaseId` 同样遵循相同字符规则。`workbookId` 与 `groupId` 不能含点号，因为点号用于分隔三个组件；`rowCaseId` 可含点号。模板路径相对 `templates.root`；render glob 匹配必须保持在模板下，`renderAs: file` 与 Tool/DB Action `saveAs.path` 目标必须保持在 Case artifact 目录下。ATT 会规范化并检查根包含性。
 
-#### Validation JSON 合约
+### Validation JSON 合约
 
 ```json
 {
@@ -311,7 +307,7 @@ ATT 3.3.0 可另外提供 `summary`、`detail`、`source`、`context` 和 `schem
 
 运行时 Action 错误的结构化诊断会传入 Case YAML、`run.yaml`、重新生成的报表、CI JSON 和 JUnit 错误详情。嵌套 Flow 错误会指出内部 `flow.yaml` 及 Action，调用链说明 Template 如何到达该位置。Tool 与 DB evidence 在适用时记录尝试次数、超时、解析／采集状态、参数绑定及取消操作；文件保存错误包含配置路径和允许的产物根目录。
 
-#### 生成输出模式摘要
+### 生成输出模式摘要
 
 | 产物 | 顶层必需契约 |
 |---|---|

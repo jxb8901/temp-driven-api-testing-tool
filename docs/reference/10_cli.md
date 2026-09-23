@@ -1,10 +1,6 @@
 ## 10 CLI Reference
 
-<!-- Transitional placement produced by issue #41. #42 owns semantic reorganization. -->
-
-### 05 CLI Reference
-
-#### Commands
+### Commands
 
 | Command | Purpose | External tools? |
 |---|---|---:|
@@ -19,7 +15,7 @@
 | `build` | Archive the latest completed run | No |
 | `clean` | Remove documented ATT-generated output | No |
 
-#### Command syntax
+### Command syntax
 
 The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` with the same command and options. `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not invoke configured testcase tools. Windows validation checks `.sh` file existence and path safety, skips POSIX launch/executable compatibility, and emits one warning listing affected tools; a validation PASS does not prove those scripts can run on Windows. Provide and test Windows-native equivalents before `run`. Binary releases require Java 8+. Source-tree `att.bat` compiles with Maven when available and otherwise requires existing `target\classes`.
 
@@ -66,13 +62,13 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
 
-#### Standalone debug inputs and outputs
+### Standalone debug inputs and outputs
 
 Debug input files use `att-debug/v1.0`. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, and `inputs` is adapted directly into canonical `EXEC.INPUT.*`. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`. An explicit `--input` always wins over auto-discovery.
 
 Before execution ATT validates only the selected Template or Flow dependency closure, or the selected Tool definition. It does not require unrelated workbook snapshots or unrelated malformed Template descriptors to pass. The selected target still uses the normal Template/Flow/Tool runner, including Context resolution, Flow nesting, Tool retry/timeout, evidence, saveAs, DB finalization, and Case-log behavior.
 
-##### Configuration examples
+#### Configuration examples
 
 The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.0` document.
 
@@ -162,7 +158,7 @@ output/debug/<debugId>/
 
 For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics go to stderr.
 
-#### Exit codes
+### Exit codes
 
 | Code | Meaning |
 |---:|---|

@@ -1,3 +1,11 @@
 ## 05 Resources and Integrations
 
-This module establishes the target information-architecture location. The detailed normative material is preserved in the migrated legacy sections in this transitional #41 structure and will be moved here by #42 without changing runtime behavior.
+Tool, DBHelper and MQHelper are peer integration/resource types. They have different descriptors and lifecycle rules but converge on the common operation-result/evidence contract in 5.4.
+
+```text
+Tool      -> process/call operation --\
+DBHelper  -> JDBC operation ----------+--> Action output
+MQHelper  -> MQ operation ------------/
+```
+
+Resource IDs are logical contracts referenced by Templates/expressions. Environment profiles may bind the same DB/MQ logical ID to different descriptors without changing Action YAML.

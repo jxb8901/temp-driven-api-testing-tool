@@ -1,3 +1,12 @@
 ### 14.4 限制與預設值
 
-本模組先固定新的資訊架構位置。現有規範內容在 #41 過渡結構中完整保留於已遷移的舊章節，#42 會在不改變 runtime 行為的前提下把相關內容移入本章。
+Normative field default 以其 owner schema/configuration chapter 為準。重要 architecture limit 包括：
+
+- load V1 必須二選一 workload model；
+- arrival-rate overload policy 為 `drop`；
+- 每次 Flow invocation 有新的 Action scope，返回後恢復 caller scope；
+- `EXEC.LOAD` 只在 Load iteration 存在；
+- resource lifecycle state 不是 public Context tree；
+- 除文件明確允許的 extension location（例如支援位置的 root `x-*`）外，未知 schema field 會被拒絕。
+
+Timeout range、evidence sample bound、result limit、pool size 等 operational numeric limit 仍由對應 schema/descriptor 定義，避免本附錄成為第二個 source of truth。

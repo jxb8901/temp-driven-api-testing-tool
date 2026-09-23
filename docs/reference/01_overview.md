@@ -1,120 +1,46 @@
 ## 01 Overview and Concepts
 
-<!-- Transitional placement produced by issue #41. #42 owns semantic reorganization. -->
+ATT separates test intent from integration mechanics. Test data is versioned in workbook/sidecar/snapshot form; Templates and Flows define reusable behavior; Resources connect that behavior to external systems.
 
-### 01 Introduction
-
-ATT is an offline, template-driven API test runner. Test data lives in Excel, complete scenarios live in Template directories, reusable implementation sequences live in Flows, and external capabilities are registered as Tools.
+### Product model
 
 ```text
-Workbook row → Test case → Ordered stages
-Stage → Template-selector column → Current row's selector cell → Template
-Template → Ordered actions → Flow or configured tool
-Flow → Reusable ordered actions in the calling Template Context → Tool / DB / built-in / nested Flow
+Testcase
+  `-- ordered Stage
+        `-- Template
+              |-- Action
+              |     |-- render / assert / log / assign
+              |     |-- Tool
+              |     `-- DB
+              `-- Flow -> ordered Actions
 ```
 
-The four concepts you need first are:
+A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper or MQHelper used by Actions or permitted expression calls.
 
-| Concept | What it owns |
-|---|---|
-| Test case | One workbook row, case-level data, tags, and ordered stages |
-| Stage | Template selection, stage-private data, execution condition, and failure handling |
-| Template | A complete scenario expressed as an ordered list of actions |
-| Flow | A reusable ordered group of Template Actions with a fresh Action scope and explicit `EXEC.VARS` publication |
-| Tool | A globally configured external executable with named inputs and one declared output format |
-| Dbhelper | One independently configured database connection, timeout, transaction, limit, and evidence policy |
+### Execution modes are peers
 
-An action can render a payload, call a tool, query/update a database, assert an expression, write a structured log, assign a scoped runtime value, or invoke a Flow. Read-only DB queries are also available in expressions. ATT validates the selected package before executing external tools or JDBC operations and records the resulting evidence below one completed run directory.
+Run, Debug and Load adapt different inputs into the same execution-neutral Context and reusable components:
 
-#### What V3.4 guarantees
+| Mode | Primary input | Reuses |
+|---|---|---|
+| Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ |
+| Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
+| Load | `att-load/v1.0` scenario | one Template, Flow or Tool target repeatedly |
 
-- Configuration is strict. Unknown fields, wrong types, invalid enum values, duplicate YAML keys, and invalid action shapes are errors.
-- Every workbook has a same-basename YAML sidecar and generated semantic XML snapshot.
-- Every template is a directory containing `template.yaml`.
-- Every Flow is below `templates/flows/**/flow.yaml`, has a static `.vN` ID, uses the canonical caller input/metadata roots with a fresh Action scope, and has a maximum nesting depth of 3.
-- `validate --package` checks the whole package; `validate --selected` checks only a selected dependency closure.
-- Run ID and Case ID are validated and then used directly as output directory names.
-- The final run directory is reserved before execution so live evidence is directly inspectable; only a completed manifest is published as latest.
-- FAIL, ERROR, INVALID, SKIPPED, and PASS have stable aggregation and exit-code meanings.
-- JSON, XML, JUnit XML, JUnit HTML, and CI JSON outputs have versioned contracts.
-- V2.6 Templates remain readable, but only `att-template/v3.0` may use Flow Actions or Action `runWhen`.
-- Multiline Log Action text and process output remain physical Case-log lines; ordinary runs create no persistent `process-output` artifact.
-- `#{...}` supports typed calls, arithmetic, comparisons, boolean logic, lists, and `in`, while `${...}` remains the Context-reference syntax.
-- Tool Actions may run post-invocation evidence collectors before assertion, with per-attempt results, independent timeout, and `continue|stop` failure policy.
-- IBM MQ helpers provide primary Tool Action `send`, `receive`, and `request` calls with exact file payloads and correlation-aware request/reply evidence.
+Mode-specific identity is carried by `EXEC.MODE` and, for load only, `EXEC.LOAD`. Reusable Templates/Flows should normally depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`, not on a second mode-specific runtime tree.
 
-#### Package layout
+### Resources are peers
+
+Tool, DBHelper and MQHelper are independent resource types. They differ in configuration and lifecycle but publish operation data into one common Action envelope. Public expressions should consume Action results/evidence rather than resource-internal connection/process state.
 
 ```text
-att-package/
-├── att.sh
-├── att.bat
-├── config/
-│   ├── config.yaml
-│   ├── dbhelpers/
-│   │   └── orders.yaml
-│   ├── mqhelpers/
-│   │   └── orders.yaml
-│   └── tools/
-│       └── orders-db.yaml
-├── testcase/
-│   ├── payment.xlsx
-│   ├── payment.yaml
-│   └── payment.xml
-├── templates/
-│   ├── payment/
-│   │   ├── template.yaml
-│   │   └── request.tmp.json
-│   └── flows/common/prepare/
-│       └── flow.yaml
-├── tools/
-├── schemas/
-└── output/
+Tool ----\
+DBHelper --+--> operation result/evidence --> Action output
+MQHelper -/
 ```
 
-You normally edit `config/config.yaml`, referenced dbhelper files, workbooks, sidecars, templates, payloads, and tool scripts. The same-basename testcase XML is normally generated by `snapshot` and reviewed as source-control evidence; run-only `--update-snapshot` is an explicit opt-in refresh workflow. ATT owns generated content below the configured output directory and its documented build locations.
+### Package boundaries
 
-The global `testcase.root` setting defaults to `testcase`. Discovery is recursive, and an adjacent same-basename XLSX/YAML/XML triple defines one testcase set at any depth.
+A normal package contains `config/`, `testcase/`, `templates/`, `tools/`, `schemas/` and generated `output/`. Paths and identifiers are validated before execution. Credentials belong in environment variables or external secret handling, not committed YAML.
 
-#### V3 Flow authoring contract
-
-A Flow descriptor has exactly the top-level fields `schemaVersion`, `id`, `name`, `description`, and `actions`:
-
-```yaml
-schemaVersion: att-flow/v3.0
-id: common.decorate.v1
-name: Decorate
-description: Append a stable suffix.
-actions:
-  decorate:
-    type: assign
-    name: decoratedResult
-    expression: "${EXEC.INPUT.caseId}-done"
-  audit:
-    type: log
-    message: "Decorated ${EXEC.VARS.decoratedResult}"
-    runWhen: "${EXEC.INPUT.auditEnabled} == true"
-```
-
-A V3 Template invokes the Flow using a literal canonical ID:
-
-```yaml
-schemaVersion: att-template/v3.0
-name: PAYMENT_FLOW
-description: Complete scenario using one reusable Flow.
-actions:
-  prepare:
-    type: flow
-    use: common.decorate.v1
-  verify:
-    type: assert
-    assert: "${EXEC.VARS.decoratedResult} == '${META.SOURCE.caseId}-done'"
-```
-
-Flow and inline Template Actions use the same expression engine and canonical `EXEC`/`META` roots, but each Stage/Template and Flow invocation has an explicit Action scope. `output` is Action-local. The `CASE`, `RUN`, and `ACTIONS` roots remain compatibility aliases where they map deterministically. `${...}` reads Context and `#{...}` invokes a Tool, DB facade, or built-in where the Action permits it. An Action may read only earlier completed Actions in its current scope.
-
-Flow `inputs`, `outputs`, invocation `with`, and the dedicated `input`, lowercase `actions`, `runtime`, and `flow` roots are invalid. A Flow `assign` writes `EXEC.VARS` exactly like an inline assign. A Flow's internal Actions are directly readable through `${EXEC.ACTIONS.<internalActionId>.output...}` only while that Flow scope is active; after return the parent scope is restored. Publish any value needed by the caller through `${EXEC.VARS.<name>}`. The Flow invocation Action exposes its standard outcome and never creates `output.outputs`.
-
-Action IDs must be unique within one Stage/Template/Flow scope. Separate or repeated Flow invocations may reuse internal IDs because each invocation receives a fresh scope; duplicate IDs in one scope still fail validation. An invoked Flow with all internal Actions skipped is PASS; a Flow Action whose own `runWhen` is false is SKIPPED.
-
-Flow `use` is never dynamic. `runAlways`, warning impact, Flow timeout/retry, loops, dynamic dispatch, and parallel branches are not V3.4.0 features. Aggregate priority remains `ERROR > INVALID > FAIL > PASS > SKIPPED`.
+For a guided package build, use `docs/quick-start.md`. The rest of this manual is normative lookup documentation.

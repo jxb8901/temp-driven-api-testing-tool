@@ -9,6 +9,7 @@
 05_resources/tools.md
 05_resources/dbhelper.md
 05_resources/mqhelper.md
+05_resources/operation_result.md
 06_environment_testdata.md
 07_expressions.md
 08_reliability_execution_control.md

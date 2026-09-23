@@ -1,12 +1,8 @@
 ## 09 Configuration Reference
 
-<!-- Transitional placement produced by issue #41. #42 owns semantic reorganization. -->
-
-### 06 Configuration Reference
-
 This chapter is the authoritative reading reference for author-authored configuration. The files below [`schemas/`](../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
-#### Configuration layers and precedence
+### Configuration layers and precedence
 
 | Layer | Source | Owns |
 |---|---|---|
@@ -19,7 +15,7 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-#### Multi-environment profiles in V3.5.1
+### Multi-environment profiles in V3.5.1
 
 ATT V3.5.1 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
@@ -120,7 +116,7 @@ Keep non-secret topology in YAML: JDBC URL, MQ host/port, queue manager, channel
 
 Use profiles when the same test package is promoted across environments and only infrastructure bindings change. Use separate top-level configs when testcase/template roots, report policy, or package structure intentionally differ. Migration from the 3.5.0 complete-config pattern keeps every descriptor and Action unchanged: move the common settings into `config/config.yaml`, place each descriptor list under `environments.<NAME>`, and replace `--config config/environments/<env>.yaml` with `--config config/config.yaml --env <NAME>`.
 
-#### Schema catalog
+### Schema catalog
 
 V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 adds `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy. The dbhelper schema remains V2.5.
 
@@ -145,7 +141,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 
 All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
 
-#### Global configuration
+### Global configuration
 
 ```yaml
 schemaVersion: att-config/v2.6
@@ -227,7 +223,7 @@ Allowed global object properties are:
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
-#### Dbhelper configuration
+### Dbhelper configuration
 
 Each path in global `dbhelpers` resolves from the package root and contains one `att-dbhelper/v2.5` object:
 
@@ -243,7 +239,7 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [Database helpers](#database-helpers) for Action, expression, result, security, and lifecycle behaviour.
 
-#### MQ helper configuration
+### MQ helper configuration
 
 Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` object:
 
@@ -262,7 +258,7 @@ Case log structured entries use YAML. The human log records each normal action a
 
 ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `FAIL`, or `INVALID` with `【!!!!!】`. Search for that exact marker to locate abnormal blocks; PASS, SKIPPED, and informational blocks remain unmarked.
 
-#### Workbook sidecar
+### Workbook sidecar
 
 | Object | Allowed properties | Required/constraints |
 |---|---|---|
@@ -273,7 +269,7 @@ ATT prefixes every Case log block whose section or nested `status` is `ERROR`, `
 
 Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` reject extensions and other unknown fields. The sidecar cannot override timeout, retry, tools, dbhelpers, template root, environment, or output root.
 
-#### Template and action
+### Template and action
 
 | Object/type | Allowed/required contract |
 |---|---|
@@ -290,7 +286,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 
 `renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
 
-##### Assign variable uniqueness and lifetime
+#### Assign variable uniqueness and lifetime
 
 An `assign` action creates one immutable, Case-scoped entry below `EXEC.VARS`; it is not a mutable-variable update operation. Every `name` must be unique for the entire Test Case, including across stages and templates:
 
@@ -326,7 +322,7 @@ Later actions and stages read the transformed value as `${EXEC.VARS.normalizedAm
 
 If an assign expression fails, ATT does not create its variable. This does not relax the authoring rule: a later assign in the same Case plan still cannot reuse that declared name. If the expression succeeds and the assign action's optional assertion subsequently returns FAIL or ERROR, the variable remains available; assertions do not roll back successful assignment. `EXEC.VARS` survives stage/template transitions and is discarded only when that Test Case ends.
 
-##### Action `saveAs`
+#### Action `saveAs`
 
 `saveAs` is an optional property of `type: tool` and `type: db` actions. V2.6 uses one object shape:
 
@@ -393,7 +389,7 @@ saveAs:
 
 `att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.6` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
 
-#### Tool contract
+### Tool contract
 
 Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
 
@@ -403,7 +399,7 @@ Tool/argument keys are case-sensitive and argument keys use identifier syntax. T
 
 A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
 
-#### Identifier and path constraints
+### Identifier and path constraints
 
 Run ID and full Case ID are used directly as directory names; ATT does not slugify or hash a valid identifier.
 
@@ -411,7 +407,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 
 `workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and `renderAs: file` targets remain below the Case output directory. Tool/DB Action `saveAs.path` stays below the Case artifact directory. ATT normalizes and checks root containment before reads and writes.
 
-#### Validation JSON contract
+### Validation JSON contract
 
 ```json
 {
@@ -442,7 +438,7 @@ ATT 3.3.0 may also include `summary`, `detail`, `source`, `context`, and `schema
 
 Runtime Action failures preserve the same structure in Case YAML, `run.yaml`, regenerated reports, CI JSON, and JUnit failure detail. A nested Flow failure identifies the inner `flow.yaml` and Action while the call chain identifies how the Template reached it. Tool and DB evidence adds attempts, timeout, parse/capture, parameter binding, and cancellation details where available. File save failures include the configured path and allowed artifact root.
 
-#### Generated-output schema summary
+### Generated-output schema summary
 
 | Artifact | Required top-level contract |
 |---|---|

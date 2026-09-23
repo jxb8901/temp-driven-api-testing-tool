@@ -1,10 +1,6 @@
 ## 10 CLI 參考
 
-<!-- Transitional placement produced by issue #41. #42 owns semantic reorganization. -->
-
-### 05 CLI 参考
-
-#### 命令
+### 命令
 
 | 命令 | 目的 | 是否调用外部工具 |
 |---|---|---:|
@@ -19,7 +15,7 @@
 | `build` | 归档最新已完成 run | 否 |
 | `clean` | 删除文档化的 ATT 生成输出 | 否 |
 
-#### 命令语法
+### 命令语法
 
 表格中使用 Linux/macOS 启动器 `./att.sh`。Windows 上使用 `att.bat`，命令与选项相同。`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不会触发配置的 testcase 工具。Windows 校验会检查 `.sh` 文件是否存在并路径是否安全，跳过 POSIX 启动/可执行兼容性，并输出一条警告列出受影响工具；一次校验 PASS 并不证明这些脚本能在 Windows 上运行。运行前请提供并测试 Windows 原生等价物。二进制发布要求 Java 8+；源码树 `att.bat` 会在可用时使用 Maven，否则要求存在 `target\classes`。
 
@@ -61,7 +57,7 @@
 | `./att.sh build` | 在 `build/` 中归档最新完成 run |
 | `./att.sh clean` | 删除文档化生成输出 |
 
-#### Standalone debug 配置例子
+### Standalone debug 配置例子
 
 以下每个文件都是完整的 `att-debug/v1.0` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和临时覆盖值的不同写法。
 
@@ -175,7 +171,7 @@ case:
 
 即使输入包含这些字段，`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及对应的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。`EXEC.STAGES` 不是 canonical Context 节点；Stage 历史仍由旧的 `CASE.STAGES` 证据视图保存。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
 
-#### 退出码
+### 退出码
 
 | 代码 | 含义 |
 |---:|---|
