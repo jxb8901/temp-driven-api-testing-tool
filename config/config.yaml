@@ -122,11 +122,12 @@ tools:
         description: Full V2 Case ID
         required: true
 
-# V5.3.1 profile example. Common settings and logical helper IDs stay stable;
+# V3.5.1 profile example. Common settings and logical helper IDs stay stable;
 # each profile replaces only the resource descriptor lists it declares.
 environments:
   SIT:
-    dbhelpers: [config/dbhelpers/orders.yaml]
+    dbhelpers: [config/dbhelpers/sit/orders.yaml]
+    mqhelpers: [config/mqhelpers/sit/payment.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]

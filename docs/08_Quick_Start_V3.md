@@ -1,8 +1,8 @@
-# ATT V5.3.1 新手入門
+# ATT V3.5.1 新手入門
 
-本指南用一套中文 Excel 案例帶你完成 ATT V5.3.1 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug、load、environment profiles 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+本指南用一套中文 Excel 案例帶你完成 ATT V3.5.1 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug、load、environment profiles 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V5.3.1 Reference Manual](09_Reference_Manual_V3.md)。
+本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.5.1 Reference Manual](09_Reference_Manual_V3.md)。
 
 ## 1. 核心關係
 
@@ -13,7 +13,7 @@ test case --1:n stage--> template --1:n action--> tool
 
 Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
 
-### V5.3.1 Tool 選擇與共同 Action 結果
+### V3.5.1 Tool 選擇與共同 Action 結果
 
 新增 framework-native 或可重用能力時，先使用 call-backed Tool：它在 ATT typed runtime 中執行，保留 String、Number、Boolean、null、List、Context value 及 nested call 的原生型別。
 
@@ -229,7 +229,7 @@ output/debug/<debugId>/artifacts/case.yaml
 
 ## 1.3 Load V1：由 CLI 到 report
 
-ATT 5.3.1 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
+ATT 3.5.1 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
 
 ```sh
 ./att.sh load examples/load/closed-smoke.yaml
@@ -277,7 +277,7 @@ mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedAr
 
 ## 1.4 SIT/UAT environment profiles
 
-V5.3.1 使用一份 common global config 加上 `environments` map；`--env` 選擇 effective profile，而不修改 Template、Flow 或 Action。配置中的 DB/MQ descriptor 可以不同，但 logical helper ID 保持不變：Actions 永遠寫 `db: orders` 和 `mq.payment...`，不寫 `orders_sit`、`orders_uat`、`payment_sit` 或 `payment_uat`。
+V3.5.1 使用一份 common global config 加上 `environments` map；`--env` 選擇 effective profile，而不修改 Template、Flow 或 Action。配置中的 DB/MQ descriptor 可以不同，但 logical helper ID 保持不變：Actions 永遠寫 `db: orders` 和 `mq.payment...`，不寫 `orders_sit`、`orders_uat`、`payment_sit` 或 `payment_uat`。
 
 推薦目錄：
 
@@ -1100,7 +1100,7 @@ ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "5.3.1",
+  "attVersion": "3.5.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1251,4 +1251,4 @@ assert: "${EXEC.ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
 - `./att.sh validate --package` 通過後再執行選定案例。
 - CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
 
-完整配置、Context、Flow、load、報告、打包及診斷內容見 [ATT V5.3.1 Reference Manual](09_Reference_Manual_V3.md)。
+完整配置、Context、Flow、load、報告、打包及診斷內容見 [ATT V3.5.1 Reference Manual](09_Reference_Manual_V3.md)。

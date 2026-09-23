@@ -1,6 +1,6 @@
 # Changelog
 
-## 5.3.1 - 2026-09-23
+## 3.5.1 - 2026-09-23
 
 - Implemented Issue #36 environment profiles with one common `att-config/v2.6`, deterministic `--env` selection, shallow typed DB/MQ overlays, stable logical helper IDs, and backward-compatible complete `--config` workflows.
 - Applied the same effective environment contract to `run`, `validate`, standalone `debug`, and `load`; unknown profiles, unsupported overlay fields, missing descriptors, and duplicate helper IDs fail before external execution.

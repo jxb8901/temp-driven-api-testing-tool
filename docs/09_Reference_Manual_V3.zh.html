@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V5.3.1 使用手冊與參考</title>
+  <title>ATT V3.5.1 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,11 +233,11 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V5.3.1 使用手冊與參考</h1>
+<h1 class="title">ATT V3.5.1 使用手冊與參考</h1>
 </header>
-<h1 id="att-v5.3.1-中文用户手册与参考手册">ATT V5.3.1
+<h1 id="att-v3.5.1-中文用户手册与参考手册">ATT V3.5.1
 中文用户手册与参考手册</h1>
-<p>作者：Jeffrey + ChatGPT 版本：5.3.1 状态：规范性终端用户文档</p>
+<p>作者：Jeffrey + ChatGPT 版本：3.5.1 状态：规范性终端用户文档</p>
 <p>本手册设计为两种阅读方式：</p>
 <ul>
 <li>如果你是第一次使用 ATT，请按章节 1–4
@@ -2710,8 +2710,8 @@ evidence policy</td>
 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的
 <code>--output-dir</code> 和 <code>--run-id</code>
 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。</p>
-<h3 id="v5.3.1-多环境-profile-选择">V5.3.1 多环境 Profile 选择</h3>
-<p>ATT V5.3.1 使用一份 common <code>att-config/v2.6</code> 加上
+<h3 id="v3.5.1-多环境-profile-选择">V3.5.1 多环境 Profile 选择</h3>
+<p>ATT V3.5.1 使用一份 common <code>att-config/v2.6</code> 加上
 <code>environments</code> map 选择环境；不通过修改 Action 或增加环境专用
 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like
 环境之间，Action 只保留稳定的 logical ID：</p>
@@ -3344,7 +3344,7 @@ boolean <code>required</code>。Command-backed 参数可使用 argv
 <div class="sourceCode" id="cb90"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;5.3.1&quot;</span><span class="fu">,</span></span>
+<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.5.1&quot;</span><span class="fu">,</span></span>
 <span id="cb90-4"><a href="#cb90-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb90-5"><a href="#cb90-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb90-6"><a href="#cb90-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -3531,10 +3531,10 @@ scope 值必须写入 <code>EXEC.VARS</code>。Stage/template 的
 status、timing 和 history 属于 execution result/evidence model，并由旧的
 <code>CASE.STAGES</code> view 提供读取。严格的
 <code>${EXEC.LOAD.&lt;field&gt;}</code> 在非 load mode 会 validation
-error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；5.3.1
+error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；3.5.1
 的 <code>att-load/v1.0</code> adapter 会按下述 contract 增加 load-only
 的 <code>EXEC.LOAD</code>。</p>
-<h3 id="load-v1-context5.3.1">Load V1 Context（5.3.1）</h3>
+<h3 id="load-v1-context3.5.1">Load V1 Context（3.5.1）</h3>
 <p>每个 load iteration 使用与普通执行相同的
 <code>EXEC</code>／<code>META</code> tree 和 Action 局部
 <code>output</code>。<code>EXEC.MODE</code> 是

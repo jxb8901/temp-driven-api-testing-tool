@@ -1,6 +1,6 @@
-# ATT V5.3.1 environment profile examples
+# ATT V3.5.1 environment profile examples
 
-ATT V5.3.1 adds a first-class `--env` selector over one common `att-config/v2.6` file. The selected profile owns the physical DB/MQ descriptor lists; Templates, Flows, and Actions keep stable logical helper IDs.
+ATT V3.5.1 adds a first-class `--env` selector over one common `att-config/v2.6` file. The selected profile owns the physical DB/MQ descriptor lists; Templates, Flows, and Actions keep stable logical helper IDs.
 
 > Actions reference stable logical resources; environment differences belong to the configuration/resource layer.
 
@@ -36,7 +36,7 @@ The snippet shows the profile layer. Retain the common `report`, `run`, `executi
 
 ```text
 config/
-├── config.yaml                  # V5.3.1 common config + profiles
+├── config.yaml                  # V3.5.1 common config + profiles
 ├── environments/{sit,uat}.yaml
 ├── dbhelpers/{sit,uat}/orders.yaml
 └── mqhelpers/{sit,uat}/payment.yaml

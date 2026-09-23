@@ -38,7 +38,7 @@ class LoadAcceptanceTest {
         Path root = projectRoot();
         Path closedScenario = writeScenario("closed-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
-                        + "target: {type: tool, id: sample.getAcDate}\n"
+                + "target: {type: tool, id: sample.getAcDate}\n"
                         + "load: {users: 1, duration: 25ms}\n");
         Path arrivalScenario = writeScenario("arrival-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
@@ -83,12 +83,12 @@ class LoadAcceptanceTest {
                         + "target: {type: tool, id: sample.getAcDate}\n"
                         + "load: {users: 1, duration: 25ms}\n");
         Path output = temp.resolve("profile-output");
-        runCli(root, scenario, output, "issue17-profile", "--profile");
+        runCli(root, scenario, output, "issue17-profile", "--profile", "--think-time", "1s");
 
         Path performance = output.resolve("load/issue17-profile/performance.json");
         assertTrue(Files.isRegularFile(performance), "load --profile must write performance.json");
         @SuppressWarnings("unchecked") Map<String, Object> profile = JsonSupport.mapper().readValue(performance.toFile(), Map.class);
-        assertEquals("5.3.1", profile.get("attVersion"));
+        assertEquals("3.5.1", profile.get("attVersion"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadExecutionMs"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadReportMs"));
         assertEquals(1L, ((Number) ((Map<?, ?>) profile.get("counters")).get("loadCompleted")).longValue());

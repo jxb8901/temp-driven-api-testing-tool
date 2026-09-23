@@ -6,7 +6,7 @@
 
     <groupId>att</groupId>
     <artifactId>template-driven-api-testing-tool</artifactId>
-    <version>5.3.1</version>
+    <version>3.5.1</version>
     <name>Template-driven API Test Framework</name>
 
     <properties>
@@ -94,6 +94,14 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
+                <configuration>
+                    <environmentVariables>
+                        <ORDERS_DB_USERNAME>profile-test</ORDERS_DB_USERNAME>
+                        <ORDERS_DB_PASSWORD>profile-test</ORDERS_DB_PASSWORD>
+                        <PAYMENT_MQ_USERNAME>profile-test</PAYMENT_MQ_USERNAME>
+                        <PAYMENT_MQ_PASSWORD>profile-test</PAYMENT_MQ_PASSWORD>
+                    </environmentVariables>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>

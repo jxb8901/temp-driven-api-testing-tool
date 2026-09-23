@@ -56,12 +56,17 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 2
 fi
 if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to execute the V5.3.1 release gate" >&2
+  echo "mvn is required to execute the V3.5.1 release gate" >&2
   exit 2
 fi
 
 (cd "$ROOT_DIR" && mvn test)
-(cd "$ROOT_DIR" && ./att.sh validate --package)
+(cd "$ROOT_DIR" && \
+  ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" \
+  ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" \
+  PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" \
+  PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" \
+  ./att.sh validate --package)
 
 rm -rf "$PACKAGE_DIR"
 rm -rf "$SOURCE_PACKAGE_DIR"
@@ -155,7 +160,12 @@ find "$PACKAGE_DIR/tools" -type f -name '*.sh' -exec chmod +x {} \;
 } > "$PACKAGE_DIR/RELEASE_MANIFEST.txt"
 
 (cd "$PACKAGE_DIR" && ./att.sh version | grep -Fx "ATT V$VERSION" >/dev/null)
-(cd "$PACKAGE_DIR" && ./att.sh validate --package)
+(cd "$PACKAGE_DIR" && \
+  ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" \
+  ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" \
+  PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" \
+  PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" \
+  ./att.sh validate --package)
 
 (cd "$BUILD_DIR" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$DIST_DIR/$PACKAGE_NAME.tar.gz" "$PACKAGE_NAME")
 
