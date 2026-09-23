@@ -26,8 +26,8 @@ jobs:
 
       - name: Normalize Test Authoring section numbers
         run: |
-          sed -i -E 's/^### 3\.1 /### 2.1 /; s/^#### 3\.2 /### 2.2 /' docs/reference/02_test_authoring.md
-          sed -i -E 's/^### 3\.1 /### 2.1 /; s/^#### 3\.2 /### 2.2 /' docs/reference.zh/02_test_authoring.md
+          sed -i -E 's/^#{3,5} 3\.1 /### 2.1 /; s/^#{3,5} 3\.2 /### 2.2 /' docs/reference/02_test_authoring.md
+          sed -i -E 's/^#{3,5} 3\.1 /### 2.1 /; s/^#{3,5} 3\.2 /### 2.2 /' docs/reference.zh/02_test_authoring.md
 
       - name: Regenerate and verify Reference Manual
         run: |
