@@ -141,6 +141,10 @@ class EnvironmentProfileTest {
                 + "environment: SIT\n"
                 + "environments: {SIT: {dbhelpers: [db/not-found.yaml]}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missing, temp));
+        Path missingMq = write("missing-mq-descriptor.yaml", "schemaVersion: att-config/v2.6\n"
+                + "environment: SIT\n"
+                + "environments: {SIT: {mqhelpers: [mq/not-found.yaml]}}\n");
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingMq, temp));
 
         write("db/one.yaml", db("orders", "jdbc:one"));
         write("db/two.yaml", db("orders", "jdbc:two"));
@@ -150,6 +154,15 @@ class EnvironmentProfileTest {
                 + "  SIT:\n"
                 + "    dbhelpers: [db/one.yaml, db/two.yaml]\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(duplicate, temp));
+
+        write("mq/one.yaml", mq("payment", "mq-one"));
+        write("mq/two.yaml", mq("payment", "mq-two"));
+        Path duplicateMq = write("duplicate-mq-descriptor.yaml", "schemaVersion: att-config/v2.6\n"
+                + "environment: SIT\n"
+                + "environments:\n"
+                + "  SIT:\n"
+                + "    mqhelpers: [mq/one.yaml, mq/two.yaml]\n");
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(duplicateMq, temp));
     }
 
     @Test
