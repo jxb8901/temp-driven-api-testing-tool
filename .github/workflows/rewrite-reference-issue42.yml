@@ -1,4 +1,4 @@
-name: Rewrite Reference Manual for Issue 42
+name: Finalize Reference Manual Issue 42
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  rewrite:
+  finalize:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -24,20 +24,136 @@ jobs:
       - name: Install Pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
 
-      - name: Apply Reference migration
+      - name: Remove remaining historical structure leakage
         run: |
-          python3 tools/rewrite_reference_issue42.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          for rel in ('docs/reference/02_test_authoring.md', 'docs/reference.zh/02_test_authoring.md'):
+              p = Path(rel)
+              text = p.read_text(encoding='utf-8')
+              text = re.sub(r'(?m)^### 3\.1 (.+)$', r'### 2.1 \1', text)
+              text = re.sub(r'(?m)^#### 3\.2 (.+)$', r'### 2.2 \1', text)
+              p.write_text(text, encoding='utf-8')
+
+          Path('docs/system-design').mkdir(parents=True, exist_ok=True)
+          Path('docs/system-design/runtime-execution.md').write_text(r'''# Runtime and Execution Internals
+
+Status: Maintainer documentation
+
+This document explains implementation ownership behind the supported contracts in `docs/reference/`. The Reference Manual is authoritative for user-visible behavior; this document must not redefine a conflicting public model.
+
+## Execution-neutral runtime
+
+The canonical runtime roots are `EXEC` and `META`; `output` is Action-local. Run, Debug and Load adapt their inputs into that same model before invoking reusable Templates, Flows and Resources.
+
+```text
+Run adapter -----\
+Debug adapter ----+--> Execution Context --> Template / Flow / Tool
+Load adapter -----/          |
+                              +--> EXEC / META
+                              `--> Action-local output
+```
+
+`EXEC.ACTIONS` is scope-local. A Stage/Template receives a fresh Action scope; a Flow invocation installs another fresh scope and restores the caller scope on return. `EXEC.VARS` is the explicit publication mechanism across those boundaries. `EXEC.LOAD` is attached only by the load adapter and does not fork the runtime model.
+
+Compatibility aliases are views over canonical state where a deterministic mapping exists. Stage history, resource handles, scheduler workers and invocation frames are not promoted into the public Context tree.
+
+## Configuration and environment resolution
+
+CLI parsing selects a base config and optional `--env`. Environment selection is resolved once into an effective framework configuration before Run, Validate, Debug or Load dispatch. Typed DB/MQ bindings therefore enter downstream execution through the same resolved resource registry instead of mode-specific branching.
+
+Secrets are resolved only where supported by the relevant descriptor. Curated `META` data and diagnostics must not publish resolved credentials.
+
+## Validation pipeline
+
+ATT applies schema validation before semantic/dependency validation. The semantic phase resolves configured roots, testcase mappings, snapshots, Template/Flow dependencies, payloads, expressions and resource contracts before external execution.
+
+Package validation discovers the whole configured package. Selected validation and standalone execution modes validate only the dependency closure required by the selected target. Runtime uses validated/compiled descriptors rather than discovering a different contract during Action execution.
+
+## Execution and aggregation
+
+The execution engine preserves ordered Stage/Template/Action semantics. `runWhen` decides eligibility and `onFailure` controls continuation without suppressing failure severity. Parent results aggregate child outcomes with the public order:
+
+```text
+ERROR > INVALID > FAIL > PASS > SKIPPED
+```
+
+Reports, manifests, CLI summaries and CI outputs must consume the same aggregate result rather than recomputing independent status rules.
+
+## Action and operation boundary
+
+Tool, DB and MQ executors return operation data through a common boundary before the Template runner applies Action status, assertion and retry semantics:
+
+```text
+operation result/evidence/diagnostic/timing
+                  |
+                  v
+          Action lifecycle
+                  |
+                  v
+     output.result / evidence / attempts
+```
+
+Only the final or winning primary operation is exposed at top level. Per-attempt evidence remains in `output.attempts[n]`. JDBC connections/transactions, MQ connections/sessions, process handles and load scheduler state are internal ownership objects, not alternate Context roots.
+
+## Run lifecycle and persistence
+
+A normal run validates and plans before reserving `<outputDirectory>/<RunID>/`. Evidence is written under that reserved directory. Completion publishes the run manifest/reports and then updates the latest-completed-run pointer. A colliding Run ID is rejected rather than overwritten.
+
+Debug writes an isolated debug result tree and does not participate in normal latest-run publication. Load owns one load-run output tree and creates per-iteration physical workspaces lazily according to failure/evidence policy.
+
+## Load scheduling and resource ownership
+
+Closed-VU and fixed-arrival-rate schedulers are mode adapters around the shared iteration executor. Closed VUs retain scheduler identity across iterations; arrival-rate execution schedules independent arrivals and records drops when its concurrency cap prevents a start.
+
+Load-run DB/MQ resource pools may be shared by concurrent iterations according to the resource layer, while mutable execution Context (`EXEC.VARS`, `EXEC.ACTIONS`, Action-local output) remains iteration-isolated. Pool/session implementation details must not leak into public expression paths.
+
+## Process and path safety
+
+Process-backed Tools construct explicit argv rather than relying on an implicit shell. Output is bounded/streamed according to the Tool evidence contract. Framework writes normalize and contain paths beneath their intended roots; logical target/resource identifiers are not treated as arbitrary filesystem paths.
+
+## Maintainer verification
+
+Changes to runtime or documentation should preserve these invariants:
+
+- Run/Debug/Load share the canonical Context and reusable component semantics;
+- Tool/DB/MQ converge on one Action result/evidence model;
+- environment resolution occurs before mode execution;
+- scope isolation/restoration is deterministic;
+- validation precedes external execution for the validated target closure;
+- reports and exit behavior derive from the same status model;
+- generated documentation and schemas remain aligned with code/tests.
+''', encoding='utf-8')
+
+          ci = Path('.github/workflows/ci.yml')
+          text = ci.read_text(encoding='utf-8')
+          marker = "      - name: Verify Reference Manual generation\n        run: python3 tools/build_reference_manual.py --check\n"
+          addition = marker + "\n      - name: Verify Reference Manual semantic coverage\n        run: python3 tools/validate_reference_content.py\n"
+          if 'Verify Reference Manual semantic coverage' not in text:
+              if marker not in text:
+                  raise SystemExit('CI Reference generation step not found')
+              text = text.replace(marker, addition, 1)
+              ci.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Regenerate and verify Reference Manual
+        run: |
           python3 tools/build_reference_manual.py
           python3 tools/validate_reference_content.py
+          python3 tools/build_reference_manual.py --check
 
-      - name: Commit migrated documentation
+      - name: Remove one-time migration machinery
+        run: |
+          rm -f tools/rewrite_reference_issue42.py
+          rm -f tools/bootstrap_reference_sources.py
+          rm -f .github/workflows/rewrite-reference-issue42.yml
+
+      - name: Commit final issue 42 state
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add README.md docs
-          if git diff --cached --quiet; then
-            echo 'No migration changes required.'
-          else
-            git commit -m 'Rewrite Reference Manual content for issue 42'
-            git push origin HEAD:master
-          fi
+          git add -A README.md docs tools .github/workflows
+          git commit -m 'Finalize issue 42 Reference information architecture'
+          git push origin HEAD:master
