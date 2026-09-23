@@ -1,5 +1,6 @@
 name: Finalize Reference Modularization
 
+# One-shot workflow: it removes itself after applying the release-build patch.
 on:
   push:
     branches: [master]
