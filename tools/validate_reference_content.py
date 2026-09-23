@@ -90,6 +90,15 @@ def main():
         sd = system_design.read_text(encoding="utf-8")
         if "Validation pipeline" not in sd or "Execution and aggregation" not in sd:
             fail(errors, "system-design/runtime-execution.md does not contain migrated maintainer material")
+        if "canonical runtime roots are `EXEC` and `META`" not in sd:
+            fail(errors, "system-design/runtime-execution.md must explicitly align with canonical EXEC/META Context")
+        stale_system_design = (
+            "authoritative persisted runtime tree has one `CASE` root",
+            "formula expressions, not cached results, enter Context",
+        )
+        for stale in stale_system_design:
+            if stale in sd:
+                fail(errors, "system-design/runtime-execution.md still contains stale architecture text: %s" % stale)
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8") if (ROOT / "README.md").is_file() else ""
     for link in ("docs/quick-start.md", "docs/generated/reference.html", "docs/system-design/"):
@@ -97,12 +106,18 @@ def main():
             fail(errors, "README missing current documentation entry point: %s" % link)
 
     # Reference must no longer contain the old tutorial/cookbook or maintainer chapter.
-    en_authoring = (DOCS / "reference" / "02_test_authoring.md")
-    if en_authoring.is_file():
-        text = en_authoring.read_text(encoding="utf-8")
-        for old in ("### 02 Quick Start", "### 04 Cookbook", "#### 3.3 Tool", "#### 3.4 Running Tests", "#### 3.5 Reports"):
-            if old in text:
-                fail(errors, "Test Authoring still contains migrated material: %s" % old)
+    for lang_root in (DOCS / "reference", DOCS / "reference.zh"):
+        authoring = lang_root / "02_test_authoring.md"
+        if authoring.is_file():
+            text = authoring.read_text(encoding="utf-8")
+            for old in ("### 02 Quick Start", "### 04 Cookbook", "#### 3.3 Tool", "#### 3.4 Running Tests", "#### 3.5 Reports"):
+                if old in text:
+                    fail(errors, "%s still contains migrated material: %s" % (authoring.relative_to(ROOT), old))
+            if re.search(r"(?m)^#{3,5}\s+3\.[12]\b", text):
+                fail(errors, "%s still uses legacy User Guide section numbering" % authoring.relative_to(ROOT))
+            if not re.search(r"(?m)^###\s+2\.1\s+", text) or not re.search(r"(?m)^###\s+2\.2\s+", text):
+                fail(errors, "%s must expose current 2.1 Workbook and 2.2 Template peer sections" % authoring.relative_to(ROOT))
+
     en_ops = DOCS / "reference" / "13_ci_packaging_operations.md"
     if en_ops.is_file() and "Architecture for Maintainers" in en_ops.read_text(encoding="utf-8"):
         fail(errors, "Reference 13 still contains Architecture for Maintainers")
