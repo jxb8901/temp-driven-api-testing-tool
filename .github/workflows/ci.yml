@@ -35,8 +35,14 @@ jobs:
           java-version: '8'
           cache: maven
 
+      - name: Install Pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
       - name: Verify
         run: mvn -B -ntp clean verify
+
+      - name: Verify Reference Manual generation
+        run: python3 tools/build_reference_manual.py --check
 
       - name: Upload test reports on failure
         if: failure()
