@@ -44,6 +44,9 @@ jobs:
       - name: Verify Reference Manual generation
         run: python3 tools/build_reference_manual.py --check
 
+      - name: Verify Reference Manual semantic coverage
+        run: python3 tools/validate_reference_content.py
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
