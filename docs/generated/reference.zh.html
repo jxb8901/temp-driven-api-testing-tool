@@ -251,8 +251,8 @@ id="toc-三種-resource-是同級概念">三種 Resource 是同級概念</a></li
 測試案例編寫</a>
 <ul>
 <li><a href="#編寫契約" id="toc-編寫契約">編寫契約</a></li>
-<li><a href="#31-工作簿" id="toc-31-工作簿">3.1 工作簿</a></li>
-<li><a href="#32-模板" id="toc-32-模板">3.2 模板</a></li>
+<li><a href="#21-工作簿" id="toc-21-工作簿">2.1 工作簿</a></li>
+<li><a href="#22-模板" id="toc-22-模板">2.2 模板</a></li>
 </ul></li>
 <li><a href="#03-runtime-與-context-模型"
 id="toc-03-runtime-與-context-模型">03 Runtime 與 Context 模型</a>
@@ -496,7 +496,7 @@ YAML。</p>
 <h2 id="02-測試案例編寫">02 測試案例編寫</h2>
 <h3 id="編寫契約">編寫契約</h3>
 <p>本章说明正常日常工作流中的数据流转顺序。</p>
-<h3 id="31-工作簿">3.1 工作簿</h3>
+<h3 id="21-工作簿">2.1 工作簿</h3>
 <h4 id="工作簿侧车和快照之间的关系">工作簿、侧车和快照之间的关系</h4>
 <p>每个 <code>.xlsx</code> 工作簿都要求有一个 YAML 侧车和一个生成的 XML
 快照，它们必须具有相同的基名且位于同一目录：</p>
@@ -718,7 +718,7 @@ PASS，只是允许后续适格工作继续运行。</p>
 </table>
 <p>使用 <code>onFailure</code> 做回滚/诊断，使用 <code>always</code>
 做清理或最终证据收集。</p>
-<h3 id="32-模板">3.2 模板</h3>
+<h3 id="22-模板">2.2 模板</h3>
 <p>只有当目录直接包含 <code>template.yaml</code>
 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。</p>
 <div class="sourceCode" id="cb8"><pre

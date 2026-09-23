@@ -58,7 +58,7 @@ For a guided package build, use `docs/quick-start.md`. The rest of this manual i
 
 This chapter explains the normal day-to-day workflow in the same order that data moves through ATT.
 
-### 3.1 Workbook
+### 2.1 Workbook
 
 #### Workbook, sidecar, and snapshot relationship
 
@@ -185,7 +185,7 @@ All selector-map keys, including `name`, are copied into the stage Context. `sta
 
 Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evidence collection.
 
-### 3.2 Template
+### 2.2 Template
 
 A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
 
