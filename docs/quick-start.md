@@ -261,7 +261,7 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 | debug one Template/Flow/Tool without Excel | [Standalone Debug](reference/04_execution_modes/debug.md) |
 | run load tests | [Load](reference/04_execution_modes/load.md) |
 | call scripts/programs or framework-native Tools | [Tool](reference/05_resources/tools.md) |
-| query/update a database | [DBHelper](reference/05_resources/dbhelper.md) |
+| query/update a database, including query timeout/retry | [DBHelper](reference/05_resources/dbhelper.md) |
 | send/receive/request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
 | switch SIT/UAT resource bindings | [Environment and Test Data](reference/06_environment_testdata.md) |
 | use `${...}` and `#{...}` correctly | [Expressions](reference/07_expressions.md) |
@@ -269,5 +269,7 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 | look up commands and options | [CLI Reference](reference/10_cli.md) |
 | troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Diagnostics](reference/12_validation_diagnostics.md) |
 | integrate ATT into CI or package it | [CI, Packaging, and Operations](reference/13_ci_packaging_operations.md) |
+
+For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/05_resources/dbhelper.md) for the full contract.
 
 For field-by-field supported behavior, use the generated [ATT V3.5.1 Reference Manual](generated/reference.html) rather than extending this tutorial into a second manual.
