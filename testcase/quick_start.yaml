@@ -1,0 +1,23 @@
+schemaVersion: att-sidecar/v2.2
+id: quickStart
+excel:
+  sheet: QuickStart
+  headerRows: 2
+  caseId: Case ID
+  tags: Tags
+  dataColumns: name=Name, amount=Amount, useTool=Use Tool(yaml), expected=Expected
+
+stages:
+  - key: main
+    template: Template
+    required: true
+    onFailure: stop
+    runWhen: normal
+
+report:
+  columns:
+    result: Test Result
+    durationMs: Duration(ms)
+    expectedResult: Expected Result
+    actualResult: Actual Result
+    runTime: Run Time
