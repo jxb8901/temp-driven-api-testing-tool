@@ -15,8 +15,6 @@ import java.util.function.Consumer;
 
 /** Closed workload scheduler: each VU waits for completion before its next iteration. */
 public final class ClosedVuScheduler implements LoadScheduler {
-    private static final long THINK_TIME_SLEEP_SLICE_MS = 50L;
-
     private final LoadScenario scenario;
     private final LoadIterationRunner executor;
     private final String runId;
@@ -115,15 +113,15 @@ public final class ClosedVuScheduler implements LoadScheduler {
 
     /**
      * Consume the requested think time in bounded slices. The system timing primitive intentionally
-     * limits each individual sleep to 50 ms so schedulers can remain responsive; therefore a
-     * multi-slice wait is required to honor think times longer than that polling quantum.
+     * limits each individual sleep so schedulers can remain responsive; therefore a multi-slice wait
+     * is required to honor think times longer than that polling quantum.
      */
     private void sleepThinkTime(long millis, long startedAt) throws InterruptedException {
         long remainingThinkTime = millis;
         while (remainingThinkTime > 0L && !cancelled.get()) {
             long remainingRun = remainingRunMillis(startedAt);
             if (remainingRun <= 0L) return;
-            long slice = Math.min(THINK_TIME_SLEEP_SLICE_MS, Math.min(remainingThinkTime, remainingRun));
+            long slice = Math.min(LoadSchedulerSupport.MAX_SLEEP_SLICE_MS, Math.min(remainingThinkTime, remainingRun));
             if (slice <= 0L) return;
             timing.sleep(slice);
             remainingThinkTime -= slice;
