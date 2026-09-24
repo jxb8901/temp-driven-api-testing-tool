@@ -3,6 +3,7 @@ package att.load;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -56,12 +57,13 @@ public final class ClosedVuScheduler implements LoadScheduler {
 
     @Override public LoadRunResult run() throws Exception {
         final long startedAt = timing.now(); final Instant start = LoadSchedulerSupport.instant(startedAt);
+        final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
         workers = Executors.newFixedThreadPool(scenario.users(), new NamedFactory("att-load-vu"));
         java.util.List<Future<?>> futures = new java.util.ArrayList<Future<?>>();
         for (int user = 0; user < scenario.users(); user++) {
             final int userNumber = user;
-            futures.add(workers.submit(() -> runUser(userNumber, startedAt, metrics)));
+            futures.add(workers.submit(() -> runUser(userNumber, startedAt, metrics, runSeed)));
         }
         try { for (Future<?> future : futures) future.get(); }
         finally { shutdown(); }
@@ -69,8 +71,9 @@ public final class ClosedVuScheduler implements LoadScheduler {
         return new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
     }
 
-    private void runUser(int userNumber, long startedAt, LoadMetrics metrics) {
+    private void runUser(int userNumber, long startedAt, LoadMetrics metrics, long runSeed) {
         long userIteration = 0L; String userId = "VU-" + (userNumber + 1);
+        Random random = LoadRandomization.randomForVu(runSeed, LoadRandomization.workloadKey(scenario), userId);
         try {
             while (!cancelled.get()) {
                 long elapsed = timing.now() - startedAt;
@@ -102,7 +105,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
                         sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence));
                 long remaining = LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
                 if (cancelled.get() || remaining <= 0L) return;
-                timing.sleep(Math.min(scenario.thinkTime().toMillis(), remaining));
+                long sampledThinkTime = scenario.thinkTimePolicy().sampleMillis(random);
+                timing.sleep(Math.min(sampledThinkTime, remaining));
             }
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
     }
