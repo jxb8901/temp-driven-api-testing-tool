@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testcases schemaVersion="att-testcases/v2.4" workbookId="quickStart">
+  <group id="default" sheet="QuickStart">
+    <case rowCaseId="QS001">
+      <tags>
+        <tag>smoke</tag>
+        <tag>quickstart</tag>
+      </tags>
+      <data>
+        <field name="name" type="string">Basic offline case</field>
+        <field name="amount" type="string">100</field>
+        <field name="useTool" type="boolean">false</field>
+        <field name="expected" type="string">100</field>
+      </data>
+      <stages>
+        <stage key="main">
+          <field name="name" type="string">QUICK_START</field>
+        </stage>
+      </stages>
+    </case>
+    <case rowCaseId="QS002">
+      <tags>
+        <tag>quickstart</tag>
+        <tag>tool</tag>
+      </tags>
+      <data>
+        <field name="name" type="string">Case with sample Tool</field>
+        <field name="amount" type="string">200</field>
+        <field name="useTool" type="boolean">true</field>
+        <field name="expected" type="string">200</field>
+      </data>
+      <stages>
+        <stage key="main">
+          <field name="name" type="string">QUICK_START</field>
+        </stage>
+      </stages>
+    </case>
+  </group>
+</testcases>
