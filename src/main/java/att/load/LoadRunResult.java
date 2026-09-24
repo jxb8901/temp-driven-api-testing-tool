@@ -56,7 +56,10 @@ public final class LoadRunResult {
         result.put("status", status().name()); result.put("exitCode", exitCode());
         result.put("runId", runId); result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
-        result.put("scenario", scenario.toSummaryMap()); result.put("timing", timing());
+        Map<String, Object> scenarioSummary = scenario.toSummaryMap();
+        if (scenario.thinkTimePolicy().randomized())
+            scenarioSummary.put("effectiveSeed", Long.valueOf(LoadRandomization.effectiveSeed(scenario, runId)));
+        result.put("scenario", scenarioSummary); result.put("timing", timing());
         result.put("metrics", metrics.toMap()); result.put("thresholds", thresholds.toMap());
         result.put("resources", resources);
         if (!evidence.isEmpty()) result.put("evidence", evidence);

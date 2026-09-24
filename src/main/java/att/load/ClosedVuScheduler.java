@@ -3,6 +3,7 @@ package att.load;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -56,12 +57,13 @@ public final class ClosedVuScheduler implements LoadScheduler {
 
     @Override public LoadRunResult run() throws Exception {
         final long startedAt = timing.now(); final Instant start = LoadSchedulerSupport.instant(startedAt);
+        final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
         workers = Executors.newFixedThreadPool(scenario.users(), new NamedFactory("att-load-vu"));
         java.util.List<Future<?>> futures = new java.util.ArrayList<Future<?>>();
         for (int user = 0; user < scenario.users(); user++) {
             final int userNumber = user;
-            futures.add(workers.submit(() -> runUser(userNumber, startedAt, metrics)));
+            futures.add(workers.submit(() -> runUser(userNumber, startedAt, metrics, runSeed)));
         }
         try { for (Future<?> future : futures) future.get(); }
         finally { shutdown(); }
@@ -69,8 +71,9 @@ public final class ClosedVuScheduler implements LoadScheduler {
         return new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
     }
 
-    private void runUser(int userNumber, long startedAt, LoadMetrics metrics) {
+    private void runUser(int userNumber, long startedAt, LoadMetrics metrics, long runSeed) {
         long userIteration = 0L; String userId = "VU-" + (userNumber + 1);
+        Random random = LoadRandomization.randomForVu(runSeed, LoadRandomization.workloadKey(scenario), userId);
         try {
             while (!cancelled.get()) {
                 long elapsed = timing.now() - startedAt;
@@ -100,11 +103,33 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 long completedAt = timing.now();
                 LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completion(runId, "closed", phase, iterationId, userId,
                         sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence));
-                long remaining = LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
+                long remaining = remainingRunMillis(startedAt);
                 if (cancelled.get() || remaining <= 0L) return;
-                timing.sleep(Math.min(scenario.thinkTime().toMillis(), remaining));
+                long sampledThinkTime = scenario.thinkTimePolicy().sampleMillis(random);
+                sleepThinkTime(Math.min(sampledThinkTime, remaining), startedAt);
             }
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+    }
+
+    /**
+     * Consume the requested think time in bounded slices. The system timing primitive intentionally
+     * limits each individual sleep so schedulers can remain responsive; therefore a multi-slice wait
+     * is required to honor think times longer than that polling quantum.
+     */
+    private void sleepThinkTime(long millis, long startedAt) throws InterruptedException {
+        long remainingThinkTime = millis;
+        while (remainingThinkTime > 0L && !cancelled.get()) {
+            long remainingRun = remainingRunMillis(startedAt);
+            if (remainingRun <= 0L) return;
+            long slice = Math.min(LoadSchedulerSupport.MAX_SLEEP_SLICE_MS, Math.min(remainingThinkTime, remainingRun));
+            if (slice <= 0L) return;
+            timing.sleep(slice);
+            remainingThinkTime -= slice;
+        }
+    }
+
+    private long remainingRunMillis(long startedAt) {
+        return LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
     }
 
     private Path sampleOutputRoot(String iterationId) {

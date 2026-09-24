@@ -6,6 +6,7 @@
   "required": ["schemaVersion", "target", "load"],
   "properties": {
     "schemaVersion": {"const": "att-load/v1.0"},
+    "seed": {"type": "integer"},
     "target": {
       "type": "object",
       "required": ["type", "id"],
@@ -39,7 +40,20 @@
     "execution": {
       "type": "object",
       "properties": {
-        "thinkTime": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"}
+        "thinkTime": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+            {
+              "type": "object",
+              "required": ["min", "max"],
+              "properties": {
+                "min": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+                "max": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
       },
       "additionalProperties": false
     },

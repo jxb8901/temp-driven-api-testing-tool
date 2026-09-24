@@ -26,6 +26,8 @@
       "required": ["schemaVersion", "target", "load"],
       "properties": {
         "schemaVersion": {"const": "att-load/v1.0"},
+        "seed": {"type": "integer"},
+        "effectiveSeed": {"type": "integer"},
         "target": {
           "type": "object",
           "required": ["type", "id"],
@@ -57,7 +59,23 @@
         },
         "execution": {
           "type": "object",
-          "properties": {"thinkTime": {"type": "string", "minLength": 1}},
+          "properties": {
+            "thinkTime": {
+              "oneOf": [
+                {"type": "string", "minLength": 1},
+                {
+                  "type": "object",
+                  "required": ["min", "max"],
+                  "properties": {
+                    "min": {"type": "string", "minLength": 1},
+                    "max": {"type": "string", "minLength": 1}
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "thinkTimePolicy": {"type": "string", "minLength": 1}
+          },
           "additionalProperties": false
         },
         "thresholds": {"type": "object", "additionalProperties": true},

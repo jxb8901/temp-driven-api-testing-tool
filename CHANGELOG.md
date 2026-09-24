@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.2 - 2026-09-24
+
+- Implemented Issue #53 randomized think-time ranges for closed-VU load workloads while preserving the existing fixed `execution.thinkTime` syntax and keeping arrival-rate workloads unchanged.
+- Added reusable `ThinkTimePolicy` normalization, deterministic run-level seeding with isolated per-VU random streams, inclusive millisecond range sampling, report-safe effective-seed/policy output, schema updates, an offline example, and EN/ZH Reference coverage.
+- Fixed production closed-VU think-time waiting so sampled delays longer than the scheduler's 50 ms cancellation quantum are fully consumed in bounded cancellable slices; added a real-system-timing regression test to prevent throughput inflation from truncated waits.
+
 ## 3.5.1 - 2026-09-23
 
 - Implemented Issue #36 environment profiles with one common `att-config/v2.6`, deterministic `--env` selection, shallow typed DB/MQ overlays, stable logical helper IDs, and backward-compatible complete `--config` workflows.
