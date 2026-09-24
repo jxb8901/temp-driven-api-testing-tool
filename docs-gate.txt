@@ -1,0 +1,5 @@
+Documentation release gate failed:
+  - docs/reference.md link escapes repository root: ../../examples/load/closed-random-think.yaml
+  - docs/reference.zh.md link escapes repository root: ../../examples/load/closed-random-think.yaml
+  - docs/reference.html HTML link escapes repository root: ../../examples/load/closed-random-think.yaml
+  - docs/reference.zh.html HTML link escapes repository root: ../../examples/load/closed-random-think.yaml
