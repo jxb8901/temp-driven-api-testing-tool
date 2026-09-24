@@ -71,7 +71,7 @@ public class StageTemplateRunner {
                         : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : "assign".equals(type) ? "expression" : "use";
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
                 else if ("tool".equals(type)) toolStatus = executeTool(action, context, log, output, targets, node);
-                else if ("db".equals(type)) invocationSucceeded = executeDb(action, context, log, output, targets);
+                else if ("db".equals(type)) toolStatus = executeDb(action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
@@ -95,7 +95,8 @@ public class StageTemplateRunner {
                     output.put("expected", expected);
                     output.put("actual", actual);
                 }
-                boolean assertionReport = "assert".equals(type) || ("tool".equals(type) && !action.assertion().trim().isEmpty());
+                boolean assertionReport = "assert".equals(type)
+                        || (("tool".equals(type) || "db".equals(type)) && !action.assertion().trim().isEmpty());
                 if ("tool".equals(type) && assertionReport) {
                     executionField = "expected";
                     expected = normalizeLines(templateEngine.render(action.expected(), context, log));
@@ -301,8 +302,8 @@ public class StageTemplateRunner {
         context.assignCaseVariable(action.name(), value);
     }
 
-    private boolean executeDb(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
-                              Map<String, Object> output, List<String> targets) throws Exception {
+    private ResultStatus executeDb(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+                                   Map<String, Object> output, List<String> targets) throws Exception {
         att.exec.DbHelperExecutor executor = templateEngine.dbHelperExecutor();
         if (executor == null) throw new IllegalStateException("DB action execution is unavailable");
         context.setDbHelperMetadata(action.db());
@@ -342,25 +343,102 @@ public class StageTemplateRunner {
             NamedSqlParameters.Binding binding = NamedSqlParameters.bind(sql, resolved);
             sql = binding.sql(); params.addAll(binding.values()); parameterNames.addAll(binding.names());
         }
-        String invocationId = context.nextDbInvocationId(action.db());
-        att.exec.DbInvocationResult result = parameterNames.isEmpty()
-                ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
-                : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
-        try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
-        catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
-        ActionExecutionResult operationResult = result.operationResult();
-        publishOperationResult(output, operationResult);
-        if (operationResult.executionSuccess() && action.saveConfig().configured()) {
-            String path = templateEngine.render(action.saveConfig().path(), context, log);
-            String format = requiredFormat(action.saveConfig(), "DB", "");
-            if (console(path)) try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result.result())); }
-            catch (Exception error) { recordEvidenceError(output, error); }
-            else {
-                Path saved = artifactWriter.writeDb(context, action.id(), path, format, result.result(), action.saveConfig().overwrite());
-                targets.add(saved.toString());
+
+        Map<String, Object> retry = action.retry();
+        int maxAttempts = integer(retry.get("maxAttempts"), 1);
+        java.util.Set<String> retryOn = strings(retry.get("retryOn"));
+        int intervalMs = integer(retry.get("intervalMs"), 0);
+        List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
+        if (!retry.isEmpty()) output.put("attempts", attempts);
+
+        for (int number = 1; number <= maxAttempts; number++) {
+            String invocationId = context.nextDbInvocationId(action.db());
+            att.exec.DbInvocationResult result;
+            if (action.timeoutMs() != null) {
+                // The timeout-aware executor overload preserves the same effective
+                // helper/action minimum rule. Positional execution is also valid
+                // for SQL normalized from named parameters; parameter order was
+                // fixed by NamedSqlParameters.bind above.
+                result = executor.execute(action.db(), query ? "query" : "update", sql, source,
+                        params, invocationId, action.timeoutMs());
+            } else {
+                result = parameterNames.isEmpty()
+                        ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
+                        : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
             }
+            try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
+            catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
+
+            ActionExecutionResult operationResult = result.operationResult();
+            publishOperationResult(output, operationResult);
+            Map<String, Object> attempt = new LinkedHashMap<String, Object>();
+            attempt.put("attempt", number);
+            attempt.put("invocationId", invocationId);
+            attempt.put("result", operationResult.result());
+            attempt.put("evidence", operationResult.evidence());
+            attempt.put("status", operationResult.executionSuccess() ? "PASS" : "ERROR");
+            attempt.put("success", Boolean.valueOf(operationResult.executionSuccess()));
+            if (!retry.isEmpty()) attempts.add(attempt);
+
+            if (!operationResult.executionSuccess()) {
+                String category = dbFailureType(operationResult.result());
+                if (category != null) attempt.put("category", category);
+                if (query && "TIMEOUT".equals(category)
+                        && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
+                    attempt.put("retryReason", "TIMEOUT");
+                    waitBeforeRetry(intervalMs);
+                    continue;
+                }
+                if (!retry.isEmpty()) output.put("finalAttempt", number);
+                output.put("status", "ERROR"); output.put("success", false);
+                return ResultStatus.ERROR;
+            }
+
+            context.setActionOutput(output);
+            boolean passed = evaluateAssertion(action, output, context, log);
+            if (output.get("assertion") != null) {
+                attempt.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) output.get("assertion")));
+            }
+            if (passed) {
+                saveDbResult(action, context, log, targets, result.result());
+                if (!retry.isEmpty()) output.put("winningAttempt", number);
+                output.put("status", "PASS"); output.put("success", true);
+                return ResultStatus.PASS;
+            }
+            if (!shouldRetry(retryOn, "ASSERTION", number, maxAttempts)) {
+                saveDbResult(action, context, log, targets, result.result());
+                if (!retry.isEmpty()) output.put("finalAttempt", number);
+                output.put("status", "FAIL"); output.put("success", false);
+                return ResultStatus.FAIL;
+            }
+            attempt.put("status", "FAIL"); attempt.put("success", false);
+            attempt.put("retryReason", "ASSERTION");
+            waitBeforeRetry(intervalMs);
         }
-        return operationResult.executionSuccess();
+        throw new IllegalStateException("DB action completed without a final attempt: " + action.id());
+    }
+
+    private void saveDbResult(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+                              List<String> targets, Object result) throws Exception {
+        if (!action.saveConfig().configured()) return;
+        String path = templateEngine.render(action.saveConfig().path(), context, log);
+        String format = requiredFormat(action.saveConfig(), "DB", "");
+        if (console(path)) {
+            try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result)); }
+            catch (Exception error) { /* saving evidence must not replace the operation result */ }
+        } else {
+            Path saved = artifactWriter.writeDb(context, action.id(), path, format, result, action.saveConfig().overwrite());
+            targets.add(saved.toString());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String dbFailureType(Object result) {
+        if (!(result instanceof Map)) return null;
+        Object error = ((Map<String, Object>) result).get("error");
+        if (!(error instanceof Map)) return null;
+        Object type = ((Map<String, Object>) error).get("type");
+        return type == null ? null : String.valueOf(type);
     }
 
     private ResultStatus executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
@@ -424,7 +502,7 @@ public class StageTemplateRunner {
                     output.put("status", "PASS"); output.put("success", true);
                     return ResultStatus.PASS;
                 }
-                if (!retryOn.contains("ASSERTION") || number >= maxAttempts) {
+                if (!shouldRetry(retryOn, "ASSERTION", number, maxAttempts)) {
                     output.put("finalAttempt", number);
                     output.put("status", "FAIL"); output.put("success", false);
                     return ResultStatus.FAIL;
@@ -448,7 +526,7 @@ public class StageTemplateRunner {
                 if (evidence.get("outputFile") != null && !targets.contains(String.valueOf(evidence.get("outputFile")))) targets.add(String.valueOf(evidence.get("outputFile")));
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
-                if ("TIMEOUT".equals(e.category()) && retryOn.contains("TIMEOUT") && number < maxAttempts) {
+                if ("TIMEOUT".equals(e.category()) && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                     evidence.put("retryReason", "TIMEOUT");
                     waitBeforeRetry(intervalMs);
                     continue;
@@ -621,6 +699,10 @@ public class StageTemplateRunner {
         Object evaluated = templateEngine.evaluate(expression, context, log);
         return evaluated instanceof Boolean ? ((Boolean) evaluated).booleanValue()
                 : evaluator.evaluate(String.valueOf(evaluated));
+    }
+
+    private boolean shouldRetry(java.util.Set<String> retryOn, String reason, int attempt, int maxAttempts) {
+        return retryOn.contains(reason) && attempt < maxAttempts;
     }
 
     private void waitBeforeRetry(int intervalMs) throws InterruptedException {

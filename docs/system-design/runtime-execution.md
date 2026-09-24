@@ -58,6 +58,10 @@ operation result/evidence/diagnostic/timing
 
 Only the final or winning primary operation is exposed at top level. Per-attempt evidence remains in `output.attempts[n]`. JDBC connections/transactions, MQ connections/sessions, process handles and load scheduler state are internal ownership objects, not alternate Context roots.
 
+Tool Actions and direct DB query Actions use the same retry-decision semantics: a retry category must be explicitly configured and another attempt must remain. Direct DB query retry is deliberately limited to `ASSERTION` and `TIMEOUT`; generic SQL failures remain terminal. Direct DB updates may use Action `timeoutMs` but cannot opt into automatic retry because mutation outcome can be uncertain after timeout or transport/database failure.
+
+DB Action timeout is passed into the DB executor for each attempt. The JDBC layer applies the shorter effective bound between the Action timeout and the DBHelper statement timeout; the Action runner owns attempt count and inter-attempt sleep, so `retry.intervalMs` is outside the attempt timeout. This keeps timeout mechanics in the resource executor and retry/status/evidence ownership in the Action runner.
+
 ## Run lifecycle and persistence
 
 A normal run validates and plans before reserving `<outputDirectory>/<RunID>/`. Evidence is written under that reserved directory. Completion publishes the run manifest/reports and then updates the latest-completed-run pointer. A colliding Run ID is rejected rather than overwritten.
@@ -80,6 +84,7 @@ Changes to runtime or documentation should preserve these invariants:
 
 - Run/Debug/Load share the canonical Context and reusable component semantics;
 - Tool/DB/MQ converge on one Action result/evidence model;
+- retry policy remains Action-owned while resource executors own their operation-specific timeout/cancellation mechanisms;
 - environment resolution occurs before mode execution;
 - scope isolation/restoration is deterministic;
 - validation precedes external execution for the validated target closure;
