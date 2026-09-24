@@ -46,14 +46,14 @@ jobs:
         run: mvn -B -ntp clean verify
 
       - name: Capture documentation release gate
-        run: python3 tools/verify_documentation.py > docs-gate.log 2>&1 || true
+        run: python3 tools/verify_documentation.py > docs-gate.txt 2>&1 || true
 
       - name: Commit generated manuals and diagnostics
         if: github.ref == 'refs/heads/automation/issue-53-docgen'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/reference.md docs/reference.html docs/reference.zh.md docs/reference.zh.html docs-gate.log
+          git add docs/reference.md docs/reference.html docs/reference.zh.md docs/reference.zh.html docs-gate.txt
           if git diff --cached --quiet; then
             echo 'Generated outputs and diagnostics already current'
           else
