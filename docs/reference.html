@@ -164,7 +164,7 @@
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span { line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -227,9 +227,6 @@
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
-  <!--[if lt IE 9]>
-    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
-  <![endif]-->
 </head>
 <body>
 <header id="title-block-header">
@@ -1774,7 +1771,7 @@ name, and path; iteration identity remains under <code>EXEC.ID</code>
 and <code>EXEC.LOAD.*</code>, and secrets are excluded. Root-level
 <code>LOAD.*</code>, <code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
 and <code>EXEC.INVOCATION</code> are not public load APIs. See <a
-href="../../examples/load/README.md"><code>examples/load/README.md</code></a>
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>
 for complete closed/arrival-rate configurations, CLI overrides, target
 forms, thresholds, evidence, and validation examples.</p>
 <p><code>att load</code> validates the scenario and target before
@@ -2827,9 +2824,9 @@ reliability model.</p>
 <h2 id="09-configuration-reference">09 Configuration Reference</h2>
 <p>This chapter is the authoritative reading reference for
 author-authored configuration. The files below <a
-href="../../schemas/"><code>schemas/</code></a> remain the
-machine-readable contract. Schema validation runs before cross-field and
-filesystem validation.</p>
+href="../schemas/"><code>schemas/</code></a> remain the machine-readable
+contract. Schema validation runs before cross-field and filesystem
+validation.</p>
 <h3 id="configuration-layers-and-precedence">Configuration layers and
 precedence</h3>
 <table>
@@ -2931,7 +2928,7 @@ connection details differ. The MQHelper descriptors both use
 <code>id: payment</code>, while host, queue manager, port, and channel
 differ. A complete descriptor pair, including pool settings and safe
 evidence policy, is in <a
-href="../../examples/environments/README.md"><code>examples/environments/README.md</code></a>.</p>
+href="../examples/environments/README.md"><code>examples/environments/README.md</code></a>.</p>
 <p>The Action definitions remain identical:</p>
 <div class="sourceCode" id="cb53"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
@@ -3030,98 +3027,97 @@ dbhelper schema remains V2.5.</p>
 <td>Debug input</td>
 <td><code>att-debug/v1.0</code></td>
 <td><a
-href="../../schemas/att-debug-v1.0.schema.json">att-debug-v1.0.schema.json</a></td>
+href="../schemas/att-debug-v1.0.schema.json">att-debug-v1.0.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Global configuration</td>
 <td><code>att-config/v2.6</code></td>
 <td><a
-href="../../schemas/att-config-v2.6.schema.json">att-config-v2.6.schema.json</a></td>
+href="../schemas/att-config-v2.6.schema.json">att-config-v2.6.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy global configuration (read compatibility)</td>
 <td><code>att-config/v2.1</code>, <code>att-config/v2.2</code>,
 <code>att-config/v2.5</code></td>
 <td><a
-href="../../schemas/att-config-v2.5.schema.json">att-config-v2.5.schema.json</a></td>
+href="../schemas/att-config-v2.5.schema.json">att-config-v2.5.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Dbhelper instance</td>
 <td><code>att-dbhelper/v2.5</code></td>
 <td><a
-href="../../schemas/att-dbhelper-v2.5.schema.json">att-dbhelper-v2.5.schema.json</a></td>
+href="../schemas/att-dbhelper-v2.5.schema.json">att-dbhelper-v2.5.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>MQ helper instance</td>
 <td><code>att-mqhelper/v1.0</code></td>
 <td><a
-href="../../schemas/att-mqhelper-v1.0.schema.json">att-mqhelper-v1.0.schema.json</a></td>
+href="../schemas/att-mqhelper-v1.0.schema.json">att-mqhelper-v1.0.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Tool group</td>
 <td><code>att-tool-group/v2.6</code></td>
 <td><a
-href="../../schemas/att-tool-group-v2.6.schema.json">att-tool-group-v2.6.schema.json</a></td>
+href="../schemas/att-tool-group-v2.6.schema.json">att-tool-group-v2.6.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy Tool group (read compatibility)</td>
 <td><code>att-tool-group/v2.2</code></td>
 <td><a
-href="../../schemas/att-tool-group-v2.2.schema.json">att-tool-group-v2.2.schema.json</a></td>
+href="../schemas/att-tool-group-v2.2.schema.json">att-tool-group-v2.2.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Workbook sidecar</td>
 <td><code>att-sidecar/v2.2</code></td>
 <td><a
-href="../../schemas/att-sidecar-v2.2.schema.json">att-sidecar-v2.2.schema.json</a></td>
+href="../schemas/att-sidecar-v2.2.schema.json">att-sidecar-v2.2.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy workbook sidecar (without timeout)</td>
 <td><code>att-sidecar/v2.1</code></td>
 <td><a
-href="../../schemas/att-sidecar-v2.1.schema.json">att-sidecar-v2.1.schema.json</a></td>
+href="../schemas/att-sidecar-v2.1.schema.json">att-sidecar-v2.1.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Template descriptor</td>
 <td><code>att-template/v2.6</code></td>
 <td><a
-href="../../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a></td>
+href="../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy template descriptor (read compatibility)</td>
 <td><code>att-template/v2.5</code>, <code>att-template/v2.3</code></td>
 <td><a
-href="../../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
+href="../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Run manifest</td>
 <td><code>att-run/v2.1</code></td>
 <td><a
-href="../../schemas/att-run-v2.1.schema.json">att-run-v2.1.schema.json</a></td>
+href="../schemas/att-run-v2.1.schema.json">att-run-v2.1.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Validation JSON</td>
 <td><code>att-validation/v2.1</code></td>
 <td><a
-href="../../schemas/att-validation-v2.1.schema.json">att-validation-v2.1.schema.json</a></td>
+href="../schemas/att-validation-v2.1.schema.json">att-validation-v2.1.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>CI summary</td>
 <td><code>att-ci-summary/v2.1</code></td>
 <td><a
-href="../../schemas/att-ci-summary-v2.1.schema.json">att-ci-summary-v2.1.schema.json</a></td>
+href="../schemas/att-ci-summary-v2.1.schema.json">att-ci-summary-v2.1.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>JUnit XML</td>
 <td>XSD</td>
-<td><a
-href="../../schemas/att-junit-v2.1.xsd">att-junit-v2.1.xsd</a></td>
+<td><a href="../schemas/att-junit-v2.1.xsd">att-junit-v2.1.xsd</a></td>
 </tr>
 <tr class="even">
 <td>Diagnostic codes</td>
 <td><code>att-diagnostic-catalog/v2.1</code></td>
 <td><a
-href="../../schemas/diagnostic-codes.yaml">diagnostic-codes.yaml</a></td>
+href="../schemas/diagnostic-codes.yaml">diagnostic-codes.yaml</a></td>
 </tr>
 </tbody>
 </table>
