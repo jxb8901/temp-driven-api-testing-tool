@@ -52,6 +52,8 @@ Windows uses the same commands through `att.bat`.
 
 The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DB/MQ, environments, expressions, reliability, configuration, CLI, results, validation and operations.
 
+Direct DB Actions support Action-level `timeoutMs`. Read-only `query` Actions may also use bounded retry for `ASSERTION` and `TIMEOUT`; mutating `update` Actions deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md) and the focused [DB Action timeout/retry note](docs/issue-39-db-action-retry.md).
+
 ## Core package layout
 
 ```text
