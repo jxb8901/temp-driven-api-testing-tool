@@ -49,6 +49,33 @@ class RandomThinkTimeSchedulerTest {
         assertEquals(1.0, result.metrics().doubleValue("p95Ms"), 0.0001);
     }
 
+    @Test
+    void productionTimingConsumesThinkTimeLongerThanSystemSleepQuantum() throws Exception {
+        ThinkTimePolicy policy = ThinkTimePolicy.uniform(Duration.ofMillis(100L), Duration.ofMillis(120L));
+        LoadScenario scenario = new LoadScenario(Paths.get("production-random-think.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, null,
+                Duration.ZERO, Duration.ZERO, Duration.ofMillis(220L), Duration.ZERO,
+                policy, Long.valueOf(24680L), 0, "", Collections.emptyMap(), Collections.emptyMap());
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadIterationRunner runner = request -> new IterationResult(request.iterationId(), ResultStatus.PASS, Duration.ZERO, null,
+                Collections.emptyList(), null, null);
+
+        new ClosedVuScheduler(scenario, runner, "production-random-run", events::add, LoadSchedulerTiming.system()).run();
+
+        List<LoadEvent> starts = new ArrayList<LoadEvent>();
+        List<LoadEvent> completions = new ArrayList<LoadEvent>();
+        for (LoadEvent event : events) {
+            if (event.started()) starts.add(event);
+            if (event.completed()) completions.add(event);
+        }
+        assertTrue(completions.size() <= 3,
+                "100ms minimum think time in a 220ms run should not permit more than three completed iterations; got " + completions.size());
+        assertTrue(starts.size() >= 2, "production timing regression requires at least two iterations");
+        long firstGap = starts.get(1).startedAtEpochMs() - completions.get(0).completedAtEpochMs();
+        assertTrue(firstGap >= 90L,
+                "production scheduler must consume the sampled >=100ms think time rather than the 50ms sleep quantum; gap=" + firstGap);
+    }
+
     private static final class FakeTiming {
         private final AtomicLong now = new AtomicLong();
         private final List<Long> sleeps = Collections.synchronizedList(new ArrayList<Long>());
