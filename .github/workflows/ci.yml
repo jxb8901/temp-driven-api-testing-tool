@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - load
+      - automation/issue-53-docgen-v2
   pull_request:
     branches:
       - master
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,11 +39,27 @@ jobs:
       - name: Install Pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
 
+      - name: Generate Reference manuals
+        run: python3 tools/build_reference_manual.py
+
       - name: Verify
         run: mvn -B -ntp clean verify
 
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
+
+      - name: Commit generated Reference manuals
+        if: github.ref == 'refs/heads/automation/issue-53-docgen-v2'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/reference.md docs/reference.html docs/reference.zh.md docs/reference.zh.html
+          if git diff --cached --quiet; then
+            echo 'Reference manuals already current'
+          else
+            git commit -m 'Regenerate Reference manuals for issue 53'
+            git push origin HEAD:automation/issue-53-docgen-v2
+          fi
 
       - name: Upload test reports on failure
         if: failure()
