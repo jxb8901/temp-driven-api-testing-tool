@@ -261,7 +261,7 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 | 不經 Excel 單獨測試 Template/Flow/Tool | [Standalone Debug](reference.zh/04_execution_modes/debug.md) |
 | 做 load test | [Load](reference.zh/04_execution_modes/load.md) |
 | 調用 script/program 或 framework-native Tool | [Tool](reference.zh/05_resources/tools.md) |
-| 查詢／更新資料庫 | [DBHelper](reference.zh/05_resources/dbhelper.md) |
+| 查詢／更新資料庫，包括 query timeout/retry | [DBHelper](reference.zh/05_resources/dbhelper.md) |
 | 發送／接收／request MQ message | [MQHelper](reference.zh/05_resources/mqhelper.md) |
 | 在 SIT/UAT 間切換 resource binding | [Environment and Test Data](reference.zh/06_environment_testdata.md) |
 | 正確使用 `${...}` / `#{...}` | [Expressions](reference.zh/07_expressions.md) |
@@ -269,5 +269,7 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 | 查 CLI command / option | [CLI Reference](reference.zh/10_cli.md) |
 | 排查 `FAIL`、`ERROR`、`INVALID` | [Validation and Diagnostics](reference.zh/12_validation_diagnostics.md) |
 | 接入 CI 或打包部署 | [CI, Packaging, and Operations](reference.zh/13_ci_packaging_operations.md) |
+
+Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/05_resources/dbhelper.md)。
 
 需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.5.1 中文 Reference Manual](generated/reference.zh.html)。
