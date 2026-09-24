@@ -1,0 +1,28 @@
+schemaVersion: att-template/v3.0
+name: QUICK_START
+description: Offline beginner example used by the English and Chinese Quick Start guides.
+
+actions:
+  captureAmount:
+    type: assign
+    description: Copy one workbook value into EXEC.VARS.
+    name: quickStartAmount
+    expression: "${EXEC.INPUT.amount}"
+
+  showInput:
+    type: log
+    description: Write a human-readable line to the Case log.
+    message: "Quick Start case ${META.SOURCE.caseId}: amount=${EXEC.VARS.quickStartAmount}"
+
+  readDate:
+    type: tool
+    description: Optional local sample Tool; no DB, MQ or network dependency.
+    call: "#{sample.getAcDate()}"
+    runWhen: "#{${EXEC.INPUT.useTool} == true}"
+
+  verifyAmount:
+    type: assert
+    description: Verify the value copied from EXEC.INPUT.
+    assert: "#{${EXEC.VARS.quickStartAmount} == ${EXEC.INPUT.expected}}"
+    expected: "${EXEC.INPUT.expected}"
+    actual: "${EXEC.VARS.quickStartAmount}"
