@@ -22,20 +22,34 @@ public final class LoadScenario {
     private final int users, maxConcurrent;
     private final double arrivalRatePerSecond;
     private final String arrivalRate;
-    private final Duration warmup, rampUp, duration, rampDown, thinkTime;
+    private final Duration warmup, rampUp, duration, rampDown;
+    private final ThinkTimePolicy thinkTimePolicy;
+    private final Long seed;
     private final String overloadPolicy;
 
+    /** Compatibility constructor for the original fixed-duration think-time model. */
     LoadScenario(Path source, String targetType, String targetId, Map<String, Object> targetArguments,
                  Map<String, Object> inputs, Model model, int users, double arrivalRatePerSecond,
                  String arrivalRate, Duration warmup, Duration rampUp, Duration duration, Duration rampDown,
                  Duration thinkTime, int maxConcurrent, String overloadPolicy,
                  Map<String, Object> thresholds, Map<String, Object> evidence) {
+        this(source, targetType, targetId, targetArguments, inputs, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, ThinkTimePolicy.fixed(thinkTime), null,
+                maxConcurrent, overloadPolicy, thresholds, evidence);
+    }
+
+    LoadScenario(Path source, String targetType, String targetId, Map<String, Object> targetArguments,
+                 Map<String, Object> inputs, Model model, int users, double arrivalRatePerSecond,
+                 String arrivalRate, Duration warmup, Duration rampUp, Duration duration, Duration rampDown,
+                 ThinkTimePolicy thinkTimePolicy, Long seed, int maxConcurrent, String overloadPolicy,
+                 Map<String, Object> thresholds, Map<String, Object> evidence) {
         this.source = source; this.targetType = targetType; this.targetId = targetId;
         this.targetArguments = immutable(targetArguments); this.inputs = immutable(inputs);
         this.model = model; this.users = users; this.arrivalRatePerSecond = arrivalRatePerSecond;
         this.arrivalRate = arrivalRate; this.warmup = warmup; this.rampUp = rampUp; this.duration = duration;
-        this.rampDown = rampDown; this.thinkTime = thinkTime; this.maxConcurrent = maxConcurrent;
-        this.overloadPolicy = overloadPolicy; this.thresholds = immutable(thresholds); this.evidence = immutable(evidence);
+        this.rampDown = rampDown; this.thinkTimePolicy = thinkTimePolicy == null ? ThinkTimePolicy.fixed(Duration.ZERO) : thinkTimePolicy;
+        this.seed = seed; this.maxConcurrent = maxConcurrent; this.overloadPolicy = overloadPolicy;
+        this.thresholds = immutable(thresholds); this.evidence = immutable(evidence);
     }
 
     public Path source() { return source; }
@@ -51,7 +65,10 @@ public final class LoadScenario {
     public Duration rampUp() { return rampUp; }
     public Duration duration() { return duration; }
     public Duration rampDown() { return rampDown; }
-    public Duration thinkTime() { return thinkTime; }
+    /** Compatibility accessor: for a range it returns the normalized minimum. */
+    public Duration thinkTime() { return thinkTimePolicy.min(); }
+    public ThinkTimePolicy thinkTimePolicy() { return thinkTimePolicy; }
+    public Long seed() { return seed; }
     public int maxConcurrent() { return maxConcurrent; }
     public String overloadPolicy() { return overloadPolicy; }
     public Map<String, Object> thresholds() { return thresholds; }
@@ -66,12 +83,17 @@ public final class LoadScenario {
         Map<String, Object> result = toMap(false);
         @SuppressWarnings("unchecked") Map<String, Object> load = (Map<String, Object>) result.get("load");
         load.put("model", model.wireName());
+        if (model == Model.CLOSED) {
+            @SuppressWarnings("unchecked") Map<String, Object> execution = (Map<String, Object>) result.get("execution");
+            execution.put("thinkTimePolicy", thinkTimePolicy.summary());
+        }
         return result;
     }
 
     private Map<String, Object> toMap(boolean includeExecutionData) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", att.Version.LOAD_SCHEMA);
+        if (seed != null) result.put("seed", seed);
         Map<String, Object> target = new LinkedHashMap<String, Object>();
         target.put("type", targetType); target.put("id", targetId);
         if (includeExecutionData && !targetArguments.isEmpty()) target.put("arguments", targetArguments);
@@ -85,7 +107,7 @@ public final class LoadScenario {
         result.put("load", load);
         if (model == Model.CLOSED) {
             Map<String, Object> execution = new LinkedHashMap<String, Object>();
-            execution.put("thinkTime", format(thinkTime));
+            execution.put("thinkTime", thinkTimePolicy.toConfigValue());
             result.put("execution", execution);
         }
         if (!thresholds.isEmpty()) result.put("thresholds", thresholds);
@@ -95,11 +117,7 @@ public final class LoadScenario {
 
     private static String format(Duration value) {
         long millis = value.toMillis();
-        if (millis == 0L) return "0ms";
-        if (millis % 3600000L == 0) return (millis / 3600000L) + "h";
-        if (millis % 60000L == 0) return (millis / 60000L) + "m";
-        if (millis % 1000L == 0) return (millis / 1000L) + "s";
-        return millis + "ms";
+        return ThinkTimePolicy.format(millis);
     }
 
     private static Map<String, Object> immutable(Map<String, Object> source) {

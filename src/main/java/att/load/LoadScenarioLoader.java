@@ -7,6 +7,7 @@ import att.validation.DiagnosticCodes;
 import att.validation.DiagnosticException;
 import att.validation.JsonSchemaVerifier;
 
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -69,6 +70,7 @@ public final class LoadScenarioLoader {
         Map<String, Object> execution = mapOptional(root.get("execution"), "execution");
         Map<String, Object> thresholds = mapOptional(root.get("thresholds"), "thresholds");
         Map<String, Object> evidence = mapOptional(root.get("evidence"), "evidence");
+        Long seed = longInteger(root.get("seed"), "seed");
         if (("template".equals(type) || "flow".equals(type)) && !arguments.isEmpty())
             throw failure("target.arguments", "target.arguments is supported only for Tool targets in V1");
 
@@ -92,10 +94,27 @@ public final class LoadScenarioLoader {
         Duration rampUp = duration(load.get("rampUp"), "load.rampUp", false);
         Duration duration = duration(load.get("duration"), "load.duration", true);
         Duration rampDown = duration(load.get("rampDown"), "load.rampDown", false);
-        Duration thinkTime = duration(execution.get("thinkTime"), "execution.thinkTime", false);
+        ThinkTimePolicy thinkTime = thinkTime(execution.get("thinkTime"));
         validateThresholds(model, thresholds);
         return new LoadScenario(source, type, id, arguments, inputs, model, users, rate, rateText,
-                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, evidence);
+                warmup, rampUp, duration, rampDown, thinkTime, seed, maxConcurrent, overload, thresholds, evidence);
+    }
+
+    private ThinkTimePolicy thinkTime(Object value) {
+        if (value == null) return ThinkTimePolicy.fixed(Duration.ZERO);
+        if (value instanceof String) return ThinkTimePolicy.fixed(duration(value, "execution.thinkTime", false));
+        if (!(value instanceof Map)) throw failure("execution.thinkTime", "execution.thinkTime must be a duration or a {min, max} map");
+        Map<String, Object> range = map(value, "execution.thinkTime");
+        for (String key : range.keySet()) {
+            if (!"min".equals(key) && !"max".equals(key))
+                throw failure("execution.thinkTime." + key, "execution.thinkTime supports only min and max");
+        }
+        if (!range.containsKey("min")) throw failure("execution.thinkTime.min", "execution.thinkTime range requires min");
+        if (!range.containsKey("max")) throw failure("execution.thinkTime.max", "execution.thinkTime range requires max");
+        Duration min = duration(range.get("min"), "execution.thinkTime.min", false);
+        Duration max = duration(range.get("max"), "execution.thinkTime.max", false);
+        if (max.compareTo(min) < 0) throw failure("execution.thinkTime.max", "execution.thinkTime.max must be greater than or equal to execution.thinkTime.min");
+        return ThinkTimePolicy.uniform(min, max);
     }
 
     private void applyOverrides(Map<String, Object> root, LoadOverrides overrides) {
@@ -171,6 +190,14 @@ public final class LoadScenarioLoader {
         if (result < minimum || result > Integer.MAX_VALUE)
             throw failure(field, field + " must be between " + minimum + " and " + Integer.MAX_VALUE);
         return (int) result;
+    }
+
+    private static Long longInteger(Object value, String field) {
+        if (value == null) return null;
+        if (!(value instanceof Number) || value instanceof Float || value instanceof Double)
+            throw failure(field, field + " must be a 64-bit integer");
+        try { return Long.valueOf(new BigDecimal(String.valueOf(value)).longValueExact()); }
+        catch (ArithmeticException | NumberFormatException e) { throw failure(field, field + " must be a 64-bit integer"); }
     }
 
     private static String string(Object value, String field) {
