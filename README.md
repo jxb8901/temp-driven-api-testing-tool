@@ -20,13 +20,15 @@ All modes use canonical `EXEC` / `META` Context roots and Action-local `output`.
 
 ## Start here
 
+New to ATT? Follow the [English Quick Start](docs/quick-start.md) or [中文快速入門](docs/quick-start.zh.md). Both guides use the same checked-in offline example and walk through snapshot, validation, execution, logs, assertions, and one local Tool call.
+
 ```sh
-./att.sh snapshot
+./att.sh snapshot --suite testcase/quick_start.xlsx
 ./att.sh validate --package
-./att.sh run --all
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 ```
 
-Useful peer-mode commands:
+Useful peer-mode commands after the basic Run workflow is familiar:
 
 ```sh
 ./att.sh debug template PAYMENT_INVOKE
@@ -38,8 +40,10 @@ Windows uses the same commands through `att.bat`.
 
 ## Documentation
 
-- Guided tutorial: [`docs/quick-start.md`](docs/quick-start.md)
+- English guided tutorial: [`docs/quick-start.md`](docs/quick-start.md)
+- 中文快速入門: [`docs/quick-start.zh.md`](docs/quick-start.zh.md)
 - Complete generated Reference Manual: [`docs/generated/reference.html`](docs/generated/reference.html)
+- 中文 Reference Manual: [`docs/generated/reference.zh.html`](docs/generated/reference.zh.html)
 - English Reference sources: [`docs/reference/`](docs/reference/)
 - Chinese Reference sources: [`docs/reference.zh/`](docs/reference.zh/)
 - Maintainer design: [`docs/system-design/`](docs/system-design/)
