@@ -8,6 +8,7 @@ import att.config.ToolConfig;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
 import att.core.ResultStatus;
+import att.core.StageCaseData;
 import att.core.TestCase;
 import att.core.ValidationResult;
 import att.template.StageTemplate;
@@ -46,7 +47,7 @@ class DirectDbActionRetryRuntimeTest {
         ScriptedProvider provider = new ScriptedProvider(Behavior.EMPTY_THEN_ROW);
         RunResult run = run(provider, queryAction("poll", 3, 20, "ASSERTION", null));
 
-        assertEquals(ResultStatus.PASS, run.result.status());
+        assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
         assertEquals(2, provider.executions);
         List<?> attempts = (List<?>) run.context.resolve("EXEC.ACTIONS.poll.output.attempts");
         assertEquals(2, attempts.size());
@@ -62,7 +63,7 @@ class DirectDbActionRetryRuntimeTest {
         ScriptedProvider provider = new ScriptedProvider(Behavior.TIMEOUT_THEN_ROW);
         RunResult run = run(provider, queryAction("poll", 2, 0, "TIMEOUT", 1500L));
 
-        assertEquals(ResultStatus.PASS, run.result.status());
+        assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
         assertEquals(2, provider.executions);
         assertEquals(Arrays.asList(2, 2), provider.queryTimeoutSeconds);
         List<?> attempts = (List<?>) run.context.resolve("EXEC.ACTIONS.poll.output.attempts");
@@ -76,7 +77,7 @@ class DirectDbActionRetryRuntimeTest {
         ScriptedProvider provider = new ScriptedProvider(Behavior.ALWAYS_EMPTY);
         RunResult run = run(provider, queryAction("poll", 2, 0, "ASSERTION", null));
 
-        assertEquals(ResultStatus.FAIL, run.result.status());
+        assertEquals(ResultStatus.FAIL, run.result.status(), run.result.message());
         assertEquals(2, provider.executions);
         assertEquals(2, run.context.resolve("EXEC.ACTIONS.poll.output.finalAttempt"));
         assertEquals(0, run.context.resolve("EXEC.ACTIONS.poll.output.result.rowCount"));
@@ -103,7 +104,7 @@ class DirectDbActionRetryRuntimeTest {
                 "timeoutMs", 400);
         RunResult run = run(provider, new TemplateAction("write", values, "att-template/v3.0"));
 
-        assertEquals(ResultStatus.PASS, run.result.status());
+        assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
         assertEquals(Collections.singletonList(1), provider.queryTimeoutSeconds);
         assertFalse(run.context.contains("EXEC.ACTIONS.write.output.attempts"));
         assertEquals(1, run.context.resolve("EXEC.ACTIONS.write.output.result.affectedRows"));
@@ -132,6 +133,8 @@ class DirectDbActionRetryRuntimeTest {
         TestCase testCase = new TestCase(2, "default", "Sheet1", "TC1", Collections.<String>emptyList(),
                 Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, tempDir, "run-1", tempDir, tempDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("main", "DB_RETRY", Collections.<String, Object>emptyMap()),
+                "DB_RETRY", tempDir);
         StageTemplate template = new StageTemplate("DB_RETRY", tempDir, Collections.singletonList(action), "att-template/v3.0");
         executor.beginCase();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
