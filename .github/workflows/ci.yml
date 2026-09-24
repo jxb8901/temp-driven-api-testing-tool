@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - load
+      - docs/fix-46-47-layout
   pull_request:
     branches:
       - master
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -21,7 +22,7 @@ concurrency:
 jobs:
   build-test:
     name: Java 8 / Maven verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -37,6 +38,21 @@ jobs:
 
       - name: Install Pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Regenerate Reference outputs on documentation migration branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/docs/fix-46-47-layout'
+        run: python3 tools/build_reference_manual.py
+
+      - name: Commit regenerated Reference outputs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/docs/fix-46-47-layout'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reference.md docs/reference.html docs/reference.zh.md docs/reference.zh.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Regenerate Reference manuals after docs layout migration"
+            git push origin HEAD:docs/fix-46-47-layout
+          fi
 
       - name: Verify
         run: mvn -B -ntp clean verify
