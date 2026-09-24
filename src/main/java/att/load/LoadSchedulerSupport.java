@@ -7,12 +7,14 @@ import java.util.function.Consumer;
 import att.core.ResultStatus;
 
 final class LoadSchedulerSupport {
+    static final long MAX_SLEEP_SLICE_MS = 50L;
+
     private LoadSchedulerSupport() {}
     static String runId(String requested) {
         return att.core.IdentifierValidator.runId(requested == null || requested.trim().isEmpty() ? "load-" + System.currentTimeMillis() : requested);
     }
     static void emit(LoadMetrics metrics, Consumer<LoadEvent> listener, LoadEvent event) { metrics.onEvent(event); if (listener != null) listener.accept(event); }
-    static void sleep(long millis) throws InterruptedException { if (millis > 0L) Thread.sleep(Math.min(50L, millis)); else Thread.yield(); }
+    static void sleep(long millis) throws InterruptedException { if (millis > 0L) Thread.sleep(Math.min(MAX_SLEEP_SLICE_MS, millis)); else Thread.yield(); }
     static long now() { return System.currentTimeMillis(); }
     static Instant instant(long epochMs) { return Instant.ofEpochMilli(epochMs); }
     static long next(AtomicLong sequence) { return sequence.incrementAndGet(); }
