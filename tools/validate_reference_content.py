@@ -38,7 +38,8 @@ def main():
         fail(errors, "missing docs/reference-manifest.txt")
         items = []
     else:
-        items = [x.strip() for x in MANIFEST.read_text(encoding="utf-8").splitlines() if x.strip() and not x.lstrip().startswith("#")]
+        items = [x.strip() for x in MANIFEST.read_text(encoding="utf-8").splitlines()
+                 if x.strip() and not x.lstrip().startswith("#")]
 
     if "05_resources/operation_result.md" not in items:
         fail(errors, "manifest must include 05_resources/operation_result.md")
@@ -52,24 +53,26 @@ def main():
             text = path.read_text(encoding="utf-8")
             for phrase in FORBIDDEN:
                 if phrase in text:
-                    fail(errors, "%s still contains transitional #41 text: %s" % (path.relative_to(ROOT), phrase))
+                    fail(errors, "%s still contains transitional #41 text: %s" %
+                         (path.relative_to(ROOT), phrase))
             if re.search(r"(?m)^### (0[1-9]|10)\s+", text):
-                fail(errors, "%s still exposes a legacy top-level 09 chapter wrapper" % path.relative_to(ROOT))
+                fail(errors, "%s still exposes a legacy top-level 09 chapter wrapper" %
+                     path.relative_to(ROOT))
 
     for rel, tokens in REQUIRED.items():
         for lang_root in (DOCS / "reference", DOCS / "reference.zh"):
             path = lang_root / rel
             if not path.is_file():
                 continue
-            text = path.read_text(encoding="utf-8")
-            folded = text.casefold()
+            folded = path.read_text(encoding="utf-8").casefold()
             for token in tokens:
                 if token.casefold() not in folded:
-                    fail(errors, "%s missing required semantic coverage token: %s" % (path.relative_to(ROOT), token))
+                    fail(errors, "%s missing required semantic coverage token: %s" %
+                         (path.relative_to(ROOT), token))
 
-    migration = DOCS / "reference-migration-map.md"
+    migration = DOCS / "history" / "reference-migration-map.md"
     if not migration.is_file():
-        fail(errors, "missing docs/reference-migration-map.md")
+        fail(errors, "missing archived docs/history/reference-migration-map.md")
     else:
         text = migration.read_text(encoding="utf-8")
         for chapter in range(1, 11):
@@ -101,9 +104,17 @@ def main():
                 fail(errors, "system-design/runtime-execution.md still contains stale architecture text: %s" % stale)
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8") if (ROOT / "README.md").is_file() else ""
-    for link in ("docs/quick-start.md", "docs/generated/reference.html", "docs/system-design/"):
+    for link in ("docs/README.md", "docs/quick-start.md", "docs/reference.html", "docs/system-design/"):
         if link not in readme:
             fail(errors, "README missing current documentation entry point: %s" % link)
+
+    for output in (DOCS / "reference.md", DOCS / "reference.html",
+                   DOCS / "reference.zh.md", DOCS / "reference.zh.html"):
+        if not output.is_file():
+            fail(errors, "missing generated Reference output: %s" % output.relative_to(ROOT))
+
+    if (DOCS / "generated").exists():
+        fail(errors, "docs/generated must not be used for current generated manuals; outputs belong directly under docs/")
 
     # Reference must no longer contain the old tutorial/cookbook or maintainer chapter.
     for lang_root in (DOCS / "reference", DOCS / "reference.zh"):
@@ -112,11 +123,14 @@ def main():
             text = authoring.read_text(encoding="utf-8")
             for old in ("### 02 Quick Start", "### 04 Cookbook", "#### 3.3 Tool", "#### 3.4 Running Tests", "#### 3.5 Reports"):
                 if old in text:
-                    fail(errors, "%s still contains migrated material: %s" % (authoring.relative_to(ROOT), old))
+                    fail(errors, "%s still contains migrated material: %s" %
+                         (authoring.relative_to(ROOT), old))
             if re.search(r"(?m)^#{3,5}\s+3\.[12]\b", text):
-                fail(errors, "%s still uses legacy User Guide section numbering" % authoring.relative_to(ROOT))
+                fail(errors, "%s still uses legacy User Guide section numbering" %
+                     authoring.relative_to(ROOT))
             if not re.search(r"(?m)^###\s+2\.1\s+", text) or not re.search(r"(?m)^###\s+2\.2\s+", text):
-                fail(errors, "%s must expose current 2.1 Workbook and 2.2 Template peer sections" % authoring.relative_to(ROOT))
+                fail(errors, "%s must expose current 2.1 Workbook and 2.2 Template peer sections" %
+                     authoring.relative_to(ROOT))
 
     en_ops = DOCS / "reference" / "13_ci_packaging_operations.md"
     if en_ops.is_file() and "Architecture for Maintainers" in en_ops.read_text(encoding="utf-8"):

@@ -1,6 +1,6 @@
 # ATT V3.5.1 快速入門
 
-[English Quick Start](quick-start.md) · [Reference Manual](generated/reference.zh.html)
+[English Quick Start](quick-start.md) · [Reference Manual](reference.zh.html)
 
 本指南的目標很單純：從乾淨的 repository checkout 開始，用最小但完整的例子跑通第一次 ATT 測試。內容刻意先教正常的 Run 流程；Debug、Load、DB/MQ、environment、retry 及完整 Context 模型都放到最後的「下一步」。
 
@@ -272,4 +272,4 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 
 Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/05_resources/dbhelper.md)。
 
-需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.5.1 中文 Reference Manual](generated/reference.zh.html)。
+需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.5.1 中文 Reference Manual](reference.zh.html)。

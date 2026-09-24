@@ -1,6 +1,6 @@
 # ATT V3.5.1 Quick Start
 
-[中文快速入门](quick-start.zh.md) · [Reference Manual](generated/reference.html)
+[中文快速入门](quick-start.zh.md) · [Reference Manual](reference.html)
 
 This guide gets you from a clean checkout to a successful ATT run with the smallest useful example. It deliberately teaches the normal Run workflow first. Debug, Load, DB/MQ, environments, retry, and the full Context model come later as next steps.
 
@@ -272,4 +272,4 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 
 For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/05_resources/dbhelper.md) for the full contract.
 
-For field-by-field supported behavior, use the generated [ATT V3.5.1 Reference Manual](generated/reference.html) rather than extending this tutorial into a second manual.
+For field-by-field supported behavior, use the generated [ATT V3.5.1 Reference Manual](reference.html) rather than extending this tutorial into a second manual.

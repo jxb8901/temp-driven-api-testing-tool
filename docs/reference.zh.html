@@ -164,7 +164,7 @@
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span { line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -227,9 +227,6 @@
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
-  <!--[if lt IE 9]>
-    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
-  <![endif]-->
 </head>
 <body>
 <header id="title-block-header">
@@ -1513,7 +1510,7 @@ type、名称和 path；iteration identity 保留在 <code>EXEC.ID</code> 与
 <code>EXEC.INVOCATION</code> 不是公开的 load API。完整的
 closed／arrival-rate 配置、CLI override、target
 形式、threshold、evidence 和 validation 例子见 <a
-href="../../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
 <p><code>att load</code> 会在 scheduler 启动前完成 scenario 和 target
 validation，再选择两个 scheduler 之一。closed mode 为 Virtual User
 保持稳定 identity，等待 target 完成后才进入 think time 和下一次
@@ -1535,7 +1532,7 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb27-1"><a href="#
 <span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--format</span> json</span>
 <span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/tool.yaml <span class="at">--duration</span> 100ms <span class="at">--run-id</span> load-tool-example</span></code></pre></div>
 <p><a
-href="../../examples/load/README.md"><code>examples/load/README.md</code></a>
+href="../examples/load/README.md"><code>examples/load/README.md</code></a>
 是维护中的可复制参考，涵盖 Template、Flow、Tool、DB/MQ pool
 sizing、threshold、evidence、CLI override
 和非法配置。<code>LoadAcceptanceTest</code> 会先校验全部六个例子的
@@ -2168,7 +2165,7 @@ timeout/retry（#39）應延伸本章既有概念，而不是再建立一套 rel
 model。</p>
 <h2 id="09-配置參考">09 配置參考</h2>
 <p>本章是作者编写配置时的权威阅读参考。下面提到的 <a
-href="../../schemas/"><code>schemas/</code></a>
+href="../schemas/"><code>schemas/</code></a>
 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。</p>
 <h3 id="配置层与优先级">配置层与优先级</h3>
 <table>
@@ -2266,7 +2263,7 @@ URL 等 physical connection details；MQHelper 都保持
 <code>id: payment</code>，只改变 host、queue manager、port 和
 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见
 <a
-href="../../examples/environments/README.md"><code>examples/environments/README.md</code></a>。</p>
+href="../examples/environments/README.md"><code>examples/environments/README.md</code></a>。</p>
 <p>两种环境使用完全相同的 Action 定义：</p>
 <div class="sourceCode" id="cb39"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
@@ -2343,7 +2340,7 @@ testcase/template root、report policy 或 package structure
 <code>--config config/config.yaml --env &lt;NAME&gt;</code>。</p>
 <h3 id="schema-catalog">Schema catalog</h3>
 <p><a
-href="../../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
+href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
 使用 <code>att-schema-catalog/v3.0</code>。当前主配置、Tool
 group、sidecar、Template 与 Flow 分别为
 <code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v3.0</code>

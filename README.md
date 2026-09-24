@@ -43,17 +43,17 @@ Windows uses the same commands through `att.bat`.
 - Canonical documentation index: [`docs/README.md`](docs/README.md)
 - English guided tutorial: [`docs/quick-start.md`](docs/quick-start.md)
 - 中文快速入門: [`docs/quick-start.zh.md`](docs/quick-start.zh.md)
-- Complete generated Reference Manual: [`docs/generated/reference.html`](docs/generated/reference.html)
-- 中文 Reference Manual: [`docs/generated/reference.zh.html`](docs/generated/reference.zh.html)
+- Complete generated Reference Manual: [`docs/reference.html`](docs/reference.html)
+- 中文 Reference Manual: [`docs/reference.zh.html`](docs/reference.zh.html)
 - English Reference sources: [`docs/reference/`](docs/reference/)
 - Chinese Reference sources: [`docs/reference.zh/`](docs/reference.zh/)
 - Maintainer design: [`docs/system-design/`](docs/system-design/)
-- Documentation architecture: [`docs/documentation-architecture.md`](docs/documentation-architecture.md)
+- Historical and superseded documentation: [`docs/history/`](docs/history/)
 - Release chronology: [`CHANGELOG.md`](CHANGELOG.md)
 
-The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DB/MQ, environments, expressions, reliability, configuration, CLI, results, validation and operations.
+The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
 
-Direct DB Actions support Action-level `timeoutMs`. Read-only `query` Actions may also use bounded retry for `ASSERTION` and `TIMEOUT`; mutating `update` Actions deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md) and the focused [DB Action timeout/retry note](docs/issue-39-db-action-retry.md).
+Direct DB Actions support Action-level `timeoutMs`. Read-only `query` Actions may also use bounded retry for `ASSERTION` and `TIMEOUT`; mutating `update` Actions deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md).
 
 ## Core package layout
 
