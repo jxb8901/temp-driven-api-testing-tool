@@ -11,6 +11,8 @@
 - Implemented Issue #43 as a documentation release gate covering ATT version consistency, EN/ZH module and numbered-heading parity, generated Reference freshness, local links/anchors, schema references, CLI command/option coverage, secret-safe examples, and canonical documentation ownership.
 - Added `DocumentationExamplesTest` to regression-test the checked-in SIT/UAT profiles and DB/MQ/Tool resources through the real CLI, plus dry-run, standalone debug, closed-VU load, and arrival-rate load examples under Java 8 CI.
 - Fixed documentation drift exposed by the new gate, including generated Reference schema/example links, a stale Quick Start anchor, incomplete CLI load/compatibility option coverage, and the current schema-catalog identity.
+- Implemented Issue #39 direct DB Action execution controls: `query` and `update` accept Action-level `timeoutMs`; read-only `query` Actions may use bounded `ASSERTION`/`TIMEOUT` retry with per-attempt evidence and final/winning-result publication; mutating `update` Actions explicitly reject automatic retry because the mutation outcome may be uncertain after timeout or database/transport failure.
+- Reused the existing Action attempt lifecycle and DBHelper timeout machinery, including the shorter effective Action/statement timeout, fresh timeout per attempt, retry interval outside the attempt timeout, terminal ordinary SQL errors, and Java 8 regression coverage for assertion retry, timeout retry, exhaustion, update timeout, and retry-safety validation.
 
 ## 3.5.0 - 2026-09-22
 
