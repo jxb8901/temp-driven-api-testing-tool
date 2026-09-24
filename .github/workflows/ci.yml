@@ -41,11 +41,8 @@ jobs:
       - name: Verify
         run: mvn -B -ntp clean verify
 
-      - name: Verify Reference Manual generation
-        run: python3 tools/build_reference_manual.py --check
-
-      - name: Verify Reference Manual semantic coverage
-        run: python3 tools/validate_reference_content.py
+      - name: Verify documentation release gate
+        run: python3 tools/verify_documentation.py
 
       - name: Upload test reports on failure
         if: failure()
