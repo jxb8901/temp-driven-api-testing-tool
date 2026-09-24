@@ -1,1254 +1,273 @@
-# ATT V3.5.1 新手入門
+# ATT V3.5.1 Quick Start
 
-本指南用一套中文 Excel 案例帶你完成 ATT V3.5.1 的 Flow、expression、command/call-backed 工具、Java JDBC dbhelper、IBM MQ helper、模板、嚴格驗證、執行、報告、CI 輸出、文件及打包流程；亦包括 standalone debug、load、environment profiles 和統一的 EXEC／META Context。關鍵原則是：先讓整個套件通過驗證，再執行；每個輸出目錄、結果狀態和證據檔都有清楚、可追溯的含義。
+[中文快速入门](quick-start.zh.md) · [Reference Manual](generated/reference.html)
 
-本指南面向案例作者。完整欄位契約、診斷 JSON、輸出資料結構及限制見 [ATT V3.5.1 Reference Manual](09_Reference_Manual_V3.md)。
+This guide gets you from a clean checkout to a successful ATT run with the smallest useful example. It deliberately teaches the normal Run workflow first. Debug, Load, DB/MQ, environments, retry, and the full Context model come later as next steps.
 
-## 1. 核心關係
+The checked-in Quick Start example is intentionally offline: the first case uses only `assign`, `log`, and `assert`. The second case adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
 
-```text
-test case --1:n stage--> template --1:n action--> tool
-                                      └── flow --1:n action
-```
+## 1. What you will run
 
-Test case、template、flow、tool 是核心概念。Stage 選擇完整情境 Template；Flow 是在同一 Template Context 中執行的可重用 Action 組。
-
-### V3.5.1 Tool 選擇與共同 Action 結果
-
-新增 framework-native 或可重用能力時，先使用 call-backed Tool：它在 ATT typed runtime 中執行，保留 String、Number、Boolean、null、List、Context value 及 nested call 的原生型別。
-
-```yaml
-# preferred: typed call-backed Tool
-lookupOrder:
-  type: tool
-  call: "#{orders.find(customerId=${EXEC.INPUT.customerId}, status='OPEN')}"
-  assert: "${output.result.rowCount} > 0"
-```
-
-只有在能力天然需要外部 executable、script、CLI、SSH 或第三方 process 時，才使用 command-backed Tool。它仍是完整支援的 extension mechanism，並沒有 deprecated；`command` 的每一項保持 deterministic argv，`argName`／`argNameMode` 也只適用於這一類。
-
-```yaml
-# supported: external-process Tool
-invokePayment:
-  type: tool
-  call: >-
-    #{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile},
-                       environment=${EXEC.INPUT.environment})}
-```
-
-兩者的 observable result 使用同一個 Action lifecycle：Action 執行時讀 `${output.result}`，完成後讀 `${EXEC.ACTIONS.<id>.output.result}`；Tool／DB／MQ／collector 的安全證據則在 `${output.evidence}` 及發布後的 `EXEC.ACTIONS` 下保存。
+ATT's normal authoring path is:
 
 ```text
-output.evidence.tool.invocations[0] # final command/call/built-in Tool metadata
-output.evidence.db.invocations[0]   # final SQL, parameter, row/update and timing metadata
-output.evidence.mq.invocations[0]   # final queue, MsgId/CorrelId, reason and timing metadata
-output.attempts[n].evidence # post-invoke collector evidence
+Excel Testcase
+   -> Stage
+      -> Template
+         -> ordered Actions
 ```
 
-call-backed 與 command-backed 的低層參數契約刻意不同，但在 `result`／`evidence`／`diagnostic`／`attempts` 的 Action envelope 匯合。JDBC connection、transaction、MQ connection/queue、process handle 和 cache lease 都是 internal resource state；不會建立 `EXEC.DB`、`EXEC.MQ` 或其他 helper-specific canonical root。DB transaction finalization 的舊 `${CASE.DB.<instance>}` 只表示 Case 收尾狀態，不是 DB operation result。
-
-## 1.1 不經 Excel 的 standalone debug
-
-需要快速檢查一個 Template、Flow 或 Tool 時，可直接執行其正常 runtime：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE
-./att.sh debug flow common.compose.v1
-./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml
-```
-
-未指定 `--input` 時，ATT 依次使用 Template 或 Flow 目錄下的 `debug.yaml`；Tool group 則使用 `config/tools/<group>.debug.yaml`。輸入檔的根節點必須包含：
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  RefNo: REF001
-  Amount: 1000
-stage:
-  key: DEBUG
-  values:
-    SrcRefNo: SRC001
-inputs:
-  SrcRefNo: SRC001
-arguments:
-  requestId: REF001
-tools:
-  invokeApi:
-    arguments:
-      requestFile: /tmp/request.xml
-```
-
-Template 使用 `case` 和 `stage`；Flow 可用 `case`、`stage`、`inputs`；Tool 使用根 `arguments` 或所選 group 下 `tools.<localKey>.arguments`。`--input` 會覆蓋自動發現的 sidecar。ATT 會建立合成 Case，例如 `DEBUG.template.PAYMENT_INVOKE`，但不會讓輸入檔改寫框架擁有的 `EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 或對應的 legacy aliases；`EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.STAGES` 都不是 canonical 節點。
-
-結果只寫入 `output/debug/<debugId>/`（可由 `--output-dir` 覆蓋）：`case.log` 是人可讀執行記錄，`result.yaml` 是機器可讀總結果，`artifacts/` 保存 payload、saveAs 及 `case.yaml`。Exit code 為 `0 PASS`、`1 FAIL`、`2` 輸入／驗證錯誤、`3` runtime 錯誤；debug 不會建立或更新普通 run 的 `latest-run.yaml`。
-
-### 1.2 Debug 配置例子
-
-以下例子都使用 `att-debug/v1.0`。可把檔案命名為 `debug.yaml` 放在目標旁邊，讓 ATT 自動發現；也可放在任意位置，再用 `--input` 指定。
-
-#### Template：提供 Case 和 Stage 資料
-
-建立 `templates/PAYMENT_INVOKE/debug.yaml`：
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  caseName: PAYMENT debug
-  amount: 100
-  environment: SIT
-stage:
-  key: invoke
-  values:
-    channel: WEB
-    sourceRef: SRC-001
-```
-
-執行：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE
-```
-
-Template 內可照普通執行一樣讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`。Stage 的 `values` 會在該 Stage 執行期間適配到 `EXEC.INPUT`；與 Case-level 同名時，Stage value 優先，Stage 結束後恢復 Case-level value。沒有 `inputs` 時，`case` 和 `stage.values` 已足夠建立一個可執行的合成 Case；`CASE.*` 仍是兼容 alias，`CASE.STAGES.*` 只表示舊的執行／證據視圖。
-
-#### Flow：用 `inputs` 提供 Flow 測試值
-
-建立 `templates/flows/common/compose/debug.yaml`：
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  caseName: Compose debug
-  traceId: TRACE-001
-stage:
-  key: DEBUG
-  values:
-    mode: SIT
-inputs:
-  source: payment
-  suffix: -debug
-```
-
-執行：
-
-```sh
-./att.sh debug flow common.compose.v1
-```
-
-`inputs.source` 可用 `${EXEC.INPUT.source}` 讀取；若沒有同名 Case 欄位，也可用舊的 `${CASE.source}` 兼容 alias 讀取。`stage.key` 及 `stage.values` 會建立 Flow 執行時使用的唯一 Debug Stage。
-
-#### Group Tool：在 `tools.<localKey>.arguments` 傳入參數
-
-對 `config/tools/fpp.yaml` 內的 `invokeApi`，建立 `config/tools/fpp.debug.yaml`：
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  RefNo: REF001
-tools:
-  invokeApi:
-    arguments:
-      requestId: REF001
-      requestType: PAYMENT
-      requestFile: /tmp/payment-request.xml
-      apiLogPath: /tmp/payment-api.log
-```
-
-執行：
-
-```sh
-./att.sh debug tool fpp.invokeApi
-```
-
-工具組內的 local key 是 `invokeApi`；命令列可使用完整 ID `fpp.invokeApi`。Tool debug arguments 應提供已在 Tool descriptor 宣告的 scalar 或 list 值，不能用 map literal 代替普通 Tool 參數。
-
-#### Ungrouped Tool：使用根 `arguments`
-
-對 `config/config.yaml` 根 `tools.invokePaymentApi`，可以建立 `config/tools/invokePaymentApi.debug.yaml`：
-
-```yaml
-schemaVersion: att-debug/v1.0
-arguments:
-  requestFile: /tmp/payment-request.xml
-  environment: SIT
-```
-
-執行：
-
-```sh
-./att.sh debug tool invokePaymentApi
-```
-
-未分組 Tool 不需要 `tools.invokePaymentApi.arguments` 包裝；根 `arguments` 會直接成為本次 Tool call 的具名參數。
-
-#### 用 `--input` 覆蓋 sidecar
-
-當只想臨時改一組值，不要修改版本控制中的 `debug.yaml`，建立 `/tmp/payment-debug.yaml`：
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  amount: 999
-  environment: UAT
-stage:
-  key: invoke
-  values:
-    channel: MOBILE
-```
-
-執行：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml
-```
-
-明確指定的 `--input` 優先於自動發現的 sidecar；若檔案不存在、schema 不正確或缺少必需的 Tool 參數，命令會以 exit code `2` 結束，並在結果中保留 `Debug input: ...` 診斷來源。
-
-#### 檢查保護欄位和失敗診斷
-
-即使輸入檔包含下列欄位，框架仍會使用真正的合成值：
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  caseId: pretend-id
-  outputDirectory: /tmp/pretend-output
-  VARS: {shouldNotReplace: true}
-  STAGES: {shouldNotReplace: true}
-```
-
-Debug 的 `EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架欄位不可由配置覆蓋；`EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.STAGES` 不存在，Stage 歷史仍由 `CASE.STAGES` 證據視圖保存。診斷時查看：
+For this tutorial, the important files are already in the repository:
 
 ```text
-output/debug/<debugId>/case.log
-output/debug/<debugId>/result.yaml
-output/debug/<debugId>/artifacts/case.yaml
-```
-
-`result.yaml` 會記錄目標、合成 Case ID、輸入檔、status、exit code、diagnostic 及證據位置；因此可以先用 debug 反覆調整輸入，再用普通 Excel run 做完整回歸。
-
-## 1.3 Load V1：由 CLI 到 report
-
-ATT 3.5.1 的 `load` command 使用相同的 Template、Flow、Tool、DB/MQ resource 和 `EXEC`/`META` runtime，但由獨立 scheduler 產生 iterations。先驗證再執行：
-
-```sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/tool.yaml --duration 100ms --run-id quick-tool
-```
-
-closed-VU 配置以 `load.users` 定義長期 Virtual Users；同一 VU 的 `EXEC.LOAD.USER_ID` 穩定，iteration 之間可使用 `execution.thinkTime`。fixed arrival-rate 配置以 `load.arrivalRate`、`maxConcurrent` 和 V1 唯一支援的 `overloadPolicy: drop` 定義到達；不建立 persistent VU，並發已滿時只記錄 generator `dropped`。`warmup` traffic 會實際執行，但預設不納入 measured thresholds。
-
-最小配置：
-
-```yaml
-schemaVersion: att-load/v1.0
-target: {type: template, id: V3_FLOW_EXAMPLE}
-load: {users: 2, duration: 30s}
-```
-
-```yaml
-schemaVersion: att-load/v1.0
-target: {type: flow, id: common.compose.v1}
-load:
-  arrivalRate: 100/s
-  duration: 30s
-  maxConcurrent: 20
-  overloadPolicy: drop
-```
-
-每個 load iteration 都有獨立的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 output workspace；只可從 `EXEC.LOAD.*` 讀取 `RUN_ID`、`MODEL`、`USER_ID`、`ITERATION_ID`、`ITERATION` sequence number 和 phase。root-level `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是 public contract。Tool target 可用 `target.arguments` 傳 named arguments；[`examples/load/README.md`](../examples/load/README.md) 包含 Template、Flow、Tool、DB/MQ pool 和 threshold 例子。
-
-執行結果固定寫入：
-
-```text
-output/load/<runId>/load-summary.json
-output/load/<runId>/load-summary.yaml
-output/load/<runId>/report/index.html
-```
-
-summary 會分開 configured/achieved/completed rate、SUT error、runtime error 和 generator drops；`--format json` 的 stdout 可直接交給 CI。`att load --profile` 會在同一個 `output/load/<runId>/` 寫出 `performance.json`，記錄 load execution/report phases、bounded metric counters 和既有 schema/template/process counters；它沿用既有 `--profile` 的診斷語義，不是 SUT microbenchmark。完整整合/self-overhead gate 可重複執行：
-
-```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
-```
-
-這個 gate 驗證所有例子、兩種 scheduler 的 CLI-to-report 路徑、Context isolation、bounded metrics/evidence、resource cleanup、threshold PASS/FAIL 和 report schema；它不是 distributed/Poisson/target-resource microbenchmark。
-
-## 1.4 SIT/UAT environment profiles
-
-V3.5.1 使用一份 common global config 加上 `environments` map；`--env` 選擇 effective profile，而不修改 Template、Flow 或 Action。配置中的 DB/MQ descriptor 可以不同，但 logical helper ID 保持不變：Actions 永遠寫 `db: orders` 和 `mq.payment...`，不寫 `orders_sit`、`orders_uat`、`payment_sit` 或 `payment_uat`。
-
-推薦目錄：
-
-```text
-config/
-├── config.yaml
-├── environments/sit.yaml       # legacy complete-config migration source
-├── environments/uat.yaml       # legacy complete-config migration source
-├── dbhelpers/sit/orders.yaml
-├── dbhelpers/uat/orders.yaml
-├── mqhelpers/sit/payment.yaml
-└── mqhelpers/uat/payment.yaml
-```
-
-Common `config/config.yaml` 保留相同的 templates、testcase、run、execution、report、Tool registry 和其他 runtime 設定；只有 `dbhelpers`/`mqhelpers` 兩個 typed list 可以在 profile 中覆蓋：
-
-```yaml
-schemaVersion: att-config/v2.6
-environment: SIT
-templates: {root: templates}
-testcase: {root: testcase}
-environments:
-  SIT:
-    dbhelpers: [config/dbhelpers/sit/orders.yaml]
-    mqhelpers: [config/mqhelpers/sit/payment.yaml]
-  UAT:
-    dbhelpers: [config/dbhelpers/uat/orders.yaml]
-    mqhelpers: [config/mqhelpers/uat/payment.yaml]
-```
-
-`environment` 是 default；`--env UAT` 優先於它。profile list 是 shallow replacement，省略的 list 才會繼承 common list；不支援 generic recursive merge，也不允許 profile 修改 report、tool、template 或 testcase 設定。
-
-共用 config 仍保留相同的 Tool registry：
-
-```yaml
-toolGroups:
-  - config/tools/sample.yaml
-  - config/tools/fpp.yaml
-  - config/tools/orders-db.yaml
-```
-
-global `tools` map 也必須相同，至少包括 `invokePaymentApi` 和由 `closed-smoke.yaml` 使用的 `sample.getAcDate`。DB descriptors 保持 `id: orders`，只改 JDBC URL 等 topology；MQ descriptors 保持 `id: payment`，只改 host、queue manager、port、channel。DB 的 URL、username/password 和 string-valued connection properties 支援完整 `${ENV:NAME}`；MQ 只有 username/password 支援該解析，host、queue manager、channel 和 numeric port 應直接寫在環境 descriptor。
-
-相同的 Action 可同時用於 SIT 和 UAT：
-
-```yaml
-actions:
-  queryOrder:
-    type: db
-    db: orders
-    query:
-      sql: "select * from orders where order_id = ?"
-      params: ["${EXEC.INPUT.orderId}"]
-
-  paymentRequest:
-    type: tool
-    call: >-
-      #{mq.payment.request(
-        requestQueue='PAYMENT.REQUEST',
-        replyQueue='PAYMENT.REPLY',
-        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
-        waitMs=5000
-      )}
-```
-
-四種模式都使用同一個 selector：
-
-```sh
-./att.sh validate --config config/config.yaml --env SIT --package
-./att.sh run --config config/config.yaml --env SIT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
-
-./att.sh validate --config config/config.yaml --env UAT --package
-./att.sh run --config config/config.yaml --env UAT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
-```
-
-CI 可以對同一 package 依次執行 SIT 與 UAT 的 `validate --package` 和 `run --all`；PREPROD 或 production-like validation 從 CI secret store 注入 credentials。從舊版 `--config config/environments/<env>.yaml` 遷移時，只需把 common settings 合併到一份 config、把兩組 helper path 放進 `environments.<NAME>`，Action 不變。若 package root、report policy 或其他 ATT 行為確實不同，才另設 top-level config。完整可複製的 descriptor、pool、secret 和 CI 例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
-
-## 2. 先理解執行方式
-
-一次正常 run 會依序完成：
-
-```text
-validate + plan
-  → 原子保留 output/<RunID>/
-  → 在最終路徑執行並即時保留每個案例／工具／重試證據
-  → 成功後寫入 COMPLETE run.yaml
-  → 原子更新 output/latest-run.yaml
-```
-
-只有具有 `COMPLETE` manifest 的 run 才能用 `report`、`build` 或 `rerun-failed`。中途中斷的 run 保留在 `output/<RunID>` 供除錯，但不會成為 latest；重試同一 Run ID 前需先移走或清理該未完成目錄。
-
-V3.4.2 compatibility baseline 沿用既有狀態及聚合契約，不可混淆：
-
-| 狀態 | 意義 | 例子 |
-|---|---|---|
-| PASS | 框架及業務驗證都成功 | 回應狀態為 `SUCCESS` |
-| FAIL | 框架成功執行，但業務斷言不成立 | 狀態為 `REJECTED`，但預期 `SUCCESS` |
-| ERROR | 工具、超時、解析、I/O 或框架執行失敗 | script exit code 非 0、JSON 格式錯誤 |
-| SKIPPED | 刻意未執行 | `--dry-run` 或不符合 `runWhen` |
-| INVALID | 驗證不通過，不能排程 | 未知字段、缺少 template、非法 Case ID |
-
-若同一 run 同時有 FAIL 和 ERROR，整體 exit code 是 `3`；只有 FAIL 而沒有 ERROR 時才是 `1`。
-
-## 3. 目錄
-
-```text
-att.sh
-att.bat
+testcase/quick_start.xlsx
+testcase/quick_start.yaml
+testcase/quick_start.xml
+templates/QUICK_START/template.yaml
 config/config.yaml
-config/tools/payment.yaml
-testcase/支付回歸.xlsx
-testcase/支付回歸.yaml
-testcase/支付回歸.xml
-templates/payment/local/CT001/template.yaml
-templates/payment/local/CT001/request.tmp.xml
-tools/invoke_payment_api.sh
 ```
 
-全域 `testcase.root` 預設為 `testcase`。ATT 會遞歸掃描其任意子目錄；同一目錄內的 `basename.xlsx`、`basename.yaml` 與 `basename.xml` 三個檔案共同構成一個測試案例集。
+The workbook contains two cases:
 
-只有直接包含 `template.yaml` 的目錄才是模板；上例模板完整路徑是 `payment/local/CT001`。Flow 固定放在 `templates/flows/**/flow.yaml`，同一目錄不能同時包含 `template.yaml` 與 `flow.yaml`。
+| Case | Purpose | External dependency |
+|---|---|---|
+| `quickStart.default.QS001` | first successful ATT run | none |
+| `quickStart.default.QS002` | same flow plus a local sample Tool | none |
 
-### 3.1 建立及調用 Flow
+You do not need to understand every ATT schema before running them.
 
-先建立 `templates/flows/common/decorate/flow.yaml`：
+## 2. Prerequisites
 
-```yaml
-schemaVersion: att-flow/v3.0
-id: common.decorate.v1
-name: Decorate
-description: 加上固定後綴並輸出結果。
-actions:
-  decorate:
-    type: assign
-    name: decoratedResult
-    expression: "${EXEC.INPUT.caseId}-done"
-  audit:
-    type: log
-    message: "Decorated ${EXEC.VARS.decoratedResult}"
-    runWhen: "${EXEC.INPUT.auditEnabled} == true"
-```
-
-再從 V3 Template 靜態調用：
-
-```yaml
-schemaVersion: att-template/v3.0
-name: PAYMENT_FLOW
-description: 使用可重用 Flow 的完整測試情境。
-actions:
-  prepare:
-    type: flow
-    use: common.decorate.v1
-  verify:
-    type: assert
-    assert: "${EXEC.VARS.decoratedResult} == '${META.SOURCE.caseId}-done'"
-```
-
-Flow ID 必須是以 `.vN` 結尾的固定 canonical ID；`use` 不接受 expression、版本範圍或動態選擇。Flow 與 Template Action 使用相同的 canonical `EXEC`／`META` Context、transient `${TOOL...}`／`${DB...}` scope 及目前 Action 的 `${output...}`；舊的 `CASE`／`RUN`／`ACTIONS` 只作相容 alias。`${...}` 只讀 Context，`#{...}` 才調用 Tool、DB façade 或 built-in。
-
-Flow 不再有 `inputs`、`outputs` 或調用端 `with`。每個 Flow invocation 進入新的 Action scope；內部 Action 只在該 scope 內使用 `${EXEC.ACTIONS.<internalActionId>...}`。需要由 caller 使用的值必須透過 assign 顯式寫入 `${EXEC.VARS.<name>}`；返回後 parent scope 會恢復。Stage／Flow history 屬於 execution evidence，不是可重用的 expression namespace。
-
-Action ID 只須在同一個 Stage／Template／Flow scope 內唯一；不同或重複的 Flow invocation 可以重用內部 ID，同一 scope 內重名仍會在 validate 時失敗。內部 Action 全部 SKIPPED 的已調用 Flow 是 PASS；若 Flow Action 自身的 `runWhen` 為 false，該 Action 才是 SKIPPED。
-
-V3.4.2 compatibility baseline 的最大 Flow 嵌套深度是 3。`runAlways`、warning impact、Flow timeout/retry、動態 dispatch、loop 和並行分支尚未支援。
-
-### 3.2 使用 V3.4 expression、evidence、console 及命名 SQL
-
-`${...}` 只負責 Context 取值及文字插值；需要計算時使用完整的 `#{...}` expression block：
-
-```yaml
-actions:
-  eligible:
-    type: assert
-    assert: >-
-      #{(${EXEC.INPUT.amount} * ${EXEC.INPUT.rate}) >= 100
-        and ${EXEC.INPUT.status} in ['PENDING', 'POSTED']}
-
-  showResult:
-    type: log
-    message: "#{prettyPrint(${EXEC.ACTIONS.queryOrder.output.result})}"
-```
-
-直接 DB Action 可選用命名參數；ATT 只把 placeholder 編譯成 JDBC `?`，不會把值拼入 SQL：
-
-```yaml
-queryOrder:
-  type: db
-  db: orders
-  query:
-    sql: >-
-      select id, status from orders
-      where id = :orderId and status = :status
-    parameters:
-      orderId: "${EXEC.INPUT.orderId}"
-      status: "#{upper(${EXEC.INPUT.expectedStatus})}"
-  saveAs:
-    path: console
-    format: text
-```
-
-`params` 與 `parameters` 不可同時使用。DB parameter evidence 預設顯示解析後的值；若套件有敏感業務參數，可在 dbhelper 明確配置 `evidence.parameters: masked` 或 `types`。帳號、密碼、JDBC URL 和敏感 connection properties 不會進入 parameter evidence。
-
-Log Action 多行內容及 process stdout/stderr 會以原始行寫入 Case log。普通 run 不再建立 `process-output`；只有明確指定非 `console` 的 `saveAs` 才建立 Action artifact。
-
-Tool Action 的 `evidence` collector 在主要 Tool result 之後、assertion 之前執行；`${output.result}` 仍是主要結果。每次 `ASSERTION` retry 都會重新執行全部 collector：
-
-```yaml
-invokeApi:
-  type: tool
-  call: "#{invokePaymentApi(requestFile=${EXEC.INPUT.requestFile}, environment=${EXEC.INPUT.environment})}"
-  evidence:
-    queueState:
-      call: "#{readQueueState(queue=${EXEC.INPUT.queue})}"
-      timeoutMs: 3000
-      onFailure: continue
-  assert: "${output.result.status} == 'SUCCESS'"
-```
-
-Collector 結果位於 `output.attempts[n].evidence.queueState.result`；`continue` 只記錄 collector 錯誤，`stop` 會讓 Action ERROR 並跳過 assertion。
-
-## 4. 建立嚴格的全域配置
-
-```yaml
-schemaVersion: att-config/v2.6
-outputDirectory: output
-environment: SIT
-timeoutMs: 10000
-caseLog:
-  yamlAnchors: false
-testcase:
-  root: testcase
-templates:
-  root: templates
-execution:
-  processOutput:
-    memoryLimitBytes: 65536
-    artifactLimitBytes: 104857600
-run:
-  id:
-    default: timestamp
-    timestampFormat: yyyyMMdd-HHmmss
-report:
-  mode: append-to-copy
-  fileNamePattern: "${suiteName}.result.xlsx"
-  html:
-    caseLogInlineLimitBytes: 32768
-  junit:
-    caseLogEmbedThresholdBytes: 10240
-xml:
-  namespaceMode: ignore
-toolGroups:
-  - config/tools/payment.yaml
-  - config/tools/orders-db.yaml
-dbhelpers:
-  - config/dbhelpers/orders.yaml
-mqhelpers:
-  - config/mqhelpers/orders.yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: 調用付款 API
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestFile}"
-      - "${input.environment}"
-      - "${input.traceId}"
-    output: json
-    arguments:
-      requestFile: {name: Request File, description: 已渲染 XML, required: true}
-      environment: {name: Environment, description: 執行環境, required: true}
-      traceId: {name: Trace ID, description: 可選追蹤 ID, required: false, argName: --trace-id}
-```
-
-`schemaVersion` 必填。V2.6 對 config、dbhelper、tool group、sidecar、template 和 action 採嚴格 schema。既有 V2.1/V2.2/V2.5 config 與 V2.2 command-backed Tool group 仍可讀；只有 V2.6 Tool descriptor 可使用 `call`／`cache`。
-
-`caseLog.yamlAnchors` 預設為 `false`，相同 Map/List 會在 Case log 每處完整輸出。設為 `true` 時，YAML 可使用 `&id001`／`*id001` 形式的 anchor/alias 以減少重複內容；它們只是 YAML 引用，不是 ATT ID。
-
-Case log 中 `ERROR`、`FAIL`、`INVALID` 區塊會以 `【!!!!!】` 開頭，例如 `【!!!!!】[ACTION invokeApi]`。可直接搜尋 `【!!!!!】` 快速定位異常日誌。
-
-工具 `output` 可為 `txt`、`yaml`、`json` 或 `xml`。`arguments` 用於驗證及工具文件；每個參數都需 `name`、`description`、`required`，並可選 `argName`、`argNameMode`。例如 `traceId` 有值時產生 `--trace-id <value>` 兩個 argv；缺少或空白時兩者都不產生。多值參數直接在 call 傳 YAML array，例如 `keywords=['PAYMENT', 'POSTED']`，不可在 V2.6 descriptor 配置 `delimit`。具名 List 預設 `argNameMode: once`，名稱只在第一個 value 前產生一次；`repeat` 則在每個 value 前重複。省略 `argName` 或設為空字串代表 positional argument，optional positional 值為空時也不產生 argv。舊 config/tool-group schema 的 `delimit` 只保留讀取相容性。
-
-`command` 推薦使用多行 argv list：每一項就是一個 argv，不會再次分詞。原有單行字串仍支持，ATT 只在載入時拆分一次，再統一轉為 argv list。具名參數優先以 `${requestFile}` 直接引用，需要明確命名空間時使用 `${input.requestFile}`；名稱大小寫必須與 arguments key 完全一致。command 只能引用已聲明參數，不能直接引用 `${EXEC.INPUT...}` 或 `${EXEC.ACTIONS...}`。本地工具以當前 Case 輸出目錄作為工作目錄；以 `./` 或 `../` 開頭的 executable 仍相對套件根目錄解析，其他相對 argv 路徑則由工具從 Case 目錄解讀。工具將結果寫到 stdout、診斷寫到 stderr。只有 action 明確設定 `saveAs` 時才另存 raw stdout。
-
-每個本地 tool process 都會收到兩個 ATT 保留環境變量：`ATT_ROOT_DIR` 是套件根目錄，`ATT_CASE_OUTPUT_DIR` 是當前 Case 輸出目錄。兩者均為絕對標準化路徑，並覆蓋外部同名值；shell 可用 `$ATT_ROOT_DIR`，Windows batch 可用 `%ATT_ROOT_DIR%`。SSH 遠端不注入這些本機路徑。
-
-V2.5 的 dbhelper 是一級配置，不放入 `tools`。`config.yaml` 的 `dbhelpers` 只列出獨立檔案；每個 `att-dbhelper/v2.5` 檔案聲明一個實例。例如 `config/dbhelpers/orders.yaml`：
-
-```yaml
-schemaVersion: att-dbhelper/v2.5
-id: orders
-name: Orders DB
-description: 查詢及更新訂單資料庫
-connection:
-  url: jdbc:postgresql://localhost/orders
-  username: att
-  password: "${ENV:ORDERS_DB_PASSWORD}"
-  readOnly: false
-statement:
-  timeoutSeconds: 30
-transaction:
-  scope: case
-  onEnd: rollback
-result:
-  maxRows: 1000
-  maxCellBytes: 1048576
-  maxBytes: 10485760
-```
-
-把 JDBC driver 及其依賴放入 `lib/` 並重啟 ATT。更新使用 `type: db`；查詢既可使用 DB Action，也可在 Case runtime expression 中調用：
-
-```yaml
-loadOrders:
-  type: db
-  db: orders
-  query:
-    sql: "select id, status from orders where customer_id = ? and status = ?"
-    params: ["${EXEC.INPUT.customerId}", OPEN]
-  saveAs:
-    path: db/orders.json
-    format: json
-
-checkCount:
-  type: assert
-  assert: >-
-    #{db.orders.scalar(
-      sql='select count(*) from orders where customer_id = ? and status = ?',
-      params=[${EXEC.INPUT.customerId}, 'OPEN']
-    )} > 0
-```
-
-`params` 依 JDBC `?` 次序綁定並保留 Java 類型。查詢結果的 `rows` 永遠是 list，不會因零／一／多行改變形狀。DB operation result 位於 `${output.result}`，SQL、parameters、row/update、status 和 timing evidence 位於 `${output.evidence.db.invocations[0]}`；Action 發布後使用對應的 `${EXEC.ACTIONS.<id>.output...}`。DB 操作異常使 Action 及 Case 成為 ERROR；Case 交易收尾結果在 Case 完成後寫入固定的 `${CASE.DB.<instance>}`，這只表示 resource finalization，不是 operation evidence。連線按 dbhelper 實例與執行 thread 重用，下一個 Case 前會 rollback 隔離；該 rollback 若失敗會自動重新連線，不改變新 Case 狀態。
-
-### 4.1 配置 IBM MQ helper
-
-在 `config/mqhelpers/orders.yaml` 建立一個 `att-mqhelper/v1.0` 實例，密碼建議使用完整的 `${ENV:NAME}` 引用：
-
-```yaml
-schemaVersion: att-mqhelper/v1.0
-id: orders
-name: Orders MQ
-description: Order request and reply queues
-connection:
-  queueManager: QM1
-  host: mq.example.internal
-  port: 1414
-  channel: APP.SVRCONN
-  username: att
-  password: "${ENV:MQ_PASSWORD}"
-message:
-  ccsid: 1208
-  format: MQSTR
-  persistence: asQueue
-requestReply:
-  waitMs: 10000
-evidence:
-  payload: metadata
-```
-
-MQ helper 只支援 TCP client 模式；IBM MQ client jar 不由預設 ATT build 內置。開發時可執行 `mvn -Pibm-mq package`，release package 則可用 `IBM_MQ_JAR=/path/to/com.ibm.mq.allclient-10.0.0.0.jar ./build.sh` 把 jar 放入 `lib/`。`send` 和 `request` 的 `file` 是原始 payload 文件；相對路徑相對當前 Case output，從 `renderAs: file` 的 `targetFiles` 直接傳入最安全。
-
-在 Template 中將 MQ 操作作為 Tool Action 的主要 call：
-
-```yaml
-sendOrder:
-  type: tool
-  call: >-
-    #{mq.orders.send(
-      queue='ORDER.REQUEST',
-      file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
-    )}
-
-waitReply:
-  type: tool
-  call: >-
-    #{mq.orders.request(
-      requestQueue='ORDER.REQUEST',
-      replyQueue='ORDER.REPLY',
-      file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
-      waitMs=5000
-    )}
-  assert: "${output.result.replyReceived} == true"
-```
-
-`request` 先 PUT，再以送出訊息的 MsgId 作為 GET CorrelId；回覆文件只寫入一次 `mq/<instance>/` 下的 Case output。等待逾時的 MQ reason 2033 會是成功但 `replyReceived: false`，需要回覆時才用 assertion 將它判定為 FAIL。MQ evidence 保留 queue、MsgId、CorrelId、bytes、status、reason 和 duration 等 metadata，並在 primary Action 的 `${output.evidence.mq.invocations[0]}` 發布；不保存完整 payload，也不輸出密碼。
-
-若同一操作會重複出現，可新增 `config/tools/orders-db.yaml` 將它包裝成 typed Tool：
-
-```yaml
-schemaVersion: att-tool-group/v2.6
-id: orders
-name: Order DB tools
-description: 常用訂單操作
-tools:
-  find:
-    name: Find orders
-    description: 按客戶與狀態查詢
-    timeoutMs: 5000
-    call: "#{db.orders.query(sql='select id, status from orders where customer_id = ? and status = ?', params=[${input.customerId}, ${input.status}])}"
-    cache: {scope: case}
-    arguments:
-      customerId: {name: Customer ID, description: 客戶, required: true}
-      status: {name: Status, description: 狀態, required: true}
-```
-
-之後可在 expression 直接取得 Java object：
-
-```yaml
-loadOrders:
-  type: assign
-  name: orders
-  expression: "#{orders.find(customerId=${EXEC.INPUT.customerId}, status='OPEN')}"
-```
-
-`cache.scope` 可為 `case` 或 `db`。`db` 可跨 Case 重用，但 DB update、commit、rollback 或 reconnect 都不會清除 cache，因此可能返回 stale data，只應用於穩定/reference 資料。DB update façade 不可 cache，且只能作為 `type: tool` 的主要 call。command-backed 與 call-backed Tool 均可用 descriptor `timeoutMs` 提供預設；帶 retry 的 Action 會繞過 call-backed cache，確保每次輪詢取得新結果。
-
-例如以下 process-backed Tool 可接收含單引號、雙引號及 Context interpolation 的完整 message：
-
-先在 global config 的 `tools` 內宣告：
-
-```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
-    output: yaml
-    arguments:
-      message: {name: Message, description: 完整訊息, required: true}
-      sourceFile: {name: Source file, description: 關聯檔案, required: true}
-```
-
-再於 template action 調用：
-
-```yaml
-writeAudit:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message="O'Reilly said \"READY\" for ${EXEC.INPUT.caseId}",
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
-    )}
-```
-
-Child process 會收到例如 `O'Reilly said "READY" for payment.payment.TC001` 的一個 atomic argv。這些是 ATT expression quote，不是 shell quote；Context value 自身含引號也無需 shell escaping。YAML block scalar 可避免再增加一層 YAML quote escaping。普通 Tool 不會展開 `$HOME`、`$(date)` 或 `*.xml`，完整規則與更多單／雙引號例子見 Reference Manual。
-
-工具組是獨立配置文件。`config/tools/payment.yaml` 的最小例子：
-
-```yaml
-schemaVersion: att-tool-group/v2.2
-id: payment
-name: Payment tools
-description: Payment integration commands
-script: ["./tools/payment_dispatch.sh"]
-tools:
-  invoke:
-    name: Invoke payment
-    description: Invoke one payment request
-    command: ["send", "${input.requestFile}", "${input.environment}"]
-    output: json
-    arguments:
-      requestFile: {name: Request File, description: 已渲染 XML, required: true}
-      environment: {name: Environment, description: 執行環境, required: true}
-```
-
-調用名稱是 `payment.invoke`。有 `script` 時，實際邏輯 argv 是 `./tools/payment_dispatch.sh invoke send <requestFile> <environment>`；沒有 `script` 時，tool command 的第一項就是 executable。
-
-全局 config 或個別工具組都可配置一個 SSH 目標：
-
-```yaml
-ssh:
-  host: tools.example.internal
-  user: att
-  port: 22
-  identityFile: /secure/keys/att_ed25519
-```
-
-ATT 預設使用本地 `ssh` command；若 `PATH` 找不到 `ssh`，會提示並改用內置 mwiede/jsch Java library。OpenSSH 可使用 SSH agent 或 `identityFile`；Java fallback 不繼承 OpenSSH agent／`~/.ssh/config`，通常需設定 `identityFile`，並要求 `~/.ssh/known_hosts`。兩者均執行 strict host-key checking，不支持 password 欄位。工具輸出及 retry/assert/saveAs 行為與本地執行相同；Java/JSch 算法限制見 Reference Manual Chapter 09。
-
-不要這樣將案例資料直接拼到 command：
-
-```yaml
-# 錯誤：全域 tool 不能隱式依賴 runtime Context
-command: "./tools/invoke_payment_api.sh --note ${EXEC.INPUT.note}"
-```
-
-建立最小可執行 mock tool `tools/invoke_payment_api.sh`：
+ATT requires Java 8 or later. From the repository root, make the launcher executable on macOS/Linux if necessary:
 
 ```sh
-#!/usr/bin/env sh
-set -eu
-
-request_file="${1:?missing request file}"
-environment="${2:?missing environment}"
-
-[ -f "$request_file" ] || {
-  echo "request file not found: $request_file" >&2
-  exit 2
-}
-
-printf '{"status":"SUCCESS","environment":"%s"}\n' "$environment"
+chmod +x att.sh
 ```
+
+Check the CLI:
 
 ```sh
-chmod +x tools/invoke_payment_api.sh
+./att.sh version
 ```
 
-## 5. 建立 V2.6 模板與 JSON 工具輸出
+On Windows, use `att.bat` instead of `./att.sh` in the commands below.
 
-`templates/payment/local/CT001/template.yaml`：
+## 3. Inspect the workbook and sidecar
 
-```yaml
-schemaVersion: att-template/v2.6
-name: 本地付款
-description: 產生付款 XML 並調用 API
-actions:
-  renderRequest:
-    type: render
-    description: "為 ${EXEC.INPUT.caseId} 產生付款 request；狀態=${output.status}"
-    payload: requests/*.xml
-    renderAs: file
-    assert: "${output.targetFiles[0]} != null"
-  invokeApi:
-    type: tool
-    description: 調用付款 API
-    call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}"
-    saveAs:
-      path: "${EXEC.INPUT.caseId}-response.json"
-      format: raw
-      overwrite: false
-    assert: "${output.result.status} == '${EXEC.INPUT.expected.status}'"
-    # 可覆蓋 Tool descriptor／global timeoutMs；單位為毫秒
-    timeoutMs: 30000
-    retry:
-      maxAttempts: 3
-      intervalMs: 1000
-      retryOn: [ASSERTION, TIMEOUT]
+Open `testcase/quick_start.xlsx`. The second header row contains the physical Excel column names used by the sidecar:
+
+```text
+Case ID | Tags | Name | Amount | Use Tool | Template | Expected
 ```
 
-`type: tool` 的主要 `call` 也可直接使用 ATT built-in。結果同樣位於 `${output.result}`，可使用 `assert` 和 `saveAs`；built-in 在 JVM 內執行，因此不會產生外部進程的 `TOOL`、argv、stdout 或 stderr 證據：
-
-```yaml
-normalizeReference:
-  type: tool
-  call: "#{upper(${EXEC.INPUT.reference})}"
-  saveAs:
-    path: normalized-reference.txt
-    format: text
-  assert: "${output.result} == 'PAY-001'"
-```
-
-`requests/request.xml`：
-
-```xml
-<PaymentRequest>
-  <CaseId>${EXEC.INPUT.caseId}</CaseId>
-  <DebitAccount>${EXEC.INPUT.debitAccount}</DebitAccount>
-  <Amount>${EXEC.INPUT.amount}</Amount>
-</PaymentRequest>
-```
-
-Action type 決定可用字段。所有 action 都可設定包含 `${...}` 的 `description`：validate 先替換案例等靜態值，保留 `${output...}` 之類的 runtime 值；執行完成後再解析剩餘表達式。
-
-- `render` 必須有 `payload` glob 及 `renderAs: file|text|json|yaml|xml`。`file` 把每個匹配文件 render 到 Case output 目錄的同名相對路徑，目標清單位於 `output.targetFiles`；其他類型把單一值或按相對路徑排序的多值 map 放在 `output.result`。render 不再使用 `saveAs`、`overwrite` 或配置 `output.mode`。
-- `tool` 必須有一個指向已配置 Tool 或 ATT built-in 的 `call`；V2.6 `saveAs` 使用 `{path, format, overwrite}`。process Tool 預設 `raw` 並可另選 text/json/yaml/xml；built-in 預設 text 且不支持 raw。command-backed、call-backed 及主要 built-in 均使用相同的 timeout/retry Action 契約。
-- `db` 必須指定实例 `db`，并在 `query`／`update` 中选一个；DB `saveAs` 要求 format 为 text/json/yaml/xml。text 会输出 SQL*Plus 风格的查询表格或 update 行数摘要。DB timeout 来自实例的 `statement.timeoutSeconds`，不使用 Action `timeoutMs`，也不自动 retry SQL。
-- `assert` action 必須有非空 `assert`，不再使用 `expression`；可加 `expected`（validate 階段求值）和 `actual`（runtime 求值）。
-- 任何可寫 `${...}` 的使用者欄位也可寫 `#{...}`。`${...}` 用於 Context 引用及文字插值；`#{...}` 的參數也必須用 `${...}` 引用 Context，例如 `assert: "#{length(value=${EXEC.VARS.SrcRefNo})} <= 35"`、`description: "#{upper(${EXEC.INPUT.caseId})}"` 和 `saveAs.path: "#{lower(${EXEC.INPUT.caseId})}.txt"`。裸 `CASE.*`、`ACTIONS.*`、`input.*` 等 path 會被拒絕。普通 Case-runtime expression 也可调用只读 `#{db.<instance>.query/scalar(...)}`。字面字串使用 ASCII 單／雙引號。
-- `log` 必須有非空 `message`，可有 `level` 和 `fields`；不允許 retry。要把先前 DB 结果直接打印成相同表格，可使用 `message: "#{dbText(${EXEC.ACTIONS.queryOrders.output.result})}"`，不必建立中间文件。
-- render、tool、log 都可用 `assert` 決定 PASS/FAIL；操作異常仍是 ERROR。tool exit code 是 `output.exitCode` 證據，不再單獨決定 action 結果。
-
-所有 action 的結果統一位於當前 Stage 的 `EXEC.ACTIONS.<id>.output`：`status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及有設定時的 `assertion`。不要再讀取 action 頂層 `status`、`outputFile` 或舊式 scalar `output`。
-
-全域 `timeoutMs` 的單位是毫秒；上例為 10 秒。每次 Tool 調用依次使用 Action `timeoutMs`、Tool descriptor `timeoutMs`、全域 `timeoutMs`，最後才是框架 10000 ms fallback。sidecar、stage 和 Template 不可配置 timeout 預設；Action/Tool/global 值範圍均為 1–3600000。
-
-retry 只適用於 tool action，且必須同時提供 `maxAttempts: 2..10`、`intervalMs: 0..3600000` 和非空 `retryOn`。`ASSERTION` 表示每次正常返回後立即執行同一 Action 的 `assert`，false 才等待並重調 Tool；`TIMEOUT` 表示單次 timeout 可重試。exit code 沒有專用 retry，需在 `assert` 中檢查 `${output.exitCode}`。配置、參數、I/O、輸出解析、DB 非 timeout 錯誤及 assertion 求值錯誤均不重試。每次 attempt 證據直接寫入 case log/action record，不建立額外目錄；`saveAs` 最終保留最後一次 attempt 的結果。
-
-## 6. 中文 Excel 和 sidecar
-
-Excel 表頭：
-
-| 案例編號 | 案例名稱 | 標籤 | 扣賬帳號 | 金額 | 預期結果 | 執行模板 |
-|---|---|---|---|---:|---|---|
-| TC001 | 本地付款成功 | smoke,付款 | 111111 | 100 | `status: SUCCESS` | `name: 本地付款` |
-
-相鄰的 `testcase/支付回歸.yaml`：
+`testcase/quick_start.yaml` maps those columns into ATT input:
 
 ```yaml
 schemaVersion: att-sidecar/v2.2
-id: payment
+id: quickStart
 excel:
-  sheet: 支付測試案例集
-  headerRows: 1
-  caseId: 案例編號
-  tags: 標籤
-  dataColumns: caseName=案例名稱, debitAccount=扣賬帳號, amount=金額, expected=預期結果(yaml)
+  sheet: QuickStart
+  headerRows: 2
+  caseId: Case ID
+  tags: Tags
+  dataColumns: name=Name, amount=Amount, useTool=Use Tool(yaml), expected=Expected
+
 stages:
-  - key: invoke
-    template: 執行模板
+  - key: main
+    template: Template
     required: true
-    runWhen: normal
     onFailure: stop
-report:
-  columns:
-    result: 測試結果
-    reportLink: 詳細報告
+    runWhen: normal
 ```
 
-`report.columns` 的 key 是 ATT 結果字段，value 是 Excel 實際表頭。若來源工作表已存在映射表頭（例如「測試結果」），ATT 會直接填充該欄；只有不存在的映射表頭才按配置順序追加到工作表末尾。
+The `(yaml)` marker on `Use Tool` preserves Excel `true`/`false` as a Boolean instead of a string.
 
-模板單元格可寫成含 `name` 的 YAML map，也可直接寫一行 YAML scalar shorthand。`name` 或 scalar 值有兩種寫法：填寫模板 `template.yaml` 中定義的 symbolic name（例如 `本地付款`），或填寫相對於 `templates.root` 的完整模板目錄路徑（例如 `payment/local/CT001`）；兩者都用來唯一選定要執行的模板。例如 `PAYMENT_INVOKE` 等價於 `name: PAYMENT_INVOKE`。scalar 會由 ATT 正規化為 `name` stage data；map 的所有 key-value 都會加入 stage data。`N/A`、`NA`、`NULL`、`NONE` 和空白會正規化為 blank。未知 sidecar 字段、未知 stage 字段、錯誤資料型別和重複 YAML key 都是 validation ERROR。詳細規則見 [Reference Manual V3：Workbook sidecar](09_Reference_Manual_V3.md#workbook-sidecar)。
+The generated `testcase/quick_start.xml` is the normalized snapshot ATT executes against. Do not edit it manually.
 
-多 sheet 使用：
+## 4. Understand the Template
+
+Both rows select `QUICK_START`, implemented by `templates/QUICK_START/template.yaml`.
+
+The first three useful ideas are enough for now:
 
 ```yaml
-sheet: payment=支付測試案例集, batch=批量測試案例集
+actions:
+  captureAmount:
+    type: assign
+    name: quickStartAmount
+    expression: "${EXEC.INPUT.amount}"
+
+  showInput:
+    type: log
+    message: "Quick Start case ${META.SOURCE.caseId}: amount=${EXEC.VARS.quickStartAmount}"
+
+  verifyAmount:
+    type: assert
+    assert: "#{${EXEC.VARS.quickStartAmount} == ${EXEC.INPUT.expected}}"
+    expected: "${EXEC.INPUT.expected}"
+    actual: "${EXEC.VARS.quickStartAmount}"
 ```
 
-完整 Case ID 分別是 `payment.payment.TC001`、`payment.batch.TC001`。第一段來自 sidecar `id`，第二段來自 `excel.sheet` 的 group ID，第三段來自 Excel 案例編號。
+For this tutorial:
 
-Case ID 同時是輸出目錄名，完整路徑為 `output/<RunID>/<workbookId>.<groupId>.<rowCaseId>/`。請使用可讀、穩定的值，例如 `payment.payment.TC001`。sidecar `id` 在 package 內必須唯一；三個 ID component 都不能是空白、`.`、`..`，不能含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 或控制字符，不能以空白或 `.` 結尾，也不能使用 `CON`、`NUL`、`COM1` 等保留名稱。ATT 不會 slugify 或 hash Case ID；合法 ID 原樣成為目錄名。
+- `EXEC.INPUT` contains values materialized from the Testcase row;
+- `EXEC.VARS` contains values explicitly created by `assign`;
+- `${...}` reads/interpolates Context values;
+- `#{...}` evaluates a typed expression.
 
-HTML report 的 Groups 會按 `workbookId.groupId` 統計。Cases 可用 Workbook、Sheet、Status 下拉列表過濾；搜尋框匹配 workbook、sheet、完整 Case ID 和 tags；點擊任一列頭可切換升序／降序。
+That is enough Context knowledge for a first run. The complete model is in [Runtime and Context](reference/03_runtime_context.md) and [Expressions](reference/07_expressions.md).
 
-### 多行表頭
+## 5. Regenerate the snapshot
 
-如果 Excel 前兩行是表頭，在 sidecar 的 `excel` 下設定 `headerRows: 2`。ATT 會逐欄由上到下尋找最後一個非空表頭 cell 作為實際欄名，不會把多行文字拼接：
-
-```text
-第 1 行：基本資料 |        | 執行資訊 |        |
-第 2 行：案例編號 | 案例名稱 | 執行模板 | 執行參數 |
-有效欄名：案例編號、案例名稱、執行模板、執行參數
-```
-
-`headerRows` 預設為 `1`；資料從表頭列之後開始。匹配時會忽略表頭及 sidecar 欄名中的空格、tab、換行、NBSP 等 Unicode whitespace，但仍區分大小寫；忽略 whitespace 後重複的有效欄名、找不到必填欄位或 `headerRows < 1` 都會在 validate 階段報錯。詳細規則見 [Reference Manual V3：Workbook sidecar](09_Reference_Manual_V3.md#workbook-sidecar)。
-
-## 7. 表達式
-
-- `${EXEC.INPUT.amount}`：讀取 Context。
-- `${EXEC.VARS.txnSeq}`：讀取前序 `assign` action 寫入、可跨 stage/template 使用的 Case-scoped 變數。
-- `${EXEC.OUTPUT_DIR}`：當前 Case 的絕對輸出目錄；可讓 action 將此路徑明確傳給 tool。
-- `${CASE.STAGES.invoke.TEMPLATE.ACTIONS.invokeApi.TOOL.invokePaymentApi.output}`：僅供遷移／報告對照的舊跨 Stage 證據完整路徑；可重用的當前 Stage 輸入應讀取 `${EXEC.INPUT.<field>}`，Template/Flow expression 不可直接讀取它。
-- `${EXEC.ACTIONS.invokeApi.output.result}`：目前 template 的便捷結果路徑。
-- `${output.status}`：當前 action 在 assertion／runtime description 中的本地 outcome 路徑。
-- `#{tool(name='中文,字串', count=2, enabled=true)}`：調用工具，支援字串、數字、布爾 literal。
-
-需要組合一次並供後續 action／stage 重用的值時，可使用 `assign`：
-
-```yaml
-buildTxnSeq:
-  type: assign
-  name: txnSeq
-  expression: "ATT00#{sysdate('yyyyMMdd')}#{sample.getSeq(10)}"
-
-renderRequest:
-  type: render
-  payload: request.xml
-  renderAs: file
-  description: "Render request ${EXEC.VARS.txnSeq}"
-```
-
-`name` 在同一 Case 內必須唯一，不能覆蓋前序 assign。求值成功後可從 `${EXEC.VARS.txnSeq}` 讀取；當前 Stage template 也可使用 `${EXEC.ACTIONS.buildTxnSeq.output.result}`。`EXEC.VARS` 與 Excel/框架 Case 欄位分離，並保留至後續 stage。可選 `assert` 在賦值後執行；FAIL/ERROR 不回滾已成功產生的變數。
-
-核心節點 `CASE`、`STAGES`、`TEMPLATE`、`ACTIONS`、`TOOL` 使用大寫；`caseId`、`targetFiles` 等 metadata 使用 camelCase。
-
-`${EXEC.OUTPUT_DIR}` 從執行開始便指向最終 `output/<RunID>/<CaseID>`。validate 階段尚未產生 Run 目錄，因此保留此 placeholder 原樣。本地 tool 的 cwd 與 `ATT_CASE_OUTPUT_DIR` 就是這個目錄，所以 tool 以相對路徑建立的文件會直接成為可即時檢查的 Case 證據。SSH 遠端 process 仍使用遠端帳號的預設目錄；需要遠端目錄時應以已聲明參數明確傳入。
-
-`CASE`、`STAGE`、`TEMPLATE`、`ACTION`、`TOOL` 的所有內建屬性、適用時機及完整路徑，見 [Reference Manual V3：Runtime Context](09_Reference_Manual_V3.md#runtime-context)。
-
-ATT 內置函數包括：
-
-- `upper(value=...)`：轉換為大寫；
-- `lower(value=...)`：轉換為小寫；
-- `trim(value=...)`：移除前後空白；
-- `string(value=...)`、`number(value=...)`、`boolean(value=...)`：執行型別轉換；
-- `length(value=...)`：取得字串長度；
-- `concat(...)`：按參數順序串接文字；
-- `coalesce(...)`：返回第一個非 blank 值。
-- `nvl(value, defaultValue)`：value 為 null/空字串時返回預設值；
-- `iif(condition, trueValue, falseValue)`：按布爾條件選值；
-- `nchar(count, value)`：重複文字，例如 `nchar(3, '9')` 返回 `999`。
-- `ltrim(value)`、`rtrim(value)`：只移除左側或右側空白；
-- `substr(value, start[, length])`、`indexOf(value, search[, fromIndex])`：以 0 為起點截取／搜尋；`substr` 的負數 start 從尾部計算；
-- `contains`、`startsWith`、`endsWith`、`replace`：進行大小寫敏感的字面文字比對／替換；
-- `padLeft(value, length[, pad])`、`padRight(...)`：補齊文字，預設使用空格；
-- `sysdate([format])`、`systimestamp([format])`：返回系統時區的日期／timestamp；省略 format 時沿用 ISO 預設，亦可傳入 Java `DateTimeFormatter` pattern，例如 `sysdate('yyyyMMdd')`；
-- `formatDate(value, pattern[, zoneId])`、`dateAdd(value, amount, unit)`：格式化 ISO-8601 日期時間或進行日期加減。
-- `fileExists(path)`、`directoryExists(path)`、`fileSize(path)`：檢查一般文件、目錄或取得文件 byte 數；
-- `makeDirectories(path)`：建立完整目錄樹；
-- `copyFile(source, target[, overwrite])`、`moveFile(...)`：複製／移動一般文件，預設不覆蓋同名目標；
-- `deleteFile(path[, missingOk])`：刪除非目錄文件，預設在文件不存在時報錯；
-- `randomChoice(first, ...)`：從 1 至 1000 個輸入值中隨機返回一個值；
-- `dbText(value)`：把 `type: db` 或 DB expression 的 typed result 轉成 SQL*Plus 風格文字，不執行新查詢。
-
-例如：
-
-```text
-#{upper(${EXEC.INPUT.currency})}
-#{getAppLogs(${EXEC.INPUT.caseId})}
-#{substr(${EXEC.INPUT.reference}, 0, 8)}
-#{formatDate('2026-07-14T04:30:00Z', 'yyyyMMdd-HHmm', 'Asia/Hong_Kong')}
-#{sysdate('yyyyMMdd')}
-#{systimestamp(format='yyyyMMdd-HHmmssXXX')}
-#{coalesce(${EXEC.INPUT.optionalReference}, 'NO-REFERENCE')}
-#{boolean(yes)}
-#{nvl(${EXEC.INPUT.optionalReference}, 'NO-REFERENCE')}
-#{iif(${EXEC.INPUT.enabled}, 'Y', 'N')}
-#{str.repeat(3, '9')}
-#{file.exists(${EXEC.INPUT.requestFile})}
-#{file.copy(${EXEC.INPUT.requestFile}, ${EXEC.INPUT.backupFile}, true)}
-#{misc.randomChoice('PRIMARY', 'SECONDARY', 'FALLBACK')}
-#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}
-```
-
-V2.6 canonical built-in 以 package 分組：`str.*`、`date.*`、`file.*`、`misc.*`，例如 `str.lpad`、`file.move`、`misc.nvl`。舊 flat 名稱仍可調用以兼容既有 template。Tool group 的 `id` 同樣是 call package；例如 group `fpp` 的工具使用 `fpp.exehelper`。
-
-只有一個 `value` 的 built-in 可省略 `value=`。配置中只宣告一個 argument 的 tool 也可省略名稱，如 `#{getAppLogs(${EXEC.INPUT.caseId})}`；只要 tool 宣告零個或多個 argument，就必須沿用原有的空參數／具名參數寫法，多參數 tool 不接受位置參數。
-
-檔案 built-in 的相對路徑以 ATT 進程工作目錄為基準；寫入操作的 `overwrite` 預設為 `false`。它們不產生 TOOL process evidence，需要外部稽核、網路或平台命令時仍應配置 tool。
-
-套件也載入 `config/tools/fpp.yaml` 參考工具組，可按以下方式呼叫：
-
-```text
-#{fpp.invokeApi(requestId=${EXEC.INPUT.requestId}, requestType=${EXEC.INPUT.requestType}, requestFile=${EXEC.INPUT.requestFile}, apiLogPath=${EXEC.INPUT.apiLogPath})}
-#{fpp.sqlplusToXml(inputFile=${EXEC.INPUT.sqlplusOutput})}
-#{fpp.exehelper(command=${EXEC.INPUT.command}, stdoutPath=${EXEC.INPUT.stdoutPath}, stderrPath=${EXEC.INPUT.stderrPath})}
-```
-
-V2.6.2 的 reference helper 另可明確展開 pathname wildcard：
-
-```yaml
-countRequests:
-  type: tool
-  call: >-
-    #{fpp.exehelper(
-        command='wc',
-        arguments=['-l', '${EXEC.OUTPUT_DIR}/requests/*.xml'],
-        stdoutPath='${EXEC.OUTPUT_DIR}/request-counts.txt'
-    )}
-
-findTransactions:
-  type: tool
-  call: >-
-    #{fpp.loghelper(
-        maxTidFiles=10,
-        minTidFiles=2,
-        outputPrefix='${EXEC.OUTPUT_DIR}/transaction',
-        logFiles=['/var/log/payment/app*.log', '/archive/payment/app-2026-07-2?.log'],
-        keywords=[${EXEC.INPUT.caseId}, 'SUCCESS'],
-        recentLogCount=0,
-        sshOption='--ssh'
-    )}
-```
-
-`fpp.exehelper.arguments`、`fpp.loghelper.logFiles` 和 `fpp.loghelper.keywords` 都是有序 YAML array，不會按字元分隔。ATT 將每個 item 保持為獨立 argv；List placeholder 必須獨佔一個 command token。`exehelper` 對每個含 `*`、`?` 或 `[` 的 child argument 展開 matching path；unmatched pattern 保持字面值。`loghelper` 在每台 host 展開 log path，只接受 regular file；無任何本地匹配時失敗。匹配結果依 C locale pathname 排序，路徑含空格仍維持一個 argv。這是 helper 自身的明確功能，不會令普通 Tool 使用 shell。
-
-`loghelper` 的 SSH server list 每行格式為 `host|user|port|identity-file|remote-loghelper-path`，可包含 `localhost||||` 或當前 hostname；本機已在 local pass 搜索，不會再 SSH 自身。非本機 entry 仍需完整 SSH 資料。
-
-`invokeApi` 只是一個安全骨架，未接入真實 API 時會輸出 `NOT_IMPLEMENTED` XML；`sqlplusToXml` 把首行欄名及後續 pipe-delimited 記錄轉為 XML，合法安全的欄名會直接成為 element，例如 `name` 產生 `<name>...</name>`；`exehelper` 將子進程 exit code、第一行錯誤及輸出路徑寫成 YAML。提供 stdout/stderr 路徑時會把完整輸出寫入指定文件；省略任一路徑時，對應輸出會寫入當前 Case log。完整函數、工具契約及平台限制見 [Reference Manual V3](09_Reference_Manual_V3.md#built-in-functions)。
-
-## 8. 先驗證，再執行
+ATT keeps the Excel workbook and its normalized XML snapshot in sync. Run:
 
 ```sh
-# Excel 修改後先生成同 basename 的語義 XML，並 review Git diff
-./att.sh snapshot --suite testcase/支付回歸.xlsx
-# 未指定 selector 時，snapshot 預設遞迴處理所有 workbook；--all 仍可明確使用
-./att.sh snapshot
-# 或為 testcase.root 下所有 workbook 生成 snapshot
-./att.sh snapshot --all
+./att.sh snapshot --suite testcase/quick_start.xlsx
+```
 
-# 預設 --package：檢查整個套件，包括未被案例引用的 template/tool
+If you edit the workbook later, run the same command again and review the resulting XML diff before committing it.
+
+## 6. Validate before execution
+
+First validate the whole package:
+
+```sh
 ./att.sh validate --package
-
-# 快速迭代：只驗證選中案例及其依賴閉包
-./att.sh validate --selected --suite testcase/支付回歸.xlsx --case payment.payment.TC001
-
-# CI：stdout 只有一份可機讀 JSON；進度與診斷走 stderr
-./att.sh validate --package --format json
-
-./att.sh run --suite testcase/支付回歸.xlsx
-# 明確允許先更新這個 workbook 的 XML，再走相同 validation/run 流程
-./att.sh run --suite testcase/支付回歸.xlsx --update-snapshot
-./att.sh run --all
-./att.sh run --all --case payment.payment.TC001
-./att.sh run --all --tag smoke
-./att.sh run --all --ci-output junit,json
 ```
 
-Windows 使用同一組命令與參數，只需將 `./att.sh` 換成 `att.bat`：
+Validation checks schemas, workbook/snapshot consistency, Template references, expressions, Tool/resource references, and other package contracts without executing the test.
 
-```bat
-att.bat snapshot
-att.bat validate --package
-att.bat docs
-att.bat run --all
-```
+For a normal package you should fix validation errors before running anything.
 
-`snapshot`、`validate` 和 `docs` 可在 Windows 透過 `att.bat` 原生執行，且不會調用 configured testcase tools。Windows validation 仍檢查 `.sh` 是否存在、是否為安全的普通檔案，但不判定 POSIX `.sh` 能否啟動，並會輸出 warning；執行 `run` 前仍須提供並測試 `.bat`、`.cmd`、PowerShell 或 native equivalent。Binary release 只需 Java 8+。在 source tree 中，`att.bat` 會在 Maven 可用時先編譯；若 Maven 不存在，必須已有 `target\classes`。
+## 7. Run your first case
 
-同一個 output 目錄同時收到多個 `run` 時，可選擇：
-
-```bash
-./att.sh run --all             # 默認：已有 run 時立即拒絕
-./att.sh run --all --queue     # 顯示排隊提示，等前一個 run 完成
-./att.sh run --all --allow-parallel-runs  # 允許多個 ATT 進程並行；不會並行單次 run 內的 Case
-./att.sh run --all --profile              # 完成後輸出 performance.json
-```
-
-ATT 會在 validation/progress 輸出前預檢 Run ID，並在 planning／取得排隊鎖後再次檢查。若已存在，會直接輸出包含重複 ID 與路徑的 `ATT-RUN-001`，不會顯示「Executing cases」或調用工具。若只在完成發布時才發生競態碰撞，ATT 會保留既有 run，並使用第一個可用的 `-2`、`-3` 等序號發布本次結果。請以完成訊息輸出的最終 Run ID 和 report 路徑為準。
-
-`validate --package` 是預設模式；它可不帶 testcase filter，並會找出未被引用但壞掉的 template 或 tool。`--selected` 僅驗證選定案例的依賴，速度較快，但輸出會明示未驗證其餘內容。
-
-`snapshot` 是日常審查流程中產生 testcase XML 的命令。`validate` 和預設 `run` 只讀取並比較 snapshot；若 XML 缺失、格式不 canonical、內容過期或 schema 不是 `att-testcases/v2.4`，便以 `ATT-TC-001` 阻止後續執行。只有明確加入 run-only `--update-snapshot` 才會在 normal validation 及建立輸出目錄之前，為選中的完整 workbook 建立或覆蓋有差異的 XML；相同 bytes 的 XML 保持不動，snapshot symlink 會被拒絕。此選項與 `--dry-run` 一起使用仍會更新 XML，但不執行 testcase tool。XML 只包含 sidecar 映射後的 Sheet、Case、tag、data 與 stage 值，不包含 Excel 樣式、欄寬、註解或未配置 Sheet。含換行或 `&`、`<`、`>` 的字串會優先寫成 CDATA；內容中的 `]]>` 會自動拆成相鄰 CDATA section，讀回時仍是原字串。請勿手動修改 XML。
-
-範例 validation JSON：
-
-```json
-{
-  "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
-  "valid": false,
-  "mode": "package",
-  "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
-  "diagnostics": [{
-    "code": "ATT-TPL-104",
-    "severity": "ERROR",
-    "message": "assert action requires a non-blank expression",
-    "file": "templates/PAYMENT_VERIFY/template.yaml",
-    "field": "actions.assertStatus.expression",
-    "sheet": null, "row": null, "column": null,
-    "template": "PAYMENT_VERIFY", "action": "assertStatus",
-    "suggestion": "Add expression to the assert action"
-  }]
-}
-```
-
-每條 diagnostic 都包含穩定 code、severity、檔案、字段，並在適用時提供 sheet、row、column、template、action、詳細原因和修正建議。Human 格式以兩格縮排顯示 diagnostic header、四格縮排顯示後續資料，且各 diagnostic block 之間保留一個空行；JSON 格式不變。驗證會使用與 run 相同的 Context 與 `#{...}` parser，因而會在執行前拒絕未知 Context、錯誤 stage/action ID、未知 built-in/tool、錯誤參數，以及 render payload 內的錯誤調用；validation 不會真的執行 built-in 或外部 tool。
-
-Human `run` 預設顯示 run/suite/Case/stage/action lifecycle，並將每個完整 Case-log block（包括模板內容、tool input/argv/stdout/stderr）鏡像到 console。`--verbose` 仍接受但屬於相容性選項；`--quiet` 可抑制這個預設輸出，且明確同時指定 `--verbose --quiet` 仍會報錯。輸出可能包含敏感案例資料，只應在合適的終端使用。
-
-Context 引用可在整條路徑末尾加 `?`：`${EXEC.INPUT.response.body.missing?}`。只要任一 map、list、root-owned Context 或中間 segment 不存在，結果就是真正的 `null`；若路徑存在但最後值本身是 `null`，結果同樣是 `null`。`${path}` 仍是 strict；optional 不會抑制 ambiguous、malformed 或 scalar 上索引等 invalid traversal 錯誤，因此可安全用於 `is null`、`nvl`、`coalesce`、插值、Tool argument、assert 和 assign。
-
-不帶參數或使用 `--help` 顯示完整用法。
-
-驗證錯誤代碼、選擇規則及 stage 執行語義見 [Reference Manual V3：Validation JSON contract](09_Reference_Manual_V3.md#validation-json-contract)。
-
-## 9. 報告、CI、文件、打包與清理
+Run only the completely offline case:
 
 ```sh
-./att.sh report --run-id <RunID>
-./att.sh docs
-./att.sh build
-./att.sh clean
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 ```
 
-- 單頁測試報告：`output/<RunID>/report/index.html`
-- 單頁套件文件：`build/docs/index.html`
-- 結果工作簿：`output/<RunID>/workbooks/`
-- CI JSON：`output/<RunID>/ci/summary.json`
-- CI JUnit XML：`output/<RunID>/ci/junit.xml`
-- JUnit HTML 報告：`output/<RunID>/report/junit.html`（可直接開啟閱讀）
-- 最近完成 run 的 archive：`build/att-<RunID>.tar.gz`
+The expected result is `PASS`.
 
-單頁測試報告的 Action Results table 分別顯示 Stage、Action、Description、Status、Message。Description 是 action 完成後的最終渲染值；同一欄位亦寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Case Expected 仍按順序包含 assert description 與 `expected`。
+The high-level status model is:
 
-`./att.sh docs` 的 Testcases 區段先按 workbook、再按 Sheet 分組。Sheet 名稱只顯示於分組標題，table 依序包含 Case ID、Name、Tags、Stages → Templates 及最後一欄 Expected Result；Expected Result 依 action 順序組合所有 assert action 在 validation 階段可解析的 `description` 與 `expected`，未解析的 runtime placeholder 保持原樣，換行統一為 LF。
-
-Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的非法字符及保留名稱限制。`report --run-id` 只接受合法 Run ID，不接受檔案路徑。
-
-`report --run-id` 會同時重建 `report/index.html` 和 `report/junit.html`；run 目錄或 manifest 若是跳出 output root 的 symlink，命令會拒絕處理。
-
-清理只針對 ATT 產生的最終用戶輸出：
-
-- `./att.sh clean`：只清除設定的 `outputDirectory`、`build/docs` 及 `build/att-*.tar.gz`；不會清除案例、模板、工具、設定或文件。
-
-`clean` 拒絕清除專案根目錄、專案外目錄、source/configuration directory 或會跳出專案的 symlink。
-
-報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V3：Report Reference](09_Reference_Manual_V3.md#11-results-reports-and-evidence)。
-
-## 10. 常見問題與安全提醒
-
-- 找不到模板：檢查目錄中的 `template.yaml`、symbolic name 或完整路徑。
-- Context variable 報錯：查看 `requestedPath`、最深 `currentNode`、`missingSegment` 或 `ATT-CTX-002` candidates。`${...}` 可省略前段 path，但 suffix 必須以 case-sensitive segment 唯一識別一個當前可讀節點；為避免錯誤日誌過大，ATT 不再附帶完整 Context tree。案例中確實存在但值為 blank 的 optional 欄位仍會得到空字串。
-- Tool 驗證失敗：檢查 unknown、missing required 或 duplicate argument。
-- YAML cell 失敗：確認內容是 map 或 scalar shorthand；檢查重複 key 和未知字段。
-- 中文連結：V2.2 使用 Unicode-safe anchor，可支援中文 Case ID、模板名及路徑。
-- JSON／XML output ERROR：檢查 raw output 和 parser diagnostic；JSON duplicate key、非合法 JSON，以及 XML DTD/外部 entity 都會被拒絕。
-- ERROR 與 FAIL：ERROR 表示執行可靠性問題，優先查看 tool attempt、stdout、stderr、raw output 和 case log；FAIL 表示 assertion 的預期與實際不一致。
-
-更多配置錯誤診斷及常見問題可參考 [Reference Manual V3](09_Reference_Manual_V3.md)。
-
-## 11. 案例開發參考
-
-### 11.1 新增案例行
-
-1. Excel 表頭與 sidecar 欄名匹配時忽略空格、tab、換行及其他 Unicode whitespace，但其他字符及大小寫必須一致。
-2. sidecar `id` 必須在 package 內唯一；每個 sheet 的 row Case ID 必須有效，ATT 會自動組成 `<workbookId>.<groupId>.<rowCaseId>`。
-3. 只有 sidecar 以 `(yaml)` 標識的欄位才會解析 YAML，Excel 實際表頭不包含 `(yaml)`。
-4. required stage 的模板欄可為包含 `name` 的 YAML map，或直接使用 scalar shorthand。
-5. Case ID 必須通過非法字符檢查，因為它會原樣成為輸出目錄名。
-6. 優先執行 `./att.sh validate --package`；只做局部開發時使用 `--selected`。
-
-案例欄位示例：
-
-| 欄位 | 示例 |
+| Status | Meaning |
 |---|---|
-| 案例編號 | `TC012` |
-| 案例名稱 | `退款金額小數測試` |
-| 標籤 | `refund,edge,decimal` |
-| 預期結果 | `status: SUCCESS\nrejectCode: '0000'` |
-| 執行模板 | `name: PAYMENT_INVOKE` |
-| 驗證模板 | `name: PAYMENT_VERIFY` |
+| `PASS` | execution completed and assertions passed |
+| `FAIL` | execution completed but a business assertion failed |
+| `ERROR` | execution/runtime/integration failure |
+| `INVALID` | validation prevented execution |
+| `SKIPPED` | execution was intentionally skipped |
 
-### 11.2 Stage、Template、Action 設計
+You do not need the detailed aggregation rules yet; see [Validation and Diagnostics](reference/12_validation_diagnostics.md) when troubleshooting real suites.
 
-每個 stage 未配置時，ATT 預設 `runWhen: normal`、`onFailure: stop`：主流程失敗後，後續 normal stage 不再執行。`runWhen: onSuccess` 適合驗證；`runWhen: onFailure` 適合補償或診斷；`runWhen: always` 適合清理。`onFailure: continue` 只應用於不阻斷後續流程的證據收集，且不會將案例結果改為 PASS。
+## 8. Inspect the result
 
-例如 invoke 使用預設 normal/stop，verify 使用 onSuccess，rollback 使用 onFailure，cleanup 使用 always：
+ATT writes each normal run below `output/<runId>/` and updates `output/latest-run.yaml` only for a completed run.
 
-```yaml
-- {key: invoke, template: 執行模板, required: true}
-- {key: verify, template: 驗證模板, required: true, runWhen: onSuccess}
-- {key: rollback, template: 回滾模板, required: false, runWhen: onFailure, onFailure: continue}
-- {key: cleanup, template: 清理模板, required: false, runWhen: always, onFailure: continue}
-```
-
-完整的判斷表與非阻斷診斷場景見 [Reference Manual V3：Stage execution controls](09_Reference_Manual_V3.md#stage-execution-controls)。
-
-模板目錄必須直接包含 `template.yaml`。大型 XML、JSON、YAML 或文字內容應放在模板目錄的 request 文件中，由 `render` action 產生輸出。
-
-action 的 `onFailure` 與 stage 的設定獨立：每個 action 只可設為 `stop` 或 `continue`，未設定即為 `stop`。`stop` 停止同一模板後續 action；`continue` 僅容許後續 action 執行，仍會保留失敗結果。詳見 [Reference Manual V3：Template and action](09_Reference_Manual_V3.md#template-and-action)。
-
-目前 scope 內完成的 Action 結果可用 `${EXEC.ACTIONS.<actionId>.output.result}`（或兼容的 `${ACTIONS.<actionId>.output.result}`）讀取；Flow 返回後 parent 只能讀取 Flow invocation 的標準 outcome，不能直接讀取其 internal Action ID。Stage／Flow history 保存在 execution evidence；`CASE.STAGES` 不是 reusable component 的 expression path。
-
-### 11.3 表達式與工具呼叫
-
-字串 literal 必須加引號；數字及布爾值可保留原生型別：
-
-```yaml
-assert: "${EXEC.ACTIONS.callApi.output.result.status} == 'SUCCESS'"
-assert: "${EXEC.ACTIONS.selectTxn.output.result.effectRows} >= 1 and true"
-```
-
-內置函數可處理簡單轉換：
+Start with these artifacts:
 
 ```text
-#{upper(value=${EXEC.INPUT.currency})}
-#{coalesce(${EXEC.INPUT.optionalReference}, 'NO-REFERENCE')}
-#{boolean(yes)}
+output/<runId>/
+  run.yaml
+  ... case output ...
+  ... case.log ...
 ```
 
-外部工具只接受已在 `config/config.yaml` 或其 `toolGroups` 文件宣告的命名參數。全局工具使用 `tool(...)`，組內工具使用 `group.tool(...)`。參數可用 `argName: --reference` 在有值時生成名稱和值兩個 argv；optional 空值會連名稱一起省略。省略／清空 `argName` 表示 process positional argument。多值直接傳 array，例如 `keywords=['PAYMENT', 'POSTED']`；`argNameMode: once`（預設）或 `repeat` 控制名稱是否逐值重複。
+Then generate or inspect the HTML report using the normal report workflow documented in [Results, Reports, and Evidence](reference/11_results_reports_evidence.md).
 
-### 11.4 V2.3 開發檢查表
+For the Quick Start case, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
 
-- config、sidecar 和 template 都有正確的 `schemaVersion`。
-- Workbook 與 sidecar 檔名相同且位於同一目錄。
-- Case ID、標籤及模板名稱清晰且唯一。
-- YAML cell 可解析，沒有重複 key、未知字段或錯誤資料型別，且不與 stage data key 重複。
-- 工具參數沒有 unknown、missing required 或 duplicate。
-- 工具組 ID 唯一，使用 `group.tool` 調用；argv list 每項都是預期的一個 process argument。
-- SSH 工具已在執行主機準備 key/agent 與 known-host 記錄，且 package validation 無法替代連線測試。
-- 每個 action 都符合其 type 專屬字段要求；只為可安全重試的 tool action 設定 retry。
-- render glob 至少匹配一個安全的普通文件，`renderAs` 正確，輸出相對路徑在同一 Case 內不衝突。
-- assert action 使用 `assert`／`expected`／`actual`，報表多行值以 LF 保存；不使用舊 `expression` 或拼錯的 `acture`／`actural`。
-- JSON/XML tool output 選擇正確，並以解析後結構撰寫 assertion。
-- 範例及 log 不包含敏感資料。
-- `./att.sh validate --package` 通過後再執行選定案例。
-- CI 使用 `--ci-output junit,json`，並保留 `ci/summary.json`、`ci/junit.xml`、`report/junit.html` 和 run manifest。
+## 9. See a controlled failure
 
-完整配置、Context、Flow、load、報告、打包及診斷內容見 [ATT V3.5.1 Reference Manual](09_Reference_Manual_V3.md)。
+A useful way to learn ATT is to make one business assertion fail without breaking the framework.
+
+In `testcase/quick_start.xlsx`, change `QS001` `Expected` from `100` to `999`, then regenerate the snapshot:
+
+```sh
+./att.sh snapshot --suite testcase/quick_start.xlsx
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+```
+
+The case should now be `FAIL`, not `ERROR`: ATT executed successfully, but the assertion was false.
+
+Change the value back to `100` and regenerate the snapshot when finished.
+
+## 10. Add a real Tool call
+
+The same Template already contains one optional Tool Action:
+
+```yaml
+readDate:
+  type: tool
+  call: "#{sample.getAcDate()}"
+  runWhen: "#{${EXEC.INPUT.useTool} == true}"
+```
+
+`QS001` has `Use Tool = false`, so this Action is skipped. `QS002` has `Use Tool = true`.
+
+Run the second case:
+
+```sh
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
+```
+
+This calls the checked-in `sample.getAcDate` Tool from `config/tools/sample.yaml`. It is a local command-backed example, so the tutorial remains offline.
+
+The important mental model is:
+
+```text
+Testcase input -> Template Action -> Tool -> Action output/evidence
+```
+
+For complete Tool configuration, command-backed vs call-backed behavior, arguments, outputs, and evidence, use [Resources - Tool](reference/05_resources/tools.md).
+
+## 11. Run the whole Quick Start workbook
+
+Once both individual cases make sense, run them together:
+
+```sh
+./att.sh run --suite testcase/quick_start.xlsx
+```
+
+You now have the basic ATT authoring loop:
+
+```text
+edit Excel / Template
+        |
+        v
+snapshot
+        |
+        v
+validate
+        |
+        v
+run
+        |
+        v
+inspect log/report
+```
+
+That loop is the foundation for larger SIT/UAT packages.
+
+## 12. What to learn next
+
+Do not try to learn every ATT feature from this tutorial. Follow the Reference chapter that matches the task you are doing:
+
+| I want to... | Read next |
+|---|---|
+| understand workbook, sidecar, snapshot, Template, Flow | [Test Authoring](reference/02_test_authoring.md) |
+| understand `EXEC`, `META`, `EXEC.VARS`, `EXEC.ACTIONS`, `output` | [Runtime and Context](reference/03_runtime_context.md) |
+| debug one Template/Flow/Tool without Excel | [Standalone Debug](reference/04_execution_modes/debug.md) |
+| run load tests | [Load](reference/04_execution_modes/load.md) |
+| call scripts/programs or framework-native Tools | [Tool](reference/05_resources/tools.md) |
+| query/update a database | [DBHelper](reference/05_resources/dbhelper.md) |
+| send/receive/request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
+| switch SIT/UAT resource bindings | [Environment and Test Data](reference/06_environment_testdata.md) |
+| use `${...}` and `#{...}` correctly | [Expressions](reference/07_expressions.md) |
+| add assertion, timeout, retry, `runWhen`, `onFailure` | [Reliability and Execution Control](reference/08_reliability_execution_control.md) |
+| look up commands and options | [CLI Reference](reference/10_cli.md) |
+| troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Diagnostics](reference/12_validation_diagnostics.md) |
+| integrate ATT into CI or package it | [CI, Packaging, and Operations](reference/13_ci_packaging_operations.md) |
+
+For field-by-field supported behavior, use the generated [ATT V3.5.1 Reference Manual](generated/reference.html) rather than extending this tutorial into a second manual.
