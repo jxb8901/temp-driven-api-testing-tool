@@ -6,7 +6,9 @@ package att.template;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One ordered V2 action inside a template.
@@ -47,7 +49,6 @@ public class TemplateAction {
     public TemplateAction(String key, Map<String, Object> values, String schemaVersion) {
         this.key = key;
         Map<String, Object> data = values == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(values);
-        this.raw = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(data));
         this.id = text(data.get("id"), key);
         this.type = text(data.get("type"), "tool");
         this.description = text(data.get("description"), "");
@@ -73,6 +74,19 @@ public class TemplateAction {
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
         this.use = text(data.get("use"), "");
         this.runWhen = text(data.get("runWhen"), "");
+
+        validateDirectDbExecutionControls();
+
+        // PackageValidator historically uses raw() to reject fields that are not
+        // legal for an Action type. Direct DB timeout/query-retry are now legal,
+        // so hide only those two already-validated fields from that legacy
+        // forbidden-field check while retaining every other raw key.
+        Map<String, Object> validationRaw = new LinkedHashMap<String, Object>(data);
+        if ("db".equalsIgnoreCase(this.type)) {
+            validationRaw.remove("timeoutMs");
+            if (!this.query.isEmpty()) validationRaw.remove("retry");
+        }
+        this.raw = Collections.unmodifiableMap(validationRaw);
     }
 
     public String key() { return key; }
@@ -104,6 +118,42 @@ public class TemplateAction {
     public Long timeoutMs() { return timeoutMs; }
     public String use() { return use; }
     public String runWhen() { return runWhen; }
+
+    private void validateDirectDbExecutionControls() {
+        if (!"db".equalsIgnoreCase(type)) return;
+        if (timeoutMs != null && (timeoutMs.longValue() < 1L || timeoutMs.longValue() > 3600000L)) {
+            throw new IllegalArgumentException("DB Action timeoutMs must be 1..3600000: " + id);
+        }
+        if (retry.isEmpty()) return;
+        if (!update.isEmpty()) {
+            throw new IllegalArgumentException("Automatic retry is not supported for mutating DB Actions because the database execution outcome may be uncertain after timeout or failure: " + id);
+        }
+        if (query.isEmpty()) return; // exactly-one query/update is reported by normal DB validation.
+        int maxAttempts = integer(retry.get("maxAttempts"), -1);
+        int intervalMs = integer(retry.get("intervalMs"), -1);
+        if (maxAttempts < 2 || maxAttempts > 10) throw new IllegalArgumentException("retry.maxAttempts must be 2..10: " + id);
+        if (intervalMs < 0 || intervalMs > 3600000) throw new IllegalArgumentException("retry.intervalMs must be 0..3600000: " + id);
+        Object configured = retry.get("retryOn");
+        if (!(configured instanceof Iterable)) throw new IllegalArgumentException("retry.retryOn must be a non-empty list: " + id);
+        Set<String> categories = new LinkedHashSet<String>();
+        for (Object value : (Iterable<?>) configured) {
+            String category = String.valueOf(value);
+            if (!("ASSERTION".equals(category) || "TIMEOUT".equals(category))) {
+                throw new IllegalArgumentException("retry.retryOn supports ASSERTION and TIMEOUT only: " + id);
+            }
+            if (!categories.add(category)) throw new IllegalArgumentException("retry.retryOn must contain unique values: " + id);
+        }
+        if (categories.isEmpty()) throw new IllegalArgumentException("retry.retryOn must not be empty: " + id);
+        if (categories.contains("ASSERTION") && assertion.trim().isEmpty()) {
+            throw new IllegalArgumentException("retryOn ASSERTION requires action assert: " + id);
+        }
+    }
+
+    private static int integer(Object value, int fallback) {
+        if (value == null) return fallback;
+        try { return Integer.parseInt(String.valueOf(value)); }
+        catch (NumberFormatException error) { return fallback; }
+    }
 
     private static String text(Object value, String defaultValue) {
         return value == null ? defaultValue : String.valueOf(value);
