@@ -1,4 +1,4 @@
-# ATT 3.5.1 - Automated Testing Tool
+# ATT 3.5.2 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 

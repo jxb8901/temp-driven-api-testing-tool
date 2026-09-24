@@ -1,7 +1,7 @@
-# ATT V3.5.1 使用手冊與參考
+# ATT V3.5.2 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.1
+Version: 3.5.2
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->

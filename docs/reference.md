@@ -1,7 +1,7 @@
-# ATT V3.5.1 Reference Manual
+# ATT V3.5.2 Reference Manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.1
+Version: 3.5.2
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
