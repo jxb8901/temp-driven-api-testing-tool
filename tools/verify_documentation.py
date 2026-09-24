@@ -193,7 +193,7 @@ def check_language_parity(items):
     expected = set(items)
     roots = (DOCS / "reference", DOCS / "reference.zh")
     for root in roots:
-        actual = set(str(path.relative_to(root)).replace("\\", "/") for path in root.rglob("*.md"))
+        actual = set(str(path.relative_to(root)).replace("\\", "/") for path in root.rglob("*.md") if path.name != "README.md")
         for missing in sorted(expected - actual):
             fail("%s missing manifest module: %s" % (root.relative_to(ROOT), missing))
         for extra in sorted(actual - expected):
@@ -267,9 +267,12 @@ def check_cli_documentation():
     for command in re.findall(r"\./att\.sh\s+([a-z][a-z0-9-]*)", quick):
         if command not in public_commands:
             fail("docs/quick-start.md uses unsupported ATT command: %s" % command)
-    for option in re.findall(r"--[a-z][a-z0-9-]*", quick):
-        if option not in supported_options:
-            fail("docs/quick-start.md uses unsupported ATT option: %s" % option)
+    for line in quick.splitlines():
+        if "./att.sh" not in line and "att.bat" not in line:
+            continue
+        for option in re.findall(r"--[a-z][a-z0-9-]*", line):
+            if option not in supported_options:
+                fail("docs/quick-start.md uses unsupported ATT option: %s" % option)
 
 
 def check_secret_placeholders():

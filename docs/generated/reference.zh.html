@@ -370,6 +370,8 @@ id="toc-生成输出模式摘要">生成输出模式摘要</a></li>
 <li><a href="#standalone-debug-配置例子"
 id="toc-standalone-debug-配置例子">Standalone debug 配置例子</a></li>
 <li><a href="#退出码" id="toc-退出码">退出码</a></li>
+<li><a href="#完整選項矩陣351"
+id="toc-完整選項矩陣351">完整選項矩陣（3.5.1）</a></li>
 </ul></li>
 <li><a href="#11-結果報告與-evidence" id="toc-11-結果報告與-evidence">11
 結果、報告與 Evidence</a>
@@ -1471,7 +1473,7 @@ type、名称和 path；iteration identity 保留在 <code>EXEC.ID</code> 与
 <code>EXEC.INVOCATION</code> 不是公开的 load API。完整的
 closed／arrival-rate 配置、CLI override、target
 形式、threshold、evidence 和 validation 例子见 <a
-href="../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
+href="../../examples/load/README.md"><code>examples/load/README.md</code></a>。</p>
 <p><code>att load</code> 会在 scheduler 启动前完成 scenario 和 target
 validation，再选择两个 scheduler 之一。closed mode 为 Virtual User
 保持稳定 identity，等待 target 完成后才进入 think time 和下一次
@@ -1493,7 +1495,7 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb26-1"><a href="#
 <span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--format</span> json</span>
 <span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/tool.yaml <span class="at">--duration</span> 100ms <span class="at">--run-id</span> load-tool-example</span></code></pre></div>
 <p><a
-href="../examples/load/README.md"><code>examples/load/README.md</code></a>
+href="../../examples/load/README.md"><code>examples/load/README.md</code></a>
 是维护中的可复制参考，涵盖 Template、Flow、Tool、DB/MQ pool
 sizing、threshold、evidence、CLI override
 和非法配置。<code>LoadAcceptanceTest</code> 会先校验全部六个例子的
@@ -2126,7 +2128,7 @@ timeout/retry（#39）應延伸本章既有概念，而不是再建立一套 rel
 model。</p>
 <h2 id="09-配置參考">09 配置參考</h2>
 <p>本章是作者编写配置时的权威阅读参考。下面提到的 <a
-href="../schemas/"><code>schemas/</code></a>
+href="../../schemas/"><code>schemas/</code></a>
 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。</p>
 <h3 id="配置层与优先级">配置层与优先级</h3>
 <table>
@@ -2224,7 +2226,7 @@ URL 等 physical connection details；MQHelper 都保持
 <code>id: payment</code>，只改变 host、queue manager、port 和
 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见
 <a
-href="../examples/environments/README.md"><code>examples/environments/README.md</code></a>。</p>
+href="../../examples/environments/README.md"><code>examples/environments/README.md</code></a>。</p>
 <p>两种环境使用完全相同的 Action 定义：</p>
 <div class="sourceCode" id="cb38"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
@@ -2301,12 +2303,13 @@ testcase/template root、report policy 或 package structure
 <code>--config config/config.yaml --env &lt;NAME&gt;</code>。</p>
 <h3 id="schema-catalog">Schema catalog</h3>
 <p><a
-href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
-使用 <code>att-schema-catalog/v2.6</code>。当前主配置、Tool
-group、sidecar 与 template 分别为
-<code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v2.6</code>。旧
-schema 保持有限 read compatibility，但旧 <code>EXIT_CODE</code> retry 与
-sidecar timeout 必须迁移。</p>
+href="../../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
+使用 <code>att-schema-catalog/v3.0</code>。当前主配置、Tool
+group、sidecar、Template 与 Flow 分别为
+<code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v3.0</code>
+与 <code>att-flow/v3.0</code>。旧 schema 保持有限 read
+compatibility，但旧 <code>EXIT_CODE</code> retry 与 sidecar timeout
+必须迁移。</p>
 <h3 id="全局配置">全局配置</h3>
 <div class="sourceCode" id="cb41"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
@@ -3221,6 +3224,32 @@ canonical Context 节点；Stage 历史仍由旧的 <code>CASE.STAGES</code>
 </tr>
 </tbody>
 </table>
+<h3 id="完整選項矩陣351">完整選項矩陣（3.5.1）</h3>
+<p><code>--config &lt;file&gt;</code> 選擇 base
+configuration；<code>--env &lt;name&gt;</code> 從
+<code>att-config/v2.6</code> 選擇 environment profile，適用於
+<code>run</code>、<code>validate</code>、<code>debug</code> 和
+<code>load</code>。<code>--help</code> 顯示說明。<code>--case-id</code>
+是 <code>--case</code> 的相容別名。<code>--parallel</code> 是已棄用的
+<code>--allow-parallel-runs</code>
+相容拼法，應優先使用後者。<code>--queue</code> 與
+<code>--allow-parallel-runs</code> 控制共用 output root 的 process-level
+concurrency，不會在單一 run 內增加 Case worker。<code>--profile</code>
+為 <code>run</code> 或 <code>load</code> 寫入 performance
+diagnostics。</p>
+<p>Load 以 scenario 為基礎；明確提供的 workload option
+會先覆蓋對應欄位，再重新驗證 effective scenario：</p>
+<div class="sourceCode" id="cb54"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
+<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
+<span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
+<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
+<p>完整 workload override 為
+<code>--users</code>、<code>--arrival-rate</code>、<code>--warmup</code>、<code>--ramp-up</code>、<code>--duration</code>、<code>--ramp-down</code>、<code>--think-time</code>、<code>--max-concurrent</code>
+和 <code>--overload-policy</code>；<code>--think-time</code> 只適用
+closed-VU。其餘 selection/output 選項仍受各 command
+約束：<code>--suite</code>、<code>--suite-dir</code>、<code>--case</code>/<code>--case-id</code>、<code>--tag</code>、<code>--exclude-tag</code>、<code>--all</code>、<code>--run-id</code>、<code>--output-dir</code>、<code>--format</code>、<code>--quiet</code>、<code>--verbose</code>、<code>--ci-output</code>、<code>--dry-run</code>、<code>--fail-fast</code>、<code>--rerun-failed</code>、<code>--update-snapshot</code>、<code>--package</code>、<code>--selected</code>、<code>--input</code>、<code>--queue</code>、<code>--parallel</code>、<code>--allow-parallel-runs</code>、<code>--profile</code>、<code>--config</code>、<code>--env</code>
+和 <code>--help</code> 只在對應 command contract 允許時有效。</p>
 <h2 id="11-結果報告與-evidence">11 結果、報告與 Evidence</h2>
 <h3 id="运行目录">运行目录</h3>
 <pre class="text"><code>&lt;outputDirectory&gt;/&lt;RunID&gt;/
@@ -3337,8 +3366,8 @@ schema/catalog 版本的 SHA-256 hash。</p>
 <h2 id="12-驗證與診斷">12 驗證與診斷</h2>
 <h3 id="先从校验开始">先从校验开始</h3>
 <p>在每次工作簿、侧车、模板或工具变更后执行：</p>
-<div class="sourceCode" id="cb55"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb56"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。</p>
 <table>
 <thead>
@@ -3515,11 +3544,11 @@ stderr。优先使用工具脚本中经批准的秘密注入方式。在共享�
 <h2 id="13-ci打包與運維">13 CI、打包與運維</h2>
 <p>ATT 支援 source-tree development 以及 offline release package。</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb56"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb57"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> 會執行 release gate、重新生成 modular Reference
 Manual、建立 application jar 與 release/source archive，並驗證 packaged
 launcher。Reference generation 另外需要 Python 3 與 Pandoc。</p>

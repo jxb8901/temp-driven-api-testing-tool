@@ -389,6 +389,9 @@ syntax</a></li>
 id="toc-standalone-debug-inputs-and-outputs">Standalone debug inputs and
 outputs</a></li>
 <li><a href="#exit-codes" id="toc-exit-codes">Exit codes</a></li>
+<li><a href="#complete-option-matrix-351"
+id="toc-complete-option-matrix-351">Complete option matrix
+(3.5.1)</a></li>
 </ul></li>
 <li><a href="#11-results-reports-and-evidence"
 id="toc-11-results-reports-and-evidence">11 Results, Reports, and
@@ -1732,7 +1735,7 @@ name, and path; iteration identity remains under <code>EXEC.ID</code>
 and <code>EXEC.LOAD.*</code>, and secrets are excluded. Root-level
 <code>LOAD.*</code>, <code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
 and <code>EXEC.INVOCATION</code> are not public load APIs. See <a
-href="../examples/load/README.md"><code>examples/load/README.md</code></a>
+href="../../examples/load/README.md"><code>examples/load/README.md</code></a>
 for complete closed/arrival-rate configurations, CLI overrides, target
 forms, thresholds, evidence, and validation examples.</p>
 <p><code>att load</code> validates the scenario and target before
@@ -2785,9 +2788,9 @@ reliability model.</p>
 <h2 id="09-configuration-reference">09 Configuration Reference</h2>
 <p>This chapter is the authoritative reading reference for
 author-authored configuration. The files below <a
-href="../schemas/"><code>schemas/</code></a> remain the machine-readable
-contract. Schema validation runs before cross-field and filesystem
-validation.</p>
+href="../../schemas/"><code>schemas/</code></a> remain the
+machine-readable contract. Schema validation runs before cross-field and
+filesystem validation.</p>
 <h3 id="configuration-layers-and-precedence">Configuration layers and
 precedence</h3>
 <table>
@@ -2889,7 +2892,7 @@ connection details differ. The MQHelper descriptors both use
 <code>id: payment</code>, while host, queue manager, port, and channel
 differ. A complete descriptor pair, including pool settings and safe
 evidence policy, is in <a
-href="../examples/environments/README.md"><code>examples/environments/README.md</code></a>.</p>
+href="../../examples/environments/README.md"><code>examples/environments/README.md</code></a>.</p>
 <p>The Action definitions remain identical:</p>
 <div class="sourceCode" id="cb52"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
@@ -2988,97 +2991,98 @@ dbhelper schema remains V2.5.</p>
 <td>Debug input</td>
 <td><code>att-debug/v1.0</code></td>
 <td><a
-href="../schemas/att-debug-v1.0.schema.json">att-debug-v1.0.schema.json</a></td>
+href="../../schemas/att-debug-v1.0.schema.json">att-debug-v1.0.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Global configuration</td>
 <td><code>att-config/v2.6</code></td>
 <td><a
-href="../schemas/att-config-v2.6.schema.json">att-config-v2.6.schema.json</a></td>
+href="../../schemas/att-config-v2.6.schema.json">att-config-v2.6.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy global configuration (read compatibility)</td>
 <td><code>att-config/v2.1</code>, <code>att-config/v2.2</code>,
 <code>att-config/v2.5</code></td>
 <td><a
-href="../schemas/att-config-v2.5.schema.json">att-config-v2.5.schema.json</a></td>
+href="../../schemas/att-config-v2.5.schema.json">att-config-v2.5.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Dbhelper instance</td>
 <td><code>att-dbhelper/v2.5</code></td>
 <td><a
-href="../schemas/att-dbhelper-v2.5.schema.json">att-dbhelper-v2.5.schema.json</a></td>
+href="../../schemas/att-dbhelper-v2.5.schema.json">att-dbhelper-v2.5.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>MQ helper instance</td>
 <td><code>att-mqhelper/v1.0</code></td>
 <td><a
-href="../schemas/att-mqhelper-v1.0.schema.json">att-mqhelper-v1.0.schema.json</a></td>
+href="../../schemas/att-mqhelper-v1.0.schema.json">att-mqhelper-v1.0.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Tool group</td>
 <td><code>att-tool-group/v2.6</code></td>
 <td><a
-href="../schemas/att-tool-group-v2.6.schema.json">att-tool-group-v2.6.schema.json</a></td>
+href="../../schemas/att-tool-group-v2.6.schema.json">att-tool-group-v2.6.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy Tool group (read compatibility)</td>
 <td><code>att-tool-group/v2.2</code></td>
 <td><a
-href="../schemas/att-tool-group-v2.2.schema.json">att-tool-group-v2.2.schema.json</a></td>
+href="../../schemas/att-tool-group-v2.2.schema.json">att-tool-group-v2.2.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Workbook sidecar</td>
 <td><code>att-sidecar/v2.2</code></td>
 <td><a
-href="../schemas/att-sidecar-v2.2.schema.json">att-sidecar-v2.2.schema.json</a></td>
+href="../../schemas/att-sidecar-v2.2.schema.json">att-sidecar-v2.2.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy workbook sidecar (without timeout)</td>
 <td><code>att-sidecar/v2.1</code></td>
 <td><a
-href="../schemas/att-sidecar-v2.1.schema.json">att-sidecar-v2.1.schema.json</a></td>
+href="../../schemas/att-sidecar-v2.1.schema.json">att-sidecar-v2.1.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Template descriptor</td>
 <td><code>att-template/v2.6</code></td>
 <td><a
-href="../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a></td>
+href="../../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Legacy template descriptor (read compatibility)</td>
 <td><code>att-template/v2.5</code>, <code>att-template/v2.3</code></td>
 <td><a
-href="../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
+href="../../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>Run manifest</td>
 <td><code>att-run/v2.1</code></td>
 <td><a
-href="../schemas/att-run-v2.1.schema.json">att-run-v2.1.schema.json</a></td>
+href="../../schemas/att-run-v2.1.schema.json">att-run-v2.1.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>Validation JSON</td>
 <td><code>att-validation/v2.1</code></td>
 <td><a
-href="../schemas/att-validation-v2.1.schema.json">att-validation-v2.1.schema.json</a></td>
+href="../../schemas/att-validation-v2.1.schema.json">att-validation-v2.1.schema.json</a></td>
 </tr>
 <tr class="even">
 <td>CI summary</td>
 <td><code>att-ci-summary/v2.1</code></td>
 <td><a
-href="../schemas/att-ci-summary-v2.1.schema.json">att-ci-summary-v2.1.schema.json</a></td>
+href="../../schemas/att-ci-summary-v2.1.schema.json">att-ci-summary-v2.1.schema.json</a></td>
 </tr>
 <tr class="odd">
 <td>JUnit XML</td>
 <td>XSD</td>
-<td><a href="../schemas/att-junit-v2.1.xsd">att-junit-v2.1.xsd</a></td>
+<td><a
+href="../../schemas/att-junit-v2.1.xsd">att-junit-v2.1.xsd</a></td>
 </tr>
 <tr class="even">
 <td>Diagnostic codes</td>
 <td><code>att-diagnostic-catalog/v2.1</code></td>
 <td><a
-href="../schemas/diagnostic-codes.yaml">diagnostic-codes.yaml</a></td>
+href="../../schemas/diagnostic-codes.yaml">diagnostic-codes.yaml</a></td>
 </tr>
 </tbody>
 </table>
@@ -3416,7 +3420,7 @@ case. <code>connection.isolation</code> is <code>driverDefault</code>,
 <code>repeatableRead</code>, or <code>serializable</code>. Driver
 <code>properties</code> is a string-to-string map. Complete
 <code>${ENV:NAME}</code> values resolve while loading configuration;
-missing variables are errors. See <a href="#database-helpers">Database
+missing variables are errors. See <a href="#52-dbhelper">Database
 helpers</a> for Action, expression, result, security, and lifecycle
 behaviour.</p>
 <h3 id="mq-helper-configuration">MQ helper configuration</h3>
@@ -4375,6 +4379,45 @@ JSON document; progress and human diagnostics go to stderr.</p>
 </tr>
 </tbody>
 </table>
+<h3 id="complete-option-matrix-351">Complete option matrix (3.5.1)</h3>
+<p><code>--config &lt;file&gt;</code> selects the base configuration.
+<code>--env &lt;name&gt;</code> selects one environment profile from an
+<code>att-config/v2.6</code> configuration and is valid for
+<code>run</code>, <code>validate</code>, <code>debug</code>, and
+<code>load</code>. <code>--help</code> prints help.
+<code>--case-id</code> is a compatibility synonym for
+<code>--case</code>. <code>--parallel</code> is the deprecated
+compatibility spelling for <code>--allow-parallel-runs</code>; prefer
+the latter. <code>--queue</code> and <code>--allow-parallel-runs</code>
+control process-level output-root concurrency, not Case workers.
+<code>--profile</code> writes performance diagnostics for
+<code>run</code> or <code>load</code>.</p>
+<p>Load uses the scenario as the base and explicit workload options
+override the corresponding fields before the effective scenario is
+validated again:</p>
+<div class="sourceCode" id="cb69"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
+<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
+<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
+<p>The complete workload override set is <code>--users</code>,
+<code>--arrival-rate</code>, <code>--warmup</code>,
+<code>--ramp-up</code>, <code>--duration</code>,
+<code>--ramp-down</code>, <code>--think-time</code>,
+<code>--max-concurrent</code>, and <code>--overload-policy</code>.
+<code>--think-time</code> is closed-VU only. Common selection/output
+options remain command-specific: <code>--suite</code>,
+<code>--suite-dir</code>, <code>--case</code>/<code>--case-id</code>,
+<code>--tag</code>, <code>--exclude-tag</code>, <code>--all</code>,
+<code>--run-id</code>, <code>--output-dir</code>, <code>--format</code>,
+<code>--quiet</code>, <code>--verbose</code>, <code>--ci-output</code>,
+<code>--dry-run</code>, <code>--fail-fast</code>,
+<code>--rerun-failed</code>, <code>--update-snapshot</code>,
+<code>--package</code>, <code>--selected</code>, <code>--input</code>,
+<code>--queue</code>, <code>--parallel</code>,
+<code>--allow-parallel-runs</code>, <code>--profile</code>,
+<code>--config</code>, <code>--env</code>, and <code>--help</code> are
+accepted only where the command contract permits them.</p>
 <h2 id="11-results-reports-and-evidence">11 Results, Reports, and
 Evidence</h2>
 <h3 id="run-directory">Run directory</h3>
@@ -4539,8 +4582,8 @@ idempotent, and reports what it removed.</p>
 Diagnostics</h2>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, or tool change:</p>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb71"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>Then use the diagnostic code and structured location. Do not automate
 against message text.</p>
 <table>
@@ -4755,11 +4798,11 @@ Operations</h2>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb71"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
 Reference Manual, builds the application jar and release/source
 archives, and verifies the packaged launcher. It requires Java/Maven

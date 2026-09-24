@@ -1,6 +1,6 @@
 ## 09 配置參考
 
-本章是作者编写配置时的权威阅读参考。下面提到的 [`schemas/`](../schemas/) 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。
+本章是作者编写配置时的权威阅读参考。下面提到的 [`schemas/`](../../schemas/) 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。
 
 ### 配置层与优先级
 
@@ -56,7 +56,7 @@ environments:
 
 可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作为 common registry 的迁移来源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。实际 package 不要把共用 registry 缩减成 `tools: {}` 或 `toolGroups: []`。
 
-SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../examples/environments/README.md)。
+SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../../examples/environments/README.md)。
 
 两种环境使用完全相同的 Action 定义：
 
@@ -119,7 +119,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v2.6`。当前主配置、Tool group、sidecar 与 template 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v2.6`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.0` 与 `att-flow/v3.0`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。
 
 ### 全局配置
 

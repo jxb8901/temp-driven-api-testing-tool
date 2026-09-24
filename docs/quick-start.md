@@ -1158,7 +1158,7 @@ Run ID 也直接是 `output/<RunID>/` 的目錄名，遵循與 Case ID 相同的
 
 `clean` 拒絕清除專案根目錄、專案外目錄、source/configuration directory 或會跳出專案的 symlink。
 
-報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V3：Report Reference](09_Reference_Manual_V3.md#08-report-reference)。
+報告欄位、CI 輸出、單頁 HTML 內容及 archive 內容詳見 [Reference Manual V3：Report Reference](09_Reference_Manual_V3.md#11-results-reports-and-evidence)。
 
 ## 10. 常見問題與安全提醒
 

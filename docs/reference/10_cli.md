@@ -166,3 +166,19 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 | 1 | One or more FAIL results and no ERROR/INVALID |
 | 2 | CLI/configuration/validation/INVALID failure |
 | 3 | One or more ERROR results or unrecoverable runtime failure |
+
+### Complete option matrix (3.5.1)
+
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.6` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+
+Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+  --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
+  --max-concurrent 4 --overload-policy drop --format json
+```
+
+The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
+

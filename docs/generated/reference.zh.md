@@ -665,7 +665,7 @@ output
 | `EXEC.LOAD.PHASE` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
 | `EXEC.LOAD.RUN_STARTED_AT` | 可选的 enclosing load-run start timestamp。 |
 
-Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；iteration identity 保留在 `EXEC.ID` 与 `EXEC.LOAD.*`，并排除 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../examples/load/README.md)。
+Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；iteration identity 保留在 `EXEC.ID` 与 `EXEC.LOAD.*`，并排除 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../../examples/load/README.md)。
 
 `att load` 会在 scheduler 启动前完成 scenario 和 target validation，再选择两个 scheduler 之一。closed mode 为 Virtual User 保持稳定 identity，等待 target 完成后才进入 think time 和下一次 iteration；arrival-rate mode 使用 absolute planned due time，`maxConcurrent` 已满时记录 generator `dropped`，不排队，也不算作 SUT failure。两个 scheduler 都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`。warm-up 是真实 traffic，但默认不计入 measured threshold aggregates；成功 iteration 默认只保留 metrics，配置 sampling 后只为有界 sampled success 创建带 `case.log` 和 `case.yaml` 的 physical iteration workspace；失败则在保留 diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的 `samples/` 或 `failures/`，不会污染普通 functional run artifacts。
 
@@ -677,7 +677,7 @@ Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 
 ./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
 ```
 
-[`examples/load/README.md`](../examples/load/README.md) 是维护中的可复制参考，涵盖 Template、Flow、Tool、DB/MQ pool sizing、threshold、evidence、CLI override 和非法配置。`LoadAcceptanceTest` 会先校验全部六个例子的 schema 与 dependencies，再启动真正的 `att.FrameworkRunner load` CLI 执行短版 closed 与 arrival-rate scenario，并检查持久化 JSON、YAML 和离线 HTML report。
+[`examples/load/README.md`](../../examples/load/README.md) 是维护中的可复制参考，涵盖 Template、Flow、Tool、DB/MQ pool sizing、threshold、evidence、CLI override 和非法配置。`LoadAcceptanceTest` 会先校验全部六个例子的 schema 与 dependencies，再启动真正的 `att.FrameworkRunner load` CLI 执行短版 closed 与 arrival-rate scenario，并检查持久化 JSON、YAML 和离线 HTML report。
 
 ### Load summary 与 HTML report contract
 
@@ -969,7 +969,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 
 ## 09 配置參考
 
-本章是作者编写配置时的权威阅读参考。下面提到的 [`schemas/`](../schemas/) 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。
+本章是作者编写配置时的权威阅读参考。下面提到的 [`schemas/`](../../schemas/) 仍是机器可读契约。模式校验会先于跨字段和文件系统校验执行。
 
 ### 配置层与优先级
 
@@ -1025,7 +1025,7 @@ environments:
 
 可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作为 common registry 的迁移来源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。实际 package 不要把共用 registry 缩减成 `tools: {}` 或 `toolGroups: []`。
 
-SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../examples/environments/README.md)。
+SIT 与 UAT 的 DBHelper 都保持 `id: orders`，只改变 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改变 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可复制例子见 [`examples/environments/README.md`](../../examples/environments/README.md)。
 
 两种环境使用完全相同的 Action 定义：
 
@@ -1088,7 +1088,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v2.6`。当前主配置、Tool group、sidecar 与 template 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v2.6`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.0` 与 `att-flow/v3.0`。旧 schema 保持有限 read compatibility，但旧 `EXIT_CODE` retry 与 sidecar timeout 必须迁移。
 
 ### 全局配置
 
@@ -1466,6 +1466,21 @@ case:
 | 1 | 至少一个 FAIL，且无 ERROR/INVALID |
 | 2 | CLI/配置/校验/INVALID 失败 |
 | 3 | 至少一个 ERROR，或不可恢复运行时失败 |
+
+### 完整選項矩陣（3.5.1）
+
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.6` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
+
+Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+  --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
+  --max-concurrent 4 --overload-policy drop --format json
+```
+
+完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
 
 ## 11 結果、報告與 Evidence
 
