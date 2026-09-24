@@ -8,6 +8,9 @@
 - Completed Issues #40-#42 documentation architecture migration: the Reference Manual now follows product concepts rather than release chronology, with Run/Debug/Load as peer execution modes, Tool/DBHelper/MQHelper as peer resources, and centralized `EXEC`/`META` Context plus common Action result/evidence semantics.
 - Split tutorial and maintainer material into canonical `docs/quick-start.md` and `docs/system-design/`, recorded an auditable legacy-to-current migration map, and retained generated standalone EN/ZH Reference Manuals for distribution.
 - Added CI semantic coverage checks for the Reference information architecture in addition to deterministic EN/ZH generation/freshness checks; this documentation migration does not change ATT runtime behavior.
+- Implemented Issue #43 as a documentation release gate covering ATT version consistency, EN/ZH module and numbered-heading parity, generated Reference freshness, local links/anchors, schema references, CLI command/option coverage, secret-safe examples, and canonical documentation ownership.
+- Added `DocumentationExamplesTest` to regression-test the checked-in SIT/UAT profiles and DB/MQ/Tool resources through the real CLI, plus dry-run, standalone debug, closed-VU load, and arrival-rate load examples under Java 8 CI.
+- Fixed documentation drift exposed by the new gate, including generated Reference schema/example links, a stale Quick Start anchor, incomplete CLI load/compatibility option coverage, and the current schema-catalog identity.
 
 ## 3.5.0 - 2026-09-22
 
