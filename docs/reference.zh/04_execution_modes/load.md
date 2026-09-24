@@ -55,7 +55,7 @@ execution:
 
 Randomized load generation 使用單一 effective run seed。可用 top-level `seed` 明確指定；沒有指定時，ATT 會由 load `runId` 穩定推導 effective seed。每個 VU 都有由 run seed、workload identity 與 `USER_ID` 推導出的獨立 deterministic stream，不會在 VU threads 之間共用 mutable RNG。Report-safe load summary 會在 randomized think-time run 記錄 `effectiveSeed`，並把 policy 顯示為 `fixed: 500ms` 或 `uniform: 500ms..2s`；ATT 不會持久化每一次 sampled delay。
 
-相同 seed 加相同 VU/workload identity 會重播相同 random sequence。這個 run-level facility 刻意獨立於 think-time YAML，讓日後 randomized workload selector 可以重用，而不是再建立另一套 RNG scheme。完整離線例子見 [`examples/load/closed-random-think.yaml`](../../../examples/load/closed-random-think.yaml)。
+相同 seed 加相同 VU/workload identity 會重播相同 random sequence。這個 run-level facility 刻意獨立於 think-time YAML，讓日後 randomized workload selector 可以重用，而不是再建立另一套 RNG scheme。完整離線例子已提交在 `examples/load/closed-random-think.yaml`。
 
 Sampled delay 屬 scheduler 行為，不會增加新的 public Context root 或 field。
 
