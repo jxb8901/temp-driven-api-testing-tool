@@ -55,7 +55,7 @@ A range is sampled once after each completed iteration before that VU starts its
 
 Randomized load generation uses one effective run seed. Optional top-level `seed` supplies it explicitly; otherwise ATT derives a stable effective seed from the load `runId`. Each VU gets its own deterministic stream derived from the run seed, workload identity, and `USER_ID`; there is no shared mutable RNG across VU threads. The report-safe load summary records `effectiveSeed` for a randomized think-time run and reports the normalized policy as `fixed: 500ms` or `uniform: 500ms..2s`. ATT does not persist every sampled delay.
 
-The same seed and same VU/workload identity replay the same random sequence. This run-level facility is intentionally separate from think-time YAML so later randomized workload selectors can reuse it instead of creating another RNG scheme. A complete offline example is [`examples/load/closed-random-think.yaml`](../../../examples/load/closed-random-think.yaml).
+The same seed and same VU/workload identity replay the same random sequence. This run-level facility is intentionally separate from think-time YAML so later randomized workload selectors can reuse it instead of creating another RNG scheme. A complete offline example is checked in at `examples/load/closed-random-think.yaml`.
 
 The sampled delay is scheduler behavior and does not add a public Context field or root.
 
