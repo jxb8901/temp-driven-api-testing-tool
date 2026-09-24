@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,8 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Set up Java 8
         uses: actions/setup-java@v4
@@ -39,18 +37,6 @@ jobs:
 
       - name: Install Pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
-
-      - name: Regenerate Reference outputs for issue 39
-        if: github.event_name == 'pull_request'
-        run: |
-          python3 tools/build_reference_manual.py
-          if ! git diff --quiet -- docs/generated docs/09_Reference_Manual_V3.md docs/09_Reference_Manual_V3.html docs/09_Reference_Manual_V3.zh.md docs/09_Reference_Manual_V3.zh.html; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add docs/generated docs/09_Reference_Manual_V3.md docs/09_Reference_Manual_V3.html docs/09_Reference_Manual_V3.zh.md docs/09_Reference_Manual_V3.zh.html
-            git commit -m 'Regenerate Reference manuals for issue 39'
-            git push origin HEAD:${{ github.head_ref }}
-          fi
 
       - name: Verify
         run: mvn -B -ntp clean verify
