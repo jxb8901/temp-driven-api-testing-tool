@@ -1,0 +1,140 @@
+name: Fix documentation consistency for issue 43
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/fix-docs-issue43.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Apply source fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Reference modules are one directory below docs/, just like docs/generated/.
+          # Use repo-root-relative traversals that work both in modular source and combined output.
+          for rel in (
+              'docs/reference/07_expressions.md',
+              'docs/reference.zh/07_expressions.md',
+              'docs/reference/09_configuration.md',
+              'docs/reference.zh/09_configuration.md',
+          ):
+              p = Path(rel)
+              text = p.read_text(encoding='utf-8')
+              text = text.replace('](../examples/', '](../../examples/')
+              text = text.replace('](../schemas/', '](../../schemas/')
+              text = text.replace('](../schemas/)', '](../../schemas/)')
+              p.write_text(text, encoding='utf-8')
+
+          # Fix the stale current schema-catalog identity in the Chinese current Reference.
+          p = Path('docs/reference.zh/09_configuration.md')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('att-schema-catalog/v2.6', 'att-schema-catalog/v3.0')
+          text = text.replace('当前主配置、Tool group、sidecar 与 template 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v2.6`。',
+                              '当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.0` 与 `att-flow/v3.0`。')
+          p.write_text(text, encoding='utf-8')
+
+          # Point configuration cross-reference to the actual first-class DBHelper chapter.
+          for rel in ('docs/reference/09_configuration.md', 'docs/reference.zh/09_configuration.md'):
+              p = Path(rel)
+              text = p.read_text(encoding='utf-8').replace('](#database-helpers)', '](#52-dbhelper)')
+              p.write_text(text, encoding='utf-8')
+
+          # Quick Start still had an anchor from the pre-#42 manual structure.
+          p = Path('docs/quick-start.md')
+          text = p.read_text(encoding='utf-8').replace(
+              '09_Reference_Manual_V3.md#08-report-reference',
+              '09_Reference_Manual_V3.md#11-results-reports-and-evidence')
+          p.write_text(text, encoding='utf-8')
+
+          # README.md in each modular source root documents maintainership; it is intentionally
+          # outside the generated manifest. Quick Start Tool argv must not be parsed as ATT options.
+          p = Path('tools/verify_documentation.py')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              'actual = set(str(path.relative_to(root)).replace("\\\\", "/") for path in root.rglob("*.md"))',
+              'actual = set(str(path.relative_to(root)).replace("\\\\", "/") for path in root.rglob("*.md") if path.name != "README.md")')
+          text = text.replace(
+              '    for option in re.findall(r"--[a-z][a-z0-9-]*", quick):\n        if option not in supported_options:\n            fail("docs/quick-start.md uses unsupported ATT option: %s" % option)',
+              '    for line in quick.splitlines():\n        if "./att.sh" not in line and "att.bat" not in line:\n            continue\n        for option in re.findall(r"--[a-z][a-z0-9-]*", line):\n            if option not in supported_options:\n                fail("docs/quick-start.md uses unsupported ATT option: %s" % option)')
+          p.write_text(text, encoding='utf-8')
+
+          # Complete CLI coverage belongs in the CLI chapter while concepts stay in their peer chapters.
+          en = Path('docs/reference/10_cli.md')
+          text = en.read_text(encoding='utf-8')
+          marker = '### Complete option matrix (3.5.1)'
+          if marker not in text:
+              text += r'''
+
+### Complete option matrix (3.5.1)
+
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.6` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+
+Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+  --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
+  --max-concurrent 4 --overload-policy drop --format json
+```
+
+The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
+'''
+          en.write_text(text, encoding='utf-8')
+
+          zh = Path('docs/reference.zh/10_cli.md')
+          text = zh.read_text(encoding='utf-8')
+          marker = '### 完整選項矩陣（3.5.1）'
+          if marker not in text:
+              text += r'''
+
+### 完整選項矩陣（3.5.1）
+
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.6` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
+
+Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
+
+```sh
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+  --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
+  --max-concurrent 4 --overload-policy drop --format json
+```
+
+完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
+'''
+          zh.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Regenerate and validate
+        run: |
+          python3 tools/build_reference_manual.py
+          python3 tools/verify_documentation.py
+
+      - name: Commit fixes and remove one-time workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/fix-docs-issue43.yml
+          git add -A docs tools .github/workflows
+          git commit -m 'Fix documentation drift detected by issue 43 gate'
+          git push origin HEAD:master
