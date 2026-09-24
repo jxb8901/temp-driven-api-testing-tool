@@ -40,6 +40,7 @@ Windows uses the same commands through `att.bat`.
 
 ## Documentation
 
+- Canonical documentation index: [`docs/README.md`](docs/README.md)
 - English guided tutorial: [`docs/quick-start.md`](docs/quick-start.md)
 - 中文快速入門: [`docs/quick-start.zh.md`](docs/quick-start.zh.md)
 - Complete generated Reference Manual: [`docs/generated/reference.html`](docs/generated/reference.html)

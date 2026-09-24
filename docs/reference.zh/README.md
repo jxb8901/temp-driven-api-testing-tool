@@ -6,7 +6,8 @@ These modules are the authoritative editable sources for the current ATT Referen
 - Chinese sources: `docs/reference.zh/`
 - Deterministic order: `docs/reference-manifest.txt`
 - Generated combined outputs: `docs/generated/`
-- Legacy `docs/09_Reference_Manual_V3*` paths are generated compatibility outputs.
+- Canonical task navigation: `docs/README.md`
+- Legacy `docs/09_Reference_Manual_V3*` paths are generated compatibility outputs, not primary entry points.
 
 After editing modules, run:
 

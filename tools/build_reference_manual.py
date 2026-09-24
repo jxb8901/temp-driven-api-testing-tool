@@ -51,7 +51,7 @@ def manifest():
     return items
 
 
-def markdown(lang, items, ver):
+def markdown(lang, items, ver, compatibility=False):
     cfg = LANGS[lang]
     root = cfg["root"]
     chunks = []
@@ -71,6 +71,13 @@ def markdown(lang, items, ver):
         "<!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->",
         "",
     ]
+    if compatibility:
+        current = "generated/reference.zh.html" if lang == "zh" else "generated/reference.html"
+        header += [
+            "> Compatibility path only: use the [canonical current Reference Manual](%s) or the [documentation landing page](README.md)." % current,
+            "> This generated file is retained for existing versioned links and is not a separate documentation source.",
+            "",
+        ]
     return "\n".join(header) + "\n\n".join(chunks) + "\n"
 
 
@@ -80,6 +87,13 @@ def render_html(md_path, html_path, title):
         raise SystemExit("pandoc is required to generate the Reference Manual HTML")
     cmd = [pandoc, "--standalone", "--toc", "--metadata", "title=" + title, "--from", "gfm", "--to", "html5", str(md_path), "-o", str(html_path)]
     subprocess.run(cmd, check=True, cwd=str(ROOT))
+
+
+def rebase_compatibility_links(text):
+    # Reference modules are authored below docs/reference*/, where ../../ reaches
+    # the repository root. Legacy combined outputs live directly below docs/, so
+    # the same repository targets need one fewer parent traversal.
+    return text.replace("](../../", "](../")
 
 
 def compare(expected: bytes, path: Path):
@@ -130,8 +144,14 @@ def main():
             html_bytes = html_tmp.read_bytes()
             check_or_write(cfg["md"], md_bytes, args.check, errors)
             check_or_write(cfg["html"], html_bytes, args.check, errors)
-            check_or_write(cfg["compat_md"], md_bytes, args.check, errors)
-            check_or_write(cfg["compat_html"], html_bytes, args.check, errors)
+            compat_md_text = markdown(lang, items, ver, compatibility=True)
+            compat_md_text = rebase_compatibility_links(compat_md_text)
+            compat_md_tmp = tmp / ("compat-reference.zh.md" if lang == "zh" else "compat-reference.md")
+            compat_html_tmp = tmp / ("compat-reference.zh.html" if lang == "zh" else "compat-reference.html")
+            compat_md_tmp.write_text(compat_md_text, encoding="utf-8")
+            render_html(compat_md_tmp, compat_html_tmp, cfg["title"].format(version=ver))
+            check_or_write(cfg["compat_md"], compat_md_tmp.read_bytes(), args.check, errors)
+            check_or_write(cfg["compat_html"], compat_html_tmp.read_bytes(), args.check, errors)
 
     if args.check and errors:
         print("Reference Manual generated outputs are stale:", file=sys.stderr)

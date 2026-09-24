@@ -484,8 +484,10 @@ Baseline:
 
 ```text
 docs/
+├── README.md
 ├── documentation-architecture.md
 ├── quick-start.md
+├── quick-start.zh.md
 ├── reference/
 │   ├── 01_overview.md
 │   ├── 02_test_authoring.md
@@ -523,6 +525,13 @@ docs/
 │   └── reference.zh.html
 └── history/
 ```
+
+The stable browsing entry point for this tree is `docs/README.md`. The
+versioned files retained directly under `docs/` are compatibility-only paths:
+`02_System_Design_V3.md` and `08_Quick_Start_V3.md` are stubs, while
+`09_Reference_Manual_V3*` is generated compatibility output. Superseded
+version-specific sources such as the V2.6.2 system design, V4 roadmap, and
+V3.3 diagnostics plan belong under `docs/history/`.
 
 Generated output paths may be adjusted by #41, but source modules must remain distinct from generated combined artifacts.
 

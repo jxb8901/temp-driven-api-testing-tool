@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 SCHEMAS = ROOT / "schemas"
 MANIFEST = DOCS / "reference-manifest.txt"
+LANDING = DOCS / "README.md"
+HISTORY_INDEX = DOCS / "history" / "README.md"
+
+COMPATIBILITY_PATHS = (
+    DOCS / "02_System_Design_V3.md",
+    DOCS / "08_Quick_Start_V3.md",
+    DOCS / "09_Reference_Manual_V3.md",
+    DOCS / "09_Reference_Manual_V3.html",
+    DOCS / "09_Reference_Manual_V3.zh.md",
+    DOCS / "09_Reference_Manual_V3.zh.html",
+)
+
+HISTORICAL_PATHS = (
+    DOCS / "history" / "02_System_Design_V2.6.2.md",
+    DOCS / "history" / "03_Roadmap_V4.md",
+    DOCS / "history" / "10_Diagnostics_V3.3_Plan.md",
+)
 
 errors = []
 
@@ -341,11 +358,49 @@ def check_critical_examples():
 
 def check_ownership_links():
     readme = read(ROOT / "README.md")
-    for canonical in ("docs/quick-start.md", "docs/generated/reference.html", "docs/system-design/"):
+    for canonical in ("docs/README.md", "docs/quick-start.md", "docs/generated/reference.html", "docs/system-design/"):
         if canonical not in readme:
             fail("README missing canonical documentation entry point: %s" % canonical)
     if re.search(r"\[[^\]]*(?:Reference|System Design|Quick Start)[^\]]*\]\(docs/history/", readme, re.I):
         fail("README points a primary current-documentation label to docs/history/")
+
+    if not LANDING.is_file():
+        fail("missing canonical documentation landing page: docs/README.md")
+        return
+    landing = read(LANDING)
+    for canonical in (
+            "quick-start.md", "quick-start.zh.md", "generated/reference.html",
+            "generated/reference.zh.html", "reference/02_test_authoring.md",
+            "reference/04_execution_modes/debug.md", "reference/04_execution_modes/load.md",
+            "reference/05_resources/dbhelper.md", "reference/05_resources/mqhelper.md",
+            "reference/06_environment_testdata.md", "reference/07_expressions.md",
+            "reference/12_validation_diagnostics.md", "reference/13_ci_packaging_operations.md",
+            "system-design/runtime-execution.md", "history/README.md"):
+        if "(" + canonical + ")" not in landing and "(`" + canonical + "`)" not in landing:
+            fail("docs/README.md missing canonical task link: %s" % canonical)
+    for required in ("Start here", "Common tasks", "Compatibility paths", "English", "繁體中文"):
+        if required not in landing:
+            fail("docs/README.md missing landing-page section/content: %s" % required)
+    if re.search(r"\[[^\]]*(?:Reference|System Design|Quick Start)[^\]]*\]\(history/", landing, re.I):
+        fail("docs/README.md points a primary current-documentation label to history/")
+
+    if not HISTORY_INDEX.is_file():
+        fail("missing history classification index: docs/history/README.md")
+    for path in COMPATIBILITY_PATHS:
+        if not path.is_file():
+            fail("missing retained compatibility path: %s" % path.relative_to(ROOT))
+        elif "compatibility" not in read(path).lower():
+            fail("compatibility path is not clearly marked: %s" % path.relative_to(ROOT))
+    for path in HISTORICAL_PATHS:
+        if not path.is_file():
+            fail("missing relocated historical document: %s" % path.relative_to(ROOT))
+    for name in ("02_System_Design_V2.6.2.md", "03_Roadmap_V4.md", "10_Diagnostics_V3.3_Plan.md"):
+        if (DOCS / name).exists():
+            fail("historical document remains ambiguous at docs/%s; keep it under docs/history/" % name)
+    compatibility = set(COMPATIBILITY_PATHS)
+    for path in DOCS.iterdir():
+        if path.is_file() and re.match(r"^\d{2}_.*(?:_[Vv]\d)", path.name) and path not in compatibility:
+            fail("numbered/versioned top-level document is not classified: %s" % path.relative_to(ROOT))
 
 
 def main():
@@ -364,16 +419,20 @@ def main():
     check_critical_examples()
     check_ownership_links()
 
-    markdown_files = [ROOT / "README.md", DOCS / "quick-start.md", DOCS / "documentation-architecture.md",
+    markdown_files = [ROOT / "README.md", LANDING, HISTORY_INDEX, DOCS / "quick-start.md", DOCS / "quick-start.zh.md",
+                      DOCS / "reference" / "README.md", DOCS / "reference.zh" / "README.md",
+                      DOCS / "documentation-architecture.md",
                       DOCS / "reference-migration-map.md", DOCS / "02_System_Design_V3.md",
-                      DOCS / "08_Quick_Start_V3.md", DOCS / "generated/reference.md",
+                      DOCS / "08_Quick_Start_V3.md", DOCS / "09_Reference_Manual_V3.md",
+                      DOCS / "09_Reference_Manual_V3.zh.md", DOCS / "generated/reference.md",
                       DOCS / "generated/reference.zh.md"]
     markdown_files += list((DOCS / "system-design").rglob("*.md"))
     for path in markdown_files:
         if path.is_file():
             check_markdown_links(path)
 
-    for path in (DOCS / "generated/reference.html", DOCS / "generated/reference.zh.html"):
+    for path in (DOCS / "generated/reference.html", DOCS / "generated/reference.zh.html",
+                 DOCS / "09_Reference_Manual_V3.html", DOCS / "09_Reference_Manual_V3.zh.html"):
         if path.is_file():
             check_html_links(path)
 
