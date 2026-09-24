@@ -15,6 +15,8 @@ import java.util.function.Consumer;
 
 /** Closed workload scheduler: each VU waits for completion before its next iteration. */
 public final class ClosedVuScheduler implements LoadScheduler {
+    private static final long THINK_TIME_SLEEP_SLICE_MS = 50L;
+
     private final LoadScenario scenario;
     private final LoadIterationRunner executor;
     private final String runId;
@@ -103,12 +105,33 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 long completedAt = timing.now();
                 LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completion(runId, "closed", phase, iterationId, userId,
                         sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence));
-                long remaining = LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
+                long remaining = remainingRunMillis(startedAt);
                 if (cancelled.get() || remaining <= 0L) return;
                 long sampledThinkTime = scenario.thinkTimePolicy().sampleMillis(random);
-                timing.sleep(Math.min(sampledThinkTime, remaining));
+                sleepThinkTime(Math.min(sampledThinkTime, remaining), startedAt);
             }
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+    }
+
+    /**
+     * Consume the requested think time in bounded slices. The system timing primitive intentionally
+     * limits each individual sleep to 50 ms so schedulers can remain responsive; therefore a
+     * multi-slice wait is required to honor think times longer than that polling quantum.
+     */
+    private void sleepThinkTime(long millis, long startedAt) throws InterruptedException {
+        long remainingThinkTime = millis;
+        while (remainingThinkTime > 0L && !cancelled.get()) {
+            long remainingRun = remainingRunMillis(startedAt);
+            if (remainingRun <= 0L) return;
+            long slice = Math.min(THINK_TIME_SLEEP_SLICE_MS, Math.min(remainingThinkTime, remainingRun));
+            if (slice <= 0L) return;
+            timing.sleep(slice);
+            remainingThinkTime -= slice;
+        }
+    }
+
+    private long remainingRunMillis(long startedAt) {
+        return LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
     }
 
     private Path sampleOutputRoot(String iterationId) {
