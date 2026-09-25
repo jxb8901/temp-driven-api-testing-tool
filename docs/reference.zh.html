@@ -164,7 +164,7 @@
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -227,6 +227,9 @@
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
 </head>
 <body>
 <header id="title-block-header">
@@ -1270,7 +1273,9 @@ workload 出現 runtime/infrastructure error，整體為
 <code>errorRate</code>、<code>p95</code>、<code>p99</code>、<code>minThroughput</code>、<code>droppedRate</code>、<code>achievedArrivalRate</code>，並受
 workload model 相容性限制。</p>
 <p>Evidence policy 仍是 run-scoped。v1.1 會按 workload 分區保存 retained
-artifact：</p>
+artifact。每筆 sample/failure 記錄及其 summary link 都會記錄
+workload、target type 和 ID、iteration ID，以及 closed users 的 user
+ID：</p>
 <pre class="text"><code>output/load/&lt;runId&gt;/
 ├── load-summary.json
 ├── load-summary.yaml

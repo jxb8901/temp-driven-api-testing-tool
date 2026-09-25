@@ -566,7 +566,7 @@ Workload threshold 放在各自 workload 內；top-level v1.1 threshold 作用�
 
 支援的 threshold 包括 `errorRate`、`p95`、`p99`、`minThroughput`、`droppedRate`、`achievedArrivalRate`，並受 workload model 相容性限制。
 
-Evidence policy 仍是 run-scoped。v1.1 會按 workload 分區保存 retained artifact：
+Evidence policy 仍是 run-scoped。v1.1 會按 workload 分區保存 retained artifact。每筆 sample/failure 記錄及其 summary link 都會記錄 workload、target type 和 ID、iteration ID，以及 closed users 的 user ID：
 
 ```text
 output/load/<runId>/

@@ -123,7 +123,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         } catch (RejectedExecutionException rejected) { inFlight.decrementAndGet(); }
     }
 
-    private LoadEvent tag(LoadEvent event) { return scenario.legacyV1() ? event : event.withWorkloadId(scenario.workloadId()); }
+    private LoadEvent tag(LoadEvent event) {
+        return scenario.legacyV1() ? event : event.withWorkloadIdentity(
+                scenario.workloadId(), scenario.targetType(), scenario.targetId());
+    }
     private Path sampleOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccess(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");

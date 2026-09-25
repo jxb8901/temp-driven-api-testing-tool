@@ -119,7 +119,10 @@ public final class ClosedVuScheduler implements LoadScheduler {
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
     }
 
-    private LoadEvent tag(LoadEvent event) { return scenario.legacyV1() ? event : event.withWorkloadId(scenario.workloadId()); }
+    private LoadEvent tag(LoadEvent event) {
+        return scenario.legacyV1() ? event : event.withWorkloadIdentity(
+                scenario.workloadId(), scenario.targetType(), scenario.targetId());
+    }
 
     private void sleepThinkTime(long millis, long startedAt) throws InterruptedException {
         long remainingThinkTime = millis;

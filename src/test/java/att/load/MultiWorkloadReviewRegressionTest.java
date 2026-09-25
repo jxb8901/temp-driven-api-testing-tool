@@ -20,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -121,6 +122,42 @@ class MultiWorkloadReviewRegressionTest {
         List legacyFlags = (List) legacyPayload.get("flags");
         assertThrows(UnsupportedOperationException.class, () -> legacyPayload.put("x", "y"));
         assertThrows(UnsupportedOperationException.class, () -> legacyFlags.add("C"));
+    }
+
+    @Test void retainedV11EvidenceIncludesWorkloadAndTargetIdentity() throws Exception {
+        LoadScenario scenario = load("evidence-identity.yaml",
+                "schemaVersion: att-load/v1.1\nworkloads:\n"
+                + "- id: account-date\n  target: {type: tool, id: sample.getAcDate}\n"
+                + "  load: {users: 1, duration: 100ms}\n  execution: {thinkTime: 1ms}\n"
+                + "evidence: {success: sample, sampleRate: 1.0, maxSamples: 5}\n");
+        LoadScenario workload = scenario.forWorkload(scenario.workloads().get(0));
+        AtomicLong elapsed = new AtomicLong(500L);
+        LoadSchedulerTiming timing = LoadSchedulerTiming.anchored(elapsed::get, 1_700_000_000_000L, 500L,
+                millis -> elapsed.addAndGet(millis));
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        LoadIterationRunner runner = request -> new IterationResult(request.iterationId(), ResultStatus.PASS,
+                Duration.ofMillis(1L), null, Collections.emptyList(), null, null);
+        Path output = temp.resolve("identity-output");
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(workload, runner, "evidence-identity",
+                evidence::onEvent, timing, evidence, output, null);
+        scheduler.run();
+
+        Path evidenceDirectory = temp.resolve("retained-evidence");
+        Map<String, Object> index = evidence.write(evidenceDirectory);
+        Path eventFile;
+        try (java.util.stream.Stream<Path> files = Files.list(evidenceDirectory.resolve("samples/account-date"))) {
+            eventFile = files.findFirst().orElseThrow(() -> new AssertionError("expected retained sample"));
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> event = att.validation.JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
+        assertEquals("account-date", event.get("workloadId"));
+        assertEquals("tool", event.get("targetType"));
+        assertEquals("sample.getAcDate", event.get("targetId"));
+        assertEquals("VU-1", event.get("userId"));
+        assertTrue(String.valueOf(event.get("iterationId")).contains("account-date"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> item = (Map<String, Object>) ((List<?>) index.get("items")).get(0);
+        assertEquals("sample.getAcDate", item.get("targetId"));
     }
 
     private LoadScenario load(String name, String content) throws Exception {

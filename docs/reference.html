@@ -164,7 +164,7 @@
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -227,6 +227,9 @@
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
 </head>
 <body>
 <header id="title-block-header">
@@ -1359,7 +1362,9 @@ run <code>ERROR</code>/exit <code>3</code>.</p>
 <code>droppedRate</code>, and <code>achievedArrivalRate</code>, subject
 to workload-model compatibility.</p>
 <p>Evidence policy remains run-scoped. For v1.1, retained artifacts are
-partitioned by workload where applicable:</p>
+partitioned by workload where applicable. Each retained sample/failure
+record and its summary link identify the workload, target type and ID,
+iteration ID, and (for closed users) user ID:</p>
 <pre class="text"><code>output/load/&lt;runId&gt;/
 ├── load-summary.json
 ├── load-summary.yaml

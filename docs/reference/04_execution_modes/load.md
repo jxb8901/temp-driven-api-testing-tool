@@ -152,7 +152,7 @@ Workload thresholds live inside each workload; top-level v1.1 thresholds apply t
 
 Supported thresholds include `errorRate`, `p95`, `p99`, `minThroughput`, `droppedRate`, and `achievedArrivalRate`, subject to workload-model compatibility.
 
-Evidence policy remains run-scoped. For v1.1, retained artifacts are partitioned by workload where applicable:
+Evidence policy remains run-scoped. For v1.1, retained artifacts are partitioned by workload where applicable. Each retained sample/failure record and its summary link identify the workload, target type and ID, iteration ID, and (for closed users) user ID:
 
 ```text
 output/load/<runId>/

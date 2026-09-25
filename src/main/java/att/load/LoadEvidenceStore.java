@@ -54,6 +54,8 @@ public final class LoadEvidenceStore implements LoadEventListener {
             Files.write(file, JsonSupport.write(event.toMap(runDirectory)).getBytes(StandardCharsets.UTF_8));
             Map<String, Object> link = new LinkedHashMap<String, Object>();
             if (event.workloadId() != null) link.put("workloadId", event.workloadId());
+            if (event.targetType() != null) link.put("targetType", event.targetType());
+            if (event.targetId() != null) link.put("targetId", event.targetId());
             link.put("iterationId", event.iterationId());
             link.put("status", failure ? "FAILURE" : "SAMPLE");
             link.put("path", runDirectory.relativize(file).toString().replace('\\', '/'));
