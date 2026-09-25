@@ -46,20 +46,29 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
 
     private final Clock clock;
     private final Random random;
+    private final SequenceService sequences;
 
     public DefaultBuiltInProvider() {
-        this(Clock.systemDefaultZone(), new Random());
+        this(Clock.systemDefaultZone(), new Random(), new SequenceService());
     }
+
+    public DefaultBuiltInProvider(SequenceService sequences) { this(Clock.systemDefaultZone(), new Random(), sequences); }
 
     DefaultBuiltInProvider(Clock clock) {
         this(clock, new Random());
     }
 
     DefaultBuiltInProvider(Clock clock, Random random) {
+        this(clock, random, new SequenceService());
+    }
+
+    private DefaultBuiltInProvider(Clock clock, Random random, SequenceService sequences) {
         if (clock == null) throw new IllegalArgumentException("clock is required");
         if (random == null) throw new IllegalArgumentException("random is required");
+        if (sequences == null) throw new IllegalArgumentException("sequence service is required");
         this.clock = clock;
         this.random = random;
+        this.sequences = sequences;
     }
 
     @Override public Set<String> names() { return NAMES; }
@@ -78,6 +87,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("dbtext".equals(function)) {
             return new DbTextResultFormatter().format(singleValue(input, "dbText"));
         }
+        if ("seq.next".equals(function)) return nextSequence(input);
         if ("prettyprint".equals(function)) return prettyPrint(singleValue(input, "prettyPrint"));
         if (isSingleValueFunction(function)) return invokeSingleValue(function, singleValue(input, function));
         if ("concat".equals(function)) {
@@ -139,6 +149,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
     /** Validates call names/counts/styles without evaluating runtime argument values. */
     public void validateInvocation(String name, Map<String, Object> input) {
         String function = resolve(name);
+        if ("seq.next".equals(function)) { require(input, "seq.next", 0, 2, "name", "width"); return; }
         if ("sysdate".equals(function) || "systimestamp".equals(function)) { require(input, function, 0, 1, "format"); return; }
         if ("dbtext".equals(function)) { singleValue(input, "dbText"); return; }
         if ("prettyprint".equals(function)) { singleValue(input, "prettyPrint"); return; }
@@ -181,6 +192,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
                 "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories", "copyfile",
                 "movefile", "deletefile", "randomchoice", "dbtext", "prettyprint"};
         for (String name : legacy) result.put(name, name);
+        alias(result, "seq.next", "seq.next");
 
         alias(result, "str.upper", "upper"); alias(result, "str.lower", "lower");
         alias(result, "str.trim", "trim"); alias(result, "str.ltrim", "ltrim");
@@ -205,6 +217,23 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         alias(result, "misc.randomchoice", "randomchoice"); alias(result, "misc.dbtext", "dbtext");
         alias(result, "misc.prettyprint", "prettyprint"); alias(result, "format.pretty", "prettyprint");
         return Collections.unmodifiableMap(result);
+    }
+
+    private Object nextSequence(Map<String, Object> input) {
+        Object first = input.containsKey("arg0") ? input.get("arg0") : input.get("name");
+        Object second = input.containsKey("arg1") ? input.get("arg1") : input.get("width");
+        String name = "default";
+        Integer width = null;
+        if (first instanceof Number) width = boundedSize(first, "seq.next", "width");
+        else if (first != null) {
+            if (!(first instanceof String)) throw new IllegalArgumentException("seq.next name must be text");
+            name = (String) first;
+        }
+        if (second != null) {
+            if (width != null) throw new IllegalArgumentException("seq.next(width) accepts one argument");
+            width = boundedSize(second, "seq.next", "width");
+        }
+        return sequences.next(name, width);
     }
 
     private String prettyPrint(Object value) {

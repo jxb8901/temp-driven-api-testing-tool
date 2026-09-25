@@ -60,12 +60,13 @@ public class UnifiedTemplateEngine {
         this(toolInvoker, dbHelperExecutor, mqHelperExecutor, new DefaultBuiltInProvider());
     }
 
-    UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
-                          MqHelperExecutor mqHelperExecutor, BuiltInProvider builtIns) {
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                 MqHelperExecutor mqHelperExecutor, BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
         this.dbHelperExecutor = dbHelperExecutor;
         this.mqHelperExecutor = mqHelperExecutor;
         this.builtIns = builtIns;
+        if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
     }
 
     public String render(String text, CaseRuntimeContext context) throws Exception {

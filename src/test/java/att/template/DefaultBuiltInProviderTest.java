@@ -26,6 +26,39 @@ class DefaultBuiltInProviderTest {
         assertEquals("0007", provider.invoke("str.lpad", args("value", "7", "length", 4, "pad", "0")));
         assertEquals("fallback", provider.invoke("misc.nvl", args("value", "", "defaultValue", "fallback")));
         assertTrue(provider.names().contains("file.move"));
+        assertTrue(provider.names().contains("seq.next"));
+    }
+
+    @Test void sequenceBuiltInSupportsIndependentCountersAndPadding() {
+        SequenceService service = new SequenceService();
+        DefaultBuiltInProvider provider = new DefaultBuiltInProvider(service);
+        assertEquals(Long.valueOf(1), provider.invoke("seq.next", Collections.<String, Object>emptyMap()));
+        assertEquals("02", provider.invoke("seq.next", args("arg0", 2)));
+        assertEquals("0001", provider.invoke("seq.next", args("arg0", "payment", "arg1", 4)));
+        assertEquals(Long.valueOf(1), provider.invoke("seq.next", args("arg0", "other")));
+        assertThrows(IllegalArgumentException.class, () -> provider.invoke("seq.next", args("arg0", "  ")));
+        assertThrows(IllegalArgumentException.class, () -> provider.invoke("seq.next", args("arg0", 0)));
+        SequenceService overflow = new SequenceService();
+        assertEquals("1", overflow.next("tiny", Integer.valueOf(1)));
+        for (int i = 0; i < 8; i++) overflow.next("tiny", Integer.valueOf(1));
+        assertThrows(IllegalStateException.class, () -> overflow.next("tiny", Integer.valueOf(1)));
+    }
+
+    @Test void sequenceServiceIsConcurrentAndFreshInstancesResetAtOne() throws Exception {
+        SequenceService shared = new SequenceService();
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(8);
+        java.util.Set<Long> values = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<Long, Boolean>());
+        try {
+            java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int worker = 0; worker < 8; worker++) futures.add(workers.submit(() -> {
+                for (int index = 0; index < 125; index++) values.add(Long.valueOf(((Number) shared.next("run-sequence", null)).longValue()));
+            }));
+            for (java.util.concurrent.Future<?> future : futures) future.get();
+        } finally { workers.shutdownNow(); }
+        assertEquals(1000, values.size());
+        assertTrue(values.contains(Long.valueOf(1)));
+        assertTrue(values.contains(Long.valueOf(1000)));
+        assertEquals(Long.valueOf(1), new SequenceService().next("run-sequence", null));
     }
     @TempDir Path tempDir;
 

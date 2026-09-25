@@ -45,6 +45,7 @@ public class ToolInvoker {
     private final FrameworkConfig config;
     private final CommandRunner commandRunner;
     private final SshCommandRunner sshCommandRunner;
+    private volatile att.template.UnifiedTemplateEngine commandExpressionEngine;
 
     public ToolInvoker(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new CommandRunner());
@@ -59,6 +60,13 @@ public class ToolInvoker {
         this.config = config;
         this.commandRunner = commandRunner;
         this.sshCommandRunner = sshCommandRunner;
+        this.commandExpressionEngine = new att.template.UnifiedTemplateEngine(null);
+    }
+
+    /** Shares the execution's built-in runtime with expression-bearing Tool argv tokens. */
+    public void setCommandBuiltIns(att.template.BuiltInProvider builtIns) {
+        if (builtIns == null) throw new IllegalArgumentException("Built-in provider is required");
+        this.commandExpressionEngine = new att.template.UnifiedTemplateEngine(null, null, null, builtIns);
     }
 
     public ToolConfig tool(String name) { return config.tool(name); }
@@ -205,32 +213,32 @@ public class ToolInvoker {
             Files.createDirectories(directory);
             Path outputFile;
             try {
-                outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool saveAs")).normalize();
+                outputFile = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool result.path")).normalize();
             } catch (RuntimeException invalidPath) {
                 throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                        "Invalid Tool saveAs path", "configuredPath=" + saveAs + ", reason=" + invalidPath.getMessage(),
-                        null, "saveAs.path", null, null, null, null, id,
+                        "Invalid Tool result.path", "configuredPath=" + saveAs + ", reason=" + invalidPath.getMessage(),
+                        null, "result.path", null, null, null, null, id,
                         "Use a safe relative path below the Case artifact directory.", invalidPath);
             }
             if (!outputFile.startsWith(directory.normalize())) throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                    "Tool saveAs path escapes the Case artifact directory",
+                    "Tool result.path escapes the Case artifact directory",
                     "configuredPath=" + saveAs + ", resolvedPath=" + outputFile + ", allowedRoot=" + directory,
-                    null, "saveAs.path", null, null, null, null, id,
+                    null, "result.path", null, null, null, null, id,
                     "Use a safe relative path below the Case artifact directory.", null);
             try {
-                PathSafety.ensureContained(directory, outputFile, "Tool saveAs path");
+                PathSafety.ensureContained(directory, outputFile, "Tool result.path");
                 Files.createDirectories(outputFile.getParent());
-                PathSafety.ensureContained(directory, outputFile, "Tool saveAs path");
+                PathSafety.ensureContained(directory, outputFile, "Tool result.path");
             } catch (java.io.IOException unsafePath) {
                 throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                        "Tool saveAs path is not safe",
+                        "Tool result.path is not safe",
                         "configuredPath=" + saveAs + ", resolvedPath=" + outputFile + ", allowedRoot=" + directory
                                 + ", reason=" + unsafePath.getMessage(),
-                        null, "saveAs.path", null, null, null, null, id,
+                        null, "result.path", null, null, null, null, id,
                         "Use a safe relative path below the Case artifact directory and avoid symbolic links.", unsafePath);
             }
             boolean captureIsTarget = commandResult.stdoutArtifact() != null && commandResult.stdoutArtifact().normalize().equals(outputFile);
-            if (Files.exists(outputFile) && !overwrite && !captureIsTarget) throw new IllegalArgumentException("saveAs file already exists and overwrite is false: " + saveAs);
+            if (Files.exists(outputFile) && !overwrite && !captureIsTarget) throw new IllegalArgumentException("result file already exists and overwrite is false: " + saveAs);
             if (captureIsTarget) {
                 // The streamed artifact already is the requested output.
             } else if (commandResult.stdoutArtifact() != null && Files.isRegularFile(commandResult.stdoutArtifact())) {
@@ -427,7 +435,6 @@ public class ToolInvoker {
         Map<String, Object> toolScope = new LinkedHashMap<String, Object>();
         toolScope.put("input", new LinkedHashMap<String, Object>(declaredValues));
         scopedValues.put("TOOL", toolScope);
-        att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
         for (String token : tokens) {
             ToolArgumentConfig exact = exactArgumentPlaceholder(tool, token);
             if (exact != null) {
@@ -459,7 +466,7 @@ public class ToolInvoker {
                             + tool.key() + "." + argumentKey(placeholder.group(1)));
                 }
             }
-            argv.add(expressionEngine.renderScoped(token, scopedValues));
+            argv.add(commandExpressionEngine.renderScoped(token, scopedValues));
         }
         if (!tool.groupScriptArgv().isEmpty()) {
             List<String> dispatched = new ArrayList<String>(tool.groupScriptArgv());

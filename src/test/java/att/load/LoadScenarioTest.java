@@ -134,18 +134,20 @@ class LoadScenarioTest {
             Future<IterationResult> second = pool.submit(() -> executor.execute(IterationRequest.closed("run-29", "i-2", 2, "STEADY", iterationStarted, "VU-2", Collections.singletonMap("input", "two"))));
             IterationResult a = first.get(); IterationResult b = second.get();
             assertEquals(ResultStatus.PASS, a.status()); assertEquals(ResultStatus.PASS, b.status());
-            assertEquals("i-1", a.context().resolve("EXEC.ID"));
+            assertNotEquals(a.context().resolve("EXEC.ID"), b.context().resolve("EXEC.ID"));
+            assertTrue(String.valueOf(a.context().resolve("EXEC.ID")).startsWith("run-29-execution-"));
+            assertEquals("run-29", a.context().resolve("EXEC.RUN_ID"));
+            assertEquals("run-29", b.context().resolve("EXEC.RUN_ID"));
             assertEquals(iterationStarted.toString(), a.context().resolve("EXEC.STARTED_AT"));
-            assertEquals("i-1", a.context().resolve("EXEC.LOAD.ITERATION_ID"));
-            assertEquals("i-2", b.context().resolve("EXEC.LOAD.ITERATION_ID"));
-            assertEquals("run-29", a.context().resolve("EXEC.LOAD.RUN_ID"));
-            assertEquals("run-29", b.context().resolve("EXEC.LOAD.RUN_ID"));
-            assertEquals("load", a.context().resolve("EXEC.MODE"));
-            assertEquals("VU-1", a.context().resolve("EXEC.LOAD.USER_ID"));
-            assertEquals("VU-2", b.context().resolve("EXEC.LOAD.USER_ID"));
+            assertEquals("i-1", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.iterationId"));
+            assertEquals("i-2", att.core.CaseRuntimeContext.getPath(b.context().diagnosticsTree(), "load.iterationId"));
+            assertEquals("load", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "execution.mode"));
+            assertEquals("VU-1", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.userId"));
+            assertEquals("VU-2", att.core.CaseRuntimeContext.getPath(b.context().diagnosticsTree(), "load.userId"));
+            assertNull(a.context().resolve("EXEC.LOAD"));
             assertEquals("one", a.context().resolve("EXEC.INPUT.input"));
-            assertEquals("closed/STEADY/one", a.context().resolve("EXEC.ACTIONS.phase.output.result"));
-            assertEquals("closed/STEADY/two", b.context().resolve("EXEC.ACTIONS.phase.output.result"));
+            assertEquals("one", a.context().resolve("EXEC.ACTIONS.phase.output.result"));
+            assertEquals("two", b.context().resolve("EXEC.ACTIONS.phase.output.result"));
             assertEquals("one", a.context().resolve("EXEC.VARS.flowInput"));
             assertEquals("two", b.context().resolve("EXEC.VARS.flowInput"));
             assertNull(a.context().resolve("output.result"));
@@ -156,18 +158,18 @@ class LoadScenarioTest {
             assertEquals("closed", a.context().resolve("META.SOURCE.scenario"));
             assertNull(a.context().resolve("META.SOURCE.caseId"));
             assertFalse(a.context().metadataTree().toString().contains("i-1"));
-            assertEquals("closed", a.context().resolve("EXEC.LOAD.MODEL"));
+            assertEquals("closed", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.model"));
             assertNull(a.context().resolve("LOAD.model"));
             assertThrows(IllegalArgumentException.class, () -> a.context().put("EXEC.LOAD.MODEL", "arrivalRate"));
-            assertEquals("i-1", a.context().resolve("CASE.VARS.iteration"));
-            assertEquals("i-2", b.context().resolve("CASE.VARS.iteration"));
+            assertEquals("one", a.context().resolve("CASE.VARS.iteration"));
+            assertEquals("two", b.context().resolve("CASE.VARS.iteration"));
             assertFalse(Files.exists(a.outputDirectory()), "successful load iterations should not materialize case workspaces by default");
             assertFalse(Files.exists(b.outputDirectory()), "successful load iterations should not materialize case workspaces by default");
 
             IterationResult arrival = executor.execute(IterationRequest.arrivalRate("run-29", "arrival-1", 3, "RAMP_UP", Instant.now(), Collections.singletonMap("input", "arrival")));
             assertEquals(ResultStatus.PASS, arrival.status());
-            assertEquals("arrivalRate", arrival.context().resolve("EXEC.LOAD.MODEL"));
-            assertNull(arrival.context().resolve("EXEC.LOAD.USER_ID"));
+            assertEquals("arrivalRate", att.core.CaseRuntimeContext.getPath(arrival.context().diagnosticsTree(), "load.model"));
+            assertNull(att.core.CaseRuntimeContext.getPath(arrival.context().diagnosticsTree(), "load.userId"));
         } finally { pool.shutdownNow(); }
     }
 
@@ -219,9 +221,9 @@ class LoadScenarioTest {
         Path project = project();
         Files.createDirectories(project.resolve("templates/FILE_TEMPLATE"));
         write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
-        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.1\n"
                 + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
-                + "  render: {type: render, payload: payload.txt, renderAs: file}\n");
+                + "  render: {type: render, payload: payload.txt, result: {format: text, path: 'rendered/{filename}'}}\n");
         Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: FILE_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
@@ -234,7 +236,7 @@ class LoadScenarioTest {
             IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
                     IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
             assertEquals(ResultStatus.PASS, result.status());
-            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("payload.txt")));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered/payload.txt")));
             assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
                     "file-producing actions need a workspace but must not force a case log");
         } finally { resources.close(); }
@@ -461,10 +463,10 @@ class LoadScenarioTest {
         Files.createDirectories(project.resolve("templates/OPTIONAL_TEMPLATE"));
         write(project, "templates/STRICT_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
                 + "name: STRICT_TEMPLATE\ndescription: strict load context\nactions:\n"
-                + "  strict:\n    type: log\n    message: \"${EXEC.LOAD.MODEL}\"\n");
+                + "  strict:\n    type: log\n    message: \"${EXEC.MODE}\"\n");
         write(project, "templates/OPTIONAL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
                 + "name: OPTIONAL_TEMPLATE\ndescription: optional load context\nactions:\n"
-                + "  optional:\n    type: log\n    message: \"${EXEC.LOAD.USER_ID?}/${EXEC.INPUT.input}\"\n");
+                + "  optional:\n    type: log\n    message: \"${EXEC.INPUT.input}\"\n");
 
         Path strictFile = write(project, "strict.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: STRICT_TEMPLATE}\ninputs: {input: strict}\nload: {users: 1, duration: 1s}\n");
@@ -475,8 +477,8 @@ class LoadScenarioTest {
         DiagnosticException error = assertThrows(DiagnosticException.class, () -> new PackageValidator(project, config)
                 .validateDebugTarget(strictTarget.template(), strictCase, strictAdapter.stage(), strictTarget.flows(),
                         strict.source(), "debug", strict.inputs()));
-        assertTrue(error.format().contains("EXEC.LOAD.MODEL"), error.format());
-        new LoadTargetValidator(project, config).validate(strict, strictTarget);
+        assertTrue(error.format().contains("EXEC.MODE"), error.format());
+        assertThrows(DiagnosticException.class, () -> new LoadTargetValidator(project, config).validate(strict, strictTarget));
 
         Path optionalFile = write(project, "optional.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: OPTIONAL_TEMPLATE}\ninputs: {input: optional}\nload: {users: 1, duration: 1s}\n");
@@ -502,7 +504,7 @@ class LoadScenarioTest {
         inputs.put("input", "ordinary-value");
         LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(project, config, target)
                 .prepare(IterationRequest.closed("run-inputs", "iteration-inputs", 1, "STEADY", Instant.now(), "VU-1", inputs),
-                        temp.resolve("iteration-inputs"), temp.resolve("iteration-inputs/case.log"));
+                        "run-inputs-execution-1", temp.resolve("iteration-inputs"), temp.resolve("iteration-inputs/case.log"));
         assertEquals("business-value", prepared.context().resolve("EXEC.INPUT.inputs"));
         assertEquals("business-value", prepared.context().resolve("CASE.inputs"));
         assertNull(prepared.context().resolve("EXEC.INPUT.inputs.value"));
@@ -520,7 +522,7 @@ class LoadScenarioTest {
         IterationResult result = new IterationExecutor(project, config, target).execute(
                 IterationRequest.closed("tool-1", 1, "STEADY", Instant.now(), "VU-1", Collections.emptyMap()));
         assertEquals(ResultStatus.PASS, result.status());
-        assertEquals("closed", result.context().resolve("EXEC.LOAD.MODEL"));
+        assertEquals("load", att.core.CaseRuntimeContext.getPath(result.context().diagnosticsTree(), "execution.mode"));
     }
 
     @Test void cliRecognizesLoadAndRejectsMissingScenario() {
@@ -542,8 +544,8 @@ class LoadScenarioTest {
         Files.copy(Paths.get("schemas/att-flow-v3.0.schema.json"), project.resolve("schemas/att-flow-v3.0.schema.json"));
         Files.write(project.resolve("templates/LOAD_TEMPLATE/template.yaml"), (
                 "schemaVersion: att-template/v3.0\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
-                + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.LOAD.ITERATION_ID}\"\n"
-                + "  phase:\n    type: log\n    message: \"${EXEC.LOAD.MODEL}/${EXEC.LOAD.PHASE}/${EXEC.INPUT.input}\"\n"
+                + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.INPUT.input}\"\n"
+                + "  phase:\n    type: log\n    message: \"${EXEC.INPUT.input}\"\n"
                 + "  nested:\n    type: flow\n    use: load.echo.v1\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/load/echo/flow.yaml"), (
                 "schemaVersion: att-flow/v3.0\nid: load.echo.v1\nname: Load Echo\ndescription: load flow\nactions:\n"

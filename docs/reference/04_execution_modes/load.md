@@ -102,7 +102,9 @@ All workloads in one v1.1 run must use the same scheduler model: either all `arr
 
 Before scheduling starts, ATT resolves and validates **every** workload target and dependency. If any workload is invalid, no workload begins execution. Workloads share the same run-scoped DB/MQ resource layer so they contend realistically for configured pools, while mutable iteration Context and output remain isolated.
 
-For v1.1, the existing `EXEC.LOAD` node additionally exposes `WORKLOAD_ID`, `TARGET_TYPE`, and `TARGET_ID`. Closed pools retain stable `USER_ID`. Because separate pools may each contain `VU-1`, the durable virtual-user identity is `(WORKLOAD_ID, USER_ID)`.
+For v1.1, retained `DIAG.load` evidence additionally exposes `workloadId`, `targetType`, and `targetId`. Closed pools retain stable `userId`. Because separate pools may each contain `VU-1`, the durable virtual-user identity is `(workloadId, userId)`. Scheduler diagnostics are not expression Context.
+
+The former expression path `EXEC.LOAD` is no longer public; existing templates that reference it must move business inputs to `EXEC.INPUT` and inspect retained scheduler evidence outside expressions.
 
 #### Workload models
 
@@ -110,7 +112,7 @@ For v1.1, the existing `EXEC.LOAD` node additionally exposes `WORKLOAD_ID`, `TAR
 
 **Fixed arrival rate** uses `load.arrivalRate` plus positive `maxConcurrent` and `overloadPolicy: drop`. It has no persistent VU identity. Arrivals that cannot start because the workload's concurrency limit is full are recorded as `dropped`; they are not queued and are not counted as SUT errors. Arrival-rate workloads reject `execution.thinkTime`.
 
-`duration` is required. Optional `warmup`, `rampUp`, and `rampDown` define phases; `EXEC.LOAD.PHASE` identifies `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. Warm-up traffic executes but is excluded from measured threshold aggregates.
+`duration` is required. Optional `warmup`, `rampUp`, and `rampDown` define phases; `DIAG.load.phase` evidence identifies `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. Warm-up traffic executes but is excluded from measured threshold aggregates.
 
 #### Closed-VU think time and deterministic randomization
 
@@ -170,4 +172,4 @@ DB/MQ resource diagnostics remain aggregate/run-scoped. Successful iteration wor
 
 `--profile` measures ATT generator/runtime overhead; it is not a target-host CPU/memory benchmark. Load exit codes are `0` PASS, `1` threshold failure, `2` invalid scenario/configuration/target, and `3` runtime/infrastructure error.
 
-`EXEC.LOAD` is defined centrally in Chapter 3; artifact schemas and report details are in Chapter 11.
+Load execution identity and evidence-only scheduler diagnostics are defined centrally in Chapter 3; artifact schemas and report details are in Chapter 11.

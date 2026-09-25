@@ -52,7 +52,7 @@ class MultiWorkloadRuntimeTest {
         assertTrue(result.workloads().get("two").metrics().longValue("completed") > 0L);
     }
 
-    @Test void publishesWorkloadAndTargetIdentityInsideExistingExecLoadNode() throws Exception {
+    @Test void publishesWorkloadAndTargetIdentityOnlyInFrameworkDiagnostics() throws Exception {
         Path root = projectRoot();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
         LoadScenario scenario = load("context.yaml",
@@ -64,11 +64,12 @@ class MultiWorkloadRuntimeTest {
         IterationRequest request = IterationRequest.closed("run", "iter-1", 1L, "STEADY", Instant.now(), "VU-1", child.inputs())
                 .withWorkloadId("payment");
         CaseRuntimeContext context = new LoadExecutionContextAdapter(root, config, target)
-                .prepare(request, temp.resolve("iteration"), temp.resolve("iteration/case.log")).context();
-        assertEquals("payment", context.require("EXEC.LOAD.WORKLOAD_ID"));
-        assertEquals("tool", context.require("EXEC.LOAD.TARGET_TYPE"));
-        assertEquals("sample.getAcDate", context.require("EXEC.LOAD.TARGET_ID"));
-        assertEquals("VU-1", context.require("EXEC.LOAD.USER_ID"));
+                .prepare(request, "run-execution-1", temp.resolve("iteration"), temp.resolve("iteration/case.log")).context();
+        assertEquals("payment", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.workloadId"));
+        assertEquals("tool", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.targetType"));
+        assertEquals("sample.getAcDate", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.targetId"));
+        assertEquals("VU-1", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.userId"));
+        assertNull(context.resolve("EXEC.LOAD.WORKLOAD_ID"));
     }
 
     @Test void aggregatePercentileComesFromCombinedObservationsRatherThanAveragingWorkloadPercentiles() {

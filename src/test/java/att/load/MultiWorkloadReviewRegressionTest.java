@@ -27,6 +27,38 @@ import static org.junit.jupiter.api.Assertions.*;
 class MultiWorkloadReviewRegressionTest {
     @TempDir Path temp;
 
+    @Test void arrivalRateExecIdsRemainUniqueAcrossWorkloadTargetsInOneRun() throws Exception {
+        Path templates = temp.resolve("templates");
+        FrameworkConfig config = new FrameworkConfig(temp, temp, temp, "SIT", 1000, templates,
+                Collections.emptyMap(), null, null);
+        att.flow.FlowRegistry flows = new att.flow.FlowRegistry(temp, templates);
+        att.template.StageTemplate template = new att.template.StageTemplate("load-target", templates,
+                Collections.emptyList());
+        LoadTarget accountDate = new LoadTarget("template", "account-date", template, flows, templates, null);
+        LoadTarget payment = new LoadTarget("template", "payment", template, flows, templates, null);
+        Instant started = Instant.parse("2026-09-25T00:00:00Z");
+        try (LoadRunResources resources = new LoadRunResources(temp, config)) {
+            IterationRequest first = IterationRequest.arrivalRate("multi-run", "account-1", 1, "STEADY", started,
+                    Collections.emptyMap()).withWorkloadId("accounts");
+            IterationRequest second = IterationRequest.arrivalRate("multi-run", "payment-1", 1, "STEADY", started,
+                    Collections.emptyMap()).withWorkloadId("payments");
+            String firstId = resources.nextExecutionId(first.runId());
+            String secondId = resources.nextExecutionId(second.runId());
+            att.core.CaseRuntimeContext firstContext = new LoadExecutionContextAdapter(temp, config, accountDate)
+                    .prepare(first, firstId, temp.resolve("iteration-1"), temp.resolve("iteration-1/case.log")).context();
+            att.core.CaseRuntimeContext secondContext = new LoadExecutionContextAdapter(temp, config, payment)
+                    .prepare(second, secondId, temp.resolve("iteration-2"), temp.resolve("iteration-2/case.log")).context();
+
+            assertNotEquals(firstContext.resolve("EXEC.ID"), secondContext.resolve("EXEC.ID"));
+            assertEquals("multi-run", firstContext.resolve("EXEC.RUN_ID"));
+            assertEquals("multi-run", secondContext.resolve("EXEC.RUN_ID"));
+            assertEquals("accounts", att.core.CaseRuntimeContext.getPath(firstContext.diagnosticsTree(), "load.workloadId"));
+            assertEquals("payments", att.core.CaseRuntimeContext.getPath(secondContext.diagnosticsTree(), "load.workloadId"));
+            assertNull(firstContext.resolve("EXEC.LOAD"));
+            assertNull(secondContext.resolve("EXEC.LOAD"));
+        }
+    }
+
     @Test void singleWorkloadV11UsesCoordinatorAndPropagatesWorkloadThresholdFailure() throws Exception {
         LoadScenario scenario = load("single-v11.yaml",
                 "schemaVersion: att-load/v1.1\nworkloads:\n"

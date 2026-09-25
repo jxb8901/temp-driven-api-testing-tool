@@ -53,7 +53,7 @@ public final class MqHelperExecutor {
         return execute(instance, operation, arguments, context, timeoutMs, invocationId, null, null, "raw", false);
     }
 
-    /** Executes an MQ call with the common Action saveAs contract. */
+    /** Executes an MQ call with the common Action result contract. */
     public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
                                       CaseRuntimeContext context, Long timeoutMs, String invocationId,
                                       String actionId, String savePath, String saveFormat, boolean overwrite) {
@@ -74,12 +74,14 @@ public final class MqHelperExecutor {
             helper = select(logical, args.get("instance"));
             validateArguments(instance, operation, args, helper);
             if ("send".equals(operation) && savePath != null && !savePath.trim().isEmpty()) {
-                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support saveAs");
+                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support result persistence");
             }
         } catch (Exception error) {
             return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
         }
         Instant started = Instant.now();
+        final long deadlineNanos = timeoutMs == null ? Long.MAX_VALUE
+                : System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs.longValue());
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         result.put("mqHelper", logical.logicalId()); result.put("instance", helper.instanceId());
@@ -113,12 +115,15 @@ public final class MqHelperExecutor {
                 result.put("queue", queue); result.put("payloadFile", payloadFile.toString()); result.put("bytes", payload.length);
                 evidence.put("queue", queue); evidence.put("payloadFile", portable(payloadFile)); evidence.put("bytes", payload.length);
                 connection = factory.connect(helper);
+                ensureWithinDeadline(deadlineNanos, "connect");
                 requestQueue = connection.open(queue, false, true, "request".equals(operation));
+                ensureWithinDeadline(deadlineNanos, "open request queue");
                 String replyName = "request".equals(operation)
                         ? effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue") : "";
                 MqTransport.Message sent = requestQueue.put(payload, new MqTransport.PutRequest(
                         "request".equals(operation) ? helper.queueManager() : "", replyName,
                         helper.charset(), helper.encoding(), helper.format(), helper.persistence(), helper.expiry()));
+                ensureWithinDeadline(deadlineNanos, "put");
                 String messageId = id(sent == null ? null : sent.messageId());
                 result.put("messageId", messageId); result.put("correlationId", null);
                 evidence.put("messageId", messageId); evidence.put("correlationId", null);
@@ -128,18 +133,23 @@ public final class MqHelperExecutor {
                 } else {
                     closeQueue(requestQueue); requestQueue = null;
                     String reply = effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue");
-                    int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), timeoutMs);
+                    int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                     result.put("replyQueue", reply); result.put("waitMs", waitMs);
                     evidence.put("replyQueue", reply); evidence.put("waitMs", waitMs);
                     replyQueue = connection.open(reply, true, false);
+                    ensureWithinDeadline(deadlineNanos, "open reply queue");
+                    waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
+                    result.put("waitMs", waitMs); evidence.put("waitMs", waitMs);
                     MqTransport.Message received;
                     try {
                         received = replyQueue.get(new MqTransport.GetRequest(sent == null ? null : sent.messageId(), waitMs));
+                        ensureWithinDeadline(deadlineNanos, "get reply");
                     } catch (MqTransport.Exception noReply) {
                         if (!isNoMessage(noReply)) throw noReply;
                         result.put("replyReceived", false); evidence.put("replyReceived", false);
                         addReason(result, evidence, noReply);
-                        success = true;
+                        success = !deadlineExceeded(deadlineNanos);
+                        if (!success) addDeadlineError(result, evidence);
                         received = null;
                     }
                     if (received != null) {
@@ -162,13 +172,18 @@ public final class MqHelperExecutor {
             } else if ("receive".equals(operation)) {
                 String queue = string(args.get("queue"), "queue");
                 byte[] correlation = args.get("correlationId") == null ? null : messageId(String.valueOf(args.get("correlationId")));
-                int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), timeoutMs);
+                int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                 result.put("queue", queue); result.put("correlationId", id(correlation)); result.put("waitMs", waitMs);
                 evidence.put("queue", queue); evidence.put("correlationId", id(correlation)); evidence.put("waitMs", waitMs);
                 connection = factory.connect(helper);
+                ensureWithinDeadline(deadlineNanos, "connect");
                 replyQueue = connection.open(queue, true, false);
+                ensureWithinDeadline(deadlineNanos, "open queue");
+                waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
+                result.put("waitMs", waitMs); evidence.put("waitMs", waitMs);
                 try {
                     MqTransport.Message received = replyQueue.get(new MqTransport.GetRequest(correlation, waitMs));
+                    ensureWithinDeadline(deadlineNanos, "get message");
                     result.put("received", true);
                     result.put("messageId", id(received == null ? null : received.messageId()));
                     result.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
@@ -185,11 +200,15 @@ public final class MqHelperExecutor {
                     success = true;
                 } catch (MqTransport.Exception noReply) {
                     if (!isNoMessage(noReply)) throw noReply;
-                    result.put("received", false); evidence.put("received", false); addReason(result, evidence, noReply); success = true;
+                    result.put("received", false); evidence.put("received", false); addReason(result, evidence, noReply);
+                    success = !deadlineExceeded(deadlineNanos);
+                    if (!success) addDeadlineError(result, evidence);
                 }
             } else throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         } catch (MqTransport.Exception error) {
             success = false; addError(result, evidence, error, helper);
+        } catch (MqActionDeadlineException error) {
+            success = false; addDeadlineError(result, evidence, error.getMessage());
         } catch (Exception error) {
             success = false; addError(result, evidence, error, helper);
         } finally {
@@ -204,8 +223,8 @@ public final class MqHelperExecutor {
         long duration = Duration.between(started, Instant.now()).toMillis();
         result.put("durationMs", duration); evidence.put("durationMs", duration);
         if (result.get("outputFile") != null) evidence.put("outputFile", portable(Paths.get(String.valueOf(result.get("outputFile")))));
-        if (savePath != null && !savePath.trim().isEmpty()) evidence.put("saveAsPath", savePath);
-        evidence.put("saveAsFormat", representation);
+        if (savePath != null && !savePath.trim().isEmpty()) evidence.put("resultPath", savePath);
+        evidence.put("resultFormat", representation);
         evidence.put("status", success ? "PASS" : "ERROR");
         return new MqInvocationResult(result, evidence, success);
     }
@@ -276,7 +295,7 @@ public final class MqHelperExecutor {
         String result = value == null || value.trim().isEmpty() ? "raw" : value.trim().toLowerCase(Locale.ROOT);
         if (!("raw".equals(result) || "text".equals(result) || "json".equals(result)
                 || "yaml".equals(result) || "xml".equals(result))) {
-            throw new IllegalArgumentException("MQ saveAs.format must be raw, text, json, yaml, or xml");
+            throw new IllegalArgumentException("MQ result.format must be raw, text, json, yaml, or xml");
         }
         return result;
     }
@@ -295,20 +314,20 @@ public final class MqHelperExecutor {
                                  String savePath, String format, byte[] raw, Object value, boolean overwrite) throws Exception {
         if (savePath == null || savePath.trim().isEmpty()) return;
         if ("console".equalsIgnoreCase(savePath.trim())) {
-            if (log == null) throw new IOException("MQ saveAs.path=console requires the active Case execution log");
-            log.appendRaw("ACTION " + (actionId == null || actionId.trim().isEmpty() ? "MQ" : actionId) + " SAVE",
+            if (log == null) throw new IOException("MQ result.path=console requires the active Case execution log");
+            log.appendRaw("ACTION " + (actionId == null || actionId.trim().isEmpty() ? "MQ" : actionId) + " RESULT",
                     consoleValue(format, raw, value));
             return;
         }
         Path root = (context.inFlow() ? context.actionOutputDir(actionId) : context.caseOutputDirectory())
                 .toAbsolutePath().normalize();
-        Path target = root.resolve(IdentifierValidator.relativePath(savePath, "action saveAs.path")).normalize();
-        if (!target.startsWith(root) || target.equals(root)) throw new IOException("MQ saveAs path escapes the Action artifact directory: " + savePath);
+        Path target = root.resolve(IdentifierValidator.relativePath(savePath, "action result.path")).normalize();
+        if (!target.startsWith(root) || target.equals(root)) throw new IOException("MQ result path escapes the Action artifact directory: " + savePath);
         Files.createDirectories(root);
-        PathSafety.ensureContained(root, target, "MQ saveAs path");
+        PathSafety.ensureContained(root, target, "MQ result.path");
         Files.createDirectories(target.getParent());
-        PathSafety.ensureContained(root, target, "MQ saveAs path");
-        if (Files.exists(target) && !overwrite) throw new IOException("saveAs file already exists and overwrite is false: " + savePath);
+        PathSafety.ensureContained(root, target, "MQ result.path");
+        if (Files.exists(target) && !overwrite) throw new IOException("result file already exists and overwrite is false: " + savePath);
         if ("raw".equals(format)) {
             Files.write(target, raw == null ? new byte[0] : raw,
                     overwrite ? new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
@@ -339,10 +358,37 @@ public final class MqHelperExecutor {
         if (message.format() != null) { result.put("replyFormat", message.format()); evidence.put("replyFormat", message.format()); }
     }
 
-    private int effectiveWait(Object value, int fallback, Long timeoutMs) {
+    private int effectiveWait(Object value, int fallback, long deadlineNanos) {
         int requested = value == null ? fallback : integer(value, "waitMs", 0, 3600000);
-        if (timeoutMs == null) return requested;
-        return (int) Math.min((long) requested, Math.max(0L, timeoutMs.longValue()));
+        if (deadlineNanos == Long.MAX_VALUE) return requested;
+        long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
+        long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+        if (remainingNanos > 0L && remainingMs == 0L) remainingMs = 1L;
+        return (int) Math.min((long) requested, remainingMs);
+    }
+
+    private boolean deadlineExceeded(long deadlineNanos) {
+        return deadlineNanos != Long.MAX_VALUE && System.nanoTime() >= deadlineNanos;
+    }
+
+    private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence) {
+        addDeadlineError(result, evidence, "Action timeout expired while waiting for an MQ message");
+    }
+
+    private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence, String message) {
+        Map<String, Object> error = new LinkedHashMap<String, Object>();
+        error.put("type", "MQ_TIMEOUT"); error.put("message", message);
+        result.put("error", error); evidence.put("error", error);
+    }
+
+    private void ensureWithinDeadline(long deadlineNanos, String operation) throws MqActionDeadlineException {
+        if (deadlineExceeded(deadlineNanos)) {
+            throw new MqActionDeadlineException("Action timeout expired during MQ " + operation);
+        }
+    }
+
+    private static final class MqActionDeadlineException extends Exception {
+        private MqActionDeadlineException(String message) { super(message); }
     }
 
     private int integer(Object value, String name, int min, int max) {

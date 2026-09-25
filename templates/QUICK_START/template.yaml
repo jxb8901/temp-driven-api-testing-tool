@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.0
+schemaVersion: att-template/v3.1
 name: QUICK_START
 description: Offline beginner example used by the English and Chinese Quick Start guides.
 

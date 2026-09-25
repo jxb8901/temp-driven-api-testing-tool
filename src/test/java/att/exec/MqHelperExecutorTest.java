@@ -7,6 +7,12 @@ import att.config.ProcessOutputConfig;
 import att.core.CaseRuntimeContext;
 import att.core.CaseExecutionLog;
 import att.core.TestCase;
+import att.core.StageCaseData;
+import att.core.ResultStatus;
+import att.template.StageTemplate;
+import att.template.StageTemplateRunner;
+import att.template.TemplateAction;
+import att.template.UnifiedTemplateEngine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,6 +81,50 @@ class MqHelperExecutorTest {
         assertEquals(1, factory.disconnects);
     }
 
+    @Test void timedOutSendReceiveAndRequestAttemptsAreRetriedAsTimeouts() throws Exception {
+        for (String operation : new String[]{"send", "receive", "request"}) {
+            Path caseDir = tempDir.resolve("retry-" + operation);
+            Files.createDirectories(caseDir);
+            Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
+            FakeFactory factory = new FakeFactory();
+            if ("send".equals(operation) || "request".equals(operation)) factory.firstPutDelayMs = 60L;
+            else factory.firstGetDelayMs = 60L;
+            Map<String, Object> args = "send".equals(operation)
+                    ? map("queue", "REQUEST.Q", "file", "payload.bin")
+                    : "receive".equals(operation)
+                    ? map("queue", "REPLY.Q", "waitMs", 100)
+                    : map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", "payload.bin", "waitMs", 100);
+            String call = "#{mq.broker." + operation + "(" + callArguments(args) + ")}";
+            Map<String, Object> retry = map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"));
+            TemplateAction action = new TemplateAction("mqRetry", map("type", "tool", "call", call,
+                    "timeoutMs", 20, "retry", retry));
+            CaseRuntimeContext context = context(caseDir);
+            context.beginStage(new StageCaseData("mq", "MQ", Collections.<String, Object>emptyMap()), "MQ", tempDir);
+
+            List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                    null, null, new MqHelperExecutor(tempDir, config(), factory)))
+                    .execute("mq", new StageTemplate("MQ", tempDir, Collections.singletonList(action)), context,
+                            new CaseExecutionLog(caseDir.resolve("case.log")));
+
+            assertEquals(ResultStatus.PASS, results.get(0).status(), operation + ": " + results.get(0).message());
+            assertEquals(2, ((List<?>) context.resolve("ACTIONS.mqRetry.output.attempts")).size(), operation);
+            assertEquals("TIMEOUT", context.resolve("ACTIONS.mqRetry.output.attempts[0].retryReason"), operation);
+            assertEquals("PASS", context.resolve("ACTIONS.mqRetry.output.attempts[1].status"), operation);
+        }
+    }
+
+    @Test void receiveRecalculatesGetWaitAfterQueueOpenConsumesDeadline() throws Exception {
+        Path caseDir = tempDir.resolve("remaining-mq-deadline"); Files.createDirectories(caseDir);
+        FakeFactory factory = new FakeFactory();
+        factory.firstOpenDelayMs = 180L;
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                map("queue", "REPLY.Q", "waitMs", 1000), context(caseDir), Long.valueOf(1000L), "receive-deadline");
+
+        assertTrue(result.success());
+        assertNotNull(factory.getRequest);
+        assertTrue(factory.getRequest.waitMs() < 900, "GET wait must be recomputed after the delayed open");
+    }
+
     @Test void explicitRawSaveAsWritesExactReplyBytesAndPublishesArtifactOnlyThen() throws Exception {
         Path caseDir = tempDir.resolve("saved-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
@@ -108,7 +158,7 @@ class MqHelperExecutorTest {
         assertEquals(819, result.result().get("replyCcsid"));
         assertFalse(result.result().containsKey("outputFile"));
         String log = new String(Files.readAllBytes(logPath), "UTF-8");
-        assertTrue(log.contains("[ACTION reply SAVE]"), log);
+        assertTrue(log.contains("[ACTION reply RESULT]"), log);
         assertTrue(log.contains("é"), log);
     }
 
@@ -136,7 +186,7 @@ class MqHelperExecutorTest {
         assertFalse(result.evidence().containsKey("payloadEvidence"));
     }
 
-    @Test void sendRejectsSaveAsBeforeConnecting() throws Exception {
+    @Test void sendRejectsResultPersistenceBeforeConnecting() throws Exception {
         Path caseDir = tempDir.resolve("send-save-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
         FakeFactory factory = new FakeFactory();
@@ -145,7 +195,7 @@ class MqHelperExecutorTest {
                 "send", "sent.bin", "raw", false);
 
         assertFalse(result.success());
-        assertTrue(String.valueOf(((Map<?, ?>) result.result().get("error")).get("message")).contains("does not support saveAs"));
+        assertTrue(String.valueOf(((Map<?, ?>) result.result().get("error")).get("message")).contains("does not support result persistence"));
         assertTrue(factory.connectedInstances.isEmpty());
     }
 
@@ -325,6 +375,12 @@ class MqHelperExecutorTest {
         return result;
     }
 
+    private String callArguments(Map<String, Object> args) {
+        List<String> values = new ArrayList<String>();
+        for (Map.Entry<String, Object> entry : args.entrySet()) values.add(entry.getKey() + "='" + entry.getValue() + "'");
+        return String.join(", ", values);
+    }
+
     private static final class FakeFactory implements MqTransport.Factory {
         byte[] putPayload;
         MqTransport.PutRequest putRequest;
@@ -333,6 +389,12 @@ class MqHelperExecutorTest {
         boolean noMessage;
         final List<Boolean> bindNotFixed = new CopyOnWriteArrayList<Boolean>();
         int disconnects;
+        long firstPutDelayMs;
+        long firstGetDelayMs;
+        long firstOpenDelayMs;
+        int putCalls;
+        int getCalls;
+        int openCalls;
         int queueCloses;
         String connectedInstance;
         final List<String> connectedInstances = new CopyOnWriteArrayList<String>();
@@ -345,21 +407,25 @@ class MqHelperExecutorTest {
             final String connectionInstance = config.instanceId();
             return new MqTransport.Connection() {
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
+                    if (openCalls++ == 0) delay(firstOpenDelayMs);
                     bindNotFixed.add(Boolean.FALSE);
                     return queue(queue, input, output);
                 }
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output, boolean bind) {
+                    if (openCalls++ == 0) delay(firstOpenDelayMs);
                     bindNotFixed.add(Boolean.valueOf(bind));
                     return queue(queue, input, output);
                 }
                 private MqTransport.Queue queue(String queue, boolean input, boolean output) {
                     return new MqTransport.Queue() {
                         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) {
+                            if (putCalls++ == 0) delay(firstPutDelayMs);
                             putInstances.add(connectionInstance);
                             putPayload = payload.clone(); putRequest = request;
                             return new MqTransport.Message(new byte[]{1, 2}, null, payload);
                         }
                         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
+                            if (getCalls++ == 0) Thread.sleep(firstGetDelayMs);
                             getInstances.add(connectionInstance);
                             getRequest = request;
                             if (noMessage) throw new MqTransport.Exception("No message", 2, 2033, "MQRC_NO_MSG_AVAILABLE", null);
@@ -371,6 +437,11 @@ class MqHelperExecutorTest {
                 @Override public void disconnect() { disconnects++; }
                 @Override public void close() { disconnects++; }
             };
+        }
+
+        private void delay(long millis) {
+            try { Thread.sleep(millis); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
         }
     }
 }

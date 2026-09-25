@@ -19,13 +19,13 @@ public class TemplateAction {
     private final String type;
     private final String description;
     private final String payload;
-    private final String renderAs;
+    private final String resultFormat;
     private final String name;
     private final String expression;
     private final String call;
     private final String message;
     private final String file;
-    private final ActionSaveConfig saveAs;
+    private final ActionResultConfig result;
     private final String db;
     private final Map<String, Object> query;
     private final Map<String, Object> update;
@@ -53,13 +53,16 @@ public class TemplateAction {
         this.type = text(data.get("type"), "tool");
         this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");
-        this.renderAs = text(data.get("renderAs"), "");
+        Map<String, Object> resultMap = map(data.get("result"));
+        this.resultFormat = text(resultMap.get("format"), "");
         this.name = text(data.get("name"), "");
         this.expression = text(data.get("expression"), "");
         this.call = text(data.get("call"), "");
         this.message = text(data.get("message"), "");
         this.file = text(data.get("file"), "");
-        this.saveAs = save(data.get("saveAs"), data.get("overwrite"), schemaVersion);
+        this.result = data.get("result") == null ? ActionResultConfig.none()
+                : new ActionResultConfig(text(resultMap.get("path"), ""), resultFormat,
+                        Boolean.parseBoolean(text(resultMap.get("overwrite"), "false")));
         this.db = text(data.get("db"), "");
         this.query = map(data.get("query"));
         this.update = map(data.get("update"));
@@ -94,21 +97,20 @@ public class TemplateAction {
     public String type() { return type; }
     public String description() { return description; }
     public String payload() { return payload; }
-    public String renderAs() { return renderAs; }
+    public String resultFormat() { return resultFormat; }
     public String name() { return name; }
     public String expression() { return expression; }
     public String call() { return call; }
     public String message() { return message; }
     public String file() { return file; }
-    public String saveAs() { return saveAs.path(); }
-    public ActionSaveConfig saveConfig() { return saveAs; }
+    public ActionResultConfig resultConfig() { return result; }
     public String db() { return db; }
     public Map<String, Object> query() { return query; }
     public Map<String, Object> update() { return update; }
     public String assertion() { return assertion; }
     public String expected() { return expected; }
     public String actual() { return actual; }
-    public boolean overwrite() { return saveAs.overwrite(); }
+    public boolean overwrite() { return result.overwrite(); }
     public String onFailure() { return onFailure; }
     public String level() { return level; }
     public Map<String, Object> fields() { return fields; }
@@ -190,15 +192,4 @@ public class TemplateAction {
         return Collections.unmodifiableMap(result);
     }
 
-    @SuppressWarnings("unchecked")
-    private static ActionSaveConfig save(Object value, Object siblingOverwrite, String schemaVersion) {
-        if (value == null) return ActionSaveConfig.none();
-        if (value instanceof Map) {
-            Map<String, Object> map = new LinkedHashMap<String, Object>((Map<String, Object>) value);
-            boolean overwrite = map.get("overwrite") != null && Boolean.parseBoolean(String.valueOf(map.get("overwrite")));
-            return new ActionSaveConfig(text(map.get("path"), ""), text(map.get("format"), ""), overwrite, false);
-        }
-        boolean overwrite = siblingOverwrite != null && Boolean.parseBoolean(String.valueOf(siblingOverwrite));
-        return new ActionSaveConfig(String.valueOf(value), "raw", overwrite, "att-template/v2.3".equals(schemaVersion));
-    }
 }

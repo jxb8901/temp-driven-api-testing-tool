@@ -8,8 +8,8 @@
 | Tool group | `att-tool-group/v2.6` |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
-| Template | `att-template/v3.0` (older supported forms remain readable where compatible) |
-| Flow | `att-flow/v3.0` |
+| Template | `att-template/v3.1` (`renderAs`/`saveAs` are rejected with migration suggestions) |
+| Flow | `att-flow/v3.1` (legacy read: `att-flow/v3.0`) |
 | Debug input | `att-debug/v1.0` |
 | Load scenario | `att-load/v1.0` |
 | Load summary | `att-load-summary/v1.0` |

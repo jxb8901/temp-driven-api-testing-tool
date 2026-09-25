@@ -29,11 +29,11 @@ public final class LoadExecutionContextAdapter {
         this.target = target;
     }
 
-    public Prepared prepare(IterationRequest request, Path iterationDirectory, Path logPath) {
+    public Prepared prepare(IterationRequest request, String executionId, Path iterationDirectory, Path logPath) {
         TestCase testCase = testCase(request.iterationId(), request.inputs());
         StageCaseData stage = stage();
-        CaseRuntimeContext context = new CaseRuntimeContext(testCase, iterationDirectory, request.iterationId(),
-                iterationDirectory, logPath, "load", request.startedAt().toString());
+        CaseRuntimeContext context = new CaseRuntimeContext(testCase, iterationDirectory, executionId, request.runId(),
+                iterationDirectory, logPath, "load", request.startedAt().toString(), request.runStartedAt().toString());
         context.setProject(projectRoot);
         context.setLoadSourceMetadata(target.scenarioSource(), target.scenarioName());
         context.setTargetMetadata(target.type(), target.id());

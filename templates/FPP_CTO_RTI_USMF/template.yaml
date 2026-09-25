@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.6
+schemaVersion: att-template/v3.1
 name: CTO/RTI流程模板
 description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
 
@@ -21,7 +21,9 @@ actions:
     type: render
     description: "0. Render CT001 Precheck request file with testcase amount"
     payload: CT001_Precheck.xml
-    renderAs: file
+    result:
+      format: text
+      path: rendered/{filename}
 
   log1:
     type: log

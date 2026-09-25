@@ -102,7 +102,9 @@ workloads:
 
 任何 scheduler 開始之前，ATT 會先 resolve 並 validate **全部** workload target 及 dependency；只要其中一個 workload 無效，所有 workload 都不會開始執行。Workload 共用同一個 run-scoped DB/MQ resource layer，因此會真實競爭 configured pool；但 mutable iteration Context 與 output 仍彼此隔離。
 
-v1.1 在原有 `EXEC.LOAD` node 中增加 `WORKLOAD_ID`、`TARGET_TYPE`、`TARGET_ID`。Closed pool 仍保留穩定 `USER_ID`。由於不同 pool 可以各自有一個 `VU-1`，完整 VU identity 是 `(WORKLOAD_ID, USER_ID)`。
+v1.1 在 retained `DIAG.load` evidence 中增加 `workloadId`、`targetType` 和 `targetId`。Closed pool 仍保留穩定 `userId`。由於不同 pool 可以各自有一個 `VU-1`，完整 VU identity 是 `(workloadId, userId)`。Scheduler diagnostics 不屬於 expression Context。
+
+舊有 expression path `EXEC.LOAD` 已不再公開；既有 template 應將業務輸入改用 `EXEC.INPUT`，並在 expression 之外檢視 retained scheduler evidence。
 
 #### Workload models
 
@@ -110,7 +112,7 @@ v1.1 在原有 `EXEC.LOAD` node 中增加 `WORKLOAD_ID`、`TARGET_TYPE`、`TARGE
 
 **Fixed arrival rate** 使用 `load.arrivalRate`、正整數 `maxConcurrent` 及 `overloadPolicy: drop`。它沒有 persistent VU identity。因該 workload concurrency limit 已滿而無法開始的 arrival 會記為 `dropped`；不排隊，也不計作 SUT error。Arrival-rate workload 會拒絕 `execution.thinkTime`。
 
-`duration` 必填；可選 `warmup`、`rampUp`、`rampDown` 定義 phase。`EXEC.LOAD.PHASE` 為 `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。Warm-up traffic 會執行，但不納入 measured threshold aggregate。
+`duration` 必填；可選 `warmup`、`rampUp`、`rampDown` 定義 phase。`DIAG.load.phase` evidence 為 `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。Warm-up traffic 會執行，但不納入 measured threshold aggregate。
 
 #### Closed-VU think time 與 deterministic randomization
 
@@ -170,4 +172,4 @@ DB/MQ resource diagnostics 仍屬 aggregate/run-scoped；成功 iteration worksp
 
 `--profile` 量度 ATT generator/runtime overhead，不是 target host 的 CPU/memory benchmark。Load exit code：`0` PASS、`1` threshold failure、`2` scenario/configuration/target 無效、`3` runtime/infrastructure error。
 
-`EXEC.LOAD` 的中央定義見第 3 章；artifact schema/report 細節見第 11 章。
+Load execution identity 與 evidence-only scheduler diagnostics 的中央定義見第 3 章；artifact schema/report 細節見第 11 章。

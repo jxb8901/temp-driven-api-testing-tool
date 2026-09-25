@@ -136,7 +136,7 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
 
 ```yaml
-schemaVersion: att-template/v2.6
+schemaVersion: att-template/v3.1
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -148,12 +148,12 @@ actions:
     type: render
     description: "Render request for ${EXEC.INPUT.caseId}; status=${output.status}"
     payload: requests/*.xml
-    renderAs: file
+    result: {format: text, path: rendered/{filename}}
     assert: "${output.targetFiles[0]} != null"
   callApi:
     type: tool
     call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
-    saveAs:
+    result:
       path: "${EXEC.INPUT.caseId}-response.json"
       format: raw
       overwrite: false
@@ -171,7 +171,7 @@ actions:
 
 | Type | Purpose | Required fields | Common result |
 |---|---|---|---|
-| `render` | Render one or more UTF-8 payloads | `type`, `payload`, `renderAs` | nested `output.result` and `output.targetFiles` |
+| `render` | Render one or more UTF-8 payloads | `type`, `payload`, `result.format`; optional `result.path` | nested `output.result` and `output.targetFiles` |
 | `tool` | Invoke a configured external tool | `type`, `call` | nested typed result and process evidence |
 | `db` | Query or update a configured database | `type`, `db`, exactly one `query`/`update` block | stable typed DB result and transaction evidence |
 | `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
@@ -180,17 +180,19 @@ actions:
 
 Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
 
-Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log/DB fields. Retry and Action-level timeout are valid only for tool actions. Tool and DB actions may use the common object-shaped `saveAs`; no other action type may use it. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
+Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: raw|text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
-For the common Tool/DB `saveAs` object, `path` is optional: a pathless object keeps the typed result in memory and creates no artifact. `saveAs` is still validated when present, so target-specific format defaults and restrictions apply even without a path; if `path` is present, its safety, collision, and overwrite rules apply as well.
+`result.format` selects the in-memory `output.result` representation; `result.path` optionally persists that same selected, typed value without changing its representation. A pathless result creates no artifact; `path: console` writes the selected representation to the Case log only. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
+
+For a configured process Tool with `result.format: raw`, `output.result` is the trimmed, bounded stdout preview (`rawOutput`), not the complete capture file. A real `result.path` persists exactly that same selected value as UTF-8, so whitespace trimming and any preview truncation are consistent between the Context value and the artifact. Full streamed stdout remains separate process evidence/log capture.
 
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 
 Every action supports expression-bearing `description`. Validation checks `${...}` references and `#{...}` calls without invoking them, resolves available static Case values where needed, and preserves runtime-dependent references. After successful execution, ATT evaluates both forms against the current action-local `${output...}` scope before persisting the final description.
 
-An assign action evaluates `expression` with the normal Context, built-in, configured-tool, and read-only DB-expression grammar. Its `name` must match `[A-Za-z_][A-Za-z0-9_]*`, is case-sensitive, and must not already exist below `EXEC.VARS` for the current Case. `EXEC.VARS` is created once per Test Case, survives stage/template changes, and keeps runtime assignments separate from Excel and framework-owned Case fields. A complete typed expression such as `#{db.orders.query(...)}` retains its Java object; it is not stringified. A successful assignment remains available to later actions and later stages as `${EXEC.VARS.<name>}`. The same value is retained in `${EXEC.ACTIONS.<assignActionId>.output.result}`. Assign supports optional `description`, `assert`, and `onFailure`, but not render, tool-action, log, report-only, retry, timeout, or `saveAs` fields. Assertion FAIL/ERROR does not roll back a value whose expression already evaluated successfully; expression failure creates no variable.
+An assign action evaluates `expression` with the normal Context, built-in, configured-tool, and read-only DB-expression grammar. Its `name` must match `[A-Za-z_][A-Za-z0-9_]*`, is case-sensitive, and must not already exist below `EXEC.VARS` for the current Case. `EXEC.VARS` is created once per Test Case, survives stage/template changes, and keeps runtime assignments separate from Excel and framework-owned Case fields. A complete typed expression such as `#{db.orders.query(...)}` retains its Java object; it is not stringified. A successful assignment remains available to later actions and later stages as `${EXEC.VARS.<name>}`. The same value is retained in `${EXEC.ACTIONS.<assignActionId>.output.result}`. Assign supports optional `description`, `assert`, and `onFailure`, but not render, tool-action, log, report-only, retry, timeout, or `result` fields. Assertion FAIL/ERROR does not roll back a value whose expression already evaluated successfully; expression failure creates no variable.
 
-Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. `renderAs: file` writes the rendered result under the Case output directory using that same relative path; collisions are ERROR. Other render modes write no file and store one typed value, or an ordered relative-path-to-value map for multiple matches, in `output.result`.
+Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. A Render `result.path` is evaluated as a normal ATT expression path first, then expands `{filename}`, `{name}`, `{ext}`, `{index}`, and `{relativePath}` tokens. Statically knowable path safety and collisions are checked during package validation; runtime-dependent path values are checked again before writing. Expanded targets must be unique; `overwrite: true` never permits intra-Action collisions. Render keeps one typed value for one source or an ordered source-keyed map for multiple sources, and `output.targetFiles` lists only files actually persisted.
 
 A log action can emit a rendered `message`, the complete content of one `file`, or both:
 
@@ -206,7 +208,7 @@ logResponse:
 
 Both `message` and `file` support the unified `${...}` / `#{...}` expression engine and are evaluated before the log action publishes its own output. Their combined content is written to the Case log as raw text with CRLF/CR normalized to LF, so multiline content remains physical lines rather than YAML-escaped `\\n`. A relative `file` path resolves below `${EXEC.OUTPUT_DIR}`; an absolute path is accepted only when its resolved real path is still below that directory. The source must be an existing regular non-symlink UTF-8 file. Path/symlink escapes, malformed UTF-8, blank resolved paths, and attempts to read the current Case log are ERROR.
 
-To print a typed DB result using the same SQL*Plus-style text as DB Action `saveAs.format: text`, format it in the message with the pure `dbText(...)` built-in:
+To print a typed DB result using the same SQL*Plus-style text as DB Action `result.format: text`, format it in the message with the pure `dbText(...)` built-in:
 
 ```yaml
 printOrders:

@@ -36,7 +36,7 @@ class PackageValidatorTest {
 
         TemplateAction query = new TemplateAction("query", map("type","db","db","orders",
                 "query",map("sqlFile","sql/find.sql","params",Collections.singletonList("${CASE.id}")),
-                "saveAs",map("path","result.txt","format","text")), "att-template/v2.5");
+                "result",map("path","result.txt","format","text")), "att-template/v2.5");
         TemplateAction expression = new TemplateAction("check", map("type","assert",
                 "assert","#{db.orders.scalar(sql='select count(*) from orders where id = ?', params=[${CASE.id}, 'OPEN'])} >= 0"),
                 "att-template/v2.5");
@@ -58,7 +58,7 @@ class PackageValidatorTest {
                 new StageTemplate("DB",tempDir,Collections.singletonList(dynamicFile),"att-template/v2.5"),config));
 
         TemplateAction rawDb = new TemplateAction("raw", map("type","db","db","orders",
-                "query",map("sql","select 1"), "saveAs",map("format","raw")),
+                "query",map("sql","select 1"), "result",map("format","raw")),
                 "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("DB",tempDir,Collections.singletonList(rawDb),"att-template/v2.5"),config));
@@ -84,22 +84,22 @@ class PackageValidatorTest {
 
         TemplateAction sendSaveAs = new TemplateAction("sendWithSaveAs", map("type", "tool",
                 "call", "#{mq.broker.send(queue='REQUEST.Q', file='request.bin')}",
-                "saveAs", map("path", "sent.bin", "format", "raw")), "att-template/v3.0");
+                "result", map("path", "sent.bin", "format", "raw")), "att-template/v3.0");
         java.lang.reflect.InvocationTargetException saveAsError = assertThrows(java.lang.reflect.InvocationTargetException.class,
                 () -> contract.invoke(validator, new StageTemplate("MQ", tempDir, Collections.singletonList(sendSaveAs), "att-template/v3.0"), config));
         assertTrue(saveAsError.getCause().getMessage().contains("MQ send does not produce a business payload"));
 
         TemplateAction pathlessSendSaveAs = new TemplateAction("pathlessSendWithSaveAs", map("type", "tool",
                 "call", "#{mq.broker.send(queue='REQUEST.Q', file='request.bin')}",
-                "saveAs", map("format", "text")), "att-template/v3.0");
+                "result", map("format", "text")), "att-template/v3.0");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("MQ", tempDir, Collections.singletonList(pathlessSendSaveAs), "att-template/v3.0"), config));
 
         TemplateAction requestSaveAs = new TemplateAction("requestSaveAs", map("type", "tool",
                 "call", "#{mq.broker.request(file='request.bin', requestQueue='REQUEST.Q', replyQueue='REPLY.Q')}",
-                "saveAs", map("format", "text")), "att-template/v3.0");
+                "result", map("format", "text")), "att-template/v3.0");
         TemplateAction receiveSaveAs = new TemplateAction("receiveSaveAs", map("type", "tool",
-                "call", "#{mq.broker.receive(queue='REPLY.Q')}", "saveAs", map("format", "json")), "att-template/v3.0");
+                "call", "#{mq.broker.receive(queue='REPLY.Q')}", "result", map("format", "json")), "att-template/v3.0");
         assertDoesNotThrow(() -> {
             try { contract.invoke(validator, new StageTemplate("MQ", tempDir,
                     Arrays.asList(requestSaveAs, receiveSaveAs), "att-template/v3.0"), config); }
@@ -155,17 +155,18 @@ class PackageValidatorTest {
             catch (Exception e) { throw new RuntimeException(e); } });
 
         TemplateAction rawSave = new TemplateAction("bad", map("type","tool",
-                "call","#{orders.find(id=${CASE.id})}", "saveAs", map("path","out.json","format","raw")), "att-template/v2.5");
+                "call","#{orders.find(id=${CASE.id})}", "result", map("path","out.json","format","raw")), "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("Facade", tempDir, Collections.singletonList(rawSave), "att-template/v2.5"), config));
         TemplateAction pathlessMissingFormat = new TemplateAction("bad", map("type","tool",
-                "call","#{orders.find(id=${CASE.id})}", "saveAs", map()), "att-template/v2.5");
+                "call","#{orders.find(id=${CASE.id})}", "result", map()), "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("Facade", tempDir, Collections.singletonList(pathlessMissingFormat), "att-template/v2.5"), config));
-        TemplateAction legacySave = new TemplateAction("bad", map("type","tool",
-                "call","#{orders.find(id=${CASE.id})}", "saveAs", "out.txt"), "att-template/v2.5");
-        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
-                new StageTemplate("Facade", tempDir, Collections.singletonList(legacySave), "att-template/v2.5"), config));
+        TemplateAction resultConfig = new TemplateAction("good", map("type","tool",
+                "call","#{orders.find(id=${CASE.id})}", "result", map("path", "out.txt", "format", "text")), "att-template/v3.1");
+        assertDoesNotThrow(() -> { try { contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(resultConfig), "att-template/v3.1"), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } });
 
         ToolConfig invalid = new ToolConfig("orders.invalid", "invalid", "orders", "Invalid", "Invalid",
                 Collections.<String>emptyList(), "#{db.missing.query(sql='select 1')}", "",
@@ -382,7 +383,7 @@ class PackageValidatorTest {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10,tempDir,Collections.<String,ToolConfig>emptyMap(),null,null);
         PackageValidator validator = new PackageValidator(tempDir,config);
         java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class); method.setAccessible(true);
-        Map<String,Object> invalidRender = new LinkedHashMap<String,Object>(); invalidRender.put("type","render"); invalidRender.put("payload","p.txt"); invalidRender.put("saveAs","out.txt"); invalidRender.put("call","#{x()}");
+        Map<String,Object> invalidRender = new LinkedHashMap<String,Object>(); invalidRender.put("type","render"); invalidRender.put("payload","p.txt"); invalidRender.put("result", map("format", "text", "path", "out.txt")); invalidRender.put("call","#{x()}");
         Files.write(tempDir.resolve("p.txt"),new byte[]{1});
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("render",invalidRender))),config));
         Map<String,Object> builtInTool = new LinkedHashMap<String,Object>(); builtInTool.put("type","tool"); builtInTool.put("call","#{upper(value='x')}");
@@ -402,12 +403,40 @@ class PackageValidatorTest {
         java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class); method.setAccessible(true);
         Files.createDirectories(tempDir.resolve("data"));
         Files.write(tempDir.resolve("data/valid.json"),"{\"ok\":true}".getBytes("UTF-8"));
-        Map<String,Object> valid = new LinkedHashMap<String,Object>(); valid.put("type","render"); valid.put("payload","data/*.json"); valid.put("renderAs","json");
+        Map<String,Object> valid = new LinkedHashMap<String,Object>(); valid.put("type","render"); valid.put("payload","data/*.json"); valid.put("result", map("format", "json"));
         assertDoesNotThrow(() -> { try { method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("render",valid))),config); } catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); } catch (Exception e) { throw new RuntimeException(e); } });
         Files.write(tempDir.resolve("data/invalid.json"),"{".getBytes("UTF-8"));
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("render",valid))),config));
         valid.put("payload","missing/*.json");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("render",valid))),config));
+    }
+
+    @Test void staticallyValidatesRenderResultPathCollisionsAndDynamicExpressions() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        method.setAccessible(true);
+        Files.createDirectories(tempDir.resolve("requests"));
+        Files.write(tempDir.resolve("requests/a.xml"), "<a/>".getBytes("UTF-8"));
+        Files.write(tempDir.resolve("requests/b.xml"), "<b/>".getBytes("UTF-8"));
+
+        Map<String, Object> dynamic = new LinkedHashMap<String, Object>();
+        dynamic.put("type", "render"); dynamic.put("payload", "requests/*.xml");
+        dynamic.put("result", map("format", "text", "path", "${EXEC.INPUT.outputDir}/{filename}"));
+        assertDoesNotThrow(() -> {
+            try { method.invoke(validator, new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("render", dynamic))), config); }
+            catch (java.lang.reflect.InvocationTargetException error) { throw new RuntimeException(error.getCause()); }
+            catch (Exception error) { throw new RuntimeException(error); }
+        });
+
+        dynamic.put("result", map("format", "text", "path", "${EXEC.INPUT.outputDir}/same.txt"));
+        java.lang.reflect.InvocationTargetException collision = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("render", dynamic))), config));
+        assertTrue(collision.getCause().getMessage().contains("maps multiple sources to the same target"));
+        dynamic.put("result", map("format", "text", "path", "../${EXEC.INPUT.outputDir}/{filename}"));
+        assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("render", dynamic))), config));
     }
     @Test void referencedToolExecutableCannotEscapePackage() throws Exception {
         Path project=tempDir.resolve("project"), outside=tempDir.resolve("outside.sh"); Files.createDirectories(project); Files.write(outside, "#!/bin/sh\n".getBytes("UTF-8")); outside.toFile().setExecutable(true);
@@ -427,7 +456,7 @@ class PackageValidatorTest {
                 configuredTools,null,null);
         PackageValidator validator = new PackageValidator(tempDir, config);
         Map<String,Object> render = new LinkedHashMap<String,Object>();
-        render.put("type", "render"); render.put("payload", "request.txt"); render.put("renderAs", "text");
+        render.put("type", "render"); render.put("payload", "request.txt"); render.put("result", map("format", "text"));
         StageTemplate template = new StageTemplate("PAYMENT", tempDir,
                 Collections.singletonList(new TemplateAction("request", render)));
         java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
@@ -969,7 +998,7 @@ class PackageValidatorTest {
                 Collections.<String,ToolConfig>emptyMap(),null,null);
         PackageValidator validator = new PackageValidator(tempDir, config);
         Map<String,Object> render = new LinkedHashMap<String,Object>();
-        render.put("type", "render"); render.put("payload", "date.txt"); render.put("renderAs", "text");
+        render.put("type", "render"); render.put("payload", "date.txt"); render.put("result", map("format", "text"));
         StageTemplate template = new StageTemplate("DATES", tempDir,
                 Collections.singletonList(new TemplateAction("date", render)));
         java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
