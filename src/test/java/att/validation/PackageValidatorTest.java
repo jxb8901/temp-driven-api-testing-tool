@@ -82,6 +82,30 @@ class PackageValidatorTest {
             catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
         });
 
+        TemplateAction sendSaveAs = new TemplateAction("sendWithSaveAs", map("type", "tool",
+                "call", "#{mq.broker.send(queue='REQUEST.Q', file='request.bin')}",
+                "saveAs", map("path", "sent.bin", "format", "raw")), "att-template/v3.0");
+        java.lang.reflect.InvocationTargetException saveAsError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, new StageTemplate("MQ", tempDir, Collections.singletonList(sendSaveAs), "att-template/v3.0"), config));
+        assertTrue(saveAsError.getCause().getMessage().contains("MQ send does not produce a business payload"));
+
+        TemplateAction pathlessSendSaveAs = new TemplateAction("pathlessSendWithSaveAs", map("type", "tool",
+                "call", "#{mq.broker.send(queue='REQUEST.Q', file='request.bin')}",
+                "saveAs", map("format", "text")), "att-template/v3.0");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("MQ", tempDir, Collections.singletonList(pathlessSendSaveAs), "att-template/v3.0"), config));
+
+        TemplateAction requestSaveAs = new TemplateAction("requestSaveAs", map("type", "tool",
+                "call", "#{mq.broker.request(file='request.bin', requestQueue='REQUEST.Q', replyQueue='REPLY.Q')}",
+                "saveAs", map("format", "text")), "att-template/v3.0");
+        TemplateAction receiveSaveAs = new TemplateAction("receiveSaveAs", map("type", "tool",
+                "call", "#{mq.broker.receive(queue='REPLY.Q')}", "saveAs", map("format", "json")), "att-template/v3.0");
+        assertDoesNotThrow(() -> {
+            try { contract.invoke(validator, new StageTemplate("MQ", tempDir,
+                    Arrays.asList(requestSaveAs, receiveSaveAs), "att-template/v3.0"), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+        });
+
         TemplateAction collector = new TemplateAction("send", map("type", "tool",
                 "call", "#{upper('ok')}", "evidence", map("mq", map("call", "#{mq.broker.receive(queue='REPLY.Q')}"))), "att-template/v3.0");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,

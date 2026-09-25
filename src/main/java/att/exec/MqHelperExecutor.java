@@ -73,13 +73,18 @@ public final class MqHelperExecutor {
         try {
             helper = select(logical, args.get("instance"));
             validateArguments(instance, operation, args, helper);
+            if ("send".equals(operation) && savePath != null && !savePath.trim().isEmpty()) {
+                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support saveAs");
+            }
         } catch (Exception error) {
             return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
         }
         Instant started = Instant.now();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
-        result.put("mqHelper", logical.logicalId()); result.put("instance", helper.instanceId()); result.put("queueManager", helper.queueManager()); result.put("result", null);
+        result.put("mqHelper", logical.logicalId()); result.put("instance", helper.instanceId());
+        result.put("queueManager", helper.queueManager()); result.put("selectionStrategy", logical.selectionStrategy());
+        result.put("result", null);
         evidence.put("instance", helper.instanceId()); evidence.put("helperId", logical.logicalId()); evidence.put("physicalInstance", helper.instanceId());
         evidence.put("selectionStrategy", logical.selectionStrategy()); evidence.put("operation", operation);
         evidence.put("queueManager", helper.queueManager());

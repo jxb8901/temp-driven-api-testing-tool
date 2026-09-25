@@ -986,6 +986,9 @@ public final class PackageValidator {
         if (!action.saveConfig().specified()) return;
         ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
         if (parsed.name().startsWith("mq.")) {
+            if (parsed.name().endsWith(".send")) {
+                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support saveAs: " + action.id());
+            }
             String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
             if (format.isEmpty()) format = "raw";
             if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)

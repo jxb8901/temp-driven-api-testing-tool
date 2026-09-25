@@ -1404,9 +1404,15 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href=
 <span id="cb26-14"><a href="#cb26-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.receive(queue=&#39;replyQ&#39;, correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}&quot;</span></span>
 <span id="cb26-15"><a href="#cb26-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
 <h4 id="output-與-validation">Output 與 validation</h4>
-<p>output.result 是 business payload；MQ metadata 直接放在 output。send
-發布 sent、queue、bytes、messageId、correlationId，result 為
-null/absent。receive/request 發布 received/replyReceived、queue
+<p>output.result 是 business payload；MQ metadata 直接放在 output。每個
+operation 都發布 <code>mqHelper</code>、選中的 physical
+<code>instance</code>、<code>queueManager</code> 與
+<code>selectionStrategy</code>；v1.0 及單一 instance helper 的
+<code>selectionStrategy</code> 為 <code>single</code>。send 發布
+sent、queue、bytes、messageId、correlationId，result 為
+null/absent。<code>send</code> 不產生 business payload，因此拒絕
+<code>saveAs</code>；<code>receive</code> 與 <code>request</code> 支援
+<code>saveAs</code>。receive/request 發布 received/replyReceived、queue
 names、effective
 waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ
 提供時的 reply CCSID/encoding/format、completion/reason fields，parsed

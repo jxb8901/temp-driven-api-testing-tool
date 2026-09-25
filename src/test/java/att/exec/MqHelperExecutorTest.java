@@ -18,6 +18,12 @@ import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,6 +42,7 @@ class MqHelperExecutorTest {
         assertArrayEquals(bytes, factory.putPayload);
         assertEquals("", factory.putRequest == null ? null : factory.putRequest.replyQueue());
         assertEquals(bytes.length, result.result().get("bytes"));
+        assertEquals("single", result.operationResult().outputMetadata().get("selectionStrategy"));
         assertFalse(result.evidence().containsKey("payload"));
         Map<?, ?> mqEvidence = (Map<?, ?>) result.operationResult().evidence().get("mq");
         assertTrue(mqEvidence.get("invocations") instanceof java.util.List);
@@ -129,6 +136,19 @@ class MqHelperExecutorTest {
         assertFalse(result.evidence().containsKey("payloadEvidence"));
     }
 
+    @Test void sendRejectsSaveAsBeforeConnecting() throws Exception {
+        Path caseDir = tempDir.resolve("send-save-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        FakeFactory factory = new FakeFactory();
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
+                map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-save",
+                "send", "sent.bin", "raw", false);
+
+        assertFalse(result.success());
+        assertTrue(String.valueOf(((Map<?, ?>) result.result().get("error")).get("message")).contains("does not support saveAs"));
+        assertTrue(factory.connectedInstances.isEmpty());
+    }
+
     @Test void savedMqArtifactUsesCommonFlowActionRoot() throws Exception {
         Path caseDir = tempDir.resolve("flow-save-case"); Files.createDirectories(caseDir);
         FakeFactory factory = new FakeFactory();
@@ -202,24 +222,83 @@ class MqHelperExecutorTest {
         assertFalse(result.operationResult().evidence().toString().contains("secret-b"));
     }
 
-    @Test void roundRobinSelectionIsThreadSafeAndStableAcrossInvocations() throws Exception {
+    @Test void randomSelectionUsesOnlyConfiguredInstancesAndCanReachMultipleMembers() throws Exception {
         Path caseDir = tempDir.resolve("round-robin-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        FrameworkConfig configured = multiConfig("random");
+        FakeFactory factory = new FakeFactory();
+        MqHelperExecutor executor = new MqHelperExecutor(tempDir, configured, factory);
+        for (int index = 0; index < 256; index++) {
+            MqInvocationResult result = executor.execute("payment", "send",
+                    map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "random-" + index);
+            assertTrue(result.success());
+            assertEquals("random", result.operationResult().outputMetadata().get("selectionStrategy"));
+        }
+        assertTrue(factory.connectedInstances.contains("a"));
+        assertTrue(factory.connectedInstances.contains("b"));
+        assertTrue(factory.connectedInstances.stream().allMatch(id -> "a".equals(id) || "b".equals(id)));
+    }
+
+    @Test void roundRobinSelectionIsBalancedUnderConcurrentInvocations() throws Exception {
+        Path caseDir = tempDir.resolve("round-robin-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        FakeFactory factory = new FakeFactory();
+        MqHelperExecutor executor = new MqHelperExecutor(tempDir, multiConfig("roundRobin"), factory);
+        int invocations = 128;
+        ExecutorService workers = Executors.newFixedThreadPool(8);
+        CountDownLatch ready = new CountDownLatch(8);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<MqInvocationResult>> futures = new ArrayList<Future<MqInvocationResult>>();
+        try {
+            for (int index = 0; index < invocations; index++) {
+                final int invocation = index;
+                futures.add(workers.submit(() -> {
+                    if (invocation < 8) ready.countDown();
+                    start.await();
+                    return executor.execute("payment", "send",
+                            map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null,
+                            "concurrent-" + invocation);
+                }));
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            for (Future<MqInvocationResult> future : futures) assertTrue(future.get(10, TimeUnit.SECONDS).success());
+        } finally {
+            start.countDown();
+            workers.shutdownNow();
+        }
+        long a = factory.connectedInstances.stream().filter("a"::equals).count();
+        long b = factory.connectedInstances.stream().filter("b"::equals).count();
+        assertEquals(invocations, factory.connectedInstances.size());
+        assertTrue(Math.abs(a - b) <= 1, "round robin distribution: a=" + a + ", b=" + b);
+    }
+
+    @Test void multiInstanceRequestUsesSameSelectedInstanceForPutAndCorrelatedGet() throws Exception {
+        Path caseDir = tempDir.resolve("multi-request-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{2}, new byte[]{1}, new byte[]{3});
+        MqInvocationResult result = new MqHelperExecutor(tempDir, multiConfig("roundRobin"), factory).execute("payment", "request",
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
+                context(caseDir), null, "request-same-instance");
+
+        assertTrue(result.success());
+        assertEquals(java.util.Collections.singletonList("a"), factory.putInstances);
+        assertEquals(java.util.Collections.singletonList("a"), factory.getInstances);
+        assertEquals(factory.putInstances.get(0), factory.getInstances.get(0));
+    }
+
+    private FrameworkConfig multiConfig(String strategy) {
         MqHelperConfig a = MqHelperConfig.physical(new MqHelperConfig("a", "Payment", "a", "QM-A", "host-a", 1414,
                 "CH-A", "", "", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml")), "payment", "a");
         MqHelperConfig b = MqHelperConfig.physical(new MqHelperConfig("b", "Payment", "b", "QM-B", "host-b", 1414,
                 "CH-B", "", "", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml")), "payment", "b");
         Map<String, MqHelperConfig> instances = new LinkedHashMap<String, MqHelperConfig>(); instances.put("a", a); instances.put("b", b);
         Map<String, MqHelperConfig> helpers = new LinkedHashMap<String, MqHelperConfig>();
-        helpers.put("payment", MqHelperConfig.group("payment", "Payment", "Payment MQ", "roundRobin", instances, "metadata", tempDir.resolve("mq.yaml")));
-        FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+        helpers.put("payment", MqHelperConfig.group("payment", "Payment", "Payment MQ", strategy, instances, "metadata", tempDir.resolve("mq.yaml")));
+        return new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
                 Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
                 null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
-        FakeFactory factory = new FakeFactory();
-        MqHelperExecutor executor = new MqHelperExecutor(tempDir, configured, factory);
-        assertTrue(executor.execute("payment", "send", map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "one").success());
-        assertTrue(executor.execute("payment", "send", map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "two").success());
-        assertEquals(java.util.Arrays.asList("a", "b"), factory.connectedInstances);
     }
 
     private FrameworkConfig config() { return config("metadata"); }
@@ -251,15 +330,18 @@ class MqHelperExecutorTest {
         MqTransport.GetRequest getRequest;
         MqTransport.Message reply;
         boolean noMessage;
-        final List<Boolean> bindNotFixed = new ArrayList<Boolean>();
+        final List<Boolean> bindNotFixed = new CopyOnWriteArrayList<Boolean>();
         int disconnects;
         int queueCloses;
         String connectedInstance;
-        final List<String> connectedInstances = new ArrayList<String>();
+        final List<String> connectedInstances = new CopyOnWriteArrayList<String>();
+        final List<String> putInstances = new CopyOnWriteArrayList<String>();
+        final List<String> getInstances = new CopyOnWriteArrayList<String>();
 
         @Override public MqTransport.Connection connect(att.config.MqHelperConfig config) {
             connectedInstance = config.instanceId();
             connectedInstances.add(config.instanceId());
+            final String connectionInstance = config.instanceId();
             return new MqTransport.Connection() {
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
                     bindNotFixed.add(Boolean.FALSE);
@@ -272,10 +354,12 @@ class MqHelperExecutorTest {
                 private MqTransport.Queue queue(String queue, boolean input, boolean output) {
                     return new MqTransport.Queue() {
                         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) {
+                            putInstances.add(connectionInstance);
                             putPayload = payload.clone(); putRequest = request;
                             return new MqTransport.Message(new byte[]{1, 2}, null, payload);
                         }
                         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
+                            getInstances.add(connectionInstance);
                             getRequest = request;
                             if (noMessage) throw new MqTransport.Exception("No message", 2, 2033, "MQRC_NO_MSG_AVAILABLE", null);
                             return reply == null ? new MqTransport.Message(new byte[]{9}, new byte[]{1, 2}, new byte[0]) : reply;

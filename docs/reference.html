@@ -1509,15 +1509,21 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href=
 <span id="cb26-15"><a href="#cb26-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
 <h4 id="output-and-validation">Output and validation</h4>
 <p>output.result is the business payload; MQ metadata is directly under
-output. send publishes sent, queue, bytes, messageId, correlationId, and
-leaves result null/absent. receive/request publish received or
-replyReceived, queue names, effective waitMs, messageId, replyMessageId,
-replyCorrelationId, byte counts, reply CCSID/encoding/format when
-supplied by MQ, completion/reason fields, and put the parsed payload
-only in result. A normal request satisfies output.messageId ==
-output.replyCorrelationId. MQRC 2033 leaves result null and publishes
-received/replyReceived false plus reasonCode 2033,
-MQRC_NO_MSG_AVAILABLE, and the effective waitMs.</p>
+output. Every operation publishes <code>mqHelper</code>, selected
+physical <code>instance</code>, <code>queueManager</code>, and
+<code>selectionStrategy</code>; v1.0 and single-instance helpers report
+<code>selectionStrategy: single</code>. send publishes sent, queue,
+bytes, messageId, correlationId, and leaves result null/absent.
+<code>send</code> does not produce a business payload and rejects
+<code>saveAs</code>; <code>receive</code> and <code>request</code>
+support it. receive/request publish received or replyReceived, queue
+names, effective waitMs, messageId, replyMessageId, replyCorrelationId,
+byte counts, reply CCSID/encoding/format when supplied by MQ,
+completion/reason fields, and put the parsed payload only in result. A
+normal request satisfies output.messageId == output.replyCorrelationId.
+MQRC 2033 leaves result null and publishes received/replyReceived false
+plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective
+waitMs.</p>
 <p>Public MsgId/CorrelId values are lowercase hex, two characters per
 byte, no separators, with leading zeroes; a 24-byte ID is 48 characters.
 Raw runtime values remain byte[]. Typed reply decoding uses the received
