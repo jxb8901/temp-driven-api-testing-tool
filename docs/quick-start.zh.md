@@ -1,4 +1,4 @@
-# ATT V3.5.1 快速入門
+# ATT V3.5.2 快速入門
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.html)
 
@@ -272,4 +272,4 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 
 Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/05_resources/dbhelper.md)。
 
-需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.5.1 中文 Reference Manual](reference.zh.html)。
+需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.5.2 中文 Reference Manual](reference.zh.html)。

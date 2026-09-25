@@ -31,12 +31,18 @@ public class ToolInvocationResult {
 
     public ToolInvocationResult(String toolName, String invocationId, Object output, Map<String, Object> invocation,
                                  boolean executionSuccess, Map<String, Object> evidence) {
+        this(toolName, invocationId, output, invocation, executionSuccess,
+                new ActionExecutionResult(output, evidence, executionSuccess));
+    }
+
+    public ToolInvocationResult(String toolName, String invocationId, Object output, Map<String, Object> invocation,
+                                boolean executionSuccess, ActionExecutionResult operationResult) {
         this.toolName = toolName;
         this.invocationId = invocationId;
         this.output = output;
         this.invocation = invocation;
         this.executionSuccess = executionSuccess;
-        this.operationResult = new ActionExecutionResult(output, evidence, executionSuccess);
+        this.operationResult = operationResult;
     }
 
     public String toolName() { return toolName; }

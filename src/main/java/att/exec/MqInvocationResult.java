@@ -1,6 +1,7 @@
 /* Author: Jeffrey + ChatGPT */
 package att.exec;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Result of one invocation-scoped MQ operation. */
@@ -16,7 +17,12 @@ public final class MqInvocationResult {
     public Map<String, Object> evidence() { return evidence; }
     public boolean success() { return success; }
     public ActionExecutionResult operationResult() {
-        return new ActionExecutionResult(result, ActionExecutionResult.evidence("mq", evidence), success);
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>(result);
+        Object payload = metadata.remove("result");
+        Object duration = metadata.get("durationMs");
+        long durationMs = duration instanceof Number ? ((Number) duration).longValue() : -1L;
+        return new ActionExecutionResult(payload, ActionExecutionResult.evidence("mq", evidence), success,
+                null, durationMs, metadata);
     }
     /** @deprecated Use {@link #operationResult()}; this is not an Action lifecycle result. */
     @Deprecated public ActionExecutionResult actionResult() { return operationResult(); }

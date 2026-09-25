@@ -140,5 +140,11 @@ class JsonSchemaVerifierTest {
         String mq = "{\"schemaVersion\":\"att-mqhelper/v1.0\",\"id\":\"broker\",\"name\":\"Broker\",\"description\":\"MQ\",\"connection\":{\"queueManager\":\"QM1\",\"host\":\"localhost\",\"port\":1414,\"channel\":\"APP.SVRCONN\"},\"message\":{\"ccsid\":1208,\"format\":\"MQSTR\",\"persistence\":\"asQueue\"},\"requestReply\":{\"waitMs\":1000},\"evidence\":{\"payload\":\"metadata\"}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), mq));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), mq.replace("\"port\":1414", "\"port\":0")));
+
+        String issue59Mq = mq.replace("\"ccsid\":1208,\"format\":\"MQSTR\",\"persistence\":\"asQueue\"",
+                "\"charset\":1208,\"encoding\":273,\"format\":\"\",\"persistence\":0,\"expiry\":-1,\"requestQueue\":\"REQUEST.Q\",\"replyQueue\":\"REPLY.Q\"");
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), issue59Mq));
+        String pathlessSave = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"reply\":{\"type\":\"tool\",\"call\":\"#{mq.broker.receive(queue='REPLY.Q')}\",\"saveAs\":{\"format\":\"json\"}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v3.0.schema.json"), pathlessSave));
     }
 }

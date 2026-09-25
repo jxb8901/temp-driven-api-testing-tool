@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.2 - 2026-09-25
+
+- Implement issue #59: extend MQHelper message defaults and IBM MQ metadata, preserve MsgId/CorrelId request/reply behavior, adopt common `saveAs` payload handling, publish MQ metadata directly under Action output, and document the complete English/Chinese contract.
+
 ## 3.5.1 - 2026-09-23
 
 - Implemented Issue #36 environment profiles with one common `att-config/v2.6`, deterministic `--env` selection, shallow typed DB/MQ overlays, stable logical helper IDs, and backward-compatible complete `--config` workflows.

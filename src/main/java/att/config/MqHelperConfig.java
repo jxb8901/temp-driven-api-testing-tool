@@ -17,9 +17,13 @@ public final class MqHelperConfig {
     private final String channel;
     private final String username;
     private final String password;
-    private final int ccsid;
+    private final int charset;
+    private final Integer encoding;
+    private final Integer expiry;
     private final String format;
     private final String persistence;
+    private final String requestQueue;
+    private final String replyQueue;
     private final int requestReplyWaitMs;
     private final String evidencePayload;
     private final Path sourceFile;
@@ -38,6 +42,16 @@ public final class MqHelperConfig {
                           String host, int port, String channel, String username, String password,
                           int ccsid, String format, String persistence, int requestReplyWaitMs,
                           String evidencePayload, int poolMaxSize, int poolMinIdle, long poolBorrowTimeoutMs, Path sourceFile) {
+        this(id, name, description, queueManager, host, port, channel, username, password, ccsid, null, null,
+                format, persistence, null, null, requestReplyWaitMs, evidencePayload,
+                poolMaxSize, poolMinIdle, poolBorrowTimeoutMs, sourceFile);
+    }
+
+    public MqHelperConfig(String id, String name, String description, String queueManager,
+                          String host, int port, String channel, String username, String password,
+                          int charset, Integer encoding, Integer expiry, String format, String persistence,
+                          String requestQueue, String replyQueue, int requestReplyWaitMs,
+                          String evidencePayload, int poolMaxSize, int poolMinIdle, long poolBorrowTimeoutMs, Path sourceFile) {
         this.id = id;
         this.name = name;
         this.description = description;
@@ -47,9 +61,13 @@ public final class MqHelperConfig {
         this.channel = channel;
         this.username = username == null ? "" : username;
         this.password = password == null ? "" : password;
-        this.ccsid = ccsid;
-        this.format = format;
-        this.persistence = persistence;
+        this.charset = charset;
+        this.encoding = encoding;
+        this.expiry = expiry;
+        this.format = format == null ? "MQSTR" : format;
+        this.persistence = persistence == null ? "asQueue" : persistence;
+        this.requestQueue = requestQueue == null ? "" : requestQueue;
+        this.replyQueue = replyQueue == null ? "" : replyQueue;
         this.requestReplyWaitMs = requestReplyWaitMs;
         this.evidencePayload = evidencePayload;
         if (poolMaxSize < 1 || poolMinIdle < 0 || poolMinIdle > poolMaxSize || poolBorrowTimeoutMs < 0L) throw new IllegalArgumentException("Invalid MQ pool configuration");
@@ -67,9 +85,15 @@ public final class MqHelperConfig {
     public String username() { return username; }
     public String password() { return password; }
     public boolean credentialsConfigured() { return !username.isEmpty() || !password.isEmpty(); }
-    public int ccsid() { return ccsid; }
+    public int charset() { return charset; }
+    /** Backward-compatible alias for the IBM MQ character-set identifier. */
+    public int ccsid() { return charset; }
+    public Integer encoding() { return encoding; }
+    public Integer expiry() { return expiry; }
     public String format() { return format; }
     public String persistence() { return persistence; }
+    public String requestQueue() { return requestQueue; }
+    public String replyQueue() { return replyQueue; }
     public int requestReplyWaitMs() { return requestReplyWaitMs; }
     public String evidencePayload() { return evidencePayload; }
     public Path sourceFile() { return sourceFile; }
@@ -86,9 +110,14 @@ public final class MqHelperConfig {
         result.put("port", port);
         result.put("channel", channel);
         result.put("credentialsConfigured", credentialsConfigured());
-        result.put("ccsid", ccsid);
+        result.put("charset", charset);
+        result.put("ccsid", charset);
+        if (encoding != null) result.put("encoding", encoding);
+        if (expiry != null) result.put("expiry", expiry);
         result.put("format", format);
         result.put("persistence", persistence);
+        if (!requestQueue.isEmpty()) result.put("requestQueue", requestQueue);
+        if (!replyQueue.isEmpty()) result.put("replyQueue", replyQueue);
         return Collections.unmodifiableMap(result);
     }
 

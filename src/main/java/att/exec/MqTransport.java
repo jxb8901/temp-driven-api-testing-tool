@@ -24,20 +24,33 @@ public final class MqTransport {
     }
 
     public static final class PutRequest {
+        private final String replyQueueManager;
         private final String replyQueue;
         private final int ccsid;
+        private final Integer encoding;
         private final String format;
         private final String persistence;
+        private final Integer expiry;
         public PutRequest(String replyQueue, int ccsid, String format, String persistence) {
+            this("", replyQueue, ccsid, null, format, persistence, null);
+        }
+        public PutRequest(String replyQueueManager, String replyQueue, int ccsid, Integer encoding,
+                          String format, String persistence, Integer expiry) {
+            this.replyQueueManager = replyQueueManager == null ? "" : replyQueueManager;
             this.replyQueue = replyQueue == null ? "" : replyQueue;
             this.ccsid = ccsid;
+            this.encoding = encoding;
             this.format = format;
             this.persistence = persistence;
+            this.expiry = expiry;
         }
+        public String replyQueueManager() { return replyQueueManager; }
         public String replyQueue() { return replyQueue; }
         public int ccsid() { return ccsid; }
+        public Integer encoding() { return encoding; }
         public String format() { return format; }
         public String persistence() { return persistence; }
+        public Integer expiry() { return expiry; }
     }
 
     public static final class GetRequest {

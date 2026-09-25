@@ -205,7 +205,7 @@ public class CaseExecutionLog implements AutoCloseable {
         copyIfPresent(attempt, result, "attempt", "id", "status", "durationMs", "input", "logicalArgv");
         Object logical = attempt.get("logicalArgv"), executed = attempt.get("argv");
         if (executed != null && !executed.equals(logical)) result.put("argv", executed);
-        Object parsed = attempt.get("output"), stdout = attempt.get("stdout");
+        Object parsed = presentationValue(attempt.get("output")), stdout = attempt.get("stdout");
         if (!(parsed instanceof String) || stdout == null || !String.valueOf(parsed).equals(String.valueOf(stdout).trim())) {
             if (attempt.containsKey("output")) result.put("output", parsed);
         }
@@ -233,9 +233,14 @@ public class CaseExecutionLog implements AutoCloseable {
 
     private void copyResultUnlessTargetDuplicate(Map<String, Object> source, Map<String, Object> target) {
         if (!source.containsKey("result")) return;
-        Object value = source.get("result");
+        Object value = presentationValue(source.get("result"));
         if (value != null && value.equals(source.get("targetFiles"))) return;
         target.put("result", value);
+    }
+
+    /** Raw MQ bytes stay byte[] in runtime Context; only human log rendering decodes them. */
+    private Object presentationValue(Object value) {
+        return value instanceof byte[] ? new String((byte[]) value, java.nio.charset.Charset.defaultCharset()) : value;
     }
 
     private void copyIfPresent(Map<String, Object> source, Map<String, Object> target, String... keys) {

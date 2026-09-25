@@ -41,7 +41,7 @@ class MqHelperExecutorTest {
         assertEquals(1, factory.queueCloses);
     }
 
-    @Test void requestMatchesReplyCorrelationAndWritesReplyFile() throws Exception {
+    @Test void requestMatchesReplyCorrelationAndKeepsReplyInMemoryByDefault() throws Exception {
         Path caseDir = tempDir.resolve("request-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
         FakeFactory factory = new FakeFactory();
@@ -53,14 +53,31 @@ class MqHelperExecutorTest {
         assertTrue(result.success());
         assertEquals(Boolean.TRUE, result.result().get("sent"));
         assertEquals(Boolean.TRUE, result.result().get("replyReceived"));
+        assertEquals("QM1", factory.putRequest.replyQueueManager());
+        assertEquals("REPLY.Q", factory.putRequest.replyQueue());
         assertArrayEquals(new byte[]{1, 2}, factory.getRequest.correlationId());
         assertEquals(321, factory.getRequest.waitMs());
-        Path replyFile = Paths.get(String.valueOf(result.result().get("replyFile")));
-        assertArrayEquals(new byte[]{4, 5, 6}, Files.readAllBytes(replyFile));
+        assertNull(result.result().get("replyFile"));
+        assertArrayEquals(new byte[]{4, 5, 6}, (byte[]) result.result().get("result"));
         assertEquals(3, result.result().get("replyBytes"));
         assertEquals("REPLY.Q", result.evidence().get("replyQueue"));
         assertEquals(2, factory.queueCloses);
         assertEquals(1, factory.disconnects);
+    }
+
+    @Test void explicitRawSaveAsWritesExactReplyBytesAndPublishesArtifactOnlyThen() throws Exception {
+        Path caseDir = tempDir.resolve("saved-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1, 2}, new byte[]{0, 1, (byte) 0xff});
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
+                context(caseDir), null, "request-2", "request", "responses/reply.bin", "raw", false);
+
+        assertTrue(result.success());
+        Path output = Paths.get(String.valueOf(result.result().get("outputFile")));
+        assertArrayEquals(new byte[]{0, 1, (byte) 0xff}, Files.readAllBytes(output));
+        assertEquals(output.toString(), result.result().get("outputFile"));
     }
 
     @Test void noMessageAvailableIsSuccessfulReceiveWithoutResendSemantics() throws Exception {

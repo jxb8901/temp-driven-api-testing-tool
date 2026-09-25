@@ -1,7 +1,7 @@
-# ATT V3.5.1 Reference Manual
+# ATT V3.5.2 Reference Manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.1
+Version: 3.5.2
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -542,6 +542,79 @@ Timeout behavior is operation-specific and remains distinct from assertion failu
 
 ATT's default build does not require IBM MQ client classes. Runtime MQ use requires the IBM MQ client jar/profile documented by the package/release instructions. MQ operations feed the same Action result/evidence envelope as Tool and DB operations.
 
+
+#### Issue #59 configuration and public contract
+
+A complete descriptor can contain connection, message, requestReply, evidence, and pool fields:
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.0
+id: ordersMq
+name: Orders MQ
+description: IBM MQ connection used by SIT/UAT order tests
+connection:
+  queueManager: QM1
+  host: 10.12.13.14
+  port: 1414
+  channel: CHANNEL
+  username: ${ENV:MQ_USERNAME}
+  password: ${ENV:MQ_PASSWORD}
+message:
+  charset: 1208
+  encoding: 273
+  format: ""
+  persistence: asQueue
+  expiry: -1
+  requestQueue: requestQ
+  replyQueue: replyQ
+requestReply: {waitMs: 40000}
+evidence: {payload: metadata}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+~~~
+
+username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY before constructing MQQueueManager. Environment credentials are secret and never enter evidence, logs, reports, or generated docs.
+
+message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
+
+requestQueue and replyQueue are optional request defaults. Queue precedence is call argument > message default > validation error. send(queue=...) and receive(queue=...) do not use these defaults. Request payload files stay byte-preserving through MQMessage.write(byte[]). Request output uses bind-not-fixed; reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit().
+
+#### Common saveAs
+
+MQ receive/request use the common Action saveAs object; no MQ-specific resultType/replyType exists.
+
+~~~yaml
+saveAs:
+  format: raw
+  path: response.bin
+  overwrite: false
+~~~
+
+format defaults to raw and path is optional. raw gives the original byte[], text gives String, and json/yaml/xml give existing ATT typed values. No saveAs or saveAs: {} keeps the result in memory and creates no file. No .reply.bin is created unless path is explicit. raw plus a path writes exact bytes; overwrite/path safety follow the common Action rules.
+
+~~~yaml
+- id: requestXml
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml}
+  assert: "${output.result.Response.Status} == 'SUCCESS'"
+
+- id: requestXmlSaved
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml, path: responses/payment.xml, overwrite: false}
+
+- id: receiveReply
+  type: tool
+  call: "#{mq.ordersMq.receive(queue='replyQ', correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}"
+  saveAs: {format: json}
+~~~
+
+#### Output and validation
+
+output.result is the business payload; MQ metadata is directly under output. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. receive/request publish received or replyReceived, queue names, waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033 and MQRC_NO_MSG_AVAILABLE.
+
+Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported saveAs formats, and unsafe paths.
+
 ### 5.4 Common Operation Result and Evidence
 
 Tool, DB and MQ executors converge at one operation boundary before the Template runner applies Action lifecycle, assertions and retry policy.
@@ -710,7 +783,7 @@ output
 
 `EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
 
-### Load V1 Context (3.5.1)
+### Load V1 Context (3.5.2)
 
 Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
 
@@ -1193,9 +1266,9 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment profiles in V3.5.1
+### Multi-environment profiles in V3.5.2
 
-ATT V3.5.1 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1590,7 +1663,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1796,7 +1869,7 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 | 2 | CLI/configuration/validation/INVALID failure |
 | 3 | One or more ERROR results or unrecoverable runtime failure |
 
-### Complete option matrix (3.5.1)
+### Complete option matrix (3.5.2)
 
 `--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.6` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 

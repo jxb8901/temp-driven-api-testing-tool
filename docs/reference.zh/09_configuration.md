@@ -16,9 +16,9 @@
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-### V3.5.1 多环境 Profile 选择
+### V3.5.2 多环境 Profile 选择
 
-ATT V3.5.1 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -281,7 +281,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

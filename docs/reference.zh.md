@@ -1,7 +1,7 @@
-# ATT V3.5.1 使用手冊與參考
+# ATT V3.5.2 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.1
+Version: 3.5.2
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -542,6 +542,79 @@ Timeout 是 operation-specific failure，與 assertion failure 分開。MQ conne
 
 ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與 Tool、DB 一樣進入同一 Action result/evidence envelope。
 
+
+#### Issue #59 配置與 public contract
+
+完整 descriptor 可包含 connection、message、requestReply、evidence、pool：
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.0
+id: ordersMq
+name: Orders MQ
+description: IBM MQ connection used by SIT/UAT order tests
+connection:
+  queueManager: QM1
+  host: 10.12.13.14
+  port: 1414
+  channel: CHANNEL
+  username: ${ENV:MQ_USERNAME}
+  password: ${ENV:MQ_PASSWORD}
+message:
+  charset: 1208
+  encoding: 273
+  format: ""
+  persistence: asQueue
+  expiry: -1
+  requestQueue: requestQ
+  replyQueue: replyQ
+requestReply: {waitMs: 40000}
+evidence: {payload: metadata}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+~~~
+
+username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_PROPERTY/PASSWORD_PROPERTY。Environment credential 是 secret，不會進入 evidence、log、report 或 generated docs。
+
+message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
+
+requestQueue/replyQueue 是 optional request defaults。Queue precedence 是 call argument > message default > validation error。send(queue=...) 和 receive(queue=...) 不會套用這些 defaults。Request file 經 MQMessage.write(byte[]) 保持 bytes。Request output 使用 bind-not-fixed；reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。
+
+#### Common saveAs
+
+MQ receive/request 使用 common Action saveAs，不增加 MQ-specific resultType/replyType：
+
+~~~yaml
+saveAs:
+  format: raw
+  path: response.bin
+  overwrite: false
+~~~
+
+format 預設 raw，path 可省略。raw 是原始 byte[]，text 是 String，json/yaml/xml 是現有 ATT typed value。沒有 saveAs 或 saveAs: {} 只保留 memory result，不建立 file。沒有明確 path 不會建立 .reply.bin。raw 加 path 逐 byte 寫入，overwrite/path safety 沿用 common Action rules。
+
+~~~yaml
+- id: requestXml
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml}
+  assert: "${output.result.Response.Status} == 'SUCCESS'"
+
+- id: requestXmlSaved
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml, path: responses/payment.xml, overwrite: false}
+
+- id: receiveReply
+  type: tool
+  call: "#{mq.ordersMq.receive(queue='replyQ', correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}"
+  saveAs: {format: json}
+~~~
+
+#### Output 與 validation
+
+output.result 是 business payload；MQ metadata 直接放在 output。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。receive/request 發布 received/replyReceived、queue names、waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、completion/reason fields，parsed payload 只在 result。正常 request 滿足 output.messageId == output.replyCorrelationId。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033 及 MQRC_NO_MSG_AVAILABLE。
+
+Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Raw runtime value 保持 byte[]。Log/report 以 new String(rawBytes, Charset.defaultCharset()) 顯示 raw，不轉 hex，也不建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、缺少 effective request/reply queue、不支援 saveAs format 及 unsafe path。
+
 ### 5.4 Common Operation Result 與 Evidence
 
 Tool、DB、MQ executor 先收斂到同一 operation boundary，之後 Template runner 才套用 Action lifecycle、assertion、retry policy。
@@ -672,9 +745,9 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.1 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
+`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.2 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
 
-### Load V1 Context（3.5.1）
+### Load V1 Context（3.5.2）
 
 每个 load iteration 使用与普通执行相同的 `EXEC`／`META` tree 和 Action 局部 `output`。`EXEC.MODE` 是 `load`；`EXEC.ID` 与 `EXEC.LOAD.ITERATION_ID` 相同；`EXEC.STARTED_AT` 是本 iteration 的开始时间；`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 均按 iteration 隔离。scheduler-owned fields 如下：
 
@@ -1008,9 +1081,9 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-### V3.5.1 多环境 Profile 选择
+### V3.5.2 多环境 Profile 选择
 
-ATT V3.5.1 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1273,7 +1346,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1490,7 +1563,7 @@ case:
 | 2 | CLI/配置/校验/INVALID 失败 |
 | 3 | 至少一个 ERROR，或不可恢复运行时失败 |
 
-### 完整選項矩陣（3.5.1）
+### 完整選項矩陣（3.5.2）
 
 `--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.6` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
 

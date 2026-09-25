@@ -88,10 +88,19 @@ public final class MqHelperConfigLoader {
         String password = environment(connection.get("password"), "mqhelper.connection.password");
 
         Map<?, ?> message = optionalMap(map.get("message"), "mqhelper.message");
-        SchemaSupport.rejectUnknown(message, "mqhelper.message", "ccsid", "format", "persistence");
-        int ccsid = integer(message.get("ccsid"), 1208, 1, 65535, "mqhelper.message.ccsid");
-        String format = choice(message.get("format"), "MQSTR", "mqhelper.message.format", "MQSTR", "MQHRF2", "MQFMT_STRING", "MQFMT_NONE", "NONE");
-        String persistence = choice(message.get("persistence"), "asQueue", "mqhelper.message.persistence", "asQueue", "persistent", "notPersistent", "nonPersistent");
+        SchemaSupport.rejectUnknown(message, "mqhelper.message", "charset", "ccsid", "encoding", "format", "persistence", "expiry", "requestQueue", "replyQueue");
+        Integer charsetValue = optionalInteger(message.get("charset"), 1, 65535, "mqhelper.message.charset");
+        Integer ccsidValue = optionalInteger(message.get("ccsid"), 1, 65535, "mqhelper.message.ccsid");
+        if (charsetValue != null && ccsidValue != null && !charsetValue.equals(ccsidValue)) {
+            throw new IllegalArgumentException("mqhelper.message.charset and ccsid must resolve to the same IBM MQ CCSID");
+        }
+        int charset = charsetValue != null ? charsetValue.intValue() : (ccsidValue == null ? 1208 : ccsidValue.intValue());
+        Integer encoding = optionalInteger(message.get("encoding"), 0, Integer.MAX_VALUE, "mqhelper.message.encoding");
+        Integer expiry = optionalInteger(message.get("expiry"), -1, Integer.MAX_VALUE, "mqhelper.message.expiry");
+        String format = format(message.get("format"));
+        String persistence = persistence(message.get("persistence"));
+        String requestQueue = queue(message.get("requestQueue"), "mqhelper.message.requestQueue");
+        String replyQueue = queue(message.get("replyQueue"), "mqhelper.message.replyQueue");
         Map<?, ?> requestReply = optionalMap(map.get("requestReply"), "mqhelper.requestReply");
         SchemaSupport.rejectUnknown(requestReply, "mqhelper.requestReply", "waitMs");
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.requestReply.waitMs");
@@ -104,7 +113,8 @@ public final class MqHelperConfigLoader {
         int poolMinIdle = integer(pool.get("minIdle"), 0, 0, poolMaxSize, "mqhelper.pool.minIdle");
         long borrowTimeout = durationMs(pool.get("borrowTimeout"), 2000L, "mqhelper.pool.borrowTimeout");
         return new MqHelperConfig(id, name, description, queueManager, host, port, channel,
-                username, password, ccsid, format, persistence, waitMs, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
+                username, password, charset, encoding, expiry, format, persistence,
+                requestQueue, replyQueue, waitMs, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
     }
 
     private Map<?, ?> optionalMap(Object value, String owner) {
@@ -138,6 +148,10 @@ public final class MqHelperConfigLoader {
         return (int) integer;
     }
 
+    private Integer optionalInteger(Object value, int min, int max, String owner) {
+        return value == null ? null : Integer.valueOf(integer(value, 0, min, max, owner));
+    }
+
     private long durationMs(Object value, long fallback, String owner) {
         if (value == null) return fallback;
         if (value instanceof Number) return Math.max(0L, ((Number) value).longValue());
@@ -150,5 +164,34 @@ public final class MqHelperConfigLoader {
         String result = value == null ? fallback : SchemaSupport.string(value, owner, true);
         for (String candidate : allowed) if (candidate.equals(result)) return result;
         throw new IllegalArgumentException(owner + " must be one of " + java.util.Arrays.asList(allowed));
+    }
+
+    private String format(Object value) {
+        if (value == null) return "MQSTR";
+        if (!(value instanceof String)) throw new IllegalArgumentException("mqhelper.message.format must be a string");
+        String result = (String) value;
+        for (String candidate : new String[]{"", "MQSTR", "MQHRF2", "MQFMT_STRING", "MQFMT_NONE", "NONE"}) {
+            if (candidate.equals(result)) return result;
+        }
+        throw new IllegalArgumentException("mqhelper.message.format must be one of [\"\", MQSTR, MQHRF2, MQFMT_STRING, MQFMT_NONE, NONE]");
+    }
+
+    private String persistence(Object value) {
+        if (value == null) return "asQueue";
+        if (value instanceof Number) {
+            Number number = (Number) value;
+            if (number.doubleValue() != number.longValue() || number.longValue() < 0 || number.longValue() > 2) {
+                throw new IllegalArgumentException("mqhelper.message.persistence numeric value must be 0, 1, or 2");
+            }
+            return String.valueOf(number.longValue());
+        }
+        return choice(value, "asQueue", "mqhelper.message.persistence", "asQueue", "persistent", "notPersistent", "nonPersistent");
+    }
+
+    private String queue(Object value, String owner) {
+        if (value == null) return "";
+        String result = SchemaSupport.string(value, owner, true);
+        if (!result.matches("[A-Za-z0-9_.%/-]{1,48}")) throw new IllegalArgumentException(owner + " must be a valid IBM MQ queue name");
+        return result;
     }
 }

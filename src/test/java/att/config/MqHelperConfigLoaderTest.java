@@ -42,4 +42,38 @@ class MqHelperConfigLoaderTest {
         Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/one.yaml, config/mqhelpers/two.yaml]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
     }
+
+    @Test void loadsIssue59MessageDefaultsAndKeepsEmptyFormat() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        Path helper = directory.resolve("broker.yaml");
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+                "id: broker\nname: Broker\ndescription: Test broker\n" +
+                "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n" +
+                "message: {charset: 1208, encoding: 273, format: \"\", persistence: 0, expiry: -1, requestQueue: REQUEST.Q, replyQueue: REPLY.Q}\n").getBytes("UTF-8"));
+
+        MqHelperConfig broker = new FrameworkConfigLoader().load(config).mqHelper("broker");
+        assertEquals(1208, broker.charset());
+        assertEquals(1208, broker.ccsid());
+        assertEquals(Integer.valueOf(273), broker.encoding());
+        assertEquals(Integer.valueOf(-1), broker.expiry());
+        assertEquals("", broker.format());
+        assertEquals("0", broker.persistence());
+        assertEquals("REQUEST.Q", broker.requestQueue());
+        assertEquals("REPLY.Q", broker.replyQueue());
+    }
+
+    @Test void rejectsConflictingCharsetAndCcsid() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        Path helper = directory.resolve("broker.yaml");
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+                "id: broker\nname: Broker\ndescription: Test broker\n" +
+                "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n" +
+                "message: {charset: 1208, ccsid: 819}\n").getBytes("UTF-8"));
+
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
+    }
 }

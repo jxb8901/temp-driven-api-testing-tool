@@ -33,9 +33,14 @@
     "message": {
       "type": "object",
       "properties": {
+        "charset": {"type": "integer", "minimum": 1, "maximum": 65535},
         "ccsid": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "format": {"enum": ["MQSTR", "MQHRF2", "MQFMT_STRING", "MQFMT_NONE", "NONE"]},
-        "persistence": {"enum": ["asQueue", "persistent", "notPersistent", "nonPersistent"]}
+        "encoding": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "format": {"enum": ["", "MQSTR", "MQHRF2", "MQFMT_STRING", "MQFMT_NONE", "NONE"]},
+        "persistence": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 2}, {"enum": ["asQueue", "persistent", "notPersistent", "nonPersistent"]}]},
+        "expiry": {"type": "integer", "minimum": -1, "maximum": 2147483647},
+        "requestQueue": {"type": "string", "pattern": "^[A-Za-z0-9_.%/-]{1,48}$"},
+        "replyQueue": {"type": "string", "pattern": "^[A-Za-z0-9_.%/-]{1,48}$"}
       },
       "additionalProperties": false
     },

@@ -45,7 +45,10 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         @Override public MqTransport.Queue open(String queue, boolean input, boolean output) throws Exception {
             int options = constant(constants, "MQOO_FAIL_IF_QUIESCING", 0x2000);
             if (input) options |= constant(constants, "MQOO_INPUT_SHARED", 0x0002);
-            if (output) options |= constant(constants, "MQOO_OUTPUT", 0x0010);
+            if (output) {
+                options |= constant(constants, "MQOO_OUTPUT", 0x0010);
+                options |= constant(constants, "MQOO_BIND_NOT_FIXED", 0x00080000);
+            }
             try {
                 Object destination = invoke(manager, "accessQueue", new Class<?>[]{String.class, Integer.TYPE}, queue, Integer.valueOf(options));
                 return new ReflectiveQueue(destination, constants);
@@ -63,14 +66,20 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
             try {
                 Class<?> messageClass = Class.forName("com.ibm.mq.MQMessage");
                 Object message = messageClass.getConstructor().newInstance();
+                set(message, "version", Integer.valueOf(constant(constants, "MQMD_VERSION_1", 1)));
+                if (request.expiry() != null) set(message, "expiry", request.expiry());
                 set(message, "characterSet", Integer.valueOf(request.ccsid()));
                 set(message, "format", format(request.format()));
                 set(message, "persistence", persistence(request.persistence()));
+                if (request.encoding() != null) set(message, "encoding", request.encoding());
+                if (!request.replyQueueManager().isEmpty()) set(message, "replyToQueueManagerName", request.replyQueueManager());
                 if (!request.replyQueue().isEmpty()) set(message, "replyToQueueName", request.replyQueue());
                 invoke(message, "write", new Class<?>[]{byte[].class}, payload);
                 Class<?> optionsClass = Class.forName("com.ibm.mq.MQPutMessageOptions");
                 Object options = optionsClass.getConstructor().newInstance();
-                set(options, "options", Integer.valueOf(constant(constants, "MQPMO_NO_SYNCPOINT", 0x00000002)));
+                int flags = constant(constants, "MQPMO_NO_SYNCPOINT", 0x00000002)
+                        | constant(constants, "MQPMO_NEW_MSG_ID", 0x00000040);
+                set(options, "options", Integer.valueOf(flags));
                 invoke(queue, "put", new Class<?>[]{messageClass, optionsClass}, message, options);
                 return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload);
             } catch (Exception error) { throw translate(error); }
@@ -82,8 +91,8 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 if (request.correlationId() != null) set(message, "correlationId", request.correlationId());
                 Class<?> optionsClass = Class.forName("com.ibm.mq.MQGetMessageOptions");
                 Object options = optionsClass.getConstructor().newInstance();
-                int flags = constant(constants, "MQGMO_NO_SYNCPOINT", 0x00000004);
-                if (request.waitMs() > 0) flags |= constant(constants, "MQGMO_WAIT", 0x00000001);
+                int flags = constant(constants, "MQGMO_NO_SYNCPOINT", 0x00000004)
+                        | constant(constants, "MQGMO_WAIT", 0x00000001);
                 set(options, "options", Integer.valueOf(flags));
                 set(options, "waitInterval", Integer.valueOf(request.waitMs()));
                 if (request.correlationId() != null) set(options, "matchOptions", Integer.valueOf(constant(constants, "MQMO_MATCH_CORREL_ID", 0x00000002)));
@@ -99,11 +108,14 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         private String format(String name) {
             if ("MQSTR".equals(name) || "MQFMT_STRING".equals(name)) return stringConstant(constants, "MQFMT_STRING", "MQSTR   ");
             if ("NONE".equals(name) || "MQFMT_NONE".equals(name)) return stringConstant(constants, "MQFMT_NONE", "        ");
+            if ("MQHRF2".equals(name)) return stringConstant(constants, "MQFMT_RF_HEADER_2", "MQHRF2  ");
             return name;
         }
         private int persistence(String name) {
             if ("persistent".equals(name)) return constant(constants, "MQPER_PERSISTENT", 1);
             if ("notPersistent".equals(name) || "nonPersistent".equals(name)) return constant(constants, "MQPER_NOT_PERSISTENT", 2);
+            if ("1".equals(name)) return constant(constants, "MQPER_PERSISTENT", 1);
+            if ("2".equals(name)) return constant(constants, "MQPER_NOT_PERSISTENT", 2);
             return constant(constants, "MQPER_PERSISTENCE_AS_Q_DEF", 0);
         }
     }

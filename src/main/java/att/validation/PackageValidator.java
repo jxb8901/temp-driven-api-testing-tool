@@ -983,8 +983,18 @@ public final class PackageValidator {
     }
 
     private void validateToolSaveAs(TemplateAction action, FrameworkConfig config) {
-        if (!action.saveConfig().configured()) return;
+        if (!action.saveConfig().specified()) return;
         ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        if (parsed.name().startsWith("mq.")) {
+            String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+            if (format.isEmpty()) format = "raw";
+            if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
+                    || "yaml".equals(format) || "xml".equals(format))) {
+                throw new IllegalArgumentException("MQ saveAs.format must be raw, text, json, yaml, or xml: " + action.id());
+            }
+            return;
+        }
+        if (!action.saveConfig().configured()) return;
         boolean builtIn = BUILT_INS.contains(parsed.name().toLowerCase(java.util.Locale.ROOT));
         ToolConfig configured = config.tool(parsed.name());
         boolean callBacked = configured != null && configured.callBacked();
@@ -1726,7 +1736,7 @@ public final class PackageValidator {
             allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); required.add("queue");
         } else if ("request".equals(operation)) {
             allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs");
-            required.add("requestQueue"); required.add("replyQueue"); required.add("file");
+            required.add("file");
         } else {
             throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
         }
@@ -1756,6 +1766,15 @@ public final class PackageValidator {
             }
         }
         for (String name : required) if (!supplied.contains(name)) throw new IllegalArgumentException("Missing required MQ argument '" + name + "' for " + parsed.name());
+        if ("request".equals(operation)) {
+            att.config.MqHelperConfig helper = config.mqHelper(parts[1]);
+            if (!supplied.contains("requestQueue") && helper.requestQueue().isEmpty()) {
+                throw new IllegalArgumentException("Missing requestQueue: supply it in the call or mqhelper.message.requestQueue");
+            }
+            if (!supplied.contains("replyQueue") && helper.replyQueue().isEmpty()) {
+                throw new IllegalArgumentException("Missing replyQueue: supply it in the call or mqhelper.message.replyQueue");
+            }
+        }
     }
 
     private boolean isWriteFacade(ToolConfig tool) {

@@ -453,18 +453,19 @@ public class StageTemplateRunner {
         String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
         boolean console = console(saveAs);
         String kind = templateEngine.callKind(action.call());
-        String format = save.configured() ? toolFormat(save, kind) : "";
+        String format = save.specified() ? toolFormat(save, kind) : "";
         boolean invokerWritesRaw = save.configured() && !console && "tool".equals(kind) && "raw".equals(format);
         boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             try {
                 String invokerSaveAs = invokerWritesRaw ? context.scopedArtifactPath(action.id(), saveAs) : "";
+                String operationSaveAs = "mq".equals(kind) ? saveAs : invokerSaveAs;
                 att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
-                        context.qualifiedActionId(action.id()), action.timeoutMs(), invokerSaveAs,
+                        context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, format,
                         save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
-                if (save.configured() && !invokerWritesRaw) {
+                if (save.configured() && !invokerWritesRaw && !"mq".equals(kind)) {
                     if (console) {
                         if (!("tool".equals(kind) && "raw".equals(format))) {
                             try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.render(format, result.output())); }
@@ -738,6 +739,7 @@ public class StageTemplateRunner {
     @SuppressWarnings("unchecked")
     private void publishOperationResult(Map<String, Object> output, ActionExecutionResult result) {
         if (result == null) return;
+        if (result.outputMetadata() != null) output.putAll(result.outputMetadata());
         output.put("result", result.result());
         replaceActionEvidence(output, result.evidence());
         if (result.diagnostic() != null) output.put("diagnostic", result.diagnostic());

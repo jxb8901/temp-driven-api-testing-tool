@@ -15,9 +15,9 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment profiles in V3.5.1
+### Multi-environment profiles in V3.5.2
 
-ATT V3.5.1 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -412,7 +412,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

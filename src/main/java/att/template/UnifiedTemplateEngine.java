@@ -252,7 +252,7 @@ public class UnifiedTemplateEngine {
     }
 
     public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs) throws Exception {
-        Object result = executeCall(call, context, log, invocationId, true, timeoutMs, saveAs, false);
+        Object result = executeCall(call, context, log, invocationId, true, null, timeoutMs, saveAs, "", false, false);
         return (att.exec.ToolInvocationResult) result;
     }
 
@@ -261,31 +261,54 @@ public class UnifiedTemplateEngine {
     }
 
     public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
-        Object result = executeCall(call, context, log, invocationId, true, timeoutMs, saveAs, overwrite, bypassCache);
+        Object result = executeCall(call, context, log, invocationId, true, null, timeoutMs, saveAs, "", overwrite, bypassCache);
+        return (att.exec.ToolInvocationResult) result;
+    }
+
+    /** Action-aware overload used by MQ so pathless saveAs.format remains observable. */
+    public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log,
+                                                            String invocationId, String actionId, Long timeoutMs, String saveAs,
+                                                            String saveFormat, boolean overwrite, boolean bypassCache) throws Exception {
+        Object result = executeCall(call, context, log, invocationId, true, actionId, timeoutMs, saveAs, saveFormat, overwrite, bypassCache);
         return (att.exec.ToolInvocationResult) result;
     }
 
     private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt) throws Exception {
-        return executeCall(call, context, log, invocationId, attempt, null, "", false, false);
+        return executeCall(call, context, log, invocationId, attempt, null, null, "", "", false, false);
     }
 
     private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt, Long timeoutMs, String saveAs, boolean overwrite) throws Exception {
-        return executeCall(call, context, log, invocationId, attempt, timeoutMs, saveAs, overwrite, false);
+        return executeCall(call, context, log, invocationId, attempt, null, timeoutMs, saveAs, "", overwrite, false);
     }
 
     private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt, Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
+        return executeCall(call, context, log, invocationId, attempt, null, timeoutMs, saveAs, "", overwrite, bypassCache);
+    }
+
+    private Object executeCall(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, boolean attempt,
+                               String actionId, Long timeoutMs, String saveAs, String saveFormat,
+                               boolean overwrite, boolean bypassCache) throws Exception {
         String body = call.trim();
         if (body.startsWith("#{") && body.endsWith("}")) {
             body = body.substring(2, body.length() - 1);
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
         Map<String, Object> input = resolveArguments(parsed, context, log);
-        return executeResolvedCall(parsed.name(), input, context, log, invocationId, attempt, timeoutMs, saveAs, overwrite, bypassCache);
+        return executeResolvedCall(parsed.name(), input, context, log, invocationId, attempt, actionId, timeoutMs,
+                saveAs, saveFormat, overwrite, bypassCache);
     }
 
     private Object executeResolvedCall(String name, Map<String, Object> input, CaseRuntimeContext context,
                                        CaseExecutionLog log, String invocationId, boolean attempt,
                                        Long timeoutMs, String saveAs, boolean overwrite, boolean bypassCache) throws Exception {
+        return executeResolvedCall(name, input, context, log, invocationId, attempt, null, timeoutMs,
+                saveAs, "", overwrite, bypassCache);
+    }
+
+    private Object executeResolvedCall(String name, Map<String, Object> input, CaseRuntimeContext context,
+                                       CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
+                                       Long timeoutMs, String saveAs, String saveFormat,
+                                       boolean overwrite, boolean bypassCache) throws Exception {
         if (name.startsWith("db.")) {
             context.setDbHelperMetadata(name.split("\\.", -1)[1]);
             if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
@@ -294,7 +317,7 @@ public class UnifiedTemplateEngine {
         if (name.startsWith("mq.")) {
             context.setMqHelperMetadata(name.split("\\.", -1)[1]);
             if (!attempt) throw new IllegalArgumentException("An MQ operation must be the primary call of a type: tool Action");
-            return executeMqResolvedCall(name, input, context, timeoutMs, invocationId);
+            return executeMqResolvedCall(name, input, context, timeoutMs, invocationId, actionId, saveAs, saveFormat, overwrite);
         }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             context.setToolMetadata(name);
@@ -321,13 +344,17 @@ public class UnifiedTemplateEngine {
 
     private att.exec.ToolInvocationResult executeMqResolvedCall(String name, Map<String, Object> input,
                                                                   CaseRuntimeContext context, Long timeoutMs,
-                                                                  String requestedId) {
+                                                                  String requestedId, String actionId,
+                                                                  String savePath, String saveFormat, boolean overwrite) {
         if (mqHelperExecutor == null) throw new IllegalStateException("MQ invocation is unavailable: " + name);
         String[] parts = name.split("\\.", -1);
         if (parts.length != 3) throw new IllegalArgumentException("MQ call must be mq.<instance>.send|receive|request: " + name);
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextInvocationId(name) : requestedId;
-        MqInvocationResult result = mqHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id);
+        MqInvocationResult result = mqHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id,
+                actionId, savePath, saveFormat, overwrite);
+        Map<String, Object> operation = result.result();
+        Object business = operation.get("result");
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
         invocation.put("id", id);
         invocation.put("type", "mq");
@@ -337,10 +364,10 @@ public class UnifiedTemplateEngine {
         if (duration != null) invocation.put("durationMs", duration);
         invocation.put("timeoutMs", timeoutMs);
         invocation.put("input", input);
-        invocation.put("output", result.result());
+        invocation.put("output", business);
+        for (Map.Entry<String, Object> entry : operation.entrySet()) if (!"result".equals(entry.getKey())) invocation.put(entry.getKey(), entry.getValue());
         invocation.put("MQ", result.evidence());
-        return new att.exec.ToolInvocationResult(name, id, result.result(), invocation, result.success(),
-                result.operationResult().evidence());
+        return new att.exec.ToolInvocationResult(name, id, business, invocation, result.success(), result.operationResult());
     }
 
     private Object executeCallBackedTool(ToolConfig tool, Map<String, Object> supplied,
