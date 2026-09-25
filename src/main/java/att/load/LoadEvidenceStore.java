@@ -21,7 +21,6 @@ public final class LoadEvidenceStore implements LoadEventListener {
     private final Set<String> reservedSuccesses = new LinkedHashSet<String>();
     public LoadEvidenceStore(LoadEvidencePolicy policy) { this.policy = policy; }
     public boolean retainsFailureEvidence() { return policy.failure() == LoadEvidencePolicy.Failure.FULL; }
-    /** Reserves one bounded success-sample slot before the iteration starts. */
     public synchronized boolean reserveSuccess(String iterationId) {
         if (iterationId == null || reservedSuccesses.contains(iterationId)) return false;
         if (retained.size() + reservedSuccesses.size() >= policy.maxSamples()) return false;
@@ -33,9 +32,6 @@ public final class LoadEvidenceStore implements LoadEventListener {
         if (event == null || event.dropped() || !event.completed()) return;
         boolean reserved = reservedSuccesses.remove(event.iterationId());
         if (retained.size() >= policy.maxSamples()) return;
-        // A reservation only predicts a success. Once the outcome is known,
-        // the outcome-specific policy is authoritative and a failed reserved
-        // iteration must never be retained as a sample.
         if (!event.success()) {
             if (policy.failure() == LoadEvidencePolicy.Failure.FULL) retained.add(event);
             return;
@@ -44,15 +40,28 @@ public final class LoadEvidenceStore implements LoadEventListener {
     }
     public synchronized List<LoadEvent> events() { return Collections.unmodifiableList(new ArrayList<LoadEvent>(retained)); }
     public synchronized Map<String, Object> write(Path runDirectory) throws IOException {
-        Path failureDir = runDirectory.resolve("failures"); Path sampleDir = runDirectory.resolve("samples");
-        Map<String, Object> result = new LinkedHashMap<String, Object>(); List<Map<String, Object>> links = new ArrayList<Map<String, Object>>();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> links = new ArrayList<Map<String, Object>>();
         int index = 0;
         for (LoadEvent event : retained) {
-            boolean failure = !event.success(); Path directory = failure ? failureDir : sampleDir; Files.createDirectories(directory);
-            String fileName = String.format("%05d-%s.json", ++index, LoadIsolation.shortHash(event.iterationId())); Path file = directory.resolve(fileName);
+            boolean failure = !event.success();
+            String workload = event.workloadId() == null ? null : safe(event.workloadId());
+            Path directory = runDirectory.resolve(failure ? "failures" : "samples");
+            if (workload != null) directory = directory.resolve(workload);
+            Files.createDirectories(directory);
+            String fileName = String.format("%05d-%s.json", ++index, LoadIsolation.shortHash(event.iterationId()));
+            Path file = directory.resolve(fileName);
             Files.write(file, JsonSupport.write(event.toMap(runDirectory)).getBytes(StandardCharsets.UTF_8));
-            Map<String, Object> link = new LinkedHashMap<String, Object>(); link.put("iterationId", event.iterationId()); link.put("status", failure ? "FAILURE" : "SAMPLE"); link.put("path", runDirectory.relativize(file).toString().replace('\\', '/')); links.add(link);
+            Map<String, Object> link = new LinkedHashMap<String, Object>();
+            if (event.workloadId() != null) link.put("workloadId", event.workloadId());
+            if (event.targetType() != null) link.put("targetType", event.targetType());
+            if (event.targetId() != null) link.put("targetId", event.targetId());
+            link.put("iterationId", event.iterationId());
+            link.put("status", failure ? "FAILURE" : "SAMPLE");
+            link.put("path", runDirectory.relativize(file).toString().replace('\\', '/'));
+            links.add(link);
         }
         result.put("count", retained.size()); result.put("items", links); return result;
     }
+    private static String safe(String value) { return value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
 }

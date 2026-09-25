@@ -41,6 +41,7 @@ public final class LoadExecutionContextAdapter {
         context.setLegacyInputsView(request.inputs());
         context.setLoad(request.runId(), request.model(), request.iterationId(), request.iteration(), request.phase(),
                 request.startedAt().toString(), request.userId(), request.runStartedAt().toString());
+        if (request.workloadId() != null) context.setLoadWorkload(request.workloadId(), target.type(), target.id());
         return new Prepared(testCase, stage, context);
     }
 

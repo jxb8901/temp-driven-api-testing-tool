@@ -55,7 +55,25 @@ Action 執行中使用 `${output...}`；在目前 scope 完成後使用 `${EXEC.
 
 ### Load-only Context
 
-`EXEC.LOAD` 只是加在同一 Context 上的 conditional data，不是第二套 runtime。它可包含 `RUN_ID`、`MODEL`、`USER_ID`、`ITERATION_ID`、`ITERATION`、`PHASE`、`RUN_STARTED_AT`。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。
+`EXEC.LOAD` 只是加在同一 Context 上的 conditional data，不是第二套 runtime。它可包含：
+
+```text
+EXEC.LOAD
+├── RUN_ID
+├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
+├── MODEL
+├── USER_ID         # 只適用 closed-VU
+├── TARGET_TYPE     # v1.1 workload 固定 target 身份
+├── TARGET_ID       # v1.1 workload 固定 target 身份
+├── ITERATION_ID
+├── ITERATION
+├── PHASE
+└── RUN_STARTED_AT
+```
+
+在 `att-load/v1.1` 中，`WORKLOAD_ID` 就是 scenario 配置的 workload `id`；`TARGET_TYPE`、`TARGET_ID` 標識該 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。
+
+不同 closed-VU workload pool 可以各自出現 `VU-1`，因此跨 workload 的完整 VU 身份是 `(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)`。ATT 不會新增 `EXEC.USER` root，也不會在 VU 之間共享 mutable Context；每個 iteration 的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Tool/DB transient state 及 Action-local `output` 仍然彼此隔離。
 
 ### Optional lookup
 

@@ -55,7 +55,25 @@ While an Action is active, use `${output...}`. After it completes in the current
 
 ### Load-only Context
 
-`EXEC.LOAD` is conditional data added to the same Context model, not a second runtime. It may contain `RUN_ID`, `MODEL`, `USER_ID`, `ITERATION_ID`, `ITERATION`, `PHASE`, and `RUN_STARTED_AT`. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.
+`EXEC.LOAD` is conditional data added to the same Context model, not a second runtime. It may contain:
+
+```text
+EXEC.LOAD
+├── RUN_ID
+├── WORKLOAD_ID     # att-load/v1.1 multi-workload runs
+├── MODEL
+├── USER_ID         # closed-VU only
+├── TARGET_TYPE     # v1.1 workload target identity
+├── TARGET_ID       # v1.1 workload target identity
+├── ITERATION_ID
+├── ITERATION
+├── PHASE
+└── RUN_STARTED_AT
+```
+
+For `att-load/v1.1`, `WORKLOAD_ID` is the configured workload `id`. `TARGET_TYPE` and `TARGET_ID` identify the fixed target owned by that workload. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.
+
+Different closed-VU workload pools may both contain a `VU-1`. The durable identity is therefore the pair `(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)`. ATT does not introduce a separate `EXEC.USER` root or shared mutable VU Context; each iteration still gets isolated `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, transient Tool/DB state and Action-local `output`.
 
 ### Optional lookup
 
