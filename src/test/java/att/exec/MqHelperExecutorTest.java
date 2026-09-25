@@ -14,6 +14,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -93,6 +95,54 @@ class MqHelperExecutorTest {
         assertEquals("PASS", result.evidence().get("status"));
     }
 
+    @Test void explicitPhysicalInstanceIsSelectedBeforeOpeningTheConnection() throws Exception {
+        Path caseDir = tempDir.resolve("selected-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
+        MqHelperConfig a = MqHelperConfig.physical(new MqHelperConfig("payment-a", "Payment", "a", "QM-A", "host-a", 1414,
+                "CH-A", "user", "secret-a", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml")), "payment", "payment-a");
+        MqHelperConfig b = MqHelperConfig.physical(new MqHelperConfig("payment-b", "Payment", "b", "QM-B", "host-b", 1415,
+                "CH-B", "user", "secret-b", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml")), "payment", "payment-b");
+        Map<String, MqHelperConfig> instances = new LinkedHashMap<String, MqHelperConfig>();
+        instances.put("payment-a", a); instances.put("payment-b", b);
+        MqHelperConfig payment = MqHelperConfig.group("payment", "Payment", "Payment MQ", "roundRobin", instances, "metadata", tempDir.resolve("mq.yaml"));
+        Map<String, MqHelperConfig> helpers = new LinkedHashMap<String, MqHelperConfig>(); helpers.put("payment", payment);
+        FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+                Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
+                null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
+        FakeFactory factory = new FakeFactory();
+
+        MqInvocationResult result = new MqHelperExecutor(tempDir, configured, factory).execute("payment", "send",
+                map("instance", "payment-b", "queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-selected");
+
+        assertTrue(result.success());
+        assertEquals("payment", result.result().get("mqHelper"));
+        assertEquals("payment-b", result.result().get("instance"));
+        assertEquals("payment-b", factory.connectedInstance);
+        assertEquals("payment", result.evidence().get("helperId"));
+        assertEquals("payment-b", result.evidence().get("physicalInstance"));
+        assertFalse(result.operationResult().evidence().toString().contains("secret-b"));
+    }
+
+    @Test void roundRobinSelectionIsThreadSafeAndStableAcrossInvocations() throws Exception {
+        Path caseDir = tempDir.resolve("round-robin-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        MqHelperConfig a = MqHelperConfig.physical(new MqHelperConfig("a", "Payment", "a", "QM-A", "host-a", 1414,
+                "CH-A", "", "", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml")), "payment", "a");
+        MqHelperConfig b = MqHelperConfig.physical(new MqHelperConfig("b", "Payment", "b", "QM-B", "host-b", 1414,
+                "CH-B", "", "", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml")), "payment", "b");
+        Map<String, MqHelperConfig> instances = new LinkedHashMap<String, MqHelperConfig>(); instances.put("a", a); instances.put("b", b);
+        Map<String, MqHelperConfig> helpers = new LinkedHashMap<String, MqHelperConfig>();
+        helpers.put("payment", MqHelperConfig.group("payment", "Payment", "Payment MQ", "roundRobin", instances, "metadata", tempDir.resolve("mq.yaml")));
+        FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+                Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
+                null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
+        FakeFactory factory = new FakeFactory();
+        MqHelperExecutor executor = new MqHelperExecutor(tempDir, configured, factory);
+        assertTrue(executor.execute("payment", "send", map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "one").success());
+        assertTrue(executor.execute("payment", "send", map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "two").success());
+        assertEquals(java.util.Arrays.asList("a", "b"), factory.connectedInstances);
+    }
+
     private FrameworkConfig config() {
         MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
                 "DEV.APP.SVRCONN", "user", "secret", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml"));
@@ -122,8 +172,12 @@ class MqHelperExecutorTest {
         boolean noMessage;
         int disconnects;
         int queueCloses;
+        String connectedInstance;
+        final List<String> connectedInstances = new ArrayList<String>();
 
         @Override public MqTransport.Connection connect(att.config.MqHelperConfig config) {
+            connectedInstance = config.instanceId();
+            connectedInstances.add(config.instanceId());
             return new MqTransport.Connection() {
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
                     return new MqTransport.Queue() {

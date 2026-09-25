@@ -561,7 +561,7 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 
 ### 5.3 MQHelper
 
-MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: att-mqhelper/v1.0`、穩定 logical `id`、connection topology 與可選 credential。Global `mqhelpers` 引用 descriptor file；environment profile 可讓相同 logical ID 在不同環境選擇不同 descriptor。
+MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: att-mqhelper/v1.0` 或 `att-mqhelper/v1.1`，具備穩定 logical `id`、connection topology 與可選 credential。Global `mqhelpers` 引用 descriptor file；environment profile 可讓相同 logical ID 在不同環境選擇不同 descriptor。v1.0 仍是相容的單一 instance 形式；v1.1 增加由多個 physical instance 組成的 logical group。
 
 主要 call：
 
@@ -649,6 +649,50 @@ format 預設 raw，path 可省略。raw 是原始 byte[]，text 是 String，js
 output.result 是 business payload；MQ metadata 直接放在 output。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。receive/request 發布 received/replyReceived、queue names、waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、completion/reason fields，parsed payload 只在 result。正常 request 滿足 output.messageId == output.replyCorrelationId。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033 及 MQRC_NO_MSG_AVAILABLE。
 
 Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Raw runtime value 保持 byte[]。Log/report 以 new String(rawBytes, Charset.defaultCharset()) 顯示 raw，不轉 hex，也不建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、缺少 effective request/reply queue、不支援 saveAs format 及 unsafe path。
+
+#### Issue #60 v1.1 logical group 與 physical instance
+
+`att-mqhelper/v1.1` 保留一個 public logical helper id，同時宣告一個或多個 physical connection instance。v1.0 descriptor 不需修改仍然有效。v1.1 descriptor 為 `connection`、`message`、`requestReply`、`pool` 提供 group defaults 及 per-instance override：
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.1
+id: payment
+name: Payment MQ
+description: Payment MQ endpoints
+defaults:
+  connection:
+    queueManager: QM1
+    host: mq.default.example
+    port: 1414
+    channel: APP.SVRCONN
+    username: ${ENV:MQ_USERNAME}
+    password: ${ENV:MQ_PASSWORD}
+  message: {charset: 1208, requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+  requestReply: {waitMs: 40000}
+  pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+instances:
+  - id: payment-a
+    connection: {host: mq-a.example}
+  - id: payment-b
+    connection: {host: mq-b.example}
+    message: {replyQueue: PAYMENT.REPLY.B}
+selection: {strategy: roundRobin}
+evidence: {payload: metadata}
+~~~
+
+每個 physical instance 在 invocation 前先 materialize 成 immutable effective configuration。每個 section 的 precedence 是 invocation override、instance override、group default、runtime default，最後才是 validation error。Effective `queueManager`、`host`、`port`、`channel` 必須存在；username/password 可選，而且永遠不會輸出到 evidence。
+
+Public call 維持 logical id：
+
+~~~text
+#{mq.payment.send(queue='PAYMENT.REQUEST', file='request.bin')}
+#{mq.payment.request(file='request.bin', instance='payment-b')}
+#{mq.payment.receive(queue='PAYMENT.REPLY', instance='payment-a')}
+~~~
+
+單一 instance 的 v1.1 group 直接使用該 instance。多 instance group 必須宣告 `selection.strategy: random` 或 `roundRobin`；每次 MQ invocation 只選擇一次，並在 connect 前完成，因此同一個 `request` 的 PUT 與 correlated GET 一定使用同一個 physical instance。明確的 `instance` call argument 可選定 physical id；未知 id 會被拒絕。每個 physical instance 都有獨立 pool，pool identity 是 logical id 加 physical id。
+
+Output 與 evidence 同時保留 logical helper id 並公開選中的 physical instance。Evidence 也會記錄適用 strategy、queue manager、operation、queue names、MsgId/CorrelId 及安全的 connection metadata；credential 與 payload bytes 永不包含其中。Validation 會拒絕重複 physical id、未知 inherited field、缺少 effective connection field、非法 strategy 或 override，以及無效的 effective message/requestReply/pool 值。
 
 ### 5.4 Common Operation Result 與 Evidence
 
@@ -1108,7 +1152,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 |---|---|---|
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
-| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 IBM MQ TCP client 实例的队列管理器、连接、消息及 request/reply 默认值 |
+| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -1269,10 +1313,12 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
-| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` YAML 路径；每个文件声明一个实例 |
+| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `environments` | absent | 非空 profile 映射；每个 profile 只可包含 `dbhelpers` 和/或 `mqhelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
+
+每个 `mqhelpers` path 都从 package root 解析，并包含一个 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` object。v1.0 是 flat single-instance descriptor；v1.1 使用 `defaults`、非空 `instances[]`、group-level `evidence`，并在多 instance 时要求 `selection.strategy` 为 `random` 或 `roundRobin`。每个 physical instance 会在执行前取得 effective `connection`、`message`、`requestReply`、`pool`；详细 v1.1 model 与 invocation 例子维护在 MQHelper resource module。
 
 ### Dbhelper 配置
 
@@ -1809,7 +1855,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 |---|---|
 | Global configuration | `att-config/v2.6` |
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0` |
+| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
 | Tool group | `att-tool-group/v2.6` |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |

@@ -1,6 +1,6 @@
 ### 5.3 MQHelper
 
-MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0`, a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID.
+MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0` or `att-mqhelper/v1.1`, with a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID. v1.0 remains the compatible single-instance form; v1.1 adds logical groups of physical instances.
 
 Primary calls are:
 
@@ -88,3 +88,47 @@ format defaults to raw and path is optional. raw gives the original byte[], text
 output.result is the business payload; MQ metadata is directly under output. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. receive/request publish received or replyReceived, queue names, waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033 and MQRC_NO_MSG_AVAILABLE.
 
 Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported saveAs formats, and unsafe paths.
+
+#### Issue #60 v1.1 logical groups and physical instances
+
+`att-mqhelper/v1.1` keeps one public logical helper id while declaring one or more physical connection instances. A v1.0 descriptor remains valid without changes. The v1.1 descriptor has group defaults and per-instance overrides for `connection`, `message`, `requestReply`, and `pool`:
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.1
+id: payment
+name: Payment MQ
+description: Payment MQ endpoints
+defaults:
+  connection:
+    queueManager: QM1
+    host: mq.default.example
+    port: 1414
+    channel: APP.SVRCONN
+    username: ${ENV:MQ_USERNAME}
+    password: ${ENV:MQ_PASSWORD}
+  message: {charset: 1208, requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+  requestReply: {waitMs: 40000}
+  pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+instances:
+  - id: payment-a
+    connection: {host: mq-a.example}
+  - id: payment-b
+    connection: {host: mq-b.example}
+    message: {replyQueue: PAYMENT.REPLY.B}
+selection: {strategy: roundRobin}
+evidence: {payload: metadata}
+~~~
+
+Each physical instance is materialized into an immutable effective configuration before an invocation. For every section the precedence is invocation override, instance override, group default, runtime default, then validation error. Effective `queueManager`, `host`, `port`, and `channel` are required; username/password are optional and are never emitted as evidence.
+
+The public call remains logical:
+
+~~~text
+#{mq.payment.send(queue='PAYMENT.REQUEST', file='request.bin')}
+#{mq.payment.request(file='request.bin', instance='payment-b')}
+#{mq.payment.receive(queue='PAYMENT.REPLY', instance='payment-a')}
+~~~
+
+A single-instance v1.1 group uses that instance directly. A group with multiple instances must declare `selection.strategy: random` or `roundRobin`; selection occurs once per MQ invocation, before connecting, so a `request` PUT and correlated GET always use the same physical instance. An explicit `instance` call argument selects that physical id and is rejected when it is unknown. Each physical instance has an isolated pool; pool identity is logical id plus physical id.
+
+Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. Credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.

@@ -126,7 +126,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../../schemas/att-config-v2.6.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper instance | `att-mqhelper/v1.0` | [att-mqhelper-v1.0.schema.json](../../schemas/att-mqhelper-v1.0.schema.json) |
+| MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../../schemas/att-mqhelper-v1.1.schema.json) |
 | Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../../schemas/att-tool-group-v2.6.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../../schemas/att-sidecar-v2.2.schema.json) |
@@ -195,7 +195,7 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
 | `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
@@ -241,7 +241,7 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 ### MQ helper configuration
 
-Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` object:
+Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` or `att-mqhelper/v1.1` object. v1.0 is a flat single-instance descriptor. v1.1 has `defaults`, a non-empty `instances[]` list, optional `selection.strategy` (`random` or `roundRobin` for multiple instances), and group-level `evidence`; each physical instance receives effective `connection`, `message`, `requestReply`, and `pool` values before execution. The detailed v1.1 model and invocation examples are maintained in the MQHelper resource module.
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|

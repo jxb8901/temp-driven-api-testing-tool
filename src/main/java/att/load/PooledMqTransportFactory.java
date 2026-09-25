@@ -48,7 +48,8 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
     }
 
     private synchronized LoadResourcePool<MqTransport.Connection> poolFor(final MqHelperConfig config) throws Exception {
-        LoadResourcePool<MqTransport.Connection> existing = pools.get(config.id());
+        final String poolKey = config.poolKey();
+        LoadResourcePool<MqTransport.Connection> existing = pools.get(poolKey);
         if (existing != null) return existing;
         int maxSize = config.poolMaxSize() < 1 ? defaultMaxSize : config.poolMaxSize();
         long borrowTimeoutMs = config.poolBorrowTimeoutMs() < 0L ? defaultBorrowTimeoutMs : config.poolBorrowTimeoutMs();
@@ -66,7 +67,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
             created.close();
             throw error;
         }
-        pools.put(config.id(), created);
+        pools.put(poolKey, created);
         return created;
     }
 

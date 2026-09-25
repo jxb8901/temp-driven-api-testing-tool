@@ -561,7 +561,7 @@ DBHelper owns connection/statement limits, query timeout and transaction behavio
 
 ### 5.3 MQHelper
 
-MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0`, a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID.
+MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0` or `att-mqhelper/v1.1`, with a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID. v1.0 remains the compatible single-instance form; v1.1 adds logical groups of physical instances.
 
 Primary calls are:
 
@@ -649,6 +649,50 @@ format defaults to raw and path is optional. raw gives the original byte[], text
 output.result is the business payload; MQ metadata is directly under output. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. receive/request publish received or replyReceived, queue names, waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033 and MQRC_NO_MSG_AVAILABLE.
 
 Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported saveAs formats, and unsafe paths.
+
+#### Issue #60 v1.1 logical groups and physical instances
+
+`att-mqhelper/v1.1` keeps one public logical helper id while declaring one or more physical connection instances. A v1.0 descriptor remains valid without changes. The v1.1 descriptor has group defaults and per-instance overrides for `connection`, `message`, `requestReply`, and `pool`:
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.1
+id: payment
+name: Payment MQ
+description: Payment MQ endpoints
+defaults:
+  connection:
+    queueManager: QM1
+    host: mq.default.example
+    port: 1414
+    channel: APP.SVRCONN
+    username: ${ENV:MQ_USERNAME}
+    password: ${ENV:MQ_PASSWORD}
+  message: {charset: 1208, requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+  requestReply: {waitMs: 40000}
+  pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+instances:
+  - id: payment-a
+    connection: {host: mq-a.example}
+  - id: payment-b
+    connection: {host: mq-b.example}
+    message: {replyQueue: PAYMENT.REPLY.B}
+selection: {strategy: roundRobin}
+evidence: {payload: metadata}
+~~~
+
+Each physical instance is materialized into an immutable effective configuration before an invocation. For every section the precedence is invocation override, instance override, group default, runtime default, then validation error. Effective `queueManager`, `host`, `port`, and `channel` are required; username/password are optional and are never emitted as evidence.
+
+The public call remains logical:
+
+~~~text
+#{mq.payment.send(queue='PAYMENT.REQUEST', file='request.bin')}
+#{mq.payment.request(file='request.bin', instance='payment-b')}
+#{mq.payment.receive(queue='PAYMENT.REPLY', instance='payment-a')}
+~~~
+
+A single-instance v1.1 group uses that instance directly. A group with multiple instances must declare `selection.strategy: random` or `roundRobin`; selection occurs once per MQ invocation, before connecting, so a `request` PUT and correlated GET always use the same physical instance. An explicit `instance` call argument selects that physical id and is rejected when it is unknown. Each physical instance has an isolated pool; pool identity is logical id plus physical id.
+
+Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. Credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.
 
 ### 5.4 Common Operation Result and Evidence
 
@@ -1412,7 +1456,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../schemas/att-config-v2.6.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper instance | `att-mqhelper/v1.0` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json) |
+| MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../schemas/att-mqhelper-v1.1.schema.json) |
 | Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../schemas/att-tool-group-v2.6.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
@@ -1481,7 +1525,7 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
 | `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
@@ -1527,7 +1571,7 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 ### MQ helper configuration
 
-Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` object:
+Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` or `att-mqhelper/v1.1` object. v1.0 is a flat single-instance descriptor. v1.1 has `defaults`, a non-empty `instances[]` list, optional `selection.strategy` (`random` or `roundRobin` for multiple instances), and group-level `evidence`; each physical instance receives effective `connection`, `message`, `requestReply`, and `pool` values before execution. The detailed v1.1 model and invocation examples are maintained in the MQHelper resource module.
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
@@ -2123,7 +2167,7 @@ The appendices collect stable lookup material that should not drive the main pro
 |---|---|
 | Global configuration | `att-config/v2.6` |
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0` |
+| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
 | Tool group | `att-tool-group/v2.6` |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |

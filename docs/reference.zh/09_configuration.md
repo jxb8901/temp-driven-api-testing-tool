@@ -8,7 +8,7 @@
 |---|---|---|
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
-| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 IBM MQ TCP client 实例的队列管理器、连接、消息及 request/reply 默认值 |
+| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -169,10 +169,12 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
-| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` YAML 路径；每个文件声明一个实例 |
+| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `environments` | absent | 非空 profile 映射；每个 profile 只可包含 `dbhelpers` 和/或 `mqhelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
+
+每个 `mqhelpers` path 都从 package root 解析，并包含一个 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` object。v1.0 是 flat single-instance descriptor；v1.1 使用 `defaults`、非空 `instances[]`、group-level `evidence`，并在多 instance 时要求 `selection.strategy` 为 `random` 或 `roundRobin`。每个 physical instance 会在执行前取得 effective `connection`、`message`、`requestReply`、`pool`；详细 v1.1 model 与 invocation 例子维护在 MQHelper resource module。
 
 ### Dbhelper 配置
 

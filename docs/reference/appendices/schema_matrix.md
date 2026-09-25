@@ -4,7 +4,7 @@
 |---|---|
 | Global configuration | `att-config/v2.6` |
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0` |
+| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
 | Tool group | `att-tool-group/v2.6` |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |

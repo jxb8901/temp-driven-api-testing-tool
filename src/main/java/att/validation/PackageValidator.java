@@ -1724,23 +1724,25 @@ public final class PackageValidator {
         if (parts.length != 3 || !"mq".equals(parts[0]) || parts[1].isEmpty()) {
             throw new IllegalArgumentException("MQ call must be mq.<instance>.send|receive|request: " + parsed.name());
         }
-        if (config.mqHelper(parts[1]) == null) {
+        att.config.MqHelperConfig helper = config.mqHelper(parts[1]);
+        if (helper == null) {
             throw new IllegalArgumentException("Unknown mqhelper instance '" + parts[1] + "'");
         }
         String operation = parts[2];
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();
         if ("send".equals(operation)) {
-            allowed.add("queue"); allowed.add("file"); required.add("queue"); required.add("file");
+            allowed.add("queue"); allowed.add("file"); allowed.add("instance"); required.add("queue"); required.add("file");
         } else if ("receive".equals(operation)) {
-            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); required.add("queue");
+            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance"); required.add("queue");
         } else if ("request".equals(operation)) {
-            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs");
+            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs"); allowed.add("instance");
             required.add("file");
         } else {
             throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
         }
         Set<String> supplied = new LinkedHashSet<String>();
+        att.config.MqHelperConfig selected = null;
         for (ToolCallParser.Argument argument : parsed.arguments()) {
             if (argument.positional()) throw new IllegalArgumentException(parsed.name() + " requires named arguments");
             if (!allowed.contains(argument.key())) throw new IllegalArgumentException("Unknown MQ argument '" + argument.key() + "' for " + parsed.name());
@@ -1763,18 +1765,30 @@ public final class PackageValidator {
                     String queue = String.valueOf(literal);
                     if (!queue.matches("[A-Za-z0-9_.%/-]{1,48}")) throw new IllegalArgumentException("Invalid MQ queue name: " + queue);
                 }
+                if ("instance".equals(argument.key())) {
+                    selected = helper.instance(String.valueOf(literal));
+                    if (selected == null) throw new IllegalArgumentException("Unknown physical MQ instance '" + literal + "' for mq." + parts[1]);
+                }
             }
         }
         for (String name : required) if (!supplied.contains(name)) throw new IllegalArgumentException("Missing required MQ argument '" + name + "' for " + parsed.name());
         if ("request".equals(operation)) {
-            att.config.MqHelperConfig helper = config.mqHelper(parts[1]);
-            if (!supplied.contains("requestQueue") && helper.requestQueue().isEmpty()) {
+            boolean hasRequestDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
+            boolean hasReplyDefault = selected != null ? !selected.replyQueue().isEmpty() : allInstancesHaveRequestQueue(helper, false);
+            if (!supplied.contains("requestQueue") && !hasRequestDefault) {
                 throw new IllegalArgumentException("Missing requestQueue: supply it in the call or mqhelper.message.requestQueue");
             }
-            if (!supplied.contains("replyQueue") && helper.replyQueue().isEmpty()) {
+            if (!supplied.contains("replyQueue") && !hasReplyDefault) {
                 throw new IllegalArgumentException("Missing replyQueue: supply it in the call or mqhelper.message.replyQueue");
             }
         }
+    }
+
+    private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {
+        for (att.config.MqHelperConfig instance : helper.instances().values()) {
+            if (request ? instance.requestQueue().isEmpty() : instance.replyQueue().isEmpty()) return false;
+        }
+        return true;
     }
 
     private boolean isWriteFacade(ToolConfig tool) {

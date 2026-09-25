@@ -17,16 +17,22 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Executes one invocation-scoped, non-transactional IBM MQ operation. */
 public final class MqHelperExecutor {
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final MqTransport.Factory factory;
+    private final Map<String, AtomicLong> roundRobinCounters = new ConcurrentHashMap<String, AtomicLong>();
 
     public MqHelperExecutor(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -49,13 +55,22 @@ public final class MqHelperExecutor {
     public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
                                       CaseRuntimeContext context, Long timeoutMs, String invocationId,
                                       String actionId, String savePath, String saveFormat, boolean overwrite) {
-        MqHelperConfig helper = config.mqHelper(instance);
-        if (helper == null) return failure(instance, operation, invocationId, "MQ_CONFIG", "Unknown MQ helper instance '" + instance + "'", null);
+        MqHelperConfig logical = config.mqHelper(instance);
+        if (logical == null) return failure(instance, operation, invocationId, "MQ_CONFIG", "Unknown MQ helper instance '" + instance + "'", null);
+        Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
+        MqHelperConfig helper;
+        try {
+            helper = select(logical, args.get("instance"));
+            validateArguments(instance, operation, args, helper);
+        } catch (Exception error) {
+            return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
+        }
         Instant started = Instant.now();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
-        result.put("instance", instance); result.put("queueManager", helper.queueManager()); result.put("result", null);
-        evidence.put("instance", instance); evidence.put("helperId", helper.id()); evidence.put("operation", operation);
+        result.put("mqHelper", logical.logicalId()); result.put("instance", helper.instanceId()); result.put("queueManager", helper.queueManager()); result.put("result", null);
+        evidence.put("instance", helper.instanceId()); evidence.put("helperId", logical.logicalId()); evidence.put("physicalInstance", helper.instanceId());
+        evidence.put("selectionStrategy", logical.selectionStrategy()); evidence.put("operation", operation);
         evidence.put("queueManager", helper.queueManager());
         evidence.put("host", helper.host()); evidence.put("port", helper.port()); evidence.put("channel", helper.channel());
         evidence.put("charset", helper.charset()); evidence.put("ccsid", helper.ccsid());
@@ -72,8 +87,6 @@ public final class MqHelperExecutor {
         MqTransport.Queue requestQueue = null;
         MqTransport.Queue replyQueue = null;
         try {
-            Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
-            validateArguments(instance, operation, args);
             if ("send".equals(operation) || "request".equals(operation)) {
                 String file = string(args.get("file"), "file");
                 Path payloadFile = payloadFile(file, context);
@@ -185,22 +198,43 @@ public final class MqHelperExecutor {
         return new MqInvocationResult(result, evidence, false);
     }
 
-    private void validateArguments(String instance, String operation, Map<String, Object> args) {
+    private MqHelperConfig select(MqHelperConfig logical, Object requested) {
+        if (requested != null) {
+            String requestedId = string(requested, "instance");
+            MqHelperConfig selected = logical.instance(requestedId);
+            if (selected == null) throw new IllegalArgumentException("Unknown physical MQ instance '" + requestedId + "' for mq." + logical.logicalId());
+            return selected;
+        }
+        if (!logical.isMultiInstance()) return logical.instances().values().iterator().next();
+        List<MqHelperConfig> candidates = new ArrayList<MqHelperConfig>(logical.instances().values());
+        if ("random".equals(logical.selectionStrategy())) return candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
+        AtomicLong counter = roundRobinCounters.get(logical.logicalId().toLowerCase(Locale.ROOT));
+        if (counter == null) {
+            AtomicLong created = new AtomicLong();
+            AtomicLong previous = roundRobinCounters.putIfAbsent(logical.logicalId().toLowerCase(Locale.ROOT), created);
+            counter = previous == null ? created : previous;
+        }
+        return candidates.get((int) Math.floorMod(counter.getAndIncrement(), (long) candidates.size()));
+    }
+
+    private void validateArguments(String instance, String operation, Map<String, Object> args,
+                                   MqHelperConfig helper) {
         if (!("send".equals(operation) || "receive".equals(operation) || "request".equals(operation))) throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         for (String key : args.keySet()) if (!allowed(operation, key)) throw new IllegalArgumentException("Unknown MQ " + operation + " argument '" + key + "' for mq." + instance);
         if (("send".equals(operation) || "request".equals(operation)) && args.get("file") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires file");
-        if ("request".equals(operation) && args.get("requestQueue") == null && config.mqHelper(instance).requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or mqhelper.message.requestQueue");
-        if ("request".equals(operation) && args.get("replyQueue") == null && config.mqHelper(instance).replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires replyQueue or mqhelper.message.replyQueue");
+        if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or mqhelper.message.requestQueue");
+        if ("request".equals(operation) && args.get("replyQueue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires replyQueue or mqhelper.message.replyQueue");
         if (("send".equals(operation) || "receive".equals(operation)) && args.get("queue") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires queue");
         for (String key : new String[]{"queue", "requestQueue", "replyQueue"}) if (args.containsKey(key)) validQueue(string(args.get(key), key));
         if (args.containsKey("waitMs")) integer(args.get("waitMs"), "waitMs", 0, 3600000);
         if ("receive".equals(operation) && args.containsKey("correlationId") && String.valueOf(args.get("correlationId")).trim().isEmpty()) throw new IllegalArgumentException("correlationId must not be blank");
+        if (args.get("instance") != null) string(args.get("instance"), "instance");
     }
 
     private boolean allowed(String operation, String key) {
-        if ("send".equals(operation)) return "queue".equals(key) || "file".equals(key);
-        if ("receive".equals(operation)) return "queue".equals(key) || "waitMs".equals(key) || "correlationId".equals(key);
-        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "waitMs".equals(key);
+        if ("send".equals(operation)) return "queue".equals(key) || "file".equals(key) || "instance".equals(key);
+        if ("receive".equals(operation)) return "queue".equals(key) || "waitMs".equals(key) || "correlationId".equals(key) || "instance".equals(key);
+        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "waitMs".equals(key) || "instance".equals(key);
     }
 
     private Path payloadFile(String value, CaseRuntimeContext context) throws IOException {
