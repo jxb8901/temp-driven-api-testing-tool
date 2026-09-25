@@ -14,10 +14,12 @@ class StageTemplateLoaderTest {
         Path current = tempDir.resolve("templates/current");
         Path legacy = tempDir.resolve("templates/legacy");
         Path legacySave = tempDir.resolve("templates/legacy-save");
+        Path legacySaveNoFormat = tempDir.resolve("templates/legacy-save-no-format");
         Path legacyFile = tempDir.resolve("templates/legacy-file");
         Files.createDirectories(current);
         Files.createDirectories(legacy);
         Files.createDirectories(legacySave);
+        Files.createDirectories(legacySaveNoFormat);
         Files.createDirectories(legacyFile);
         Files.createDirectories(tempDir.resolve("schemas"));
         Files.copy(Paths.get("schemas/att-template-v3.1.schema.json"), tempDir.resolve("schemas/att-template-v3.1.schema.json"));
@@ -32,6 +34,10 @@ class StageTemplateLoaderTest {
         Files.write(legacySave.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
                 "name: legacy-save\ndescription: Legacy save template\nactions:\n" +
                 "  call: {type: tool, call: '#{upper(\"ok\")}', saveAs: {path: response.json, format: json, overwrite: true}}\n")
+                .getBytes("UTF-8"));
+        Files.write(legacySaveNoFormat.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
+                "name: legacy-save-no-format\ndescription: Legacy save template\nactions:\n" +
+                "  call: {type: tool, call: '#{upper(\"ok\")}', saveAs: response.json}\n")
                 .getBytes("UTF-8"));
         Files.write(legacyFile.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
                 "name: legacy-file\ndescription: Legacy file template\nactions:\n" +
@@ -52,6 +58,10 @@ class StageTemplateLoaderTest {
         att.validation.DiagnosticException saveError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-save"));
         assertTrue(saveError.field().endsWith("saveAs"));
         assertTrue(saveError.suggestion().contains("path: response.json"));
+        att.validation.DiagnosticException missingFormat = assertThrows(att.validation.DiagnosticException.class,
+                () -> loader.load("legacy-save-no-format"));
+        assertTrue(missingFormat.suggestion().contains("Choose result.format explicitly"));
+        assertFalse(missingFormat.suggestion().contains("format: raw"));
         att.validation.DiagnosticException fileError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-file"));
         assertTrue(fileError.suggestion().contains("mixed representation and persistence"));
         assertTrue(fileError.suggestion().contains("result.format"));

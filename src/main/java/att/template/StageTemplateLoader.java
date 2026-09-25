@@ -267,9 +267,11 @@ public final class StageTemplateLoader {
             if (action.containsKey("saveAs")) {
                 Object old = action.get("saveAs");
                 Map<?, ?> save = old instanceof Map ? (Map<?, ?>) old : java.util.Collections.emptyMap();
-                String format = save.get("format") == null ? ("db".equalsIgnoreCase(type) ? "json" : "raw") : String.valueOf(save.get("format"));
+                String format = save.get("format") == null ? null : String.valueOf(save.get("format"));
                 String path = save.get("path") == null ? (old instanceof String ? String.valueOf(old) : null) : String.valueOf(save.get("path"));
-                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n    format: ").append(format);
+                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n");
+                if (format != null && !format.trim().isEmpty()) suggestion.append("    format: ").append(format).append('\n');
+                else suggestion.append("    # Choose result.format explicitly; the legacy default depends on the Action and call target.\n");
                 if (path != null) suggestion.append("\n    path: ").append(path);
                 if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append("\n    overwrite: true");
                 throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,

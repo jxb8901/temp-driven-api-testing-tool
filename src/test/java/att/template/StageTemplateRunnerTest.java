@@ -37,6 +37,32 @@ class StageTemplateRunnerTest {
         assertEquals(caseDir.resolve("saved/value.json").toString(), context.resolve("ACTIONS.json.output.targetFiles[0]"));
     }
 
+    @Test void persistedToolArtifactUsesSelectedTypedResultNotNativeOutput() throws Exception {
+        Path caseDir = tempDir.resolve("selected-typed-result");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("prepare", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "txt",
+                Collections.<String, ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+        TemplateAction action = new TemplateAction("typed", map("type", "tool", "call", "#{sample()}",
+                "result", map("format", "json", "path", "selected.json")));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                new ToolInvoker(tempDir, config, new FixedRunner(0, "{\"ok\":true}"))))
+                .execute("prepare", new StageTemplate("T", tempDir, Collections.singletonList(action)), context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals(Boolean.TRUE, context.resolve("ACTIONS.typed.output.result.ok"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> saved = att.validation.JsonSupport.mapper().readValue(caseDir.resolve("selected.json").toFile(), Map.class);
+        assertEquals(Boolean.TRUE, saved.get("ok"));
+    }
+
     @Test void toolActionCanInvokeBuiltInAndPersistItsResult() throws Exception {
         Path caseDir = tempDir.resolve("builtin-case");
         Files.createDirectories(caseDir);
@@ -58,6 +84,35 @@ class StageTemplateRunnerTest {
         assertEquals("builtin", context.resolve("ACTIONS.normalize.output.evidence.tool.invocations[0].type"));
         assertEquals("ABC", new String(Files.readAllBytes(caseDir.resolve("normalized.txt")), "UTF-8"));
         assertNull(context.resolve("ACTIONS.normalize.TOOL"));
+    }
+
+    @Test void templateAndToolArgvShareTheRunSequenceProvider() throws Exception {
+        Path caseDir = tempDir.resolve("shared-sequence");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("prepare", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("sample", new ToolConfig("sample", "sample", "", "Sample", "Sample",
+                Arrays.asList("fake", "#{seq.next()}"), Collections.<String>emptyList(), "txt",
+                Collections.<String, ToolArgumentConfig>emptyMap(), null));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                tools, null, null);
+        CapturingRunner command = new CapturingRunner();
+        DefaultBuiltInProvider builtIns = new DefaultBuiltInProvider(new SequenceService());
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("templateSequence", map("type", "assign", "name", "firstSequence", "expression", "#{seq.next()}")),
+                new TemplateAction("toolSequence", map("type", "tool", "call", "#{sample()}")));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                new ToolInvoker(tempDir, config, command), builtIns)).execute("prepare",
+                new StageTemplate("T", tempDir, actions), context, new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
+                Arrays.asList(results.get(0).status(), results.get(1).status()));
+        assertEquals(Long.valueOf(1), context.resolve("EXEC.VARS.firstSequence"));
+        assertEquals("2", command.argv.get(1));
     }
 
     @Test void currentActionRootlessReferenceFailsBeforeActionPublication() throws Exception {
@@ -400,6 +455,27 @@ class StageTemplateRunnerTest {
         assertFalse(Files.exists(tempDir.resolve("console-output/console")));
     }
 
+    @Test void renderResultPathEvaluatesContextExpressionsBeforeFilenameTokens() throws Exception {
+        Path template = tempDir.resolve("expression-path-template");
+        Files.createDirectories(template.resolve("requests"));
+        Files.write(template.resolve("requests/payment.xml"), "<payment/>".getBytes("UTF-8"));
+        Path output = tempDir.resolve("expression-path-output");
+        Map<String, Object> input = new LinkedHashMap<String, Object>(); input.put("renderDirectory", "chosen");
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                input, Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, output, "R", tempDir, output.resolve("case.log"));
+        context.beginStage(new StageCaseData("render", "T", Collections.<String, Object>emptyMap()), "T", template);
+        TemplateAction action = new TemplateAction("render", map("type", "render", "payload", "requests/*.xml",
+                "result", map("format", "text", "path", "${EXEC.INPUT.renderDirectory}/{name}.txt")));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("render",
+                new StageTemplate("T", template, Collections.singletonList(action)), context,
+                new CaseExecutionLog(output.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals("<payment/>", new String(Files.readAllBytes(output.resolve("chosen/payment.txt")), "UTF-8"));
+    }
+
     @Test void toolExitCodeIsEvidenceAndAssertionControlsResult() throws Exception {
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
         Path caseDir = tempDir.resolve("exit-case");
@@ -498,6 +574,13 @@ class StageTemplateRunnerTest {
         private final int exitCode; private final String stdout;
         private FixedRunner(int exitCode, String stdout) { this.exitCode=exitCode; this.stdout=stdout; }
         @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { return new CommandResult(exitCode,stdout,"",false); }
+    }
+    private static final class CapturingRunner extends CommandRunner {
+        List<String> argv;
+        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) {
+            this.argv = new ArrayList<String>(argv);
+            return new CommandResult(0, "ok", "", false);
+        }
     }
     private int occurrences(String text,String value){int count=0,index=0;while((index=text.indexOf(value,index))>=0){count++;index+=value.length();}return count;}
     private Map<String,Object> map(Object... values){Map<String,Object> out=new LinkedHashMap<String,Object>();for(int i=0;i<values.length;i+=2)out.put(String.valueOf(values[i]),values[i+1]);return out;}

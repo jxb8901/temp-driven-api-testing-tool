@@ -119,7 +119,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.0`。舊 Template 的 `renderAs`／`saveAs` 不再接受；`att validate` 會提供遷移建議。舊 schema 的其他相容規則不變。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow 的 `renderAs`／`saveAs` 不再接受；`att validate` 會提供遷移建議。舊 schema 的其他相容規則不變。
 
 ### 全局配置
 

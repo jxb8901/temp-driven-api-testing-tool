@@ -66,6 +66,7 @@ public class UnifiedTemplateEngine {
         this.dbHelperExecutor = dbHelperExecutor;
         this.mqHelperExecutor = mqHelperExecutor;
         this.builtIns = builtIns;
+        if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
     }
 
     public String render(String text, CaseRuntimeContext context) throws Exception {

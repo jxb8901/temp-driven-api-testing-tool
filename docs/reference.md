@@ -236,7 +236,7 @@ Actions run in YAML order. Action IDs are unique within the template and cannot 
 
 Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: raw|text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
-`result.format` selects the in-memory `output.result` representation; `result.path` optionally persists it without changing that representation. A pathless result creates no artifact; `path: console` writes the selected representation to the Case log only. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
+`result.format` selects the in-memory `output.result` representation; `result.path` optionally persists that same selected, typed value without changing its representation. A pathless result creates no artifact; `path: console` writes the selected representation to the Case log only. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
 
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 
@@ -244,7 +244,7 @@ Every action supports expression-bearing `description`. Validation checks `${...
 
 An assign action evaluates `expression` with the normal Context, built-in, configured-tool, and read-only DB-expression grammar. Its `name` must match `[A-Za-z_][A-Za-z0-9_]*`, is case-sensitive, and must not already exist below `EXEC.VARS` for the current Case. `EXEC.VARS` is created once per Test Case, survives stage/template changes, and keeps runtime assignments separate from Excel and framework-owned Case fields. A complete typed expression such as `#{db.orders.query(...)}` retains its Java object; it is not stringified. A successful assignment remains available to later actions and later stages as `${EXEC.VARS.<name>}`. The same value is retained in `${EXEC.ACTIONS.<assignActionId>.output.result}`. Assign supports optional `description`, `assert`, and `onFailure`, but not render, tool-action, log, report-only, retry, timeout, or `result` fields. Assertion FAIL/ERROR does not roll back a value whose expression already evaluated successfully; expression failure creates no variable.
 
-Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. A Render `result.path` can be literal for one source or use `{filename}`, `{name}`, `{ext}`, `{index}`, and `{relativePath}` for multiple sources. Expanded targets must be unique; `overwrite: true` never permits intra-Action collisions. Render keeps one typed value for one source or an ordered source-keyed map for multiple sources, and `output.targetFiles` lists only files actually persisted.
+Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. A Render `result.path` is evaluated as a normal ATT expression path first, then expands `{filename}`, `{name}`, `{ext}`, `{index}`, and `{relativePath}` tokens. Statically knowable path safety and collisions are checked during package validation; runtime-dependent path values are checked again before writing. Expanded targets must be unique; `overwrite: true` never permits intra-Action collisions. Render keeps one typed value for one source or an ordered source-keyed map for multiple sources, and `output.targetFiles` lists only files actually persisted.
 
 A log action can emit a rendered `message`, the complete content of one `file`, or both:
 
@@ -281,13 +281,13 @@ ATT uses one public Context model for Run, Debug and each Load iteration.
 ```text
 EXEC
 ├── ID
-├── MODE
+├── RUN_ID
 ├── STARTED_AT
+├── RUN_STARTED_AT
 ├── OUTPUT_DIR
 ├── INPUT
 ├── VARS
-├── ACTIONS
-└── LOAD          # load mode only
+└── ACTIONS
 
 META
 ├── PROJECT
@@ -335,16 +335,15 @@ The framework records mode, timestamps, and load scheduler metadata in the `DIAG
 
 ```text
 DIAG.load
-├── RUN_ID
-├── WORKLOAD_ID     # att-load/v1.1 multi-workload runs
-├── MODEL
-├── USER_ID         # closed-VU only
-├── TARGET_TYPE     # v1.1 workload target identity
-├── TARGET_ID       # v1.1 workload target identity
-├── ITERATION_ID
-├── ITERATION
-├── PHASE
-└── RUN_STARTED_AT
+├── runId
+├── workloadId
+├── model
+├── userId
+├── targetType
+├── targetId
+├── iterationId
+├── iteration
+└── phase
 ```
 
 For `att-load/v1.1`, `WORKLOAD_ID` is the configured workload `id`. `TARGET_TYPE` and `TARGET_ID` identify the fixed target owned by that workload. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.
@@ -684,7 +683,7 @@ Payloads are file-based so request bytes do not have to be duplicated into Conte
 
 Timeout behavior is operation-specific and remains distinct from assertion failure. MQ connection/pool lifecycle is framework-owned resource state, especially in Load mode; it is not exposed as a public `EXEC.MQ` tree.
 
-An Action `timeoutMs` takes precedence over the helper's default `requestReply.waitMs` and caps receive/request waits to the remaining Action deadline. A call-level `waitMs` takes precedence over the helper default but cannot extend that deadline. Tool Action retry applies to every MQ operation (`send`, `receive`, and `request`); retrying a send may enqueue duplicates, which the package author must account for. Per-attempt timing and retry outcomes remain in Action evidence.
+An Action `timeoutMs` takes precedence over the helper's default `requestReply.waitMs` and caps receive/request waits to the remaining Action deadline, recalculated immediately before each GET. A call-level `waitMs` takes precedence over the helper default but cannot extend that deadline. IBM MQ client calls are synchronous and cannot be forcibly interrupted by ATT; if connect/open/put/get returns after the deadline, ATT immediately records `MQ_TIMEOUT` and applies the configured retry policy. Tool Action retry applies to every MQ operation (`send`, `receive`, and `request`); retrying a send may enqueue duplicates, which the package author must account for. Per-attempt timing and retry outcomes remain in Action evidence.
 
 ATT's default build does not require IBM MQ client classes. Runtime MQ use requires the IBM MQ client jar/profile documented by the package/release instructions. MQ operations feed the same Action result/evidence envelope as Tool and DB operations.
 
@@ -961,7 +960,7 @@ The execution-neutral Context has two canonical roots and one Action-local bindi
 
 ```text
 EXEC
-├── ID, MODE, STARTED_AT, OUTPUT_DIR
+├── ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR
 ├── INPUT (TestCase data or debug sidecar input)
 ├── VARS (typed variables shared by later stages/templates)
 └── ACTIONS (completed/published Action results)
@@ -2242,7 +2241,7 @@ The appendices collect stable lookup material that should not drive the main pro
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
 | Template | `att-template/v3.1` (`renderAs`/`saveAs` are rejected with migration suggestions) |
-| Flow | `att-flow/v3.0` |
+| Flow | `att-flow/v3.1` (legacy read: `att-flow/v3.0`) |
 | Debug input | `att-debug/v1.0` |
 | Load scenario | `att-load/v1.0` |
 | Load summary | `att-load-summary/v1.0` |

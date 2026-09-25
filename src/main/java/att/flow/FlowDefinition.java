@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** Immutable att-flow/v3.0 reusable Template Action group. */
+/** Immutable versioned reusable Flow Action group. */
 public final class FlowDefinition {
     private final String id;
     private final String name;

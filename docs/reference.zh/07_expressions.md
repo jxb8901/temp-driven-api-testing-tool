@@ -51,7 +51,7 @@ expression: "#{${EXEC.ACTIONS.query.output.result.rowCount} + 1}"
 
 ```text
 EXEC
-├── ID、MODE、STARTED_AT、OUTPUT_DIR
+├── ID、RUN_ID、STARTED_AT、RUN_STARTED_AT、OUTPUT_DIR
 ├── INPUT（TestCase 数据或 debug sidecar input）
 ├── VARS（跨阶段／模板共享的 typed variables）
 └── ACTIONS（已完成／已发布的 Action results）

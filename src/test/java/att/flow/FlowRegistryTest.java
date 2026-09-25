@@ -20,6 +20,30 @@ class FlowRegistryTest {
         assertEquals("copy", registry.get("common.one.v1").actions().get(0).id());
     }
 
+    @Test void resultContractRequiresNewFlowSchemaVersionWhileV30RemainsReadable() throws Exception {
+        Path schemaDirectory = root.resolve("schemas");
+        Files.createDirectories(schemaDirectory);
+        for (String schema : new String[]{"att-flow-v3.0.schema.json", "att-flow-v3.1.schema.json",
+                "att-template-v3.0.schema.json", "att-template-v3.1.schema.json"}) {
+            Files.copy(java.nio.file.Paths.get("schemas", schema), schemaDirectory.resolve(schema));
+        }
+        String currentResult = "schemaVersion: att-flow/v3.1\nid: common.result.v1\nname: Result\ndescription: Result flow\nactions:\n"
+                + "  save: {type: tool, call: \"#{upper('ok')}\", result: {format: text, path: value.txt}}\n";
+        flow("current-result", currentResult);
+        assertDoesNotThrow(() -> new FlowRegistry(root, root.resolve("templates")));
+
+        deleteFlows();
+        String silentlyChangedOldVersion = currentResult.replace("att-flow/v3.1", "att-flow/v3.0");
+        flow("v30-result", silentlyChangedOldVersion);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new FlowRegistry(root, root.resolve("templates")));
+        assertTrue(error.getMessage().contains("result"));
+
+        deleteFlows();
+        flow("v30-legacy", valid("common.v30.v1", "note", "${CASE.value}"));
+        assertDoesNotThrow(() -> new FlowRegistry(root, root.resolve("templates")));
+    }
+
     @Test void rejectsRemovedInputOutputAndWithContracts() throws Exception {
         flow("inputs", valid("common.inputs.v1", "copy", "${CASE.value}")
                 .replace("actions:\n", "inputs: {}\nactions:\n"));

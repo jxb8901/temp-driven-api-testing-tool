@@ -410,6 +410,34 @@ class PackageValidatorTest {
         valid.put("payload","missing/*.json");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,new StageTemplate("T",tempDir,Collections.singletonList(new TemplateAction("render",valid))),config));
     }
+
+    @Test void staticallyValidatesRenderResultPathCollisionsAndDynamicExpressions() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        method.setAccessible(true);
+        Files.createDirectories(tempDir.resolve("requests"));
+        Files.write(tempDir.resolve("requests/a.xml"), "<a/>".getBytes("UTF-8"));
+        Files.write(tempDir.resolve("requests/b.xml"), "<b/>".getBytes("UTF-8"));
+
+        Map<String, Object> dynamic = new LinkedHashMap<String, Object>();
+        dynamic.put("type", "render"); dynamic.put("payload", "requests/*.xml");
+        dynamic.put("result", map("format", "text", "path", "${EXEC.INPUT.outputDir}/{filename}"));
+        assertDoesNotThrow(() -> {
+            try { method.invoke(validator, new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("render", dynamic))), config); }
+            catch (java.lang.reflect.InvocationTargetException error) { throw new RuntimeException(error.getCause()); }
+            catch (Exception error) { throw new RuntimeException(error); }
+        });
+
+        dynamic.put("result", map("format", "text", "path", "${EXEC.INPUT.outputDir}/same.txt"));
+        java.lang.reflect.InvocationTargetException collision = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("render", dynamic))), config));
+        assertTrue(collision.getCause().getMessage().contains("maps multiple sources to the same target"));
+        dynamic.put("result", map("format", "text", "path", "../${EXEC.INPUT.outputDir}/{filename}"));
+        assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("render", dynamic))), config));
+    }
     @Test void referencedToolExecutableCannotEscapePackage() throws Exception {
         Path project=tempDir.resolve("project"), outside=tempDir.resolve("outside.sh"); Files.createDirectories(project); Files.write(outside, "#!/bin/sh\n".getBytes("UTF-8")); outside.toFile().setExecutable(true);
         ToolConfig tool=new ToolConfig("outside","Outside","test","../outside.sh","txt",Collections.<String,ToolArgumentConfig>emptyMap());

@@ -801,6 +801,7 @@ public final class PackageValidator {
                 forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 validateRenderResultPath(action);
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
+                validateStaticRenderTargets(action, template, payloads);
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
@@ -1019,13 +1020,23 @@ public final class PackageValidator {
     private void validateRenderResultPath(TemplateAction action) {
         String path = action.resultConfig().path();
         if (path == null || path.trim().isEmpty() || "console".equalsIgnoreCase(path.trim())) return;
-        if (path.contains("${") || path.contains("#{")) throw new IllegalArgumentException("Render result.path uses literal paths and {filename}, {name}, {ext}, {index}, {relativePath} tokens only: " + action.id());
-        java.util.regex.Matcher tokens = java.util.regex.Pattern.compile("\\{([^{}]+)\\}").matcher(path);
-        while (tokens.find()) if (!java.util.Arrays.asList("filename", "name", "ext", "index", "relativePath").contains(tokens.group(1))) {
-            throw new IllegalArgumentException("Unknown Render result.path token {" + tokens.group(1) + "}: " + action.id());
+        try { att.template.RenderResultPath.maskExpressionsAndValidate(path); }
+        catch (IllegalArgumentException error) { throw new IllegalArgumentException(error.getMessage() + ": " + action.id(), error); }
+    }
+
+    private void validateStaticRenderTargets(TemplateAction action, StageTemplate template, List<Path> payloads) throws Exception {
+        String path = action.resultConfig().path();
+        if (path == null || path.trim().isEmpty() || "console".equalsIgnoreCase(path.trim())) return;
+        String staticallyKnownPattern = att.template.RenderResultPath.maskExpressionsAndValidate(path);
+        Set<String> targets = new java.util.LinkedHashSet<String>();
+        for (int index = 0; index < payloads.size(); index++) {
+            String relative = att.template.RenderResultPath.relativeSource(template.directory(), action.payload(), payloads.get(index));
+            String expanded = att.template.RenderResultPath.expand(staticallyKnownPattern, relative, index + 1);
+            String safe = att.template.RenderResultPath.safeRelativeTarget(expanded);
+            if (!targets.add(safe)) {
+                throw new IllegalArgumentException("Render result.path pattern maps multiple sources to the same target: " + safe);
+            }
         }
-        String residue = path.replaceAll("\\{(?:filename|name|ext|index|relativePath)\\}", "");
-        if (residue.indexOf('{') >= 0 || residue.indexOf('}') >= 0) throw new IllegalArgumentException("Malformed Render result.path token: " + action.id());
     }
 
     private void validateEvidence(TemplateAction action, StageTemplate template,

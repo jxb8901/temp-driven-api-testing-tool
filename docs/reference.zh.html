@@ -826,9 +826,10 @@ Tool 动作有效。DB Action 必须指定已配置的 <code>db</code> ID，并�
 动作要求 <code>name</code> 和
 <code>expression</code>。不支持的字段会报错，而不是被忽略。</p>
 <p><code>result.format</code> 决定内存中的 <code>output.result</code>
-表示；<code>result.path</code> 可选持久化，但不会改变该表示。省略 path
-不会建立 artifact；<code>path: console</code> 只将选定表示写入 Case
-log。旧 <code>renderAs</code> 与 <code>saveAs</code>
+表示；<code>result.path</code> 可选持久化同一个选定 typed
+value，不会改变该表示。省略 path 不会建立
+artifact；<code>path: console</code> 只将选定表示写入 Case log。旧
+<code>renderAs</code> 与 <code>saveAs</code>
 会被拒绝，<code>att validate</code> 会提供迁移建议。</p>
 <p>每个动作都可以使用 <code>assert</code>，但 assert
 动作本身把它作为必需主表达式。每个动作结果都嵌套在 <code>output</code>
@@ -861,10 +862,10 @@ render、tool-action、log、report-only、retry、timeout 或
 不会回滚已成功求值的变量；表达式失败则不会创建变量。</p>
 <p>Render 负载路径必须保持在模板根目录下。glob
 匹配会按模板相对路径确定性排序。Render 的 <code>result.path</code>
-可对单一来源使用字面路径；多来源可使用
+先按普通 ATT expression 求值，再展开
 <code>{filename}</code>、<code>{name}</code>、<code>{ext}</code>、<code>{index}</code>
-与
-<code>{relativePath}</code>。展开后的目标必须唯一，<code>overwrite: true</code>
+与 <code>{relativePath}</code>。Package validation
+会静态检查可确定的路径安全与碰撞；依赖运行时的值会在写入前再次验证。展开后的目标必须唯一，<code>overwrite: true</code>
 也不能允许同一 Action
 内目标冲突。单来源保留一个类型化值，多来源保留按来源键排序的
 map；<code>output.targetFiles</code> 只列出实际写入的文件。</p>
@@ -909,13 +910,13 @@ LF，然后是文件内容。这个相同结果也只会在人工 Case
 <h3 id="canonical-tree">Canonical tree</h3>
 <pre class="text"><code>EXEC
 ├── ID
-├── MODE
+├── RUN_ID
 ├── STARTED_AT
+├── RUN_STARTED_AT
 ├── OUTPUT_DIR
 ├── INPUT
 ├── VARS
-├── ACTIONS
-└── LOAD          # 只在 load mode 存在
+└── ACTIONS
 
 META
 ├── PROJECT
@@ -975,16 +976,15 @@ ID；Load 為每個 iteration 分配 run 內全域唯一的 execution ID。舊�
 <code>${DIAG...}</code> 均無效；業務差異請透過 <code>EXEC.INPUT</code>
 傳入。Load evidence 可包含：</p>
 <pre class="text"><code>DIAG.load
-├── RUN_ID
-├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
-├── MODEL
-├── USER_ID         # 只適用 closed-VU
-├── TARGET_TYPE     # v1.1 workload 固定 target 身份
-├── TARGET_ID       # v1.1 workload 固定 target 身份
-├── ITERATION_ID
-├── ITERATION
-├── PHASE
-└── RUN_STARTED_AT</code></pre>
+├── runId
+├── workloadId
+├── model
+├── userId
+├── targetType
+├── targetId
+├── iterationId
+├── iteration
+└── phase</code></pre>
 <p>在 <code>att-load/v1.1</code> 中，<code>WORKLOAD_ID</code> 就是
 scenario 配置的 workload
 <code>id</code>；<code>TARGET_TYPE</code>、<code>TARGET_ID</code> 標識該
@@ -1445,9 +1445,12 @@ metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes
 不複製到 evidence。</p>
 <p>Timeout 是 operation-specific failure，與 assertion failure
 分開。Action <code>timeoutMs</code> 優先於 helper 的
-<code>requestReply.waitMs</code> 預設值，並將 receive/request wait
-限制在 Action deadline 剩餘時間內；call <code>waitMs</code> 優先於
-helper 預設值，但不能延長 deadline。Tool Action retry 可用於所有 MQ
+<code>requestReply.waitMs</code> 預設值，並在每次 GET 前重新計算剩餘
+Action deadline；call <code>waitMs</code> 優先於 helper
+預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT
+無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT
+會立即記錄 <code>MQ_TIMEOUT</code> 並套用 retry policy。Tool Action
+retry 可用於所有 MQ
 操作（<code>send</code>、<code>receive</code>、<code>request</code>）；重試
 send 可能造成重複訊息，需由 package author 評估。每次 attempt 的
 timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle
@@ -1780,7 +1783,7 @@ stderr。</p>
 <h3 id="runtime-context">Runtime Context</h3>
 <p>执行中立的 Context 有两个规范根和一个 Action 局部 binding：</p>
 <pre class="text"><code>EXEC
-├── ID、MODE、STARTED_AT、OUTPUT_DIR
+├── ID、RUN_ID、STARTED_AT、RUN_STARTED_AT、OUTPUT_DIR
 ├── INPUT（TestCase 数据或 debug sidecar input）
 ├── VARS（跨阶段／模板共享的 typed variables）
 └── ACTIONS（已完成／已发布的 Action results）
@@ -2700,8 +2703,8 @@ href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
 使用 <code>att-schema-catalog/v3.0</code>。当前主配置、Tool
 group、sidecar、Template 与 Flow 分别为
 <code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v3.1</code>
-与 <code>att-flow/v3.0</code>。舊 Template 的
-<code>renderAs</code>／<code>saveAs</code>
+与 <code>att-flow/v3.1</code>（相容讀取 <code>att-flow/v3.0</code>）。舊
+Template／Flow 的 <code>renderAs</code>／<code>saveAs</code>
 不再接受；<code>att validate</code> 會提供遷移建議。舊 schema
 的其他相容規則不變。</p>
 <h3 id="全局配置">全局配置</h3>
@@ -3987,7 +3990,7 @@ matrix、compatibility/deprecation、migration note、limit/default。</p>
 </tr>
 <tr class="even">
 <td>Flow</td>
-<td><code>att-flow/v3.0</code></td>
+<td><code>att-flow/v3.1</code>（相容讀取：<code>att-flow/v3.0</code>）</td>
 </tr>
 <tr class="odd">
 <td>Debug input</td>

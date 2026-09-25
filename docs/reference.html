@@ -893,11 +893,12 @@ requires <code>name</code> and <code>expression</code>. Unsupported
 fields are errors rather than ignored values.</p>
 <p><code>result.format</code> selects the in-memory
 <code>output.result</code> representation; <code>result.path</code>
-optionally persists it without changing that representation. A pathless
-result creates no artifact; <code>path: console</code> writes the
-selected representation to the Case log only. Legacy
-<code>renderAs</code> and <code>saveAs</code> fields are rejected with
-migration suggestions by <code>att validate</code>.</p>
+optionally persists that same selected, typed value without changing its
+representation. A pathless result creates no artifact;
+<code>path: console</code> writes the selected representation to the
+Case log only. Legacy <code>renderAs</code> and <code>saveAs</code>
+fields are rejected with migration suggestions by
+<code>att validate</code>.</p>
 <p>Every action may use <code>assert</code> except that an assert action
 uses it as its required primary expression. Every action outcome is
 nested under <code>output</code>, including <code>status</code>,
@@ -933,13 +934,15 @@ FAIL/ERROR does not roll back a value whose expression already evaluated
 successfully; expression failure creates no variable.</p>
 <p>Render payload paths must remain below the template root. Glob
 matches are regular non-symbolic-link files sorted by portable
-template-relative path. A Render <code>result.path</code> can be literal
-for one source or use <code>{filename}</code>, <code>{name}</code>,
-<code>{ext}</code>, <code>{index}</code>, and
-<code>{relativePath}</code> for multiple sources. Expanded targets must
-be unique; <code>overwrite: true</code> never permits intra-Action
-collisions. Render keeps one typed value for one source or an ordered
-source-keyed map for multiple sources, and
+template-relative path. A Render <code>result.path</code> is evaluated
+as a normal ATT expression path first, then expands
+<code>{filename}</code>, <code>{name}</code>, <code>{ext}</code>,
+<code>{index}</code>, and <code>{relativePath}</code> tokens. Statically
+knowable path safety and collisions are checked during package
+validation; runtime-dependent path values are checked again before
+writing. Expanded targets must be unique; <code>overwrite: true</code>
+never permits intra-Action collisions. Render keeps one typed value for
+one source or an ordered source-keyed map for multiple sources, and
 <code>output.targetFiles</code> lists only files actually persisted.</p>
 <p>A log action can emit a rendered <code>message</code>, the complete
 content of one <code>file</code>, or both:</p>
@@ -985,13 +988,13 @@ iteration.</p>
 <h3 id="canonical-tree">Canonical tree</h3>
 <pre class="text"><code>EXEC
 ├── ID
-├── MODE
+├── RUN_ID
 ├── STARTED_AT
+├── RUN_STARTED_AT
 ├── OUTPUT_DIR
 ├── INPUT
 ├── VARS
-├── ACTIONS
-└── LOAD          # load mode only
+└── ACTIONS
 
 META
 ├── PROJECT
@@ -1059,16 +1062,15 @@ deliberately absent from expression Context: <code>${EXEC.MODE}</code>,
 Use <code>EXEC.INPUT</code> for business variation. Load evidence may
 contain:</p>
 <pre class="text"><code>DIAG.load
-├── RUN_ID
-├── WORKLOAD_ID     # att-load/v1.1 multi-workload runs
-├── MODEL
-├── USER_ID         # closed-VU only
-├── TARGET_TYPE     # v1.1 workload target identity
-├── TARGET_ID       # v1.1 workload target identity
-├── ITERATION_ID
-├── ITERATION
-├── PHASE
-└── RUN_STARTED_AT</code></pre>
+├── runId
+├── workloadId
+├── model
+├── userId
+├── targetType
+├── targetId
+├── iterationId
+├── iteration
+└── phase</code></pre>
 <p>For <code>att-load/v1.1</code>, <code>WORKLOAD_ID</code> is the
 configured workload <code>id</code>. <code>TARGET_TYPE</code> and
 <code>TARGET_ID</code> identify the fixed target owned by that workload.
@@ -1556,8 +1558,12 @@ resource state, especially in Load mode; it is not exposed as a public
 <code>EXEC.MQ</code> tree.</p>
 <p>An Action <code>timeoutMs</code> takes precedence over the helper's
 default <code>requestReply.waitMs</code> and caps receive/request waits
-to the remaining Action deadline. A call-level <code>waitMs</code> takes
-precedence over the helper default but cannot extend that deadline. Tool
+to the remaining Action deadline, recalculated immediately before each
+GET. A call-level <code>waitMs</code> takes precedence over the helper
+default but cannot extend that deadline. IBM MQ client calls are
+synchronous and cannot be forcibly interrupted by ATT; if
+connect/open/put/get returns after the deadline, ATT immediately records
+<code>MQ_TIMEOUT</code> and applies the configured retry policy. Tool
 Action retry applies to every MQ operation (<code>send</code>,
 <code>receive</code>, and <code>request</code>); retrying a send may
 enqueue duplicates, which the package author must account for.
@@ -2069,7 +2075,7 @@ is sufficient.</p>
 <p>The execution-neutral Context has two canonical roots and one
 Action-local binding:</p>
 <pre class="text"><code>EXEC
-├── ID, MODE, STARTED_AT, OUTPUT_DIR
+├── ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR
 ├── INPUT (TestCase data or debug sidecar input)
 ├── VARS (typed variables shared by later stages/templates)
 └── ACTIONS (completed/published Action results)
@@ -5235,7 +5241,8 @@ suggestions)</td>
 </tr>
 <tr class="even">
 <td>Flow</td>
-<td><code>att-flow/v3.0</code></td>
+<td><code>att-flow/v3.1</code> (legacy read:
+<code>att-flow/v3.0</code>)</td>
 </tr>
 <tr class="odd">
 <td>Debug input</td>

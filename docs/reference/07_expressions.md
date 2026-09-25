@@ -87,7 +87,7 @@ The execution-neutral Context has two canonical roots and one Action-local bindi
 
 ```text
 EXEC
-├── ID, MODE, STARTED_AT, OUTPUT_DIR
+├── ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR
 ├── INPUT (TestCase data or debug sidecar input)
 ├── VARS (typed variables shared by later stages/templates)
 └── ACTIONS (completed/published Action results)

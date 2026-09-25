@@ -9,7 +9,7 @@
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
 | Template | `att-template/v3.1`（舊 `renderAs`／`saveAs` 會被拒絕並提供遷移建議） |
-| Flow | `att-flow/v3.0` |
+| Flow | `att-flow/v3.1`（相容讀取：`att-flow/v3.0`）|
 | Debug input | `att-debug/v1.0` |
 | Load scenario | `att-load/v1.0` |
 | Load summary | `att-load-summary/v1.0` |

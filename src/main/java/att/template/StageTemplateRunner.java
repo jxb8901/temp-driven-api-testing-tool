@@ -217,7 +217,7 @@ public class StageTemplateRunner {
             Path payloadRoot = renderPayloadRoot(template.directory(), action.payload());
             for (int i = 0; i < matches.size(); i++) {
                 String relative = RenderPayloadResolver.portable(payloadRoot.relativize(matches.get(i)));
-                String target = expandRenderPath(configuredPath, relative, i + 1);
+                String target = RenderResultPath.expand(configuredPath, relative, i + 1);
                 if (matches.size() > 1 && expandedTargets.contains(target)) {
                     throw new IllegalArgumentException("Render result.path pattern maps multiple sources to the same target: " + target);
                 }
@@ -268,26 +268,6 @@ public class StageTemplateRunner {
             if (found >= 0 && (result < 0 || found < result)) result = found;
         }
         return result;
-    }
-
-    private String expandRenderPath(String pattern, String relativePath, int index) {
-        String filename = relativePath.substring(relativePath.lastIndexOf('/') + 1);
-        int dot = filename.lastIndexOf('.');
-        String name = dot <= 0 ? filename : filename.substring(0, dot);
-        String ext = dot < 0 || dot == filename.length() - 1 ? "" : filename.substring(dot + 1);
-        Map<String, String> values = new LinkedHashMap<String, String>();
-        values.put("filename", filename); values.put("name", name); values.put("ext", ext);
-        values.put("index", String.valueOf(index)); values.put("relativePath", relativePath);
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{([^{}]+)\\}").matcher(pattern);
-        StringBuffer expanded = new StringBuffer();
-        while (matcher.find()) {
-            String value = values.get(matcher.group(1));
-            if (value == null) throw new IllegalArgumentException("Unknown Render result.path token: {" + matcher.group(1) + "}");
-            matcher.appendReplacement(expanded, java.util.regex.Matcher.quoteReplacement(value));
-        }
-        matcher.appendTail(expanded);
-        if (expanded.indexOf("{") >= 0 || expanded.indexOf("}") >= 0) throw new IllegalArgumentException("Malformed Render result.path token: " + pattern);
-        return expanded.toString();
     }
 
     private void executeLog(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output) throws Exception {
@@ -521,14 +501,16 @@ public class StageTemplateRunner {
                         save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
+                ActionExecutionResult operation = result.operationResult();
+                Object selectedResult = resultValue(action, kind, result, operation.result(), format);
                 if (save.configured() && !invokerWritesRaw && !"mq".equals(kind)) {
                     if (console) {
                         if (!("tool".equals(kind) && "raw".equals(format))) {
-                            try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.render(format, result.output())); }
+                            try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, selectedResult)); }
                             catch (Exception error) { recordEvidenceError(output, error); }
                         }
                     } else {
-                        Path saved = artifactWriter.write(context, action.id(), saveAs, format, result.output(),
+                        Path saved = artifactWriter.write(context, action.id(), saveAs, format, selectedResult,
                                 save.overwrite() || actionOwnedArtifact);
                         actionOwnedArtifact = true;
                         invocation.put("outputFile", saved.toString());
@@ -537,9 +519,7 @@ public class StageTemplateRunner {
                     actionOwnedArtifact = true;
                 }
                 attempts.add(invocation);
-                ActionExecutionResult operation = result.operationResult();
                 publishOperationResult(output, operation);
-                Object selectedResult = resultValue(action, kind, result, operation.result(), format);
                 output.put("result", selectedResult);
                 invocation.put("evidence", operation.evidence());
                 copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
@@ -548,7 +528,7 @@ public class StageTemplateRunner {
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
                 if (!operation.executionSuccess()) {
-                    if ("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.evidence()))
+                    if ("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata()))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");
                         waitBeforeRetry(intervalMs);
@@ -603,10 +583,8 @@ public class StageTemplateRunner {
     }
 
     @SuppressWarnings("unchecked")
-    private String mqErrorType(Map<String, Object> evidence) {
-        Object mq = evidence == null ? null : evidence.get("MQ");
-        if (!(mq instanceof Map)) return null;
-        Object error = ((Map<String, Object>) mq).get("error");
+    private String mqErrorType(Map<String, Object> outputMetadata) {
+        Object error = outputMetadata == null ? null : outputMetadata.get("error");
         if (!(error instanceof Map)) return null;
         Object type = ((Map<String, Object>) error).get("type");
         return type == null ? null : String.valueOf(type);

@@ -43,6 +43,23 @@ class DefaultBuiltInProviderTest {
         for (int i = 0; i < 8; i++) overflow.next("tiny", Integer.valueOf(1));
         assertThrows(IllegalStateException.class, () -> overflow.next("tiny", Integer.valueOf(1)));
     }
+
+    @Test void sequenceServiceIsConcurrentAndFreshInstancesResetAtOne() throws Exception {
+        SequenceService shared = new SequenceService();
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(8);
+        java.util.Set<Long> values = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<Long, Boolean>());
+        try {
+            java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int worker = 0; worker < 8; worker++) futures.add(workers.submit(() -> {
+                for (int index = 0; index < 125; index++) values.add(Long.valueOf(((Number) shared.next("run-sequence", null)).longValue()));
+            }));
+            for (java.util.concurrent.Future<?> future : futures) future.get();
+        } finally { workers.shutdownNow(); }
+        assertEquals(1000, values.size());
+        assertTrue(values.contains(Long.valueOf(1)));
+        assertTrue(values.contains(Long.valueOf(1000)));
+        assertEquals(Long.valueOf(1), new SequenceService().next("run-sequence", null));
+    }
     @TempDir Path tempDir;
 
     @Test void supportsSafeEverydayFileOperations() throws Exception {

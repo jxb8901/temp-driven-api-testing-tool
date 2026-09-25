@@ -45,6 +45,7 @@ public class ToolInvoker {
     private final FrameworkConfig config;
     private final CommandRunner commandRunner;
     private final SshCommandRunner sshCommandRunner;
+    private volatile att.template.UnifiedTemplateEngine commandExpressionEngine;
 
     public ToolInvoker(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new CommandRunner());
@@ -59,6 +60,13 @@ public class ToolInvoker {
         this.config = config;
         this.commandRunner = commandRunner;
         this.sshCommandRunner = sshCommandRunner;
+        this.commandExpressionEngine = new att.template.UnifiedTemplateEngine(null);
+    }
+
+    /** Shares the execution's built-in runtime with expression-bearing Tool argv tokens. */
+    public void setCommandBuiltIns(att.template.BuiltInProvider builtIns) {
+        if (builtIns == null) throw new IllegalArgumentException("Built-in provider is required");
+        this.commandExpressionEngine = new att.template.UnifiedTemplateEngine(null, null, null, builtIns);
     }
 
     public ToolConfig tool(String name) { return config.tool(name); }
@@ -427,7 +435,6 @@ public class ToolInvoker {
         Map<String, Object> toolScope = new LinkedHashMap<String, Object>();
         toolScope.put("input", new LinkedHashMap<String, Object>(declaredValues));
         scopedValues.put("TOOL", toolScope);
-        att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
         for (String token : tokens) {
             ToolArgumentConfig exact = exactArgumentPlaceholder(tool, token);
             if (exact != null) {
@@ -459,7 +466,7 @@ public class ToolInvoker {
                             + tool.key() + "." + argumentKey(placeholder.group(1)));
                 }
             }
-            argv.add(expressionEngine.renderScoped(token, scopedValues));
+            argv.add(commandExpressionEngine.renderScoped(token, scopedValues));
         }
         if (!tool.groupScriptArgv().isEmpty()) {
             List<String> dispatched = new ArrayList<String>(tool.groupScriptArgv());

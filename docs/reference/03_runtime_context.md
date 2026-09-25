@@ -7,13 +7,13 @@ ATT uses one public Context model for Run, Debug and each Load iteration.
 ```text
 EXEC
 ├── ID
-├── MODE
+├── RUN_ID
 ├── STARTED_AT
+├── RUN_STARTED_AT
 ├── OUTPUT_DIR
 ├── INPUT
 ├── VARS
-├── ACTIONS
-└── LOAD          # load mode only
+└── ACTIONS
 
 META
 ├── PROJECT
@@ -61,16 +61,15 @@ The framework records mode, timestamps, and load scheduler metadata in the `DIAG
 
 ```text
 DIAG.load
-├── RUN_ID
-├── WORKLOAD_ID     # att-load/v1.1 multi-workload runs
-├── MODEL
-├── USER_ID         # closed-VU only
-├── TARGET_TYPE     # v1.1 workload target identity
-├── TARGET_ID       # v1.1 workload target identity
-├── ITERATION_ID
-├── ITERATION
-├── PHASE
-└── RUN_STARTED_AT
+├── runId
+├── workloadId
+├── model
+├── userId
+├── targetType
+├── targetId
+├── iterationId
+├── iteration
+└── phase
 ```
 
 For `att-load/v1.1`, `WORKLOAD_ID` is the configured workload `id`. `TARGET_TYPE` and `TARGET_ID` identify the fixed target owned by that workload. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.

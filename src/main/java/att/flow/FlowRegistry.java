@@ -167,22 +167,30 @@ public final class FlowRegistry {
             map = objectMap((Map<?, ?>) loaded);
         }
         rejectLegacyResultFields(map, descriptor);
-        Path schema = projectRoot.resolve("schemas/att-flow-v3.0.schema.json");
+        Object configuredVersion = map.get("schemaVersion");
+        String flowVersion = configuredVersion == null ? "" : String.valueOf(configuredVersion);
+        boolean currentVersion = Version.FLOW_SCHEMA.equals(flowVersion);
+        boolean previousVersion = Version.PREVIOUS_FLOW_SCHEMA.equals(flowVersion);
+        if (!currentVersion && !previousVersion) throw new IllegalArgumentException("Unsupported Flow schemaVersion: " + flowVersion);
+        String suffix = currentVersion ? "v3.1" : "v3.0";
+        Path schema = projectRoot.resolve("schemas/att-flow-" + suffix + ".schema.json");
         if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
-        actionContract.put("schemaVersion", Version.TEMPLATE_SCHEMA);
+        String templateVersion = currentVersion ? Version.TEMPLATE_SCHEMA : Version.PREVIOUS_TEMPLATE_SCHEMA;
+        actionContract.put("schemaVersion", templateVersion);
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
-        Path templateSchema = projectRoot.resolve("schemas/att-template-v3.1.schema.json");
+        Path templateSchema = projectRoot.resolve("schemas/att-template-" + (currentVersion ? "v3.1" : "v3.0") + ".schema.json");
         if (Files.isRegularFile(templateSchema)) att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
-        SchemaSupport.requireVersion(map, Version.FLOW_SCHEMA, "flow");
+        SchemaSupport.requireVersion(map, flowVersion, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");
         String id = text(map.get("id"));
         if (!isCanonicalId(id)) throw new IllegalArgumentException("Flow id must be a static canonical ID ending in .vN: " + id);
         SchemaSupport.string(map.get("name"), "flow.name", true);
         SchemaSupport.string(map.get("description"), "flow.description", true);
-        return new FlowDefinition(id, text(map.get("name")), text(map.get("description")), descriptor.getParent(), actions(map.get("actions"), id));
+        return new FlowDefinition(id, text(map.get("name")), text(map.get("description")), descriptor.getParent(),
+                actions(map.get("actions"), id, templateVersion));
     }
 
     private void rejectLegacyResultFields(Map<String, Object> flow, Path descriptor) {
@@ -201,9 +209,11 @@ public final class FlowRegistry {
             if (action.containsKey("saveAs")) {
                 Object old = action.get("saveAs");
                 Map<?, ?> save = old instanceof Map ? (Map<?, ?>) old : Collections.emptyMap();
-                String format = save.get("format") == null ? "text" : String.valueOf(save.get("format"));
+                String format = save.get("format") == null ? null : String.valueOf(save.get("format"));
                 String path = save.get("path") == null ? (old instanceof String ? String.valueOf(old) : null) : String.valueOf(save.get("path"));
-                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n    format: ").append(format);
+                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n");
+                if (format != null && !format.trim().isEmpty()) suggestion.append("    format: ").append(format).append('\n');
+                else suggestion.append("    # Choose result.format explicitly; the legacy default depends on the Action and call target.\n");
                 if (path != null) suggestion.append("\n    path: ").append(path);
                 if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append("\n    overwrite: true");
                 throw migrationError(descriptor, id, "saveAs", suggestion.toString());
@@ -218,13 +228,13 @@ public final class FlowRegistry {
                 descriptor.toString(), fullField, null, null, null, null, action, suggestion, null);
     }
 
-    private List<TemplateAction> actions(Object configured, String id) {
+    private List<TemplateAction> actions(Object configured, String id, String templateSchema) {
         if (!(configured instanceof Map) || ((Map<?, ?>) configured).isEmpty()) throw new IllegalArgumentException("Flow actions must be a non-empty ordered map: " + id);
         List<TemplateAction> result = new ArrayList<TemplateAction>();
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
             String key = String.valueOf(entry.getKey());
             if (key.trim().isEmpty() || key.contains(".") || !(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Invalid Flow action: " + id + "." + key);
-            TemplateAction action = new TemplateAction(key, objectMap((Map<?, ?>) entry.getValue()), Version.TEMPLATE_SCHEMA);
+            TemplateAction action = new TemplateAction(key, objectMap((Map<?, ?>) entry.getValue()), templateSchema);
             validateActionShape(action, id);
             result.add(action);
         }

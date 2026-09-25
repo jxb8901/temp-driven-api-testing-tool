@@ -7,13 +7,13 @@ ATT 對 Run、Debug 以及每一個 Load iteration 使用同一套公開 Context
 ```text
 EXEC
 ├── ID
-├── MODE
+├── RUN_ID
 ├── STARTED_AT
+├── RUN_STARTED_AT
 ├── OUTPUT_DIR
 ├── INPUT
 ├── VARS
-├── ACTIONS
-└── LOAD          # 只在 load mode 存在
+└── ACTIONS
 
 META
 ├── PROJECT
@@ -61,16 +61,15 @@ Action 執行中使用 `${output...}`；在目前 scope 完成後使用 `${EXEC.
 
 ```text
 DIAG.load
-├── RUN_ID
-├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
-├── MODEL
-├── USER_ID         # 只適用 closed-VU
-├── TARGET_TYPE     # v1.1 workload 固定 target 身份
-├── TARGET_ID       # v1.1 workload 固定 target 身份
-├── ITERATION_ID
-├── ITERATION
-├── PHASE
-└── RUN_STARTED_AT
+├── runId
+├── workloadId
+├── model
+├── userId
+├── targetType
+├── targetId
+├── iterationId
+├── iteration
+└── phase
 ```
 
 在 `att-load/v1.1` 中，`WORKLOAD_ID` 就是 scenario 配置的 workload `id`；`TARGET_TYPE`、`TARGET_ID` 標識該 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。

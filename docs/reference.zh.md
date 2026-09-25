@@ -236,7 +236,7 @@ actions:
 
 动作校验按类型进行。render 要求安全且非空的 payload glob，以及 `result.format: raw|text|json|yaml|xml`；可选 `result.path` 负责持久化。Tool、MQ receive/request 与 DB 共用同一个可选 `result` object。重试和 Action 级 timeout 仅对 Tool 动作有效。DB Action 必须指定已配置的 `db` ID，并在 `query` 与 `update` 中恰好选择一个；所选 block 又必须在 `sql` 与 `sqlFile` 中恰好选择一个。assert 动作要求 `assert`，并可包含 `expected` 和 `actual`；`expression`、`acture`、`actural` 都是非法字段。log 动作要求 `message`、`file` 或两者；并可使用 `level` 和 `fields`。assign 动作要求 `name` 和 `expression`。不支持的字段会报错，而不是被忽略。
 
-`result.format` 决定内存中的 `output.result` 表示；`result.path` 可选持久化，但不会改变该表示。省略 path 不会建立 artifact；`path: console` 只将选定表示写入 Case log。旧 `renderAs` 与 `saveAs` 会被拒绝，`att validate` 会提供迁移建议。
+`result.format` 决定内存中的 `output.result` 表示；`result.path` 可选持久化同一个选定 typed value，不会改变该表示。省略 path 不会建立 artifact；`path: console` 只将选定表示写入 Case log。旧 `renderAs` 与 `saveAs` 会被拒绝，`att validate` 会提供迁移建议。
 
 每个动作都可以使用 `assert`，但 assert 动作本身把它作为必需主表达式。每个动作结果都嵌套在 `output` 下，包括 `status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及可选断言详情。操作错误保持 ERROR；否则显式断言决定 PASS/FAIL。一个已完成的工具进程即使返回非零退出码，也不会自动变成 ERROR：需要在 `assert` 中检查 `output.exitCode`。
 
@@ -244,7 +244,7 @@ actions:
 
 assign 动作使用常规 Context、内建函数、配置 Tool 与只读 DB expression 语法求值 `expression`。其 `name` 必须符合 `[A-Za-z_][A-Za-z0-9_]*`，大小写敏感，并且在当前 Case 的 `EXEC.VARS` 下不能已存在。`EXEC.VARS` 会在每个 Test Case 中创建一次，跨阶段和模板保持存在，并将运行时赋值与 Excel 及框架自有 Case 字段区分开。完整的类型化表达式（例如 `#{db.orders.query(...)}`）保留 Java object，不会转成字符串。成功赋值后，后续动作和阶段可通过 `${EXEC.VARS.<name>}` 读取；同一值也保存在 `${EXEC.ACTIONS.<assignActionId>.output.result}`。Assign 支持可选 `description`、`assert` 和 `onFailure`，但不支持 render、tool-action、log、report-only、retry、timeout 或 `result`。断言 FAIL/ERROR 不会回滚已成功求值的变量；表达式失败则不会创建变量。
 
-Render 负载路径必须保持在模板根目录下。glob 匹配会按模板相对路径确定性排序。Render 的 `result.path` 可对单一来源使用字面路径；多来源可使用 `{filename}`、`{name}`、`{ext}`、`{index}` 与 `{relativePath}`。展开后的目标必须唯一，`overwrite: true` 也不能允许同一 Action 内目标冲突。单来源保留一个类型化值，多来源保留按来源键排序的 map；`output.targetFiles` 只列出实际写入的文件。
+Render 负载路径必须保持在模板根目录下。glob 匹配会按模板相对路径确定性排序。Render 的 `result.path` 先按普通 ATT expression 求值，再展开 `{filename}`、`{name}`、`{ext}`、`{index}` 与 `{relativePath}`。Package validation 会静态检查可确定的路径安全与碰撞；依赖运行时的值会在写入前再次验证。展开后的目标必须唯一，`overwrite: true` 也不能允许同一 Action 内目标冲突。单来源保留一个类型化值，多来源保留按来源键排序的 map；`output.targetFiles` 只列出实际写入的文件。
 
 log 动作可以输出渲染后的 `message`、一个 `file` 的完整内容，或两者同时输出：
 
@@ -281,13 +281,13 @@ ATT 對 Run、Debug 以及每一個 Load iteration 使用同一套公開 Context
 ```text
 EXEC
 ├── ID
-├── MODE
+├── RUN_ID
 ├── STARTED_AT
+├── RUN_STARTED_AT
 ├── OUTPUT_DIR
 ├── INPUT
 ├── VARS
-├── ACTIONS
-└── LOAD          # 只在 load mode 存在
+└── ACTIONS
 
 META
 ├── PROJECT
@@ -335,16 +335,15 @@ Action 執行中使用 `${output...}`；在目前 scope 完成後使用 `${EXEC.
 
 ```text
 DIAG.load
-├── RUN_ID
-├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
-├── MODEL
-├── USER_ID         # 只適用 closed-VU
-├── TARGET_TYPE     # v1.1 workload 固定 target 身份
-├── TARGET_ID       # v1.1 workload 固定 target 身份
-├── ITERATION_ID
-├── ITERATION
-├── PHASE
-└── RUN_STARTED_AT
+├── runId
+├── workloadId
+├── model
+├── userId
+├── targetType
+├── targetId
+├── iterationId
+├── iteration
+└── phase
 ```
 
 在 `att-load/v1.1` 中，`WORKLOAD_ID` 就是 scenario 配置的 workload `id`；`TARGET_TYPE`、`TARGET_ID` 標識該 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。
@@ -682,7 +681,7 @@ MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: at
 
 Payload 採 file-based contract，因此 request bytes 不需要複製到 Context/evidence。`request` 結合 send 與 correlated receive。Correlation identifier、queue/operation metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes 不複製到 evidence。
 
-Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並將 receive/request wait 限制在 Action deadline 剩餘時間內；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。Tool Action retry 可用於所有 MQ 操作（`send`、`receive`、`request`）；重試 send 可能造成重複訊息，需由 package author 評估。每次 attempt 的 timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
+Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並在每次 GET 前重新計算剩餘 Action deadline；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT 無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT 會立即記錄 `MQ_TIMEOUT` 並套用 retry policy。Tool Action retry 可用於所有 MQ 操作（`send`、`receive`、`request`）；重試 send 可能造成重複訊息，需由 package author 評估。每次 attempt 的 timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
 
 ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與 Tool、DB 一樣進入同一 Action result/evidence envelope。
 
@@ -923,7 +922,7 @@ expression: "#{${EXEC.ACTIONS.query.output.result.rowCount} + 1}"
 
 ```text
 EXEC
-├── ID、MODE、STARTED_AT、OUTPUT_DIR
+├── ID、RUN_ID、STARTED_AT、RUN_STARTED_AT、OUTPUT_DIR
 ├── INPUT（TestCase 数据或 debug sidecar input）
 ├── VARS（跨阶段／模板共享的 typed variables）
 └── ACTIONS（已完成／已发布的 Action results）
@@ -1374,7 +1373,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.0`。舊 Template 的 `renderAs`／`saveAs` 不再接受；`att validate` 會提供遷移建議。舊 schema 的其他相容規則不變。
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow 的 `renderAs`／`saveAs` 不再接受；`att validate` 會提供遷移建議。舊 schema 的其他相容規則不變。
 
 ### 全局配置
 
@@ -1960,7 +1959,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
 | Template | `att-template/v3.1`（舊 `renderAs`／`saveAs` 會被拒絕並提供遷移建議） |
-| Flow | `att-flow/v3.0` |
+| Flow | `att-flow/v3.1`（相容讀取：`att-flow/v3.0`）|
 | Debug input | `att-debug/v1.0` |
 | Load scenario | `att-load/v1.0` |
 | Load summary | `att-load-summary/v1.0` |
