@@ -49,7 +49,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
             int options = constant(constants, "MQOO_FAIL_IF_QUIESCING", 0x2000);
             if (input) options |= constant(constants, "MQOO_INPUT_SHARED", 0x0002);
             if (output) options |= constant(constants, "MQOO_OUTPUT", 0x0010);
-            if (output && bindNotFixed) options |= constant(constants, "MQOO_BIND_NOT_FIXED", 0x00080000);
+            if (output && bindNotFixed) options |= constant(constants, "MQOO_BIND_NOT_FIXED", 0x00008000);
             try {
                 Object destination = invoke(manager, "accessQueue", new Class<?>[]{String.class, Integer.TYPE}, queue, Integer.valueOf(options));
                 return new ReflectiveQueue(destination, constants);

@@ -974,7 +974,7 @@ public final class PackageValidator {
             att.template.NamedSqlParameters.bind(sqlText, shape);
         }
         validateInlineExpressions(action.saveAs(), engine, config);
-        if (action.saveConfig().configured()) {
+        if (action.saveConfig().specified()) {
             String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
             if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
                 throw new IllegalArgumentException("DB saveAs.format must be text, json, yaml, or xml: " + action.id());
@@ -994,7 +994,6 @@ public final class PackageValidator {
             }
             return;
         }
-        if (!action.saveConfig().configured()) return;
         boolean builtIn = BUILT_INS.contains(parsed.name().toLowerCase(java.util.Locale.ROOT));
         ToolConfig configured = config.tool(parsed.name());
         boolean callBacked = configured != null && configured.callBacked();

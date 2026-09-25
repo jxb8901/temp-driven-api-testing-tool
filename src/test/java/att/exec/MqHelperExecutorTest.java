@@ -105,6 +105,48 @@ class MqHelperExecutorTest {
         assertTrue(log.contains("é"), log);
     }
 
+    @Test void typedReplyUsesPaddedIbmCcsidAlias() throws Exception {
+        Path caseDir = tempDir.resolve("ebcdic-case"); Files.createDirectories(caseDir);
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1},
+                new byte[]{(byte) 0xc8, (byte) 0xc5, (byte) 0xd3, (byte) 0xd3, (byte) 0xd6},
+                37, 273, "MQSTR   ");
+
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                map("queue", "REPLY.Q"), context(caseDir), null, "receive-ebcdic", null, null, "text", false);
+
+        assertTrue(result.success());
+        assertEquals("HELLO", result.result().get("result"));
+    }
+
+    @Test void noneEvidencePolicyOmitsPayloadEvidence() throws Exception {
+        Path caseDir = tempDir.resolve("none-evidence-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1, 2});
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config("none"), new FakeFactory()).execute("broker", "send",
+                map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-none");
+
+        assertTrue(result.success());
+        assertFalse(result.evidence().containsKey("payloadEvidence"));
+    }
+
+    @Test void savedMqArtifactUsesCommonFlowActionRoot() throws Exception {
+        Path caseDir = tempDir.resolve("flow-save-case"); Files.createDirectories(caseDir);
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1}, new byte[]{4, 5, 6});
+        CaseRuntimeContext context = context(caseDir);
+        context.beginFlow("common.save.v1", "saveFlow");
+        try {
+            MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                    map("queue", "REPLY.Q"), context, null, "receive-flow", "reply", "responses/reply.bin", "raw", false);
+            assertTrue(result.success());
+            Path expected = caseDir.resolve("flows/saveFlow/actions/reply/responses/reply.bin");
+            assertEquals(expected.toString(), result.result().get("outputFile"));
+            assertArrayEquals(new byte[]{4, 5, 6}, Files.readAllBytes(expected));
+        } finally {
+            context.finishFlow();
+        }
+    }
+
     @Test void requestNoReplyPreservesEffectiveWaitMsAndScopesBindNotFixedToRequestOutput() throws Exception {
         Path caseDir = tempDir.resolve("request-timeout-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
@@ -180,9 +222,11 @@ class MqHelperExecutorTest {
         assertEquals(java.util.Arrays.asList("a", "b"), factory.connectedInstances);
     }
 
-    private FrameworkConfig config() {
+    private FrameworkConfig config() { return config("metadata"); }
+
+    private FrameworkConfig config(String evidencePayload) {
         MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
-                "DEV.APP.SVRCONN", "user", "secret", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml"));
+                "DEV.APP.SVRCONN", "user", "secret", 1208, "MQSTR", "asQueue", 10000, evidencePayload, tempDir.resolve("mq.yaml"));
         Map<String,MqHelperConfig> helpers = new LinkedHashMap<String,MqHelperConfig>(); helpers.put("broker", helper);
         return new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
                 Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,

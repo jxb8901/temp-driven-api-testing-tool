@@ -892,9 +892,10 @@ requires <code>name</code> and <code>expression</code>. Unsupported
 fields are errors rather than ignored values.</p>
 <p>For the common Tool/DB <code>saveAs</code> object, <code>path</code>
 is optional: a pathless object keeps the typed result in memory and
-creates no artifact. If <code>path</code> is present, the
-target-specific format, safety, collision, and overwrite rules
-apply.</p>
+creates no artifact. <code>saveAs</code> is still validated when
+present, so target-specific format defaults and restrictions apply even
+without a path; if <code>path</code> is present, its safety, collision,
+and overwrite rules apply as well.</p>
 <p>Every action may use <code>assert</code> except that an assert action
 uses it as its required primary expression. Every action outcome is
 nested under <code>output</code>, including <code>status</code>,
@@ -1448,9 +1449,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb24-1"><a href=
 <span id="cb24-21"><a href="#cb24-21" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span>
 <span id="cb24-22"><a href="#cb24-22" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span><span class="kw">,</span><span class="at"> </span><span class="fu">minIdle</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">borrowTimeout</span><span class="kw">:</span><span class="at"> 2s</span><span class="kw">}</span></span></code></pre></div>
 <p>username and password map to MQConstants.USER_ID_PROPERTY and
-PASSWORD_PROPERTY before constructing MQQueueManager. Environment
-credentials are secret and never enter evidence, logs, reports, or
-generated docs.</p>
+PASSWORD_PROPERTY before constructing MQQueueManager.
+<code>evidence.payload</code> accepts <code>metadata</code> or
+<code>none</code>; <code>metadata</code> keeps only the policy marker in
+evidence, while <code>none</code> omits it. Environment credentials are
+secret and never enter evidence, logs, reports, or generated docs.</p>
 <p>message.charset is an integer IBM MQ CCSID for
 MQMessage.characterSet, not a Java charset name. ccsid remains a
 compatibility alias and must equal charset when both are present.
@@ -1518,12 +1521,13 @@ MQRC_NO_MSG_AVAILABLE, and the effective waitMs.</p>
 <p>Public MsgId/CorrelId values are lowercase hex, two characters per
 byte, no separators, with leading zeroes; a 24-byte ID is 48 characters.
 Raw runtime values remain byte[]. Typed reply decoding uses the received
-MQMessage.characterSet/CCSID when available, with the configured charset
-as fallback; logs/reports display raw bytes using new String(rawBytes,
-Charset.defaultCharset()) semantics, not hex and not an implicit file.
-Validation rejects unknown fields, conflicting charset/ccsid, invalid
-encoding/expiry/queues, missing effective request/reply queues,
-unsupported saveAs formats, and unsafe paths.</p>
+MQMessage.characterSet/CCSID when available, with an explicit IBM MQ
+CCSID-to-Java charset resolver and the configured charset as fallback;
+unsupported CCSIDs fail clearly. Logs/reports display raw bytes using
+new String(rawBytes, Charset.defaultCharset()) semantics, not hex and
+not an implicit file. Validation rejects unknown fields, conflicting
+charset/ccsid, invalid encoding/expiry/queues, missing effective
+request/reply queues, unsupported saveAs formats, and unsafe paths.</p>
 <h4 id="issue-60-v11-logical-groups-and-physical-instances">Issue #60
 v1.1 logical groups and physical instances</h4>
 <p><code>att-mqhelper/v1.1</code> keeps one public logical helper id
@@ -1555,7 +1559,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb27-1"><a href=
 <span id="cb27-20"><a href="#cb27-20" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">connection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">host</span><span class="kw">:</span><span class="at"> mq-b.example</span><span class="kw">}</span></span>
 <span id="cb27-21"><a href="#cb27-21" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">replyQueue</span><span class="kw">:</span><span class="at"> PAYMENT.REPLY.B</span><span class="kw">}</span></span>
 <span id="cb27-22"><a href="#cb27-22" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">}</span></span>
-<span id="cb27-23"><a href="#cb27-23" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> metadata</span><span class="kw">}</span></span></code></pre></div>
+<span id="cb27-23"><a href="#cb27-23" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">payload</span><span class="kw">:</span><span class="at"> none</span><span class="kw">}</span></span></code></pre></div>
 <p>Each physical instance is materialized into an immutable effective
 configuration before an invocation. For every section the precedence is
 invocation override, instance override, group default, runtime default,
@@ -1578,10 +1582,12 @@ has an isolated pool; pool identity is logical id plus physical id.</p>
 <p>Output and evidence retain the logical helper id and expose the
 selected physical instance. Evidence also records the applicable
 strategy, queue manager, operation, queue names, MsgId/CorrelId, and
-safe connection metadata. Credentials and payload bytes are never
-included. Validation rejects duplicate physical ids, unknown inherited
-fields, missing effective connection fields, invalid strategies or
-overrides, and invalid effective message/requestReply/pool values.</p>
+safe connection metadata. With <code>evidence.payload: none</code>, the
+payload policy marker is omitted; credentials and payload bytes are
+never included. Validation rejects duplicate physical ids, unknown
+inherited fields, missing effective connection fields, invalid
+strategies or overrides, and invalid effective message/requestReply/pool
+values.</p>
 <h3 id="54-common-operation-result-and-evidence">5.4 Common Operation
 Result and Evidence</h3>
 <p>Tool, DB and MQ executors converge at one operation boundary before
@@ -3741,8 +3747,7 @@ milliseconds</td>
 <tr class="odd">
 <td><code>evidence</code></td>
 <td>defaults</td>
-<td><code>payload: metadata</code> is the only V1 mode; full payload
-bytes are never placed in structured evidence</td>
+<td>`payload: none</td>
 </tr>
 <tr class="even">
 <td><code>pool</code></td>
@@ -3882,9 +3887,10 @@ saveAs</td>
 </tr>
 <tr class="odd">
 <td><code>saveAs</code></td>
-<td>requires safe relative <code>path</code>; optional
-<code>format</code> and <code>overwrite</code>; target-specific
-format/default rules below; <code>overwrite</code> defaults false</td>
+<td>optional <code>path</code>; optional <code>format</code> and
+<code>overwrite</code>; target-specific format/default rules are
+validated whenever <code>saveAs</code> is supplied;
+<code>overwrite</code> defaults false</td>
 </tr>
 <tr class="even">
 <td>retry</td>
@@ -3964,8 +3970,10 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href=
 <p><code>path</code> is optional and <code>overwrite</code> defaults to
 <code>false</code>. Omitting <code>path</code>, including in
 <code>saveAs: {format: ...}</code>, keeps the typed result in memory and
-creates no artifact. When <code>path</code> is present, it is written
-using the target-specific <code>format</code> rules:</p>
+creates no artifact. A supplied <code>saveAs</code> is still validated
+against the target-specific format defaults and restrictions even when
+<code>path</code> is absent. When <code>path</code> is present, it is
+written using those target-specific rules:</p>
 <table>
 <thead>
 <tr class="header">
@@ -4081,12 +4089,13 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href=
 <span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;db/${EXEC.INPUT.rowCaseId}-orders.txt&quot;</span></span>
 <span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
 <span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p><code>path</code> is optional for DB as well. A pathless
-<code>saveAs: {}</code> or <code>saveAs: {format: ...}</code> creates no
-artifact; when a DB artifact path is present, <code>format</code>
-remains required and is <code>text</code>, <code>json</code>,
-<code>yaml</code>, or <code>xml</code>. The written representation never
-replaces <code>${output.result}</code>'s typed Java object.</p>
+<p><code>path</code> is optional for DB as well, but DB still requires
+<code>format: text|json|yaml|xml</code> whenever <code>saveAs</code> is
+supplied, even when no path is present. A valid pathless DB
+<code>saveAs</code> creates no artifact; when a DB artifact path is
+present, the same format and path rules apply. The written
+representation never replaces <code>${output.result}</code>'s typed Java
+object.</p>
 <p><code>att-template/v2.3</code> remains read-compatible: its legacy
 Tool form <code>saveAs: response.json</code> plus sibling
 <code>overwrite: false</code> keeps its original raw-stdout meaning and

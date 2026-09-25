@@ -120,7 +120,7 @@ public final class MqHelperConfigLoader {
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.requestReply.waitMs");
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
         SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
-        String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "metadata");
+        String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "none", "metadata");
         Map<?, ?> pool = optionalMap(map.get("pool"), "mqhelper.pool");
         SchemaSupport.rejectUnknown(pool, "mqhelper.pool", "maxSize", "minIdle", "borrowTimeout");
         int poolMaxSize = integer(pool.get("maxSize"), 20, 1, 10000, "mqhelper.pool.maxSize");
@@ -152,7 +152,7 @@ public final class MqHelperConfigLoader {
 
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
         SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
-        String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "metadata");
+        String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "none", "metadata");
         Map<?, ?> selection = optionalMap(map.get("selection"), "mqhelper.selection");
         SchemaSupport.rejectUnknown(selection, "mqhelper.selection", "strategy");
         String configuredStrategy = selection.get("strategy") == null ? "" : SchemaSupport.string(selection.get("strategy"), "mqhelper.selection.strategy", true);

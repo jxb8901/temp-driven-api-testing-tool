@@ -58,7 +58,7 @@ class PackageValidatorTest {
                 new StageTemplate("DB",tempDir,Collections.singletonList(dynamicFile),"att-template/v2.5"),config));
 
         TemplateAction rawDb = new TemplateAction("raw", map("type","db","db","orders",
-                "query",map("sql","select 1"), "saveAs",map("path","result.raw","format","raw")),
+                "query",map("sql","select 1"), "saveAs",map("format","raw")),
                 "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("DB",tempDir,Collections.singletonList(rawDb),"att-template/v2.5"),config));
@@ -134,6 +134,10 @@ class PackageValidatorTest {
                 "call","#{orders.find(id=${CASE.id})}", "saveAs", map("path","out.json","format","raw")), "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("Facade", tempDir, Collections.singletonList(rawSave), "att-template/v2.5"), config));
+        TemplateAction pathlessMissingFormat = new TemplateAction("bad", map("type","tool",
+                "call","#{orders.find(id=${CASE.id})}", "saveAs", map()), "att-template/v2.5");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("Facade", tempDir, Collections.singletonList(pathlessMissingFormat), "att-template/v2.5"), config));
         TemplateAction legacySave = new TemplateAction("bad", map("type","tool",
                 "call","#{orders.find(id=${CASE.id})}", "saveAs", "out.txt"), "att-template/v2.5");
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,

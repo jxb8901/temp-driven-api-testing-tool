@@ -91,7 +91,7 @@ public final class MqHelperExecutor {
         if (!helper.requestQueue().isEmpty()) evidence.put("requestQueueDefault", helper.requestQueue());
         if (!helper.replyQueue().isEmpty()) evidence.put("replyQueueDefault", helper.replyQueue());
         evidence.put("syncpoint", "none");
-        evidence.put("payloadEvidence", helper.evidencePayload());
+        if ("metadata".equals(helper.evidencePayload())) evidence.put("payloadEvidence", helper.evidencePayload());
         String representation = normalizeFormat(saveFormat);
         boolean success = false;
         MqTransport.Connection connection = null;
@@ -295,9 +295,8 @@ public final class MqHelperExecutor {
                     consoleValue(format, raw, value));
             return;
         }
-        Path root = actionId == null || actionId.trim().isEmpty()
-                ? context.caseOutputDirectory().toAbsolutePath().normalize()
-                : context.actionOutputDir(actionId).toAbsolutePath().normalize();
+        Path root = (context.inFlow() ? context.actionOutputDir(actionId) : context.caseOutputDirectory())
+                .toAbsolutePath().normalize();
         Path target = root.resolve(IdentifierValidator.relativePath(savePath, "action saveAs.path")).normalize();
         if (!target.startsWith(root) || target.equals(root)) throw new IOException("MQ saveAs path escapes the Action artifact directory: " + savePath);
         Files.createDirectories(root);
@@ -325,15 +324,7 @@ public final class MqHelperExecutor {
     }
 
     private Charset mqCharset(int ccsid) {
-        if (ccsid == 1208) return StandardCharsets.UTF_8;
-        if (ccsid == 819) return StandardCharsets.ISO_8859_1;
-        if (ccsid == 1200) return Charset.forName("UTF-16");
-        if (ccsid == 1201 || ccsid == 13488) return StandardCharsets.UTF_16BE;
-        try { return Charset.forName("IBM" + ccsid); }
-        catch (Exception ignored) {
-            try { return Charset.forName("Cp" + ccsid); }
-            catch (Exception unsupported) { throw new IllegalArgumentException("Unsupported IBM MQ reply CCSID: " + ccsid, unsupported); }
-        }
+        return MqCcsid.charset(ccsid);
     }
 
     private void addReplyMetadata(Map<String, Object> result, Map<String, Object> evidence, MqTransport.Message message) {
