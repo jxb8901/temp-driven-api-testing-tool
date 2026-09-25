@@ -119,7 +119,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow 的 `renderAs`／`saveAs` 不再接受；`att validate` 會提供遷移建議。舊 schema 的其他相容規則不變。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow schema 可供 validation 與 migration 辨識；其中舊 `renderAs`／`saveAs` result 欄位必須遷移至 v3.1，不能視為可直接執行。`att validate` 會提供遷移建議。
 
 ### 全局配置
 
@@ -224,7 +224,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | assert | 需要 `assert`；可选 `expected`、`actual`；不允许 expression/render/tool/log-only 字段、timeout 或 retry |
 | log | 至少需要 `message` 或 `file`；可选 `level`、`fields`、`assert`；不允许 render/tool/assert-action-only 字段、timeout 或 retry |
 | assign | 需要 `name`、`expression`；可选 `assert`；`name` 在整个 Case 的 `EXEC.VARS` 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry 或 result |
-| `result` | 可用于 Render、Tool、DB；`format` 按 Action 类型限制；`path` 可选；`overwrite` 默认 false |
+| `result` | Render 必需；支援的 Tool/DB Action 可選；`format` 按 Action 类型限制；`path` 可选；`overwrite` 默认 false |
 | retry | 必填 `maxAttempts`、`intervalMs`、`retryOn`；category 仅 `ASSERTION`、`TIMEOUT` |
 
 模板 schema `att-template/v3.1` 以 `result` 取代 `renderAs`／`saveAs`；舊欄位會被拒絕並附遷移建議。`result.format` 決定 `output.result`；`result.path` 只控制可選持久化。省略 path 不會建立 artifact；`path: console` 只寫入 Case log。retry `maxAttempts` 為 2–10，`intervalMs` 為 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
@@ -249,7 +249,9 @@ receiveReply:
 
 `result.format` 决定 `output.result`；`result.path` 可选持久化相同表示，不会改变内存结果。省略 path 不建立 artifact；`path: console` 只写入 Case log，不产生文件或 `output.targetFiles`。Render 支持 `raw|text|json|yaml|xml`；process Tool/MQ 支持相应格式；built-in/call-backed Tool 与 DB 支持 `text|json|yaml|xml`，DB 的 text 使用确定性 SQL*Plus 风格 formatter。真实路径必须安全且保持在 Case artifact 根目录。
 
-Render 单来源可用字面路径，多来源支持 `{filename}`、`{name}`、`{ext}`、`{index}` 与 `{relativePath}`；这些 token 不求值表达式。匹配按确定性顺序处理，多来源展开路径必须唯一，`overwrite: true` 也不能容许同一 Action 的目标冲突。`output.result` 单来源为类型化值，多来源为有序来源键 map；`output.targetFiles` 只包含实际落盘路径。
+舊 `att-template/v2.6`、`v2.5`、`v2.3` descriptor 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位必須遷移至 `att-template/v3.1`，執行時不接受。schema 可辨識不代表這些欄位仍可直接執行。
+
+Render 會先求值 `result.path` 中一般 ATT `${...}`／`#{...}` expression，再展開來源集合路徑 token：`{filename}`、`{name}`、`{ext}`、`{index}`、`{relativePath}`。Token 替換值不會再次作 expression 求值。匹配按確定性順序處理，多來源展開路徑必須唯一，`overwrite: true` 也不能容許同一 Action 的目標衝突。`output.result` 單來源為類型化值，多來源為有序來源鍵 map；`output.targetFiles` 只包含實際落盤路徑。
 
 迁移至 `att-template/v3.1`：`renderAs` → `result.format`；`saveAs.format` → `result.format`；`saveAs.path` → `result.path`；`saveAs.overwrite` → `result.overwrite`。`renderAs: file` 混合了表示与持久化，必须由作者分别选择 format 和 path。`att validate` 会在 human/JSON diagnostics 中拒绝旧字段并展示具体替换建议；不会自动改写文件。
 

@@ -1,6 +1,22 @@
 # ATT Load Scenario Examples
 
-本目錄的 scenario 使用 `att-load/v1.0`。`att load` 會先完成 schema、語義、target 解析及依賴驗證，再啟動 closed-VU 或 fixed-arrival-rate scheduler。兩種 scheduler 共用同一個 `IterationExecutor` 和普通 run/debug 的 `EXEC`/`META` Context；mode 與 scheduler identity 只保存在 evidence-only `DIAG`，不會出現在 expression tree。
+本目錄同時提供單 target 相容格式 `att-load/v1.0` 和多 workload 格式 `att-load/v1.1`。`att load` 會先完成 schema、語義、target 解析及依賴驗證，再啟動 closed-VU 或 fixed-arrival-rate scheduler。兩種 scheduler 共用同一個 `IterationExecutor` 和普通 run/debug 的 `EXEC`/`META` Context；mode 與 scheduler identity 只保存在 evidence-only `DIAG`，不會出現在 expression tree。
+
+## Schema versions at a glance
+
+| Version | Scenario shape | Examples |
+|---|---|---|
+| `att-load/v1.0` | One top-level `target` and one `load` block; preserves the existing single-target contract. All examples in sections 1–7 below use v1.0 unless stated otherwise. | [`closed-minimal.yaml`](closed-minimal.yaml), [`closed.yaml`](closed.yaml), [`arrival-rate.yaml`](arrival-rate.yaml), [`tool.yaml`](tool.yaml), and smoke examples |
+| `att-load/v1.1` | Top-level `workloads` list. Each workload has a stable `id`, its own fixed `target`, load settings and optional thresholds. Workloads in one run use the same scheduler model and phase-duration envelope; they run as independent targets, not as a transaction mix. | [`multi-closed.yaml`](multi-closed.yaml) shows separate closed-VU pools; [`multi-arrival.yaml`](multi-arrival.yaml) shows independently paced arrival-rate workloads. |
+
+Run the v1.1 examples with:
+
+```sh
+./att.sh load examples/load/multi-closed.yaml
+./att.sh load examples/load/multi-arrival.yaml
+```
+
+The main [Load Mode reference](../../docs/reference/04_execution_modes/load.md) describes the v1.0 compatibility contract and v1.1 multi-workload validation/lifecycle in detail.
 
 ## 1. 最小 closed workload
 
@@ -153,7 +169,7 @@ Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/
 
 | 路徑 | 必填 | 說明 |
 |---|---:|---|
-| `schemaVersion` | 是 | 固定為 `att-load/v1.0`。 |
+| `schemaVersion` | 是 | 本欄位表說明的單 target 格式固定為 `att-load/v1.0`；多 workload 請使用上方的 v1.1 範例。 |
 | `target.type` | 是 | `template`、`flow` 或 `tool`。 |
 | `target.id` | 是 | 目標 Template 名稱、Flow canonical ID 或 Tool key。 |
 | `target.arguments` | 否 | 只支持 Tool target 的 named arguments；Template/Flow target 会被拒绝。 |

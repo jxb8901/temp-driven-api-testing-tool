@@ -55,9 +55,26 @@ While an Action is active, use `${output...}`. After it completes in the current
 
 ### Execution identity and diagnostics
 
-`EXEC.ID` identifies the current execution unit; `EXEC.RUN_ID` identifies its enclosing ATT run. Testcase IDs are canonical Case IDs, debug uses the debug ID for both, and each load iteration receives a unique execution ID across the run. Legacy `RUN.id` and `RUN.runId` remain deterministic aliases of `EXEC.RUN_ID`. These framework-owned fields cannot be overridden by input.
+The identity and timestamps have mode-specific scope:
 
-The framework records mode, timestamps, and load scheduler metadata in the `DIAG` evidence section. `DIAG` is deliberately absent from expression Context: `${EXEC.MODE}`, `${EXEC.LOAD...}`, and `${DIAG...}` are invalid. Use `EXEC.INPUT` for business variation. Load evidence may contain:
+| Mode | `EXEC.ID` | `EXEC.RUN_ID` | `EXEC.STARTED_AT` | `EXEC.RUN_STARTED_AT` |
+|---|---|---|---|---|
+| Testcase | Canonical `workbookId.groupId.rowCaseId`; one per Case | The enclosing Run ID, shared by all selected Cases | When this Case starts | When the enclosing Run starts; shared by its Cases |
+| Debug | The debug ID; also the `EXEC.RUN_ID` | Same debug ID | When the one-shot Debug execution starts | Same timestamp as `EXEC.STARTED_AT` |
+| Load | Unique `<runId>-execution-<n>` for each iteration across the run | The enclosing Load Run ID, shared by all workloads and iterations | When this iteration starts | When the enclosing Load Run starts; shared by its iterations |
+
+For example, two Cases in one Run have different `EXEC.ID` values but the same `EXEC.RUN_ID`:
+
+| Case | `EXEC.ID` | `EXEC.RUN_ID` |
+|---|---|---|
+| `payments.payment.TC001` | `payments.payment.TC001` | `RUN-42` |
+| `payments.payment.TC002` | `payments.payment.TC002` | `RUN-42` |
+
+Two Load iterations (including iterations from different workloads or VUs) share their `EXEC.RUN_ID` but have unique `EXEC.ID` values, such as `LOAD-7-execution-1` and `LOAD-7-execution-2`. A closed VU's stable identity is separate evidence (`DIAG.load.userId`); fixed-arrival iterations have no persistent VU identity.
+
+These framework-owned fields cannot be overridden by input. Legacy `RUN.id` and `RUN.runId` remain deterministic aliases of `EXEC.RUN_ID`.
+
+The framework records mode, timestamps, and load scheduler metadata in the `DIAG` evidence section. `DIAG` is deliberately absent from expression Context: `${EXEC.MODE}`, `${EXEC.LOAD...}`, and `${DIAG...}` are invalid. Normal Template/Flow authors must not depend on or author against the `DIAG` structure; ATT may add, remove, regroup, or rename its fields without Template/Flow compatibility guarantees. Use `EXEC.INPUT` for business variation and `META.TARGET` for curated target identity. Load evidence may contain:
 
 ```text
 DIAG.load
@@ -75,6 +92,15 @@ DIAG.load
 For `att-load/v1.1`, `WORKLOAD_ID` is the configured workload `id`. `TARGET_TYPE` and `TARGET_ID` identify the fixed target owned by that workload. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.
 
 Different closed-VU workload pools may both contain a `VU-1`. The durable evidence identity is therefore the pair `(workloadId, userId)`. Each iteration still gets isolated `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, transient Tool/DB state and Action-local `output`.
+
+#### Migration from mode-specific Context
+
+| Previous expression/usage | Supported replacement |
+|---|---|
+| `${EXEC.LOAD.RUN_ID}` | `${EXEC.RUN_ID}` |
+| `${EXEC.LOAD.TARGET_TYPE}` / `${EXEC.LOAD.TARGET_ID}` | `${META.TARGET.type}` / `${META.TARGET.id}` where a target is defined (for example, Debug/Load) |
+| Branching business behavior on mode, workload, VU, or phase | Pass the intended business selector explicitly through adapter-provided `${EXEC.INPUT.<name>}` |
+| Reading scheduler/diagnostic details in expressions | Inspect retained `DIAG` evidence outside expressions; do not reference `DIAG` from Template/Flow code |
 
 ### Optional lookup
 

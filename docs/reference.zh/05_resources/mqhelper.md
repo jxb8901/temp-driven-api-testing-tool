@@ -12,7 +12,7 @@ MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: at
 
 Payload 採 file-based contract，因此 request bytes 不需要複製到 Context/evidence。`request` 結合 send 與 correlated receive。Correlation identifier、queue/operation metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes 不複製到 evidence。
 
-Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並在每次 GET 前重新計算剩餘 Action deadline；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT 無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT 會立即記錄 `MQ_TIMEOUT` 並套用 retry policy。Tool Action retry 可用於所有 MQ 操作（`send`、`receive`、`request`）；重試 send 可能造成重複訊息，需由 package author 評估。每次 attempt 的 timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
+Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並在每次 GET 前重新計算剩餘 Action deadline；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT 無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT 會立即記錄 `MQ_TIMEOUT` 並套用 retry policy。所有 MQ 操作（`send`、`receive`、`request`）的 Tool Action retry 都由作者明確控制；ATT 不推斷 idempotency，也不抑制可能改變業務狀態的重放。重試 `send` 可能排入重複訊息；重試 `request` 會再次 PUT、產生新的 MsgId 和新的 correlation cycle，並可能重放業務操作。重放／重複處理安全由 package author 負責。每次 attempt 的 timing/retry 結果都保留在 Action evidence，包含各 request attempt 的 message/correlation ID。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
 
 ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與 Tool、DB 一樣進入同一 Action result/evidence envelope。
 

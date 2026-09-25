@@ -331,9 +331,26 @@ Action 執行中使用 `${output...}`；在目前 scope 完成後使用 `${EXEC.
 
 ### 執行身份與診斷資料
 
-`EXEC.ID` 表示目前執行單位；`EXEC.RUN_ID` 表示外層 ATT run。Run 使用 canonical Case ID，Debug 的兩者均使用 debug ID；Load 為每個 iteration 分配 run 內全域唯一的 execution ID。舊有 `RUN.id` 和 `RUN.runId` 仍確定性地對應 `EXEC.RUN_ID`，且這些 framework-owned 值不可由輸入覆寫。
+身份與時間戳的 scope 依執行模式而異：
 
-執行模式、時間戳和 load scheduler metadata 保存在 evidence-only `DIAG`，不屬於 expression Context。因此 `${EXEC.MODE}`、`${EXEC.LOAD...}` 和 `${DIAG...}` 均無效；業務差異請透過 `EXEC.INPUT` 傳入。Load evidence 可包含：
+| 模式 | `EXEC.ID` | `EXEC.RUN_ID` | `EXEC.STARTED_AT` | `EXEC.RUN_STARTED_AT` |
+|---|---|---|---|---|
+| Testcase | canonical `workbookId.groupId.rowCaseId`，每個 Case 一個 | 外層 Run ID，同一 Run 的 Cases 共用 | 該 Case 開始時間 | 外層 Run 開始時間；該 Run 的 Cases 共用 |
+| Debug | debug ID；同時也是 `EXEC.RUN_ID` | 相同 debug ID | 單次 Debug execution 開始時間 | 與 `EXEC.STARTED_AT` 相同 |
+| Load | 每個 iteration 使用 run 內唯一的 `<runId>-execution-<n>` | 外層 Load Run ID；所有 workload/iteration 共用 | 該 iteration 開始時間 | 外層 Load Run 開始時間；iterations 共用 |
+
+例如，同一 Run 的兩個 Case 有不同 `EXEC.ID`，但共用 `EXEC.RUN_ID`：
+
+| Case | `EXEC.ID` | `EXEC.RUN_ID` |
+|---|---|---|
+| `payments.payment.TC001` | `payments.payment.TC001` | `RUN-42` |
+| `payments.payment.TC002` | `payments.payment.TC002` | `RUN-42` |
+
+兩個 Load iteration（可屬於不同 workload 或 VU）共用 `EXEC.RUN_ID`，但 `EXEC.ID` 唯一，例如 `LOAD-7-execution-1` 與 `LOAD-7-execution-2`。Closed VU 的穩定身份另存於 evidence（`DIAG.load.userId`）；fixed-arrival iteration 沒有 persistent VU identity。
+
+這些 framework-owned 欄位不能由輸入覆寫。舊有 `RUN.id` 和 `RUN.runId` 仍確定性地對應 `EXEC.RUN_ID`。
+
+執行模式、時間戳和 load scheduler metadata 保存在 evidence-only `DIAG`，不屬於 expression Context。因此 `${EXEC.MODE}`、`${EXEC.LOAD...}` 和 `${DIAG...}` 均無效。一般 Template/Flow 作者不得引用或依賴 `DIAG` 結構；ATT 可在不提供 Template/Flow 相容保證下新增、移除、重組或重新命名其中欄位。業務差異請透過 `EXEC.INPUT` 傳入；精選 target identity 使用 `META.TARGET`。Load evidence 可包含：
 
 ```text
 DIAG.load
@@ -351,6 +368,15 @@ DIAG.load
 在 `att-load/v1.1` 中，`WORKLOAD_ID` 就是 scenario 配置的 workload `id`；`TARGET_TYPE`、`TARGET_ID` 標識該 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。
 
 不同 closed-VU workload pool 可各自有 `VU-1`，因此 evidence 中應用 `(workloadId, userId)` 識別 VU。ATT 不新增 `EXEC.USER` root，也不會在 VU 之間共享 mutable Context；每個 iteration 的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Tool/DB transient state 及 Action-local `output` 仍然彼此隔離。
+
+#### 從 mode-specific Context 遷移
+
+| 舊 expression／用途 | 支援的替代方式 |
+|---|---|
+| `${EXEC.LOAD.RUN_ID}` | `${EXEC.RUN_ID}` |
+| `${EXEC.LOAD.TARGET_TYPE}`／`${EXEC.LOAD.TARGET_ID}` | 有選定 target 時使用 `${META.TARGET.type}`／`${META.TARGET.id}`（例如 Debug/Load） |
+| 按 mode、workload、VU 或 phase 分支業務行為 | 透過 adapter 提供的 `${EXEC.INPUT.<name>}` 明確傳入業務 selector |
+| 在 expression 讀取 scheduler／diagnostic 資料 | 在 expression 之外檢查保留的 `DIAG` evidence；Template/Flow 不得引用 `DIAG` |
 
 ### Optional lookup
 
@@ -683,7 +709,7 @@ MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: at
 
 Payload 採 file-based contract，因此 request bytes 不需要複製到 Context/evidence。`request` 結合 send 與 correlated receive。Correlation identifier、queue/operation metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes 不複製到 evidence。
 
-Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並在每次 GET 前重新計算剩餘 Action deadline；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT 無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT 會立即記錄 `MQ_TIMEOUT` 並套用 retry policy。Tool Action retry 可用於所有 MQ 操作（`send`、`receive`、`request`）；重試 send 可能造成重複訊息，需由 package author 評估。每次 attempt 的 timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
+Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並在每次 GET 前重新計算剩餘 Action deadline；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT 無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT 會立即記錄 `MQ_TIMEOUT` 並套用 retry policy。所有 MQ 操作（`send`、`receive`、`request`）的 Tool Action retry 都由作者明確控制；ATT 不推斷 idempotency，也不抑制可能改變業務狀態的重放。重試 `send` 可能排入重複訊息；重試 `request` 會再次 PUT、產生新的 MsgId 和新的 correlation cycle，並可能重放業務操作。重放／重複處理安全由 package author 負責。每次 attempt 的 timing/retry 結果都保留在 Action evidence，包含各 request attempt 的 message/correlation ID。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
 
 ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與 Tool、DB 一樣進入同一 Action result/evidence envelope。
 
@@ -1212,6 +1238,27 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 | `misc.dbText` | 将稳定 typed DB result 格式化为 SQL*Plus 风格文字 | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
 | `misc.prettyPrint` | 将 Map/List/array/tree 确定性格式化为缩进文字 | `#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
 
+#### `seq.next` run-scoped 序列
+
+`seq.next` 支援以下四種位置參數 overload（同一組參數亦可使用 `name`、`width` 具名傳入；不可混用具名與位置參數）：
+
+| 呼叫 | 計數器 | 返回值 |
+|---|---|---|
+| `#{seq.next()}` | 預設序列 | 遞增的 Java `Long` |
+| `#{seq.next('payment')}` | 名為 `payment` 的獨立序列 | 遞增的 Java `Long` |
+| `#{seq.next(10)}` | 預設序列 | Java `String`，十進位值左側補零至恰好 10 個字元 |
+| `#{seq.next('payment', 10)}` | 名為 `payment` 的序列 | Java `String`，十進位值左側補零至恰好 10 個字元 |
+
+預設序列與每個具名序列互相獨立，且各自從 1 開始。狀態由單次 ATT Run 擁有：Run 內所有 Testcase／suite 共用計數器；Debug 的單次 execution 使用新 service；Load 的所有 workload 與並行 iteration 共用計數器。每個序列計數器均為 thread-safe，在該 Run 內發出唯一且單調遞增的值；並行排程不保證哪個 VU 取得哪個值。新 Run、新 Debug execution 或新 Load run 都會重新從 1 開始。不公開 `EXEC.SEQUENCES` Context node，也沒有 reset/current API。
+
+| 模式 | 範例用法 | Scope 說明 |
+|---|---|---|
+| Testcase | 在 `assign` Action 中：`expression: "#{seq.next('payment', 10)}"` | 同一 Run 的連續 Cases 共用 `payment` 計數器。 |
+| Debug | 在 `assign` Action 中：`expression: "#{seq.next()}"` | 新的單次 Debug execution 從 1 開始。 |
+| Load | 在 target Template/Flow 的 `assign` Action 中：`expression: "#{seq.next('load-order', 10)}"` | Iterations 共用計數器；並行呼叫唯一，但不保證每個 VU 的固定分配順序。 |
+
+`width` 必須是 1 至 1000 的整數。序列名稱必須是非空白文字；只有一個位置參數時，數字代表 `width`，字串代表序列名稱。超過兩個參數、混合具名與位置參數、無效參數型別、空白名稱、小數／零／負數／超出範圍的 width 都會報錯；diagnostic 會指出 `seq.next` 及錯誤的參數數量、型別或範圍。若補零後的數值位數超過 `width`，或底層 `Long` 計數器溢位，求值會明確失敗；ATT 不會截斷序列值，也不會默默超出指定寬度。
+
 `misc.dbText` 只接受一个位置参数或具名 `value`。参数必须是直接 DB Action、DB expression 或 DB-backed Tool 返回的稳定 query／update result。它与直接 DB Action 的 `result.format: text` 共用同一个确定性 formatter，并且没有 JDBC、transaction、connection 或 cache side effect。
 
 `misc.prettyPrint`（alias：`prettyPrint`、`format.pretty`）接受一个位置参数或具名 `value`，递归格式化 Map、List、Iterable、array、scalar 与 null。Linked Map 保留插入顺序，其他 Map 按 key 排序；输出使用两个空格缩进，并带有循环和深度保护。它不会修改输入值。
@@ -1375,7 +1422,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow 的 `renderAs`／`saveAs` 不再接受；`att validate` 會提供遷移建議。舊 schema 的其他相容規則不變。
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow schema 可供 validation 與 migration 辨識；其中舊 `renderAs`／`saveAs` result 欄位必須遷移至 v3.1，不能視為可直接執行。`att validate` 會提供遷移建議。
 
 ### 全局配置
 
@@ -1480,7 +1527,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | assert | 需要 `assert`；可选 `expected`、`actual`；不允许 expression/render/tool/log-only 字段、timeout 或 retry |
 | log | 至少需要 `message` 或 `file`；可选 `level`、`fields`、`assert`；不允许 render/tool/assert-action-only 字段、timeout 或 retry |
 | assign | 需要 `name`、`expression`；可选 `assert`；`name` 在整个 Case 的 `EXEC.VARS` 下唯一；不允许 render/tool/assert-action/log-only 字段、timeout、retry 或 result |
-| `result` | 可用于 Render、Tool、DB；`format` 按 Action 类型限制；`path` 可选；`overwrite` 默认 false |
+| `result` | Render 必需；支援的 Tool/DB Action 可選；`format` 按 Action 类型限制；`path` 可选；`overwrite` 默认 false |
 | retry | 必填 `maxAttempts`、`intervalMs`、`retryOn`；category 仅 `ASSERTION`、`TIMEOUT` |
 
 模板 schema `att-template/v3.1` 以 `result` 取代 `renderAs`／`saveAs`；舊欄位會被拒絕並附遷移建議。`result.format` 決定 `output.result`；`result.path` 只控制可選持久化。省略 path 不會建立 artifact；`path: console` 只寫入 Case log。retry `maxAttempts` 為 2–10，`intervalMs` 為 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
@@ -1505,7 +1552,9 @@ receiveReply:
 
 `result.format` 决定 `output.result`；`result.path` 可选持久化相同表示，不会改变内存结果。省略 path 不建立 artifact；`path: console` 只写入 Case log，不产生文件或 `output.targetFiles`。Render 支持 `raw|text|json|yaml|xml`；process Tool/MQ 支持相应格式；built-in/call-backed Tool 与 DB 支持 `text|json|yaml|xml`，DB 的 text 使用确定性 SQL*Plus 风格 formatter。真实路径必须安全且保持在 Case artifact 根目录。
 
-Render 单来源可用字面路径，多来源支持 `{filename}`、`{name}`、`{ext}`、`{index}` 与 `{relativePath}`；这些 token 不求值表达式。匹配按确定性顺序处理，多来源展开路径必须唯一，`overwrite: true` 也不能容许同一 Action 的目标冲突。`output.result` 单来源为类型化值，多来源为有序来源键 map；`output.targetFiles` 只包含实际落盘路径。
+舊 `att-template/v2.6`、`v2.5`、`v2.3` descriptor 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位必須遷移至 `att-template/v3.1`，執行時不接受。schema 可辨識不代表這些欄位仍可直接執行。
+
+Render 會先求值 `result.path` 中一般 ATT `${...}`／`#{...}` expression，再展開來源集合路徑 token：`{filename}`、`{name}`、`{ext}`、`{index}`、`{relativePath}`。Token 替換值不會再次作 expression 求值。匹配按確定性順序處理，多來源展開路徑必須唯一，`overwrite: true` 也不能容許同一 Action 的目標衝突。`output.result` 單來源為類型化值，多來源為有序來源鍵 map；`output.targetFiles` 只包含實際落盤路徑。
 
 迁移至 `att-template/v3.1`：`renderAs` → `result.format`；`saveAs.format` → `result.format`；`saveAs.path` → `result.path`；`saveAs.overwrite` → `result.overwrite`。`renderAs: file` 混合了表示与持久化，必须由作者分别选择 format 和 path。`att validate` 会在 human/JSON diagnostics 中拒绝旧字段并展示具体替换建议；不会自动改写文件。
 

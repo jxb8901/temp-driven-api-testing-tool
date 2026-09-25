@@ -1055,18 +1055,85 @@ per-attempt collectors remain under <code>attempts[n]</code>; they do
 not replace the top-level final result.</p>
 <h3 id="execution-identity-and-diagnostics">Execution identity and
 diagnostics</h3>
-<p><code>EXEC.ID</code> identifies the current execution unit;
-<code>EXEC.RUN_ID</code> identifies its enclosing ATT run. Testcase IDs
-are canonical Case IDs, debug uses the debug ID for both, and each load
-iteration receives a unique execution ID across the run. Legacy
+<p>The identity and timestamps have mode-specific scope:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Mode</th>
+<th><code>EXEC.ID</code></th>
+<th><code>EXEC.RUN_ID</code></th>
+<th><code>EXEC.STARTED_AT</code></th>
+<th><code>EXEC.RUN_STARTED_AT</code></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Testcase</td>
+<td>Canonical <code>workbookId.groupId.rowCaseId</code>; one per
+Case</td>
+<td>The enclosing Run ID, shared by all selected Cases</td>
+<td>When this Case starts</td>
+<td>When the enclosing Run starts; shared by its Cases</td>
+</tr>
+<tr class="even">
+<td>Debug</td>
+<td>The debug ID; also the <code>EXEC.RUN_ID</code></td>
+<td>Same debug ID</td>
+<td>When the one-shot Debug execution starts</td>
+<td>Same timestamp as <code>EXEC.STARTED_AT</code></td>
+</tr>
+<tr class="odd">
+<td>Load</td>
+<td>Unique <code>&lt;runId&gt;-execution-&lt;n&gt;</code> for each
+iteration across the run</td>
+<td>The enclosing Load Run ID, shared by all workloads and
+iterations</td>
+<td>When this iteration starts</td>
+<td>When the enclosing Load Run starts; shared by its iterations</td>
+</tr>
+</tbody>
+</table>
+<p>For example, two Cases in one Run have different <code>EXEC.ID</code>
+values but the same <code>EXEC.RUN_ID</code>:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Case</th>
+<th><code>EXEC.ID</code></th>
+<th><code>EXEC.RUN_ID</code></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>payments.payment.TC001</code></td>
+<td><code>payments.payment.TC001</code></td>
+<td><code>RUN-42</code></td>
+</tr>
+<tr class="even">
+<td><code>payments.payment.TC002</code></td>
+<td><code>payments.payment.TC002</code></td>
+<td><code>RUN-42</code></td>
+</tr>
+</tbody>
+</table>
+<p>Two Load iterations (including iterations from different workloads or
+VUs) share their <code>EXEC.RUN_ID</code> but have unique
+<code>EXEC.ID</code> values, such as <code>LOAD-7-execution-1</code> and
+<code>LOAD-7-execution-2</code>. A closed VU's stable identity is
+separate evidence (<code>DIAG.load.userId</code>); fixed-arrival
+iterations have no persistent VU identity.</p>
+<p>These framework-owned fields cannot be overridden by input. Legacy
 <code>RUN.id</code> and <code>RUN.runId</code> remain deterministic
-aliases of <code>EXEC.RUN_ID</code>. These framework-owned fields cannot
-be overridden by input.</p>
+aliases of <code>EXEC.RUN_ID</code>.</p>
 <p>The framework records mode, timestamps, and load scheduler metadata
 in the <code>DIAG</code> evidence section. <code>DIAG</code> is
 deliberately absent from expression Context: <code>${EXEC.MODE}</code>,
 <code>${EXEC.LOAD...}</code>, and <code>${DIAG...}</code> are invalid.
-Use <code>EXEC.INPUT</code> for business variation. Load evidence may
+Normal Template/Flow authors must not depend on or author against the
+<code>DIAG</code> structure; ATT may add, remove, regroup, or rename its
+fields without Template/Flow compatibility guarantees. Use
+<code>EXEC.INPUT</code> for business variation and
+<code>META.TARGET</code> for curated target identity. Load evidence may
 contain:</p>
 <pre class="text"><code>DIAG.load
 ├── runId
@@ -1089,6 +1156,38 @@ user; fixed-arrival-rate iterations have no persistent VU identity.</p>
 <code>EXEC.INPUT</code>, <code>EXEC.VARS</code>,
 <code>EXEC.ACTIONS</code>, transient Tool/DB state and Action-local
 <code>output</code>.</p>
+<h4 id="migration-from-mode-specific-context">Migration from
+mode-specific Context</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Previous expression/usage</th>
+<th>Supported replacement</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>${EXEC.LOAD.RUN_ID}</code></td>
+<td><code>${EXEC.RUN_ID}</code></td>
+</tr>
+<tr class="even">
+<td><code>${EXEC.LOAD.TARGET_TYPE}</code> /
+<code>${EXEC.LOAD.TARGET_ID}</code></td>
+<td><code>${META.TARGET.type}</code> / <code>${META.TARGET.id}</code>
+where a target is defined (for example, Debug/Load)</td>
+</tr>
+<tr class="odd">
+<td>Branching business behavior on mode, workload, VU, or phase</td>
+<td>Pass the intended business selector explicitly through
+adapter-provided <code>${EXEC.INPUT.&lt;name&gt;}</code></td>
+</tr>
+<tr class="even">
+<td>Reading scheduler/diagnostic details in expressions</td>
+<td>Inspect retained <code>DIAG</code> evidence outside expressions; do
+not reference <code>DIAG</code> from Template/Flow code</td>
+</tr>
+</tbody>
+</table>
 <h3 id="optional-lookup">Optional lookup</h3>
 <p><code>${path}</code> is strict. <code>${path?}</code> returns null
 for a missing map/list path where optional lookup is defined, but it
@@ -1497,10 +1596,10 @@ update result. Operation and SQL/parameter evidence enters the common
 Action envelope. Secret credentials are never evidence. Parameter
 evidence follows descriptor/Action masking/type policy.</p>
 <p>Direct DB Actions may declare <code>timeoutMs</code> from 1 to
-3,600,000 ms. The executor applies the shorter effective limit between
-the Action timeout and the DBHelper
-<code>statement.timeoutSeconds</code>; each retry attempt gets a fresh
-Action timeout and the retry interval is outside that timeout.</p>
+3,600,000 ms. When present, <code>Action.timeoutMs</code> overrides
+<code>DBHelper.statement.timeoutSeconds</code>; otherwise the helper
+timeout is used. Each retry attempt gets a fresh Action timeout, and the
+retry interval is outside that timeout.</p>
 <p>A direct <code>query</code> Action may also use the standard retry
 block with <code>maxAttempts</code> 2–10, <code>intervalMs</code>
 0–3,600,000, and a non-empty unique <code>retryOn</code> list containing
@@ -1571,10 +1670,15 @@ default but cannot extend that deadline. IBM MQ client calls are
 synchronous and cannot be forcibly interrupted by ATT; if
 connect/open/put/get returns after the deadline, ATT immediately records
 <code>MQ_TIMEOUT</code> and applies the configured retry policy. Tool
-Action retry applies to every MQ operation (<code>send</code>,
-<code>receive</code>, and <code>request</code>); retrying a send may
-enqueue duplicates, which the package author must account for.
-Per-attempt timing and retry outcomes remain in Action evidence.</p>
+Action retry is author-controlled for every MQ operation
+(<code>send</code>, <code>receive</code>, and <code>request</code>): ATT
+does not infer idempotency or suppress potentially mutating replays.
+Retrying <code>send</code> may enqueue duplicate messages; retrying
+<code>request</code> performs another PUT with a new MsgId and a new
+correlation cycle, and may replay the business operation. The package
+author owns replay/duplicate safety. Per-attempt timing and retry
+outcomes remain in Action evidence, including each request attempt's
+message/correlation IDs.</p>
 <p>ATT's default build does not require IBM MQ client classes. Runtime
 MQ use requires the IBM MQ client jar/profile documented by the
 package/release instructions. MQ operations feed the same Action
@@ -3090,6 +3194,95 @@ text</td>
 </tr>
 </tbody>
 </table>
+<h4 id="seqnext-run-scoped-sequences"><code>seq.next</code> run-scoped
+sequences</h4>
+<p><code>seq.next</code> supports these four positional overloads (the
+same arguments may be supplied by the names <code>name</code> and
+<code>width</code>; do not mix named and positional styles):</p>
+<table>
+<thead>
+<tr class="header">
+<th>Call</th>
+<th>Counter</th>
+<th>Return value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>#{seq.next()}</code></td>
+<td>Default sequence</td>
+<td>Incrementing Java <code>Long</code></td>
+</tr>
+<tr class="even">
+<td><code>#{seq.next('payment')}</code></td>
+<td>Independent sequence named <code>payment</code></td>
+<td>Incrementing Java <code>Long</code></td>
+</tr>
+<tr class="odd">
+<td><code>#{seq.next(10)}</code></td>
+<td>Default sequence</td>
+<td>Java <code>String</code>, decimal value left-padded with zeroes to
+exactly 10 characters</td>
+</tr>
+<tr class="even">
+<td><code>#{seq.next('payment', 10)}</code></td>
+<td>Sequence named <code>payment</code></td>
+<td>Java <code>String</code>, decimal value left-padded with zeroes to
+exactly 10 characters</td>
+</tr>
+</tbody>
+</table>
+<p>The default and each named sequence have independent counters, each
+starting at 1. State is owned by one ATT Run: Run shares counters across
+its Testcases and suites; Debug has a fresh service for its one-shot
+execution; Load shares counters across its workloads and concurrent
+iterations. Each per-name counter is thread-safe and issues unique,
+monotonically increasing values within that Run; concurrent scheduling
+does not guarantee which VU receives which value. A new Run, Debug
+execution, or Load run starts the counters again at 1. No
+<code>EXEC.SEQUENCES</code> Context node or reset/current API is
+exposed.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Mode</th>
+<th>Example use</th>
+<th>Scope note</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Testcase</td>
+<td>In an <code>assign</code> Action:
+<code>expression: "#{seq.next('payment', 10)}"</code></td>
+<td>Consecutive Cases in one Run share the <code>payment</code>
+counter.</td>
+</tr>
+<tr class="even">
+<td>Debug</td>
+<td>In an <code>assign</code> Action:
+<code>expression: "#{seq.next()}"</code></td>
+<td>A fresh one-shot Debug execution starts at 1.</td>
+</tr>
+<tr class="odd">
+<td>Load</td>
+<td>In an <code>assign</code> Action in the target Template/Flow:
+<code>expression: "#{seq.next('load-order', 10)}"</code></td>
+<td>Iterations share the counter; concurrent calls are unique, but no
+stable VU allocation order is promised.</td>
+</tr>
+</tbody>
+</table>
+<p><code>width</code> must be an integer from 1 through 1000. The name
+must be non-blank text; with one positional argument, a number means
+<code>width</code> and a string means sequence name. More than two
+arguments, mixed named/positional argument styles, invalid argument
+types, blank names, fractional/zero/negative/out-of-range widths are
+errors. Diagnostics identify <code>seq.next</code> and the invalid
+arity, argument, or range. If a padded value needs more digits than
+<code>width</code>, or the underlying <code>Long</code> counter
+overflows, evaluation fails explicitly; ATT never truncates a sequence
+or silently exceeds the requested width.</p>
 <p>The single-value <code>str.upper/lower/trim/ltrim/rtrim/length</code>
 and <code>misc.string/number/boolean</code> functions accept either
 <code>value=...</code> or one unnamed value. Other built-ins accept
@@ -3497,7 +3690,8 @@ href="../schemas/att-template-v3.1.schema.json">att-template-v3.1.schema.json</a
 href="../schemas/att-template-v3.0.schema.json">att-template-v3.0.schema.json</a></td>
 </tr>
 <tr class="even">
-<td>Legacy template descriptors (read compatibility)</td>
+<td>Legacy template descriptors (recognized for
+validation/migration)</td>
 <td><code>att-template/v2.6</code>, <code>att-template/v2.5</code>,
 <code>att-template/v2.3</code></td>
 <td><a
@@ -4067,9 +4261,9 @@ result</td>
 </tr>
 <tr class="odd">
 <td><code>result</code></td>
-<td>optional on Render, Tool, and DB; <code>format</code> is
-Action-specific; <code>path</code> is optional; <code>overwrite</code>
-defaults false</td>
+<td>required for Render; optional for supported Tool/DB Actions;
+<code>format</code> is Action-specific; <code>path</code> is optional;
+<code>overwrite</code> defaults false</td>
 </tr>
 <tr class="even">
 <td>retry</td>
@@ -4163,13 +4357,20 @@ artifact. <code>path: console</code> writes the representation to the
 Case log without creating a file or <code>output.targetFiles</code>
 entry. All real paths remain safe, relative to the Case artifact
 directory, and are containment-checked.</p>
-<p>Render supports literal paths for one source and these path-only
-tokens for source sets: <code>{filename}</code> (including extension),
-<code>{name}</code> (without final extension), <code>{ext}</code>
-(without dot), <code>{index}</code> (one-based deterministic order),
-<code>{relativePath}</code> (relative to the matched source root). No
-expression interpolation is performed inside these patterns.
-Multi-source paths must expand uniquely even when
+<p>Legacy <code>att-template/v2.6</code>, <code>v2.5</code>, and
+<code>v2.3</code> descriptors are recognized for validation and
+migration; legacy <code>renderAs</code>/<code>saveAs</code> result
+fields must be migrated to <code>att-template/v3.1</code> and are not
+accepted for execution. Do not interpret schema recognition as runtime
+compatibility for those fields.</p>
+<p>Render evaluates ordinary ATT <code>${...}</code> /
+<code>#{...}</code> expressions in <code>result.path</code> first, then
+expands these source-set path tokens: <code>{filename}</code> (including
+extension), <code>{name}</code> (without final extension),
+<code>{ext}</code> (without dot), <code>{index}</code> (one-based
+deterministic order), and <code>{relativePath}</code> (relative to the
+matched source root). Token values are not recursively
+expression-evaluated. Multi-source paths must expand uniquely even when
 <code>overwrite: true</code>; every expanded path is safety-checked
 before writing. <code>output.result</code> remains a typed value for one
 source and an ordered source-keyed map for multiple sources;

@@ -971,16 +971,82 @@ publication</h3>
 collector 保留在 <code>attempts[n]</code>，不會取代 top-level final
 result。</p>
 <h3 id="執行身份與診斷資料">執行身份與診斷資料</h3>
-<p><code>EXEC.ID</code> 表示目前執行單位；<code>EXEC.RUN_ID</code>
-表示外層 ATT run。Run 使用 canonical Case ID，Debug 的兩者均使用 debug
-ID；Load 為每個 iteration 分配 run 內全域唯一的 execution ID。舊有
-<code>RUN.id</code> 和 <code>RUN.runId</code> 仍確定性地對應
-<code>EXEC.RUN_ID</code>，且這些 framework-owned 值不可由輸入覆寫。</p>
+<p>身份與時間戳的 scope 依執行模式而異：</p>
+<table>
+<thead>
+<tr class="header">
+<th>模式</th>
+<th><code>EXEC.ID</code></th>
+<th><code>EXEC.RUN_ID</code></th>
+<th><code>EXEC.STARTED_AT</code></th>
+<th><code>EXEC.RUN_STARTED_AT</code></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Testcase</td>
+<td>canonical <code>workbookId.groupId.rowCaseId</code>，每個 Case
+一個</td>
+<td>外層 Run ID，同一 Run 的 Cases 共用</td>
+<td>該 Case 開始時間</td>
+<td>外層 Run 開始時間；該 Run 的 Cases 共用</td>
+</tr>
+<tr class="even">
+<td>Debug</td>
+<td>debug ID；同時也是 <code>EXEC.RUN_ID</code></td>
+<td>相同 debug ID</td>
+<td>單次 Debug execution 開始時間</td>
+<td>與 <code>EXEC.STARTED_AT</code> 相同</td>
+</tr>
+<tr class="odd">
+<td>Load</td>
+<td>每個 iteration 使用 run 內唯一的
+<code>&lt;runId&gt;-execution-&lt;n&gt;</code></td>
+<td>外層 Load Run ID；所有 workload/iteration 共用</td>
+<td>該 iteration 開始時間</td>
+<td>外層 Load Run 開始時間；iterations 共用</td>
+</tr>
+</tbody>
+</table>
+<p>例如，同一 Run 的兩個 Case 有不同 <code>EXEC.ID</code>，但共用
+<code>EXEC.RUN_ID</code>：</p>
+<table>
+<thead>
+<tr class="header">
+<th>Case</th>
+<th><code>EXEC.ID</code></th>
+<th><code>EXEC.RUN_ID</code></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>payments.payment.TC001</code></td>
+<td><code>payments.payment.TC001</code></td>
+<td><code>RUN-42</code></td>
+</tr>
+<tr class="even">
+<td><code>payments.payment.TC002</code></td>
+<td><code>payments.payment.TC002</code></td>
+<td><code>RUN-42</code></td>
+</tr>
+</tbody>
+</table>
+<p>兩個 Load iteration（可屬於不同 workload 或 VU）共用
+<code>EXEC.RUN_ID</code>，但 <code>EXEC.ID</code> 唯一，例如
+<code>LOAD-7-execution-1</code> 與
+<code>LOAD-7-execution-2</code>。Closed VU 的穩定身份另存於
+evidence（<code>DIAG.load.userId</code>）；fixed-arrival iteration 沒有
+persistent VU identity。</p>
+<p>這些 framework-owned 欄位不能由輸入覆寫。舊有 <code>RUN.id</code> 和
+<code>RUN.runId</code> 仍確定性地對應 <code>EXEC.RUN_ID</code>。</p>
 <p>執行模式、時間戳和 load scheduler metadata 保存在 evidence-only
 <code>DIAG</code>，不屬於 expression Context。因此
 <code>${EXEC.MODE}</code>、<code>${EXEC.LOAD...}</code> 和
-<code>${DIAG...}</code> 均無效；業務差異請透過 <code>EXEC.INPUT</code>
-傳入。Load evidence 可包含：</p>
+<code>${DIAG...}</code> 均無效。一般 Template/Flow 作者不得引用或依賴
+<code>DIAG</code> 結構；ATT 可在不提供 Template/Flow
+相容保證下新增、移除、重組或重新命名其中欄位。業務差異請透過
+<code>EXEC.INPUT</code> 傳入；精選 target identity 使用
+<code>META.TARGET</code>。Load evidence 可包含：</p>
 <pre class="text"><code>DIAG.load
 ├── runId
 ├── workloadId
@@ -1003,6 +1069,38 @@ evidence 中應用 <code>(workloadId, userId)</code> 識別 VU。ATT 不新增
 iteration 的
 <code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>、Tool/DB
 transient state 及 Action-local <code>output</code> 仍然彼此隔離。</p>
+<h4 id="從-mode-specific-context-遷移">從 mode-specific Context
+遷移</h4>
+<table>
+<thead>
+<tr class="header">
+<th>舊 expression／用途</th>
+<th>支援的替代方式</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>${EXEC.LOAD.RUN_ID}</code></td>
+<td><code>${EXEC.RUN_ID}</code></td>
+</tr>
+<tr class="even">
+<td><code>${EXEC.LOAD.TARGET_TYPE}</code>／<code>${EXEC.LOAD.TARGET_ID}</code></td>
+<td>有選定 target 時使用
+<code>${META.TARGET.type}</code>／<code>${META.TARGET.id}</code>（例如
+Debug/Load）</td>
+</tr>
+<tr class="odd">
+<td>按 mode、workload、VU 或 phase 分支業務行為</td>
+<td>透過 adapter 提供的 <code>${EXEC.INPUT.&lt;name&gt;}</code>
+明確傳入業務 selector</td>
+</tr>
+<tr class="even">
+<td>在 expression 讀取 scheduler／diagnostic 資料</td>
+<td>在 expression 之外檢查保留的 <code>DIAG</code>
+evidence；Template/Flow 不得引用 <code>DIAG</code></td>
+</tr>
+</tbody>
+</table>
 <h3 id="optional-lookup">Optional lookup</h3>
 <p><code>${path}</code> 是 strict lookup。<code>${path?}</code>
 在定義允許的 missing map/list path 上返回 null，但不會把 malformed
@@ -1455,13 +1553,16 @@ metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes
 Action deadline；call <code>waitMs</code> 優先於 helper
 預設值，但不能延長 deadline。IBM MQ client call 是同步操作，ATT
 無法強制中斷 connect/open/put/get；若呼叫在 deadline 後才返回，ATT
-會立即記錄 <code>MQ_TIMEOUT</code> 並套用 retry policy。Tool Action
-retry 可用於所有 MQ
-操作（<code>send</code>、<code>receive</code>、<code>request</code>）；重試
-send 可能造成重複訊息，需由 package author 評估。每次 attempt 的
-timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle
-是 framework-owned resource state，特別是在 Load mode，不會公開成
-<code>EXEC.MQ</code> tree。</p>
+會立即記錄 <code>MQ_TIMEOUT</code> 並套用 retry policy。所有 MQ
+操作（<code>send</code>、<code>receive</code>、<code>request</code>）的
+Tool Action retry 都由作者明確控制；ATT 不推斷
+idempotency，也不抑制可能改變業務狀態的重放。重試 <code>send</code>
+可能排入重複訊息；重試 <code>request</code> 會再次 PUT、產生新的 MsgId
+和新的 correlation cycle，並可能重放業務操作。重放／重複處理安全由
+package author 負責。每次 attempt 的 timing/retry 結果都保留在 Action
+evidence，包含各 request attempt 的 message/correlation ID。MQ
+connection/pool lifecycle 是 framework-owned resource state，特別是在
+Load mode，不會公開成 <code>EXEC.MQ</code> tree。</p>
 <p>ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要
 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與
 Tool、DB 一樣進入同一 Action result/evidence envelope。</p>
@@ -2473,6 +2574,87 @@ framework-owned
 </tr>
 </tbody>
 </table>
+<h4 id="seqnext-run-scoped-序列"><code>seq.next</code> run-scoped
+序列</h4>
+<p><code>seq.next</code> 支援以下四種位置參數
+overload（同一組參數亦可使用 <code>name</code>、<code>width</code>
+具名傳入；不可混用具名與位置參數）：</p>
+<table>
+<thead>
+<tr class="header">
+<th>呼叫</th>
+<th>計數器</th>
+<th>返回值</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>#{seq.next()}</code></td>
+<td>預設序列</td>
+<td>遞增的 Java <code>Long</code></td>
+</tr>
+<tr class="even">
+<td><code>#{seq.next('payment')}</code></td>
+<td>名為 <code>payment</code> 的獨立序列</td>
+<td>遞增的 Java <code>Long</code></td>
+</tr>
+<tr class="odd">
+<td><code>#{seq.next(10)}</code></td>
+<td>預設序列</td>
+<td>Java <code>String</code>，十進位值左側補零至恰好 10 個字元</td>
+</tr>
+<tr class="even">
+<td><code>#{seq.next('payment', 10)}</code></td>
+<td>名為 <code>payment</code> 的序列</td>
+<td>Java <code>String</code>，十進位值左側補零至恰好 10 個字元</td>
+</tr>
+</tbody>
+</table>
+<p>預設序列與每個具名序列互相獨立，且各自從 1 開始。狀態由單次 ATT Run
+擁有：Run 內所有 Testcase／suite 共用計數器；Debug 的單次 execution
+使用新 service；Load 的所有 workload 與並行 iteration
+共用計數器。每個序列計數器均為 thread-safe，在該 Run
+內發出唯一且單調遞增的值；並行排程不保證哪個 VU 取得哪個值。新 Run、新
+Debug execution 或新 Load run 都會重新從 1 開始。不公開
+<code>EXEC.SEQUENCES</code> Context node，也沒有 reset/current API。</p>
+<table>
+<thead>
+<tr class="header">
+<th>模式</th>
+<th>範例用法</th>
+<th>Scope 說明</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Testcase</td>
+<td>在 <code>assign</code> Action
+中：<code>expression: "#{seq.next('payment', 10)}"</code></td>
+<td>同一 Run 的連續 Cases 共用 <code>payment</code> 計數器。</td>
+</tr>
+<tr class="even">
+<td>Debug</td>
+<td>在 <code>assign</code> Action
+中：<code>expression: "#{seq.next()}"</code></td>
+<td>新的單次 Debug execution 從 1 開始。</td>
+</tr>
+<tr class="odd">
+<td>Load</td>
+<td>在 target Template/Flow 的 <code>assign</code> Action
+中：<code>expression: "#{seq.next('load-order', 10)}"</code></td>
+<td>Iterations 共用計數器；並行呼叫唯一，但不保證每個 VU
+的固定分配順序。</td>
+</tr>
+</tbody>
+</table>
+<p><code>width</code> 必須是 1 至 1000
+的整數。序列名稱必須是非空白文字；只有一個位置參數時，數字代表
+<code>width</code>，字串代表序列名稱。超過兩個參數、混合具名與位置參數、無效參數型別、空白名稱、小數／零／負數／超出範圍的
+width 都會報錯；diagnostic 會指出 <code>seq.next</code>
+及錯誤的參數數量、型別或範圍。若補零後的數值位數超過
+<code>width</code>，或底層 <code>Long</code>
+計數器溢位，求值會明確失敗；ATT
+不會截斷序列值，也不會默默超出指定寬度。</p>
 <p><code>misc.dbText</code> 只接受一个位置参数或具名
 <code>value</code>。参数必须是直接 DB Action、DB expression 或 DB-backed
 Tool 返回的稳定 query／update result。它与直接 DB Action 的
@@ -2710,9 +2892,9 @@ href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
 group、sidecar、Template 与 Flow 分别为
 <code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v3.1</code>
 与 <code>att-flow/v3.1</code>（相容讀取 <code>att-flow/v3.0</code>）。舊
-Template／Flow 的 <code>renderAs</code>／<code>saveAs</code>
-不再接受；<code>att validate</code> 會提供遷移建議。舊 schema
-的其他相容規則不變。</p>
+Template／Flow schema 可供 validation 與 migration 辨識；其中舊
+<code>renderAs</code>／<code>saveAs</code> result 欄位必須遷移至
+v3.1，不能視為可直接執行。<code>att validate</code> 會提供遷移建議。</p>
 <h3 id="全局配置">全局配置</h3>
 <div class="sourceCode" id="cb52"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
@@ -3073,8 +3255,9 @@ render/tool/assert-action-only 字段、timeout 或 retry</td>
 </tr>
 <tr class="odd">
 <td><code>result</code></td>
-<td>可用于 Render、Tool、DB；<code>format</code> 按 Action
-类型限制；<code>path</code> 可选；<code>overwrite</code> 默认 false</td>
+<td>Render 必需；支援的 Tool/DB Action 可選；<code>format</code> 按
+Action 类型限制；<code>path</code> 可选；<code>overwrite</code> 默认
+false</td>
 </tr>
 <tr class="even">
 <td>retry</td>
@@ -3122,13 +3305,20 @@ artifact；<code>path: console</code> 只写入 Case log，不产生文件或
 支持相应格式；built-in/call-backed Tool 与 DB 支持
 <code>text|json|yaml|xml</code>，DB 的 text 使用确定性 SQL*Plus 风格
 formatter。真实路径必须安全且保持在 Case artifact 根目录。</p>
-<p>Render 单来源可用字面路径，多来源支持
-<code>{filename}</code>、<code>{name}</code>、<code>{ext}</code>、<code>{index}</code>
-与 <code>{relativePath}</code>；这些 token
-不求值表达式。匹配按确定性顺序处理，多来源展开路径必须唯一，<code>overwrite: true</code>
-也不能容许同一 Action 的目标冲突。<code>output.result</code>
-单来源为类型化值，多来源为有序来源键
-map；<code>output.targetFiles</code> 只包含实际落盘路径。</p>
+<p>舊
+<code>att-template/v2.6</code>、<code>v2.5</code>、<code>v2.3</code>
+descriptor 可供 validation 與 migration 辨識；舊
+<code>renderAs</code>／<code>saveAs</code> result 欄位必須遷移至
+<code>att-template/v3.1</code>，執行時不接受。schema
+可辨識不代表這些欄位仍可直接執行。</p>
+<p>Render 會先求值 <code>result.path</code> 中一般 ATT
+<code>${...}</code>／<code>#{...}</code> expression，再展開來源集合路徑
+token：<code>{filename}</code>、<code>{name}</code>、<code>{ext}</code>、<code>{index}</code>、<code>{relativePath}</code>。Token
+替換值不會再次作 expression
+求值。匹配按確定性順序處理，多來源展開路徑必須唯一，<code>overwrite: true</code>
+也不能容許同一 Action 的目標衝突。<code>output.result</code>
+單來源為類型化值，多來源為有序來源鍵
+map；<code>output.targetFiles</code> 只包含實際落盤路徑。</p>
 <p>迁移至 <code>att-template/v3.1</code>：<code>renderAs</code> →
 <code>result.format</code>；<code>saveAs.format</code> →
 <code>result.format</code>；<code>saveAs.path</code> →
