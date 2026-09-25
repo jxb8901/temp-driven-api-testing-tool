@@ -216,6 +216,7 @@ class MqHelperExecutorTest {
         assertTrue(result.success());
         assertEquals("payment", result.result().get("mqHelper"));
         assertEquals("payment-b", result.result().get("instance"));
+        assertEquals("roundRobin", result.result().get("selectionStrategy"));
         assertEquals("payment-b", factory.connectedInstance);
         assertEquals("payment", result.evidence().get("helperId"));
         assertEquals("payment-b", result.evidence().get("physicalInstance"));

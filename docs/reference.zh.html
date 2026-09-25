@@ -1592,6 +1592,12 @@ policy marker；credential 與 payload bytes 永不包含其中。Validation
 會拒絕重複 physical id、未知 inherited field、缺少 effective connection
 field、非法 strategy 或 override，以及無效的 effective
 message/requestReply/pool 值。</p>
+<p><code>output.selectionStrategy</code> 表示已設定的 group
+policy（<code>single</code>、<code>random</code> 或
+<code>roundRobin</code>），而非單次 invocation
+的選擇來源。若呼叫明確提供 <code>instance</code>，此 policy
+值仍維持不變；<code>output.instance</code> 則表示實際選中的 physical
+instance。</p>
 <h3 id="54-common-operation-result-與-evidence">5.4 Common Operation
 Result 與 Evidence</h3>
 <p>Tool、DB、MQ executor 先收斂到同一 operation boundary，之後 Template

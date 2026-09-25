@@ -1699,6 +1699,12 @@ never included. Validation rejects duplicate physical ids, unknown
 inherited fields, missing effective connection fields, invalid
 strategies or overrides, and invalid effective message/requestReply/pool
 values.</p>
+<p><code>output.selectionStrategy</code> identifies the configured group
+policy (<code>single</code>, <code>random</code>, or
+<code>roundRobin</code>), not the selection source for an individual
+invocation. When a call explicitly supplies <code>instance</code>, that
+policy value remains unchanged and <code>output.instance</code>
+identifies the physical instance actually selected.</p>
 <h3 id="54-common-operation-result-and-evidence">5.4 Common Operation
 Result and Evidence</h3>
 <p>Tool, DB and MQ executors converge at one operation boundary before
