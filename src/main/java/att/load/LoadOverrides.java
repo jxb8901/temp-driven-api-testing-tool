@@ -20,6 +20,10 @@ public final class LoadOverrides {
                 options.loadMaxConcurrent(), options.loadOverloadPolicy());
     }
 
+    public boolean any() {
+        return users != null || arrivalRate != null || warmup != null || rampUp != null || duration != null
+                || rampDown != null || thinkTime != null || maxConcurrent != null || overloadPolicy != null;
+    }
     public String users() { return users; }
     public String arrivalRate() { return arrivalRate; }
     public String warmup() { return warmup; }

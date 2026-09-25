@@ -8,78 +8,74 @@ import java.util.Map;
 
 /** A compact scheduler/iteration event; only a bounded reference to retained evidence is carried. */
 public final class LoadEvent {
-    private final String runId, model, phase, iterationId, userId;
+    private final String runId, workloadId, model, phase, iterationId, userId;
     private final long sequence, scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs;
     private final boolean scheduled, started, completed, dropped;
     private final ResultStatus status;
     private final String errorType;
     private final EvidenceRef evidence;
 
-    private LoadEvent(String runId, String model, String phase, String iterationId, String userId, long sequence,
+    private LoadEvent(String runId, String workloadId, String model, String phase, String iterationId, String userId, long sequence,
                       long scheduledAtEpochMs, long startedAtEpochMs, long completedAtEpochMs, long schedulerLagMs,
                       long latencyMs, boolean scheduled, boolean started, boolean completed, boolean dropped,
                       ResultStatus status, String errorType, EvidenceRef evidence) {
-        this.runId = runId; this.model = model; this.phase = phase; this.iterationId = iterationId; this.userId = userId;
+        this.runId = runId; this.workloadId = workloadId; this.model = model; this.phase = phase; this.iterationId = iterationId; this.userId = userId;
         this.sequence = sequence; this.scheduledAtEpochMs = scheduledAtEpochMs; this.startedAtEpochMs = startedAtEpochMs;
         this.completedAtEpochMs = completedAtEpochMs; this.schedulerLagMs = schedulerLagMs; this.latencyMs = latencyMs;
         this.scheduled = scheduled; this.started = started; this.completed = completed; this.dropped = dropped; this.status = status;
         this.errorType = errorType; this.evidence = evidence;
     }
 
-    /** Legacy combined scheduled/start/completion event retained for compatibility. */
+    /** Returns the same event attributed to one configured workload. */
+    public LoadEvent withWorkloadId(String value) {
+        return new LoadEvent(runId, value, model, phase, iterationId, userId, sequence, scheduledAtEpochMs, startedAtEpochMs,
+                completedAtEpochMs, schedulerLagMs, latencyMs, scheduled, started, completed, dropped, status, errorType, evidence);
+    }
+
     public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
                                       long sequence, long scheduledAt, long startedAt, long completedAt, ResultStatus status) {
         return completed(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null);
     }
-
     public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
                                       long sequence, long scheduledAt, long startedAt, long completedAt,
                                       ResultStatus status, EvidenceRef evidence) {
         return completed(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null, evidence);
     }
-
     public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
                                       long sequence, long scheduledAt, long startedAt, long completedAt,
                                       ResultStatus status, String errorType, EvidenceRef evidence) {
-        return new LoadEvent(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt,
+        return new LoadEvent(runId, null, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt,
                 Math.max(0L, startedAt - scheduledAt), Math.max(0L, completedAt - startedAt), true, true, true, false, status, errorType, evidence);
     }
-
-    /** Publishes admission/start without coupling it to the eventual completion event. */
     public static LoadEvent started(String runId, String model, String phase, String iterationId, String userId,
                                     long sequence, long scheduledAt, long startedAt) {
-        return new LoadEvent(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, 0L,
+        return new LoadEvent(runId, null, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, 0L,
                 Math.max(0L, startedAt - scheduledAt), 0L, true, true, false, false, null, null, null);
     }
-
-    /** Publishes completion for an iteration whose admission/start was already observed. */
     public static LoadEvent completion(String runId, String model, String phase, String iterationId, String userId,
                                        long sequence, long scheduledAt, long startedAt, long completedAt,
                                        ResultStatus status) {
         return completion(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null, null);
     }
-
-    /** Publishes completion for an iteration whose admission/start was already observed. */
     public static LoadEvent completion(String runId, String model, String phase, String iterationId, String userId,
                                        long sequence, long scheduledAt, long startedAt, long completedAt,
                                        ResultStatus status, EvidenceRef evidence) {
         return completion(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt, status, null, evidence);
     }
-
     public static LoadEvent completion(String runId, String model, String phase, String iterationId, String userId,
                                        long sequence, long scheduledAt, long startedAt, long completedAt,
                                        ResultStatus status, String errorType, EvidenceRef evidence) {
-        return new LoadEvent(runId, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt,
+        return new LoadEvent(runId, null, model, phase, iterationId, userId, sequence, scheduledAt, startedAt, completedAt,
                 Math.max(0L, startedAt - scheduledAt), Math.max(0L, completedAt - startedAt), false, false, true, false, status, errorType, evidence);
     }
-
     public static LoadEvent dropped(String runId, String model, String phase, String iterationId, long sequence,
                                     long scheduledAt, long observedAt) {
-        return new LoadEvent(runId, model, phase, iterationId, null, sequence, scheduledAt, 0L, 0L,
+        return new LoadEvent(runId, null, model, phase, iterationId, null, sequence, scheduledAt, 0L, 0L,
                 Math.max(0L, observedAt - scheduledAt), 0L, true, false, false, true, null, null, null);
     }
 
     public String runId() { return runId; }
+    public String workloadId() { return workloadId; }
     public String model() { return model; }
     public String phase() { return phase; }
     public String iterationId() { return iterationId; }
@@ -100,10 +96,10 @@ public final class LoadEvent {
     public boolean success() { return status == ResultStatus.PASS; }
 
     public Map<String, Object> toMap() { return toMap(null); }
-
     public Map<String, Object> toMap(java.nio.file.Path base) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("runId", runId); result.put("model", model); result.put("phase", phase); result.put("iterationId", iterationId);
+        result.put("runId", runId); if (workloadId != null) result.put("workloadId", workloadId);
+        result.put("model", model); result.put("phase", phase); result.put("iterationId", iterationId);
         if (userId != null) result.put("userId", userId);
         result.put("sequence", sequence); result.put("scheduledAt", Instant.ofEpochMilli(scheduledAtEpochMs).toString());
         if (started) result.put("startedAt", Instant.ofEpochMilli(startedAtEpochMs).toString());

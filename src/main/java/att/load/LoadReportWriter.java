@@ -48,6 +48,7 @@ public final class LoadReportWriter {
         appendModelSemantics(html, result, metrics);
         appendPhaseTable(html, result, summary);
         appendMetricsTable(html, metrics);
+        appendWorkloadTable(html, result);
         appendThresholdTable(html, result.thresholds().results());
         appendResourceTable(html, result.resources());
         appendEvidenceTable(html, result.evidence());
@@ -130,6 +131,45 @@ public final class LoadReportWriter {
             html.append("<tr><td>").append(escape(entry.getKey())).append("</td><td>").append(escape(display(entry.getValue()))).append("</td></tr>");
         }
         html.append("</tbody></table></div></section>");
+    }
+
+    private void appendWorkloadTable(StringBuilder html, LoadRunResult result) {
+        if (result.workloads().isEmpty()) return;
+        html.append("<section class=\"panel\"><h2>Workloads</h2>");
+        html.append("<p class=\"note\">Each workload is independently paced. Overall latency percentiles above come from the aggregate raw-latency collector, not an average of workload percentiles.</p>");
+        html.append("<div class=\"scroll\"><table><thead><tr><th>Workload</th><th>Target</th><th>Model</th><th>Configured load</th><th>Completed TPS</th><th>P95</th><th>Error</th><th>Drop</th><th>Thresholds</th><th>Status</th></tr></thead><tbody>");
+        for (Map.Entry<String, LoadRunResult> entry : result.workloads().entrySet()) {
+            LoadRunResult child = entry.getValue();
+            Map<String, Object> metrics = child.metrics().values();
+            String configured = child.scenario().model() == LoadScenario.Model.CLOSED
+                    ? child.scenario().users() + " users"
+                    : rate(child.scenario().arrivalRatePerSecond());
+            String target = child.scenario().targetType() + ":" + child.scenario().targetId();
+            String childStatus = child.status().name();
+            html.append("<tr><td><b>").append(escape(entry.getKey())).append("</b></td><td>").append(escape(target))
+                    .append("</td><td>").append(escape(child.scenario().model().wireName())).append("</td><td>")
+                    .append(escape(configured)).append("</td><td>").append(rate(metrics.get("completedThroughput")))
+                    .append("</td><td>").append(display(metrics.get("p95Ms"))).append(" ms</td><td>")
+                    .append(percent(metrics.get("sutErrorRate"))).append("</td><td>").append(percent(metrics.get("droppedRate")))
+                    .append("</td><td>").append(escape(workloadThresholdSummary(child.thresholds().results())))
+                    .append("</td><td class=\"").append("PASS".equals(childStatus) ? "pass\">" : "fail\">")
+                    .append(escape(childStatus)).append("</td></tr>");
+        }
+        html.append("</tbody></table></div></section>");
+    }
+
+    private String workloadThresholdSummary(List<ThresholdResult> thresholds) {
+        if (thresholds == null || thresholds.isEmpty()) return "none";
+        StringBuilder result = new StringBuilder();
+        for (ThresholdResult threshold : thresholds) {
+            if (result.length() > 0) result.append("; ");
+            result.append(threshold.name()).append(' ').append(threshold.expression())
+                    .append(" (actual ").append(threshold.actual()).append(") ")
+                    .append(threshold.passed() ? "PASS" : "FAIL");
+            if (threshold.diagnostic() != null && !threshold.diagnostic().trim().isEmpty())
+                result.append(" - ").append(threshold.diagnostic());
+        }
+        return result.toString();
     }
 
     private void appendThresholdTable(StringBuilder html, List<ThresholdResult> thresholds) {
