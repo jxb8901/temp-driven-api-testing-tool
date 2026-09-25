@@ -1,0 +1,32 @@
+schemaVersion: att-load/v1.1
+
+workloads:
+  - id: account-date
+    target:
+      type: tool
+      id: sample.getAcDate
+    load:
+      arrivalRate: 20/s
+      duration: 2s
+      maxConcurrent: 4
+      overloadPolicy: drop
+    thresholds:
+      errorRate: "< 1%"
+
+  - id: sequence
+    target:
+      type: tool
+      id: sample.getSeq
+      arguments:
+        seqLen: 8
+    load:
+      arrivalRate: 5/s
+      duration: 2s
+      maxConcurrent: 2
+      overloadPolicy: drop
+    thresholds:
+      errorRate: "< 1%"
+
+thresholds:
+  errorRate: "< 1%"
+  minThroughput: ">= 1/s"

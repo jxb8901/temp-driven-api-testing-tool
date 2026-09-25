@@ -9,6 +9,9 @@
 - Implemented Issue #53 randomized think-time ranges for closed-VU load workloads while preserving the existing fixed `execution.thinkTime` syntax and keeping arrival-rate workloads unchanged.
 - Added reusable `ThinkTimePolicy` normalization, deterministic run-level seeding with isolated per-VU random streams, inclusive millisecond range sampling, report-safe effective-seed/policy output, schema updates, an offline example, and EN/ZH Reference coverage.
 - Fixed production closed-VU think-time waiting so sampled delays longer than the scheduler's 50 ms cancellation quantum are fully consumed in bounded cancellable slices; added a real-system-timing regression test to prevent throughput inflation from truncated waits.
+- Implemented Issues #50 and #51 with `att-load/v1.1` multi-workload scenarios while retaining `att-load/v1.0` single-target compatibility. A run may own independent fixed-arrival-rate workloads with per-target TPS/concurrency or independent closed-VU pools with fixed target/user count/think-time policy.
+- Added a synchronized multi-workload coordinator with common T0/phase envelope, atomic pre-start target validation, shared run-scoped DB/MQ resources, isolated iteration Context/output, workload-qualified VU identity, per-workload evidence partitioning, and deterministic workload-aware random streams.
+- Added aggregate plus per-workload metrics and thresholds; aggregate percentiles are calculated from combined raw latency observations rather than averaging workload percentiles. Mixed arrival/closed workloads and ambiguous unscoped CLI load overrides for multi-workload scenarios are rejected in v1.1.
 
 ## 3.5.1 - 2026-09-23
 

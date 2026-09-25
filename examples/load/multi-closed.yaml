@@ -1,0 +1,35 @@
+schemaVersion: att-load/v1.1
+seed: 12345
+
+workloads:
+  - id: account-date
+    target:
+      type: tool
+      id: sample.getAcDate
+    load:
+      users: 2
+      duration: 2s
+    execution:
+      thinkTime:
+        min: 50ms
+        max: 150ms
+    thresholds:
+      errorRate: "< 1%"
+
+  - id: sequence
+    target:
+      type: tool
+      id: sample.getSeq
+      arguments:
+        seqLen: 8
+    load:
+      users: 1
+      duration: 2s
+    execution:
+      thinkTime: 100ms
+    thresholds:
+      errorRate: "< 1%"
+
+thresholds:
+  errorRate: "< 1%"
+  minThroughput: ">= 1/s"

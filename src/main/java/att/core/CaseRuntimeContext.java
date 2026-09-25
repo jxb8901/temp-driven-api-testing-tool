@@ -620,6 +620,15 @@ public final class CaseRuntimeContext {
         execNode.put("LOAD", loadNode);
     }
 
+    /** Adds v1.1 workload and fixed-target identity to the existing EXEC.LOAD node. */
+    public void setLoadWorkload(String workloadId, String targetType, String targetId) {
+        if (!"load".equals(mode)) throw new IllegalStateException("EXEC.LOAD requires load execution mode");
+        if (workloadId != null) loadNode.put("WORKLOAD_ID", workloadId);
+        if (targetType != null) loadNode.put("TARGET_TYPE", targetType);
+        if (targetId != null) loadNode.put("TARGET_ID", targetId);
+        execNode.put("LOAD", loadNode);
+    }
+
     /** Compatibility overload for scheduler adapters that do not expose run start time. */
     public void setLoad(String model, String iterationId, long iteration, String phase,
                         String startedAt, String userId) {
