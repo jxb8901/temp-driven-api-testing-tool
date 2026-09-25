@@ -11,7 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-/** Writes a typed Tool/DB result to a safe Case-contained artifact path. */
+/** Writes a typed Action result to a safe Case-contained artifact path. */
 final class ActionResultArtifactWriter {
     private final ObjectOutputCodec codec = new ObjectOutputCodec();
     private final DbTextResultFormatter dbText = new DbTextResultFormatter();
@@ -35,38 +35,38 @@ final class ActionResultArtifactWriter {
         Files.createDirectories(root);
         Path target;
         try {
-            target = root.resolve(IdentifierValidator.relativePath(configuredPath, "action saveAs.path")).normalize();
+            target = root.resolve(IdentifierValidator.relativePath(configuredPath, "action result.path")).normalize();
         } catch (RuntimeException error) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                    "Invalid action saveAs path",
+                    "Invalid action result path",
                     "configuredPath=" + configuredPath + ", resolvedRoot=" + root + ", reason=" + error.getMessage(),
-                    null, "saveAs.path", null, null, null, null, actionId,
+                    null, "result.path", null, null, null, null, actionId,
                     "Use a safe relative path below the Case artifact directory.", error);
         }
         if (!target.startsWith(root) || target.equals(root)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                    "Action saveAs path escapes the Case artifact directory",
+                    "Action result path escapes the Case artifact directory",
                     "configuredPath=" + configuredPath + ", resolvedPath=" + target + ", allowedRoot=" + root,
-                    null, "saveAs.path", null, null, null, null, actionId,
+                    null, "result.path", null, null, null, null, actionId,
                     "Use a safe relative path below the Case artifact directory.", null);
         }
         try {
-            PathSafety.ensureContained(root, target, "Action saveAs path");
+            PathSafety.ensureContained(root, target, "Action result path");
             Files.createDirectories(target.getParent());
-            PathSafety.ensureContained(root, target, "Action saveAs path");
+            PathSafety.ensureContained(root, target, "Action result path");
         } catch (java.io.IOException unsafePath) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                    "Action saveAs path is not safe",
+                    "Action result path is not safe",
                     "configuredPath=" + configuredPath + ", resolvedPath=" + target + ", allowedRoot=" + root
                             + ", reason=" + unsafePath.getMessage(),
-                    null, "saveAs.path", null, null, null, null, actionId,
+                    null, "result.path", null, null, null, null, actionId,
                     "Use a safe relative path below the Case artifact directory and avoid symbolic links.", unsafePath);
         }
         if (Files.exists(target) && !overwrite) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.PATH_INVALID,
-                    "Action saveAs target already exists",
+                    "Action result target already exists",
                     "configuredPath=" + configuredPath + ", resolvedPath=" + target + ", overwrite=false",
-                    null, "saveAs.path", null, null, null, null, actionId,
+                    null, "result.path", null, null, null, null, actionId,
                     "Choose a unique target or set overwrite: true.", null);
         }
         byte[] bytes = render(format, value, dbResult).getBytes(StandardCharsets.UTF_8);

@@ -221,9 +221,9 @@ class LoadScenarioTest {
         Path project = project();
         Files.createDirectories(project.resolve("templates/FILE_TEMPLATE"));
         write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
-        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.1\n"
                 + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
-                + "  render: {type: render, payload: payload.txt, renderAs: file}\n");
+                + "  render: {type: render, payload: payload.txt, result: {format: text, path: 'rendered/{filename}'}}\n");
         Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: FILE_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
@@ -236,7 +236,7 @@ class LoadScenarioTest {
             IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
                     IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
             assertEquals(ResultStatus.PASS, result.status());
-            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("payload.txt")));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered/payload.txt")));
             assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
                     "file-producing actions need a workspace but must not force a case log");
         } finally { resources.close(); }

@@ -108,7 +108,7 @@ class MqHelperExecutorTest {
         assertEquals(819, result.result().get("replyCcsid"));
         assertFalse(result.result().containsKey("outputFile"));
         String log = new String(Files.readAllBytes(logPath), "UTF-8");
-        assertTrue(log.contains("[ACTION reply SAVE]"), log);
+        assertTrue(log.contains("[ACTION reply RESULT]"), log);
         assertTrue(log.contains("é"), log);
     }
 
@@ -136,7 +136,7 @@ class MqHelperExecutorTest {
         assertFalse(result.evidence().containsKey("payloadEvidence"));
     }
 
-    @Test void sendRejectsSaveAsBeforeConnecting() throws Exception {
+    @Test void sendRejectsResultPersistenceBeforeConnecting() throws Exception {
         Path caseDir = tempDir.resolve("send-save-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
         FakeFactory factory = new FakeFactory();
@@ -145,7 +145,7 @@ class MqHelperExecutorTest {
                 "send", "sent.bin", "raw", false);
 
         assertFalse(result.success());
-        assertTrue(String.valueOf(((Map<?, ?>) result.result().get("error")).get("message")).contains("does not support saveAs"));
+        assertTrue(String.valueOf(((Map<?, ?>) result.result().get("error")).get("message")).contains("does not support result persistence"));
         assertTrue(factory.connectedInstances.isEmpty());
     }
 

@@ -54,42 +54,42 @@ message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Jav
 
 requestQueue and replyQueue are optional request defaults. Queue precedence is call argument > message default > validation error. send(queue=...) and receive(queue=...) do not use these defaults. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
 
-#### Common saveAs
+#### Common Action result
 
-MQ receive/request use the common Action saveAs object; no MQ-specific resultType/replyType exists.
+MQ receive/request use the common Action `result` object; no MQ-specific resultType/replyType exists.
 
 ~~~yaml
-saveAs:
+result:
   format: raw
   path: response.bin
   overwrite: false
 ~~~
 
-format defaults to raw and path is optional. raw gives the original byte[], text gives String, and json/yaml/xml give existing ATT typed values. No saveAs or saveAs: {} keeps the result in memory and creates no file. `path: console` writes the selected representation to the Case log and creates no `output.targetFiles` entry or file. No .reply.bin is created unless a real path is explicit. raw plus a real path writes exact bytes; overwrite/path safety follow the common Action rules.
+`format` selects the in-memory `output.result` representation; `path` is optional and affects persistence only. `raw` gives the original byte[], `text` gives String, and json/yaml/xml give existing ATT typed values. A pathless `result` keeps the value in memory without creating a file. `path: console` writes the selected representation to the Case log and creates no `output.targetFiles` entry or file. No .reply.bin is created unless a real path is explicit. `raw` plus a real path writes exact bytes; overwrite/path safety follow the common Action rules.
 
 ~~~yaml
 - id: requestXml
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  saveAs: {format: xml}
+  result: {format: xml}
   assert: "${output.result.Response.Status} == 'SUCCESS'"
 
 - id: requestXmlSaved
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  saveAs: {format: xml, path: responses/payment.xml, overwrite: false}
+  result: {format: xml, path: responses/payment.xml, overwrite: false}
 
 - id: receiveReply
   type: tool
   call: "#{mq.ordersMq.receive(queue='replyQ', correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}"
-  saveAs: {format: json}
+  result: {format: json}
 ~~~
 
 #### Output and validation
 
-output.result is the business payload; MQ metadata is directly under output. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects `saveAs`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
+output.result is the business payload; MQ metadata is directly under output. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects Action `result`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
 
-Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Typed reply decoding uses the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and the configured charset as fallback; unsupported CCSIDs fail clearly. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported saveAs formats, and unsafe paths.
+Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Typed reply decoding uses the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and the configured charset as fallback; unsupported CCSIDs fail clearly. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported result formats, and unsafe paths.
 
 #### Issue #60 v1.1 logical groups and physical instances
 

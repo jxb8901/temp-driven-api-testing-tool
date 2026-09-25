@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.3
+schemaVersion: att-template/v3.1
 name: PAYMENT_INVOKE
 description: Render payment request XML to a file and invoke the payment API.
 
@@ -6,7 +6,9 @@ actions:
   renderRequest:
     type: render
     payload: payload.xml
-    renderAs: file
+    result:
+      format: text
+      path: rendered/{filename}
 
   logRequest:
     type: log

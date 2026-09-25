@@ -148,16 +148,19 @@ public final class StageTemplateLoader {
             if (cached != null) { HITS.incrementAndGet(); return cached; }
         }
         Map<String, Object> map = yaml(descriptor);
+        rejectLegacyResultFields(map, descriptor);
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
         boolean current = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
+        boolean previousVersion = Version.PREVIOUS_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean legacy = Version.LEGACY_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean older = Version.OLDER_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean oldest = Version.OLDEST_TEMPLATE_SCHEMA.equals(schemaVersion);
-        boolean modern = current || legacy || older;
+        boolean modern = current || previousVersion || legacy || older;
         if (!(modern || oldest)) throw new IllegalArgumentException("Unsupported template schemaVersion: " + schemaVersion);
-        Path schema = projectRoot.resolve(current ? "schemas/att-template-v3.0.schema.json"
+        Path schema = projectRoot.resolve(current ? "schemas/att-template-v3.1.schema.json"
+                : (previousVersion ? "schemas/att-template-v3.0.schema.json"
                 : (legacy ? "schemas/att-template-v2.6.schema.json"
-                : (older ? "schemas/att-template-v2.5.schema.json" : "schemas/att-template-v2.3.schema.json")));
+                : (older ? "schemas/att-template-v2.5.schema.json" : "schemas/att-template-v2.3.schema.json"))));
         if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, schemaVersion, "template");
         SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
@@ -172,6 +175,8 @@ public final class StageTemplateLoader {
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
                     current
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "result", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
+                            : previousVersion
                             ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
                             : modern
                             ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update"}
@@ -179,11 +184,12 @@ public final class StageTemplateLoader {
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
             if (!modern && actionMap.get("overwrite") != null && !(actionMap.get("overwrite") instanceof Boolean)) throw new IllegalArgumentException("actions." + actionKey + ".overwrite must be a boolean");
-            for (String mapping : current ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"}
+            for (String mapping : current ? new String[]{"retry", "evidence", "fields", "result", "query", "update"}
+                    : previousVersion ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"}
                     : modern ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"} : new String[]{"retry", "fields"}) {
                 if (actionMap.get(mapping) != null && !(actionMap.get(mapping) instanceof Map)) throw new IllegalArgumentException("actions." + actionKey + "." + mapping + " must be a map");
             }
-            if (current && "flow".equals(String.valueOf(actionMap.get("type")))
+            if ((current || previousVersion) && "flow".equals(String.valueOf(actionMap.get("type")))
                     && !att.flow.FlowRegistry.isCanonicalId(String.valueOf(actionMap.get("use")))) {
                 throw new IllegalArgumentException("actions." + actionKey + ".use must be one static canonical Flow ID ending in .vN");
             }
@@ -241,6 +247,36 @@ public final class StageTemplateLoader {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (Map.Entry<?, ?> e : value.entrySet()) result.put(String.valueOf(e.getKey()), e.getValue());
         return result;
+    }
+    private void rejectLegacyResultFields(Map<String, Object> template, Path descriptor) {
+        Object configured = template.get("actions");
+        if (!(configured instanceof Map)) return;
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (!(entry.getValue() instanceof Map)) continue;
+            Map<?, ?> action = (Map<?, ?>) entry.getValue();
+            String actionId = String.valueOf(entry.getKey());
+            String type = String.valueOf(action.get("type"));
+            if (action.containsKey("renderAs")) {
+                String format = String.valueOf(action.get("renderAs"));
+                String suggestion = "Legacy field 'renderAs' is no longer supported. Replace it with:\n  result:\n    format: " + format;
+                if ("file".equalsIgnoreCase(format)) suggestion = "Legacy 'renderAs: file' mixed representation and persistence. Choose a result.format and result.path explicitly, for example:\n  result:\n    format: text\n    path: rendered/{filename}";
+                throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                        "Legacy Action field 'renderAs' is not supported", "Action " + actionId + " uses renderAs under schemaVersion " + template.get("schemaVersion"),
+                        descriptor.toString(), "actions." + actionId + ".renderAs", null, null, null, null, actionId, suggestion, null);
+            }
+            if (action.containsKey("saveAs")) {
+                Object old = action.get("saveAs");
+                Map<?, ?> save = old instanceof Map ? (Map<?, ?>) old : java.util.Collections.emptyMap();
+                String format = save.get("format") == null ? ("db".equalsIgnoreCase(type) ? "json" : "raw") : String.valueOf(save.get("format"));
+                String path = save.get("path") == null ? (old instanceof String ? String.valueOf(old) : null) : String.valueOf(save.get("path"));
+                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n    format: ").append(format);
+                if (path != null) suggestion.append("\n    path: ").append(path);
+                if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append("\n    overwrite: true");
+                throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                        "Legacy Action field 'saveAs' is not supported", "Action " + actionId + " uses saveAs under schemaVersion " + template.get("schemaVersion"),
+                        descriptor.toString(), "actions." + actionId + ".saveAs", null, null, null, null, actionId, suggestion.toString(), null);
+            }
+        }
     }
     private String text(Object value, String fallback) { return value == null ? fallback : String.valueOf(value); }
 }

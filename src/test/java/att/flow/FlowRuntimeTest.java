@@ -117,7 +117,7 @@ class FlowRuntimeTest {
     }
 
     @Test void keepsQualifiedArtifactsWhilePublishingInternalActionDirectly() throws Exception {
-        writeFlow("save", "schemaVersion: att-flow/v3.0\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n    saveAs: {path: value.txt, format: text}\n");
+        writeFlow("save", "schemaVersion: att-flow/v3.0\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n    result: {path: value.txt, format: text}\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir,
                 Collections.singletonList(flowAction("saveFlow", "common.save.v1", "stop")), "att-template/v3.0");
@@ -175,11 +175,12 @@ class FlowRuntimeTest {
         String payload = "case=${CASE.caseId}\nref=${CASE.SrcRefNo}\namount=${CASE.amount}\nchannel=${CASE.channel}\n";
         Files.write(tempDir.resolve("request.txt"), payload.getBytes(StandardCharsets.UTF_8));
         writeFlow("render", "schemaVersion: att-flow/v3.0\nid: common.render.v1\nname: Render\ndescription: Render\nactions:\n"
-                + "  renderRequest: {type: render, payload: request.txt, renderAs: text}\n");
+                + "  renderRequest: {type: render, payload: request.txt, result: {format: text}}\n");
         Files.write(tempDir.resolve("templates/flows/render/request.txt"), payload.getBytes(StandardCharsets.UTF_8));
 
         Map<String,Object> render = new LinkedHashMap<String,Object>();
-        render.put("type", "render"); render.put("payload", "request.txt"); render.put("renderAs", "text");
+        render.put("type", "render"); render.put("payload", "request.txt");
+        render.put("result", Collections.<String,Object>singletonMap("format", "text"));
         StageTemplate inlineTemplate = new StageTemplate("INLINE", tempDir,
                 Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.0")), "att-template/v3.0");
         StageTemplate flowTemplate = new StageTemplate("FLOW", tempDir,

@@ -14,4 +14,4 @@ Call-backed Tools execute typed framework-native calls, such as supported DB rea
 
 Both backends publish the same public Action envelope. The primary value is `${output.result}` while active and `${EXEC.ACTIONS.<id>.output.result}` after publication. Final operation evidence is under `output.evidence`; retries preserve per-attempt evidence under `output.attempts[n].evidence`.
 
-A Tool Action may use object `saveAs` and post-operation evidence collectors where permitted. Collectors execute after the primary operation and before that attempt's assertion; collector failure policy does not replace the primary `result`.
+A Tool Action may use the common `result` object and post-operation evidence collectors where permitted. `result.format` selects the in-memory representation, while optional `result.path` persists it. Collectors execute after the primary operation and before that attempt's assertion; collector failure policy does not replace the primary `result`.

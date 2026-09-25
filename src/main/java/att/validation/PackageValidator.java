@@ -217,7 +217,7 @@ public final class PackageValidator {
             validateReferencedExpression(action.expression(), prefix + ".expression", template, action, template.sourceFile(), syntaxEngine, config);
             validateReferencedExpression(action.message(), prefix + ".message", template, action, template.sourceFile(), syntaxEngine, config);
             validateReferencedExpression(action.file(), prefix + ".file", template, action, template.sourceFile(), syntaxEngine, config);
-            validateReferencedExpression(action.saveAs(), prefix + ".saveAs", template, action, template.sourceFile(), syntaxEngine, config);
+            validateReferencedExpression(action.resultConfig().path(), prefix + ".result.path", template, action, template.sourceFile(), syntaxEngine, config);
             for (Map.Entry<String, Object> field : action.fields().entrySet())
                 validateReferencedExpression(String.valueOf(field.getValue()), prefix + ".fields." + field.getKey(), template, action, template.sourceFile(), syntaxEngine, config);
             if ("db".equalsIgnoreCase(action.type())) {
@@ -340,7 +340,7 @@ public final class PackageValidator {
             addContextMigrationWarnings(diagnostics, engine, template, action,
                     action.file(), prefix + ".file", sourceFile, context);
             addContextMigrationWarnings(diagnostics, engine, template, action,
-                    action.saveAs(), prefix + ".saveAs", sourceFile, context);
+                    action.resultConfig().path(), prefix + ".result.path", sourceFile, context);
             addContextMigrationWarnings(diagnostics, engine, template, action,
                     action.call(), prefix + ".call", sourceFile, context);
             for (Map.Entry<String, Object> field : action.fields().entrySet())
@@ -496,7 +496,7 @@ public final class PackageValidator {
         List<String> expressions = new ArrayList<String>();
         expressions.add(action.description()); expressions.add(action.assertion()); expressions.add(action.expected());
         expressions.add(action.actual()); expressions.add(action.message()); expressions.add(action.file()); expressions.add(action.expression());
-        expressions.add(action.saveAs()); expressions.add(action.call());
+        expressions.add(action.resultConfig().path()); expressions.add(action.call());
         for (Map<String, Object> operation : java.util.Arrays.asList(action.query(), action.update())) {
             if (operation.get("sql") != null) expressions.add(String.valueOf(operation.get("sql")));
             Object params = operation.get("params");
@@ -796,16 +796,17 @@ public final class PackageValidator {
             if (!action.runWhen().trim().isEmpty()) validateAssertionExpression(action.runWhen(), syntaxEngine, config);
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
-                require(action.renderAs(), "renderAs is required for render action " + action.id());
-                if (!java.util.Arrays.asList("file", "text", "json", "yaml", "xml").contains(action.renderAs().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Invalid renderAs: " + action.renderAs());
-                forbid(action, "name", "saveAs", "overwrite", "output", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                require(action.resultFormat(), "result.format is required for render action " + action.id());
+                if (!java.util.Arrays.asList("raw", "text", "json", "yaml", "xml").contains(action.resultFormat().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Invalid render result.format: " + action.resultFormat());
+                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                validateRenderResultPath(action);
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false, action.id());
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
-                        if (!"file".equalsIgnoreCase(action.renderAs()) && !content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.renderAs());
+                        if (!content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.resultFormat());
                     } catch (Exception e) {
                         throw att.config.YamlSupport.locateText(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
                                 "Invalid render payload", e, null, null, "Check the payload expression and output format."),
@@ -814,13 +815,13 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "renderAs", "db", "query", "update", "expression", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.saveAs(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolSaveAs(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.resultConfig().path(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolResult(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
-            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
+            if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "result", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
                 if (action.message().trim().isEmpty() && action.file().trim().isEmpty()) throw new IllegalArgumentException("message or file is required for log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
-                forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "call", "db", "query", "update", "expression", "expected", "actual", "retry", "timeoutMs");
+                forbid(action, "name", "payload", "result", "call", "db", "query", "update", "expression", "expected", "actual", "retry", "timeoutMs");
                 for (Object key : action.fields().keySet()) if (!(key instanceof String)) throw new IllegalArgumentException("Log fields keys must be strings: " + action.id());
                 validateInlineExpressions(action.message(), syntaxEngine, config);
                 validateInlineExpressions(action.file(), syntaxEngine, config);
@@ -835,14 +836,15 @@ public final class PackageValidator {
                         "The same variable name is assigned more than once in template '" + template.name() + "'.",
                         null, "name", null, null, null, template.name(), action.id(),
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
-                forbid(action, "output", "payload", "renderAs", "saveAs", "overwrite", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 validateInlineExpressions(action.expression(), syntaxEngine, config);
             validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
             }
             if ("flow".equals(type)) {
-                if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) throw new IllegalArgumentException("Flow actions require " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
+                if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())
+                        && !att.Version.PREVIOUS_TEMPLATE_SCHEMA.equals(template.schemaVersion())) throw new IllegalArgumentException("Flow actions require " + att.Version.PREVIOUS_TEMPLATE_SCHEMA + " or " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
                 require(action.use(), "use is required for Flow action " + action.id());
-                forbid(action, "name", "payload", "renderAs", "saveAs", "overwrite", "call", "db", "query", "update", "expression", "assert", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                forbid(action, "name", "payload", "result", "call", "db", "query", "update", "expression", "assert", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 if (flows == null) throw new IllegalStateException("Flow registry is unavailable");
                 flows.validateInvocation(action);
             }
@@ -859,13 +861,13 @@ public final class PackageValidator {
             validateStaticContextStructure(action.runWhen(), syntaxEngine, completedActions, false, action.id());
             if ("tool".equals(type)) {
                 validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false, action.id());
-                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false, action.id());
+                validateStaticContextStructure(action.resultConfig().path(), syntaxEngine, completedActions, false, action.id());
                 for (EvidenceCollector collector : action.evidence().values()) {
                     validateStaticContextStructure(collector.call(), syntaxEngine, completedActions, true, action.id());
                 }
             }
             if ("db".equals(type)) {
-                validateStaticContextStructure(action.saveAs(), syntaxEngine, completedActions, false, action.id());
+                validateStaticContextStructure(action.resultConfig().path(), syntaxEngine, completedActions, false, action.id());
                 Map<String, Object> operation = action.query().isEmpty() ? action.update() : action.query();
                 if (operation.get("sql") != null) validateStaticContextStructure(String.valueOf(operation.get("sql")), syntaxEngine, completedActions, false, action.id());
                 Object params = operation.get("params");
@@ -908,9 +910,9 @@ public final class PackageValidator {
 
     private void validateActionSyntax(TemplateAction action, StageTemplate template,
                                       att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
-        String[] fields = {"description", "expected", "actual", "assert", "runWhen", "call", "expression", "message", "file", "saveAs"};
+        String[] fields = {"description", "expected", "actual", "assert", "runWhen", "call", "expression", "message", "file", "result.path"};
         String[] values = {action.description(), action.expected(), action.actual(), action.assertion(), action.runWhen(),
-                action.call(), action.expression(), action.message(), action.file(), action.saveAs()};
+                action.call(), action.expression(), action.message(), action.file(), action.resultConfig().path()};
         for (int index = 0; index < fields.length; index++) {
             try {
                 if (("assert".equals(fields[index]) || "runWhen".equals(fields[index])) && !values[index].trim().isEmpty())
@@ -934,8 +936,8 @@ public final class PackageValidator {
         boolean update = !action.update().isEmpty();
         if (query == update) throw new IllegalArgumentException("DB action requires exactly one query or update block: " + action.id());
         if (update && helper.readOnly()) throw new IllegalArgumentException("Dbhelper '" + helper.id() + "' is readOnly and cannot execute update Actions");
-        forbid(action, "name", "payload", "renderAs", "call", "expression", "expected", "actual",
-                "message", "file", "level", "fields", "retry", "timeoutMs", "overwrite");
+        forbid(action, "name", "payload", "renderAs", "saveAs", "call", "expression", "expected", "actual",
+                "message", "file", "level", "fields", "retry", "timeoutMs");
         Map<String, Object> operation = query ? action.query() : action.update();
         att.config.SchemaSupport.rejectUnknown(operation, "actions." + action.id() + "." + (query ? "query" : "update"),
                 "sql", "sqlFile", "params", "parameters");
@@ -973,49 +975,57 @@ public final class PackageValidator {
             }
             att.template.NamedSqlParameters.bind(sqlText, shape);
         }
-        validateInlineExpressions(action.saveAs(), engine, config);
-        if (action.saveConfig().specified()) {
-            String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+        validateInlineExpressions(action.resultConfig().path(), engine, config);
+        if (action.resultConfig().specified()) {
+            String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
             if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
-                throw new IllegalArgumentException("DB saveAs.format must be text, json, yaml, or xml: " + action.id());
+                throw new IllegalArgumentException("DB result.format must be text, json, yaml, or xml: " + action.id());
             }
         }
     }
 
-    private void validateToolSaveAs(TemplateAction action, FrameworkConfig config) {
-        if (!action.saveConfig().specified()) return;
+    private void validateToolResult(TemplateAction action, FrameworkConfig config) {
+        if (!action.resultConfig().specified()) return;
         ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
         if (parsed.name().startsWith("mq.")) {
             if (parsed.name().endsWith(".send")) {
-                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support saveAs: " + action.id());
+                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support result: " + action.id());
             }
-            String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+            String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
             if (format.isEmpty()) format = "raw";
             if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
                     || "yaml".equals(format) || "xml".equals(format))) {
-                throw new IllegalArgumentException("MQ saveAs.format must be raw, text, json, yaml, or xml: " + action.id());
+                throw new IllegalArgumentException("MQ result.format must be raw, text, json, yaml, or xml: " + action.id());
             }
             return;
         }
         boolean builtIn = BUILT_INS.contains(parsed.name().toLowerCase(java.util.Locale.ROOT));
         ToolConfig configured = config.tool(parsed.name());
         boolean callBacked = configured != null && configured.callBacked();
-        if (action.saveConfig().legacy()) {
-            if (callBacked) throw new IllegalArgumentException("call-backed Tool saveAs must use {path, format, overwrite}: " + action.id());
-            return;
-        }
-        String format = action.saveConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+        String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
         if (format.isEmpty()) {
-            if (callBacked) throw new IllegalArgumentException("call-backed Tool saveAs.format is required: " + action.id());
+            if (callBacked) throw new IllegalArgumentException("call-backed Tool result.format is required: " + action.id());
             return; // Runtime default is text for built-ins and raw for configured process Tools.
         }
         if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
                 || "yaml".equals(format) || "xml".equals(format))) {
-            throw new IllegalArgumentException("Tool saveAs.format must be raw, text, json, yaml, or xml: " + action.id());
+            throw new IllegalArgumentException("Tool result.format must be raw, text, json, yaml, or xml: " + action.id());
         }
         if ((builtIn || callBacked) && "raw".equals(format)) {
-            throw new IllegalArgumentException("Built-in and call-backed Tool saveAs.format do not support raw: " + action.id());
+            throw new IllegalArgumentException("Built-in and call-backed Tool result.format do not support raw: " + action.id());
         }
+    }
+
+    private void validateRenderResultPath(TemplateAction action) {
+        String path = action.resultConfig().path();
+        if (path == null || path.trim().isEmpty() || "console".equalsIgnoreCase(path.trim())) return;
+        if (path.contains("${") || path.contains("#{")) throw new IllegalArgumentException("Render result.path uses literal paths and {filename}, {name}, {ext}, {index}, {relativePath} tokens only: " + action.id());
+        java.util.regex.Matcher tokens = java.util.regex.Pattern.compile("\\{([^{}]+)\\}").matcher(path);
+        while (tokens.find()) if (!java.util.Arrays.asList("filename", "name", "ext", "index", "relativePath").contains(tokens.group(1))) {
+            throw new IllegalArgumentException("Unknown Render result.path token {" + tokens.group(1) + "}: " + action.id());
+        }
+        String residue = path.replaceAll("\\{(?:filename|name|ext|index|relativePath)\\}", "");
+        if (residue.indexOf('{') >= 0 || residue.indexOf('}') >= 0) throw new IllegalArgumentException("Malformed Render result.path token: " + action.id());
     }
 
     private void validateEvidence(TemplateAction action, StageTemplate template,
@@ -1316,10 +1326,10 @@ public final class PackageValidator {
                 engine.renderValidationValues(action.file(), context);
                 validateCallArgumentsIn(action.file(), context, engine);
 
-                sourceField = "actions." + action.id() + ".saveAs";
-                validateContextStructure(action.saveAs(), engine, context, testCase, completedActions, action.id());
-                engine.renderValidationValues(action.saveAs(), context);
-                validateCallArgumentsIn(action.saveAs(), context, engine);
+                sourceField = "actions." + action.id() + ".result.path";
+                validateContextStructure(action.resultConfig().path(), engine, context, testCase, completedActions, action.id());
+                engine.renderValidationValues(action.resultConfig().path(), context);
+                validateCallArgumentsIn(action.resultConfig().path(), context, engine);
 
                 for (Object key : action.fields().keySet()) {
                     sourceField = "actions." + action.id() + ".fields." + key;
@@ -1385,7 +1395,7 @@ public final class PackageValidator {
                         validateContextStructure(content, engine, context, testCase, completedActions, action.id());
                         String partial = engine.renderValidationValues(content, context);
                         validateCallArgumentsIn(content, context, engine);
-                        if (!"file".equalsIgnoreCase(action.renderAs()) && !partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.renderAs());
+                        if (!partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.resultFormat());
                     }
                 }
 

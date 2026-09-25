@@ -64,7 +64,7 @@ actions:
   renderRequest:
     type: render
     payload: payment/request.json
-    renderAs: file
+    result: {format: text, path: rendered/{filename}}
 
   queryOrder:
     type: db
@@ -118,7 +118,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 adds `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy. The dbhelper schema remains V2.5.
+V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 added `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy; `att-template/v3.1` is the current template schema and introduces the common Action `result` contract. The dbhelper schema remains V2.5.
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
@@ -131,8 +131,9 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../../schemas/att-sidecar-v2.2.schema.json) |
 | Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../../schemas/att-sidecar-v2.1.schema.json) |
-| Template descriptor | `att-template/v2.6` | [att-template-v2.6.schema.json](../../schemas/att-template-v2.6.schema.json) |
-| Legacy template descriptor (read compatibility) | `att-template/v2.5`, `att-template/v2.3` | [att-template-v2.5.schema.json](../../schemas/att-template-v2.5.schema.json) |
+| Template descriptor | `att-template/v3.1` | [att-template-v3.1.schema.json](../../schemas/att-template-v3.1.schema.json) |
+| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../../schemas/att-template-v3.0.schema.json) |
+| Legacy template descriptors (read compatibility) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [att-template-v2.6.schema.json](../../schemas/att-template-v2.6.schema.json), [att-template-v2.5.schema.json](../../schemas/att-template-v2.5.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../../schemas/att-validation-v2.1.schema.json) |
 | CI summary | `att-ci-summary/v2.1` | [att-ci-summary-v2.1.schema.json](../../schemas/att-ci-summary-v2.1.schema.json) |
@@ -275,16 +276,16 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 |---|---|
 | template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
 | action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
-| render | requires `payload`, `renderAs`; optional `assert`; no saveAs/output/call/expression/message/file/level/fields/timeout/retry/DB fields |
-| tool | requires `call`; optional object-shaped `saveAs`, `assert`, `expected`, `actual`, `timeoutMs`, Action-only `retry`, and `evidence`; command/call-backed Tools share this contract |
-| db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and either typed-list `params` or named `parameters`; optional `assert` and object-shaped `saveAs`; no action-level `overwrite`, `call`, retry, or Action timeout |
+| render | requires `payload` and `result.format`; optional `result.path`, `assert`; no `call`/expression/message/file/level/fields/timeout/retry/DB fields |
+| tool | requires `call`; optional object-shaped `result`, `assert`, `expected`, `actual`, `timeoutMs`, Action-only `retry`, and `evidence`; command/call-backed Tools share this contract |
+| db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and either typed-list `params` or named `parameters`; optional `assert` and `result`; no `call`, retry, or Action timeout |
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
-| assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `EXEC.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or saveAs |
-| `saveAs` | optional `path`; optional `format` and `overwrite`; target-specific format/default rules are validated whenever `saveAs` is supplied; `overwrite` defaults false |
+| assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `EXEC.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or result |
+| `result` | optional on Render, Tool, and DB; `format` is Action-specific; `path` is optional; `overwrite` defaults false |
 | retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
 
-`renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
+Template schema `att-template/v3.1` replaces `renderAs` and `saveAs` with `result`; legacy fields are rejected with migration suggestions. `result.format` selects `output.result`; `result.path` only controls optional persistence. A pathless result creates no artifact and `path: console` logs without creating a file. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
 
 #### Assign variable uniqueness and lifetime
 
@@ -322,72 +323,28 @@ Later actions and stages read the transformed value as `${EXEC.VARS.normalizedAm
 
 If an assign expression fails, ATT does not create its variable. This does not relax the authoring rule: a later assign in the same Case plan still cannot reuse that declared name. If the expression succeeds and the assign action's optional assertion subsequently returns FAIL or ERROR, the variable remains available; assertions do not roll back successful assignment. `EXEC.VARS` survives stage/template transitions and is discarded only when that Test Case ends.
 
-#### Action `saveAs`
-
-`saveAs` is an optional property of `type: tool` and `type: db` actions. V2.6 uses one object shape:
+#### Common Action `result`
 
 ```yaml
+renderRequest:
+  type: render
+  payload: requests/*.xml
+  result:
+    format: text
+    path: rendered/{name}-out.{ext}
+    overwrite: false
+
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
-  saveAs:
-    path: "responses/${EXEC.INPUT.rowCaseId}-response.json"
-    format: raw
-    overwrite: false
-  assert: "${output.result.status} == 'SUCCESS'"
+  call: "#{invokePaymentApi(...)}"
+  result: {format: json, path: responses/payment.json}
 ```
 
-`path` is optional and `overwrite` defaults to `false`. Omitting `path`, including in `saveAs: {format: ...}`, keeps the typed result in memory and creates no artifact. A supplied `saveAs` is still validated against the target-specific format defaults and restrictions even when `path` is absent. When `path` is present, it is written using those target-specific rules:
+`result.format` selects `output.result`; `result.path` optionally persists that same representation. Supported formats remain Action-specific: Render accepts `raw|text|json|yaml|xml`; process Tools and MQ accept `raw|text|json|yaml|xml`; built-in/call-backed Tools accept `text|json|yaml|xml`; DB accepts `text|json|yaml|xml`. DB `text` uses its stable SQL*Plus-style formatter. Omitting `path` never creates an artifact. `path: console` writes the representation to the Case log without creating a file or `output.targetFiles` entry. All real paths remain safe, relative to the Case artifact directory, and are containment-checked.
 
-| Action target | Allowed `format` | Default | Content |
-|---|---|---|---|
-| configured process Tool | `raw`, `text`, `json`, `yaml`, `xml` | `raw` | exact stdout bytes for `raw`; parsed typed `output.result` otherwise |
-| primary built-in called by `type: tool` | `text`, `json`, `yaml`, `xml` | `text` | typed `output.result` |
-| configured call-backed Tool | `text`, `json`, `yaml`, `xml` | none; required | typed `output.result`; no stdout exists |
-| `type: db` | `text`, `json`, `yaml`, `xml` | none; required | SQL*Plus-style rows/update count for `text`; stable typed DB result otherwise |
+Render supports literal paths for one source and these path-only tokens for source sets: `{filename}` (including extension), `{name}` (without final extension), `{ext}` (without dot), `{index}` (one-based deterministic order), `{relativePath}` (relative to the matched source root). No expression interpolation is performed inside these patterns. Multi-source paths must expand uniquely even when `overwrite: true`; every expanded path is safety-checked before writing. `output.result` remains a typed value for one source and an ordered source-keyed map for multiple sources; `output.targetFiles` lists only persisted paths.
 
-For a configured Tool, `raw` writes stdout exactly as produced by the process, including any final line ending; it is not the trimmed `rawOutput` string or parsed `output.result`. A built-in and DB action have no process stdout, so `raw` is invalid. For Tool/built-in targets, `text` writes `String.valueOf(output.result)` as UTF-8; for a direct DB Action it uses the SQL*Plus-style formatter above. `json`, `yaml`, and `xml` serialize the typed result using the selected codec and never serialize raw process stdout. Serialization does not replace the typed Context value.
-
-ATT resolves the path below the current Case artifact directory, normally alongside `case.log` under `output/<RunID>/<CaseID>/`. Parent directories such as `responses/` are created. The saved path appears in the Action's `output.targetFiles`; configured Tool attempt evidence also records it as `outputFile`. Without `saveAs`, ATT creates no separate output file.
-
-`saveAs.path` may be the reserved case-insensitive value `console`, which writes the selected representation to the Case log, adds no `output.targetFiles` entry, and creates no file. Otherwise it may contain `${...}` references plus `#{...}` expressions evaluated before the primary Action starts. Canonical Context paths are preferred:
-
-```yaml
-saveAs: {path: "${EXEC.INPUT.caseId}-response.json", format: raw}
-saveAs: {path: "responses/${EXEC.VARS.txnSeq}.json", format: json}
-saveAs: {path: "responses/${EXEC.ACTIONS.prepare.output.result}.txt", format: text}
-saveAs: {path: "responses/#{lower(${EXEC.INPUT.rowCaseId})}.json", format: raw}
-saveAs: {path: console, format: text}
-```
-
-The current Action has not produced an outcome when `saveAs.path` is evaluated, so `${output...}`, the current Action through `${EXEC.ACTIONS...}`, and future Action outputs are invalid. A configured Tool or DB call in the path is a real preceding invocation with normal Case-log evidence; built-ins are preferable for filename formatting.
-
-Except for the reserved `console` value, the rendered value must be a non-blank safe relative path using `/` separators. Absolute paths, backslashes, empty path segments, `.` segments, `..` segments, and any path that escapes the Case artifact directory are rejected. Examples:
-
-```yaml
-saveAs: {path: "responses/TC001.json", format: raw}    # valid Tool artifact
-saveAs: {path: "/tmp/response.json", format: raw}      # invalid: absolute
-saveAs: {path: "../response.json", format: raw}        # invalid: parent traversal
-saveAs: {path: "responses\\TC001.json", format: raw}   # invalid: backslash separator
-saveAs: {path: "${output.result}.json", format: raw}   # invalid: current output unavailable
-```
-
-If the resolved file already exists within the same Case, the Action is ERROR unless `saveAs.overwrite: true` is configured. When Tool retry is enabled, every attempt uses the same resolved path; a later attempt may replace only the artifact written by an earlier attempt of that same Action so the dedicated file contains the final attempt. Separate Cases have separate artifact directories and therefore do not collide merely because they use the same relative path.
-
-Write timing follows the selected content source and precedes the optional assertion. A process Tool with `raw` saves captured stdout even when output parsing, exit-code retry, or the final Action outcome is unsuccessful. A non-`raw` Tool artifact requires a successfully parsed typed result; a built-in artifact requires a successful built-in call; a DB artifact requires successful JDBC execution. Codec, path-resolution, collision, and file-write failures are Action `ERROR`. `render`, `assert`, `log`, and `assign` actions reject `saveAs`. A render action writes files through `renderAs: file` and exposes them through its own `output.targetFiles` contract.
-
-DB therefore uses the same shape without pretending it has process output:
-
-```yaml
-saveAs:
-  path: "db/${EXEC.INPUT.rowCaseId}-orders.txt"
-  format: text
-  overwrite: false
-```
-
-`path` is optional for DB as well, but DB still requires `format: text|json|yaml|xml` whenever `saveAs` is supplied, even when no path is present. A valid pathless DB `saveAs` creates no artifact; when a DB artifact path is present, the same format and path rules apply. The written representation never replaces `${output.result}`'s typed Java object.
-
-`att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.6` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
+Migration for `att-template/v3.1`: `renderAs` becomes `result.format`; `saveAs.format` becomes `result.format`; `saveAs.path` becomes `result.path`; `saveAs.overwrite` becomes `result.overwrite`. `renderAs: file` is ambiguous because it mixed output representation and persistence: choose a real format and a path explicitly. `att validate` rejects legacy fields and emits a concrete replacement suggestion (including the required representation choice for `file`) in human and JSON diagnostics; it never rewrites files.
 
 ### Tool contract
 
@@ -405,7 +362,7 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and `renderAs: file` targets remain below the Case output directory. Tool/DB Action `saveAs.path` stays below the Case artifact directory. ATT normalizes and checks root containment before reads and writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and all Action `result.path` targets remain below the Case artifact directory. ATT normalizes and checks root containment before reads and writes.
 
 ### Validation JSON contract
 

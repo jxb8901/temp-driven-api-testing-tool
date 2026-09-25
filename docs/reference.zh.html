@@ -726,7 +726,7 @@ PASS，只是允许后续适格工作继续运行。</p>
 <p>只有当目录直接包含 <code>template.yaml</code>
 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。</p>
 <div class="sourceCode" id="cb8"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-template/v2.6</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-template/v3.1</span></span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> PAYMENT_INVOKE</span></span>
 <span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> Render and invoke a payment request</span></span>
 <span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
@@ -738,12 +738,12 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="
 <span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Render request for ${EXEC.INPUT.caseId}; status=${output.status}&quot;</span></span>
 <span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> requests/*.xml</span></span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">renderAs</span><span class="kw">:</span><span class="at"> file</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> rendered/{filename</span><span class="kw">}</span><span class="at">}</span></span>
 <span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.targetFiles[0]} != null&quot;</span></span>
 <span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">callApi</span><span class="kw">:</span></span>
 <span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span></span>
-<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">saveAs</span><span class="kw">:</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span></span>
 <span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.caseId}-response.json&quot;</span></span>
 <span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
 <span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
@@ -770,7 +770,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="
 <tr class="odd">
 <td><code>render</code></td>
 <td>渲染一个或多个 UTF-8 负载</td>
-<td><code>type</code>、<code>payload</code>、<code>renderAs</code></td>
+<td><code>type</code>、<code>payload</code>、<code>result.format</code>；<code>result.path</code>
+可选</td>
 <td>嵌套 <code>output.result</code> 与
 <code>output.targetFiles</code></td>
 </tr>
@@ -811,25 +812,24 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="
 <p>动作按 YAML 顺序执行。动作 ID
 在模板内唯一，且不能包含点号。每个动作都可以定义
 <code>description</code> 和 <code>onFailure: stop|continue</code>。</p>
-<p>动作校验按类型进行。render 动作要求安全且非空的 payload glob，以及
-<code>renderAs: file|text|json|yaml|xml</code>；它不能包含
-Tool、assert-action、log 或 DB 字段。重试和 Action 级 timeout 仅对 Tool
-动作有效。Tool 与 DB Action 可使用共同的 object-shaped
-<code>saveAs</code>，其他类型不可使用。DB Action 必须指定已配置的
-<code>db</code> ID，并在 <code>query</code> 与 <code>update</code>
-中恰好选择一个；所选 block 又必须在 <code>sql</code> 与
-<code>sqlFile</code> 中恰好选择一个。assert 动作要求
-<code>assert</code>，并可包含 <code>expected</code> 和
+<p>动作校验按类型进行。render 要求安全且非空的 payload glob，以及
+<code>result.format: raw|text|json|yaml|xml</code>；可选
+<code>result.path</code> 负责持久化。Tool、MQ receive/request 与 DB
+共用同一个可选 <code>result</code> object。重试和 Action 级 timeout 仅对
+Tool 动作有效。DB Action 必须指定已配置的 <code>db</code> ID，并在
+<code>query</code> 与 <code>update</code> 中恰好选择一个；所选 block
+又必须在 <code>sql</code> 与 <code>sqlFile</code> 中恰好选择一个。assert
+动作要求 <code>assert</code>，并可包含 <code>expected</code> 和
 <code>actual</code>；<code>expression</code>、<code>acture</code>、<code>actural</code>
 都是非法字段。log 动作要求 <code>message</code>、<code>file</code>
 或两者；并可使用 <code>level</code> 和 <code>fields</code>。assign
 动作要求 <code>name</code> 和
 <code>expression</code>。不支持的字段会报错，而不是被忽略。</p>
-<p>共同的 Tool/DB <code>saveAs</code> object 中，<code>path</code>
-可以省略：省略时只保留 typed result，不创建 artifact。只要提供
-<code>saveAs</code> 仍会校验目标专属的 format 默认值与限制，即使没有
-path；提供 <code>path</code> 后再应用路径安全、冲突和 overwrite
-规则。</p>
+<p><code>result.format</code> 决定内存中的 <code>output.result</code>
+表示；<code>result.path</code> 可选持久化，但不会改变该表示。省略 path
+不会建立 artifact；<code>path: console</code> 只将选定表示写入 Case
+log。旧 <code>renderAs</code> 与 <code>saveAs</code>
+会被拒绝，<code>att validate</code> 会提供迁移建议。</p>
 <p>每个动作都可以使用 <code>assert</code>，但 assert
 动作本身把它作为必需主表达式。每个动作结果都嵌套在 <code>output</code>
 下，包括
@@ -857,13 +857,17 @@ object，不会转成字符串。成功赋值后，后续动作和阶段可通�
 支持可选 <code>description</code>、<code>assert</code> 和
 <code>onFailure</code>，但不支持
 render、tool-action、log、report-only、retry、timeout 或
-<code>saveAs</code>。断言 FAIL/ERROR
+<code>result</code>。断言 FAIL/ERROR
 不会回滚已成功求值的变量；表达式失败则不会创建变量。</p>
 <p>Render 负载路径必须保持在模板根目录下。glob
-匹配会取模板相对路径排序后的普通非符号链接文件。<code>renderAs: file</code>
-会把渲染结果写入 Case 输出目录中对应的相对路径；冲突会报
-ERROR。其他渲染模式不会写文件，而是把一个类型化值，或多个匹配项对应的“相对路径→值”有序映射，写入
-<code>output.result</code>。</p>
+匹配会按模板相对路径确定性排序。Render 的 <code>result.path</code>
+可对单一来源使用字面路径；多来源可使用
+<code>{filename}</code>、<code>{name}</code>、<code>{ext}</code>、<code>{index}</code>
+与
+<code>{relativePath}</code>。展开后的目标必须唯一，<code>overwrite: true</code>
+也不能允许同一 Action
+内目标冲突。单来源保留一个类型化值，多来源保留按来源键排序的
+map；<code>output.targetFiles</code> 只列出实际写入的文件。</p>
 <p>log 动作可以输出渲染后的 <code>message</code>、一个 <code>file</code>
 的完整内容，或两者同时输出：</p>
 <div class="sourceCode" id="cb9"><pre
@@ -883,7 +887,7 @@ YAML escape 后的 <code>\\n</code>。相对 <code>file</code> 路径会解析�
 以下；绝对路径仅在其解析后的真实路径仍位于该目录下时才接受。源必须是存在的、普通非符号链接、UTF-8
 文件。路径或符号链接逃逸、恶意 UTF-8、空白解析路径，以及尝试读取当前
 Case 日志，都会报 ERROR。</p>
-<p>若要用与 DB Action <code>saveAs.format: text</code> 相同的 SQL*Plus
+<p>若要用与 DB Action <code>result.format: text</code> 相同的 SQL*Plus
 风格输出打印类型化 DB 结果，可在 message 中使用纯内建函数
 <code>dbText(...)</code>：</p>
 <div class="sourceCode" id="cb10"><pre
@@ -1347,10 +1351,11 @@ call-backed。</p>
 <code>${EXEC.ACTIONS.&lt;id&gt;.output.result}</code>。Final operation
 evidence 位於 <code>output.evidence</code>；retry 的 per-attempt
 evidence 保留在 <code>output.attempts[n].evidence</code>。</p>
-<p>Tool Action 在支援位置可以使用 object <code>saveAs</code> 和
-post-operation evidence collector。Collector 在 primary operation 後、該
-attempt assertion 前執行；collector failure policy 不會取代 primary
-<code>result</code>。</p>
+<p>Tool Action 在支援位置可以使用共同的 <code>result</code> object 和
+post-operation evidence collector。<code>result.format</code>
+決定內存表示，<code>result.path</code> 可選持久化。Collector 在 primary
+operation 後、該 attempt assertion 前執行；collector failure policy
+不會取代 primary <code>result</code>。</p>
 <h3 id="52-dbhelper">5.2 DBHelper</h3>
 <p>DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用
 <code>schemaVersion: att-dbhelper/v2.5</code> 和穩定 logical
@@ -1502,17 +1507,18 @@ request output queue 使用 <code>MQOO_BIND_NOT_FIXED</code>；send output
 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在
 <code>encoding</code> 是合法的 IBM MQ integer/decimal/float
 組合時才會接受。</p>
-<h4 id="common-saveas">Common saveAs</h4>
-<p>MQ receive/request 使用 common Action saveAs，不增加 MQ-specific
-resultType/replyType：</p>
+<h4 id="common-action-result">Common Action result</h4>
+<p>MQ receive/request 使用共同的 Action <code>result</code>，不增加
+MQ-specific resultType/replyType：</p>
 <div class="sourceCode" id="cb28"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">result</span><span class="kw">:</span></span>
 <span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span></span>
 <span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> response.bin</span></span>
 <span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p>format 預設 raw，path 可省略。raw 是原始 byte[]，text 是
-String，json/yaml/xml 是現有 ATT typed value。沒有 saveAs 或 saveAs: {}
-只保留 memory result，不建立 file。<code>path: console</code>
+<p><code>format</code> 決定內存 <code>output.result</code>
+表示；<code>path</code> 可省略且只控制持久化。raw 是原始 byte[]，text 是
+String，json/yaml/xml 是現有 ATT typed value。pathless
+<code>result</code> 不建立 file。<code>path: console</code>
 會把所選表示寫入 Case log，不加入
 <code>output.targetFiles</code>，也不建立 file。沒有真正的 path 不會建立
 .reply.bin。raw 加真正的 path 逐 byte 寫入，overwrite/path safety 沿用
@@ -1521,18 +1527,18 @@ common Action rules。</p>
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> requestXml</span></span>
 <span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.request(file=&#39;request.xml&#39;)}&quot;</span></span>
-<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">}</span></span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">}</span></span>
 <span id="cb29-5"><a href="#cb29-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.Response.Status} == &#39;SUCCESS&#39;&quot;</span></span>
 <span id="cb29-6"><a href="#cb29-6" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb29-7"><a href="#cb29-7" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> requestXmlSaved</span></span>
 <span id="cb29-8"><a href="#cb29-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb29-9"><a href="#cb29-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.request(file=&#39;request.xml&#39;)}&quot;</span></span>
-<span id="cb29-10"><a href="#cb29-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> responses/payment.xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
+<span id="cb29-10"><a href="#cb29-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> responses/payment.xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
 <span id="cb29-11"><a href="#cb29-11" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb29-12"><a href="#cb29-12" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> receiveReply</span></span>
 <span id="cb29-13"><a href="#cb29-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb29-14"><a href="#cb29-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.receive(queue=&#39;replyQ&#39;, correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}&quot;</span></span>
-<span id="cb29-15"><a href="#cb29-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
+<span id="cb29-15"><a href="#cb29-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
 <h4 id="output-與-validation">Output 與 validation</h4>
 <p>output.result 是 business payload；MQ metadata 直接放在 output。每個
 operation 都發布 <code>mqHelper</code>、選中的 physical
@@ -1540,9 +1546,9 @@ operation 都發布 <code>mqHelper</code>、選中的 physical
 <code>selectionStrategy</code>；v1.0 及單一 instance helper 的
 <code>selectionStrategy</code> 為 <code>single</code>。send 發布
 sent、queue、bytes、messageId、correlationId，result 為
-null/absent。<code>send</code> 不產生 business payload，因此拒絕
-<code>saveAs</code>；<code>receive</code> 與 <code>request</code> 支援
-<code>saveAs</code>。receive/request 發布 received/replyReceived、queue
+null/absent。<code>send</code> 不產生 business payload，因此拒絕 Action
+<code>result</code>；<code>receive</code> 與 <code>request</code>
+支援它。receive/request 發布 received/replyReceived、queue
 names、effective
 waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ
 提供時的 reply CCSID/encoding/format、completion/reason fields，parsed
@@ -1558,8 +1564,8 @@ resolver 解碼；不支援的 CCSID 會清楚失敗，沒有 metadata 才 fallb
 configured charset。Log/report 以 new String(rawBytes,
 Charset.defaultCharset()) 顯示 raw，不轉 hex，也不建立 implicit
 file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法
-encoding/expiry/queue、缺少 effective request/reply queue、不支援 saveAs
-format 及 unsafe path。</p>
+encoding/expiry/queue、缺少 effective request/reply queue、不支援 Action
+result format 及 unsafe result.path。</p>
 <h4 id="issue-60-v11-logical-group-與-physical-instance">Issue #60 v1.1
 logical group 與 physical instance</h4>
 <p><code>att-mqhelper/v1.1</code> 保留一個 public logical helper
@@ -1763,7 +1769,7 @@ Context path 或当前可见变量，此时 ATT 会要求使用
 built-in、配置 Tool 与只读 DB
 query；<code>report.fileNamePattern</code>、Tool <code>command</code> 与
 DB SQL source 是受限 scope，不允许隐藏或递归 external execution。Tool/DB
-<code>saveAs.path</code>、DB
+<code>result.path</code>、DB
 <code>params</code>／<code>parameters</code> 在主调用前求值；DB SQL
 内容只允许 Context 和 pure built-in。</p>
 <p><code>type: tool</code> 的主 <code>call</code> 可指向配置 Tool 或 ATT
@@ -2461,7 +2467,7 @@ framework-owned
 <p><code>misc.dbText</code> 只接受一个位置参数或具名
 <code>value</code>。参数必须是直接 DB Action、DB expression 或 DB-backed
 Tool 返回的稳定 query／update result。它与直接 DB Action 的
-<code>saveAs.format: text</code> 共用同一个确定性 formatter，并且没有
+<code>result.format: text</code> 共用同一个确定性 formatter，并且没有
 JDBC、transaction、connection 或 cache side effect。</p>
 <p><code>misc.prettyPrint</code>（alias：<code>prettyPrint</code>、<code>format.pretty</code>）接受一个位置参数或具名
 <code>value</code>，递归格式化 Map、List、Iterable、array、scalar 与
@@ -2620,7 +2626,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb49-1"><a href=
 <span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">renderRequest</span><span class="kw">:</span></span>
 <span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payment/request.json</span></span>
-<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">renderAs</span><span class="kw">:</span><span class="at"> file</span></span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> rendered/{filename</span><span class="kw">}</span><span class="at">}</span></span>
 <span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queryOrder</span><span class="kw">:</span></span>
 <span id="cb49-8"><a href="#cb49-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
@@ -2693,10 +2699,11 @@ testcase/template root、report policy 或 package structure
 href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a>
 使用 <code>att-schema-catalog/v3.0</code>。当前主配置、Tool
 group、sidecar、Template 与 Flow 分别为
-<code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v3.0</code>
-与 <code>att-flow/v3.0</code>。旧 schema 保持有限 read
-compatibility，但旧 <code>EXIT_CODE</code> retry 与 sidecar timeout
-必须迁移。</p>
+<code>att-config/v2.6</code>、<code>att-tool-group/v2.6</code>、<code>att-sidecar/v2.2</code>、<code>att-template/v3.1</code>
+与 <code>att-flow/v3.0</code>。舊 Template 的
+<code>renderAs</code>／<code>saveAs</code>
+不再接受；<code>att validate</code> 會提供遷移建議。舊 schema
+的其他相容規則不變。</p>
 <h3 id="全局配置">全局配置</h3>
 <div class="sourceCode" id="cb52"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.6</span></span>
@@ -3018,25 +3025,23 @@ ID 不能含点号</td>
 </tr>
 <tr class="odd">
 <td>render</td>
-<td>需要 <code>payload</code>、<code>renderAs</code>；可选
-<code>assert</code>; 不允许
-saveAs/overwrite/output/call/expression/message/file/level/fields/timeout/retry</td>
+<td>需要 <code>payload</code> 与 <code>result.format</code>；可选
+<code>result.path</code>、<code>assert</code>；不允许
+call/expression/message/file/level/fields/timeout/retry/DB</td>
 </tr>
 <tr class="even">
 <td>tool</td>
 <td>需要 <code>call</code>；可选 object
-<code>saveAs</code>、<code>assert</code>、<code>expected</code>、<code>actual</code>、<code>timeoutMs</code>、Action-only
-<code>retry</code> 与 <code>evidence</code>；command/call-backed
-共用契约</td>
+<code>result</code>、<code>assert</code>、<code>expected</code>、<code>actual</code>、<code>timeoutMs</code>、Action-only
+<code>retry</code> 与 <code>evidence</code></td>
 </tr>
 <tr class="odd">
 <td>db</td>
 <td>需要 <code>db</code> 与恰好一个
 <code>query</code>／<code>update</code>；block 内恰好一个
-<code>sql</code>／<code>sqlFile</code>；可选位置 <code>params</code>
-或具名 <code>parameters</code>、object
-<code>saveAs</code>、<code>assert</code>；不允许同时使用两种 parameter
-形式，也不允许 retry 或 Action timeout</td>
+<code>sql</code>／<code>sqlFile</code>；可选
+<code>params</code>／<code>parameters</code>、<code>assert</code> 与
+<code>result</code>；不允许 retry 或 Action timeout</td>
 </tr>
 <tr class="even">
 <td>assert</td>
@@ -3055,9 +3060,14 @@ render/tool/assert-action-only 字段、timeout 或 retry</td>
 <td>需要 <code>name</code>、<code>expression</code>；可选
 <code>assert</code>；<code>name</code> 在整个 Case 的
 <code>EXEC.VARS</code> 下唯一；不允许 render/tool/assert-action/log-only
-字段、timeout、retry、saveAs 或 overwrite</td>
+字段、timeout、retry 或 result</td>
 </tr>
 <tr class="odd">
+<td><code>result</code></td>
+<td>可用于 Render、Tool、DB；<code>format</code> 按 Action
+类型限制；<code>path</code> 可选；<code>overwrite</code> 默认 false</td>
+</tr>
+<tr class="even">
 <td>retry</td>
 <td>必填
 <code>maxAttempts</code>、<code>intervalMs</code>、<code>retryOn</code>；category
@@ -3065,9 +3075,13 @@ render/tool/assert-action-only 字段、timeout 或 retry</td>
 </tr>
 </tbody>
 </table>
-<p><code>renderAs</code> 允许
-<code>file</code>、<code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>。retry
-<code>maxAttempts</code> 为 2–10，<code>intervalMs</code> 为
+<p>模板 schema <code>att-template/v3.1</code> 以 <code>result</code>
+取代
+<code>renderAs</code>／<code>saveAs</code>；舊欄位會被拒絕並附遷移建議。<code>result.format</code>
+決定 <code>output.result</code>；<code>result.path</code>
+只控制可選持久化。省略 path 不會建立
+artifact；<code>path: console</code> 只寫入 Case log。retry
+<code>maxAttempts</code> 為 2–10，<code>intervalMs</code> 為
 0–3600000；<code>ASSERTION</code> 要求 Tool Action 有非空
 <code>assert</code>。日志级别为
 <code>TRACE</code>、<code>DEBUG</code>、<code>INFO</code>、<code>WARN</code>
@@ -3079,87 +3093,41 @@ render/tool/assert-action-only 字段、timeout 或 retry</td>
 <p>assign 动作会在 <code>EXEC.VARS</code> 下创建一个不可变、Case
 作用域的条目。一个 Case
 内每个变量名必须唯一。重复声明会导致校验失败。</p>
-<h4 id="action-saveas">Action <code>saveAs</code></h4>
-<p>V2.6 的 Tool 与 DB Action 共用一个 object shape：</p>
+<h4 id="action-result">Action <code>result</code></h4>
 <div class="sourceCode" id="cb53"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span></span>
-<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> relative/path/result.yaml</span></span>
-<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span>
-<span id="cb53-4"><a href="#cb53-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p><code>path</code> 可省略，<code>overwrite</code> 默认 false。省略
-<code>path</code>（包括 <code>saveAs: {format: ...}</code>）只把 typed
-result 保留在 memory，不建立 artifact。只要提供
-<code>saveAs</code>，即使没有 path，也会按目标专属的 format
-默认值与限制校验；提供 <code>path</code>
-时才按这些规则写入。<code>format</code> 只控制写入表示，不改变
-<code>${output.result}</code> 的 typed
-value。<code>att-template/v2.6</code> 不允许 sibling
-<code>overwrite</code> 或 scalar <code>saveAs: file.name</code>。</p>
-<table>
-<thead>
-<tr class="header">
-<th>Action target</th>
-<th>允许格式</th>
-<th>默认</th>
-<th>保存内容</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>配置 process Tool</td>
-<td><code>raw</code>、<code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
-<td><code>raw</code></td>
-<td>raw 为精确 stdout bytes；其他格式序列化已解析 typed result</td>
-</tr>
-<tr class="even">
-<td><code>type: tool</code> 的主要 Java built-in</td>
-<td><code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
-<td><code>text</code></td>
-<td>built-in typed result；text 使用 UTF-8 字符串表示</td>
-</tr>
-<tr class="odd">
-<td>配置 call-backed Tool</td>
-<td><code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
-<td>无，必须明确指定</td>
-<td>typed result；不存在 stdout</td>
-</tr>
-<tr class="even">
-<td><code>type: db</code></td>
-<td><code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code></td>
-<td>无，必须明确指定</td>
-<td>text 为 SQL*Plus 风格 rows／update 行数；其他格式为稳定 typed DB
-result object</td>
-</tr>
-</tbody>
-</table>
-<p><code>raw</code> 仅适用于有原始 stdout 的 process Tool。configured
-Tool 的 <code>output: txt|json|yaml|xml</code> 继续决定 stdout
-如何解析，因此也决定非 raw 格式的 typed source。</p>
-<p>Tool／built-in 的 <code>text</code> 使用
-<code>String.valueOf(output.result)</code>；直接 DB Action 的
-<code>text</code> 使用上述 SQL*Plus 风格
-formatter。任何写入表示都不会替换 Context 中的 typed
-<code>${output.result}</code>。</p>
-<p><code>saveAs.path</code> 可以是大小写不敏感的保留值
-<code>console</code>。此时 ATT 把所选表示写入 Case 日志，不添加
-<code>output.targetFiles</code>，也不创建文件。其他 path 使用 Action
-前的正常 expression scope 渲染，必须得到非空安全相对路径并保持在当前
-Case artifact
-目录内。绝对路径、反斜线、空／<code>.</code>／<code>..</code> segment 与
-containment escape 都非法。父目录按需创建。</p>
-<p>写入发生在可选 Action assertion 之前。process Tool 的 raw 即使遇到
-parse error、exit-code retry 或最终 Action 不成功，也保存已捕获
-stdout；非 raw Tool artifact 要求 parse 成功，built-in artifact
-要求调用成功，DB artifact 要求 JDBC 成功。codec、路径、collision
-或写入失败都是 ERROR。retry 共用同一路径，后续 attempt 只能覆盖同一
-Action 先前 attempt 写入的 artifact。最终路径加入
-<code>output.targetFiles</code>。</p>
-<p><code>render</code>、<code>assert</code>、<code>log</code> 与
-<code>assign</code> 不支持 <code>saveAs</code>；render file 继续使用
-<code>renderAs: file</code>。</p>
-<p><code>att-template/v2.3</code> 保持读取兼容：旧式 Tool
-<code>saveAs: response.json</code> 加 sibling <code>overwrite</code>
-会内部归一化并维持原行为；新模板必须使用 V2.5 object form。</p>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequests</span><span class="kw">:</span></span>
+<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> requests/*.xml</span></span>
+<span id="cb53-4"><a href="#cb53-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> rendered/{name</span><span class="kw">}</span><span class="at">-out.{ext}, overwrite: false}</span></span>
+<span id="cb53-5"><a href="#cb53-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb53-6"><a href="#cb53-6" aria-hidden="true" tabindex="-1"></a><span class="fu">receiveReply</span><span class="kw">:</span></span>
+<span id="cb53-7"><a href="#cb53-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb53-8"><a href="#cb53-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.orders.receive(queue=&#39;REPLY.Q&#39;)}&quot;</span></span>
+<span id="cb53-9"><a href="#cb53-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
+<p><code>result.format</code> 决定
+<code>output.result</code>；<code>result.path</code>
+可选持久化相同表示，不会改变内存结果。省略 path 不建立
+artifact；<code>path: console</code> 只写入 Case log，不产生文件或
+<code>output.targetFiles</code>。Render 支持
+<code>raw|text|json|yaml|xml</code>；process Tool/MQ
+支持相应格式；built-in/call-backed Tool 与 DB 支持
+<code>text|json|yaml|xml</code>，DB 的 text 使用确定性 SQL*Plus 风格
+formatter。真实路径必须安全且保持在 Case artifact 根目录。</p>
+<p>Render 单来源可用字面路径，多来源支持
+<code>{filename}</code>、<code>{name}</code>、<code>{ext}</code>、<code>{index}</code>
+与 <code>{relativePath}</code>；这些 token
+不求值表达式。匹配按确定性顺序处理，多来源展开路径必须唯一，<code>overwrite: true</code>
+也不能容许同一 Action 的目标冲突。<code>output.result</code>
+单来源为类型化值，多来源为有序来源键
+map；<code>output.targetFiles</code> 只包含实际落盘路径。</p>
+<p>迁移至 <code>att-template/v3.1</code>：<code>renderAs</code> →
+<code>result.format</code>；<code>saveAs.format</code> →
+<code>result.format</code>；<code>saveAs.path</code> →
+<code>result.path</code>；<code>saveAs.overwrite</code> →
+<code>result.overwrite</code>。<code>renderAs: file</code>
+混合了表示与持久化，必须由作者分别选择 format 和
+path。<code>att validate</code> 会在 human/JSON diagnostics
+中拒绝旧字段并展示具体替换建议；不会自动改写文件。</p>
 <h3 id="工具契约">工具契约</h3>
 <p>每个工具要求
 <code>name</code>、<code>description</code>，以及恰好一个
@@ -3188,9 +3156,8 @@ boolean <code>required</code>。Command-backed 参数可使用 argv
 同样遵循相同字符规则。<code>workbookId</code> 与 <code>groupId</code>
 不能含点号，因为点号用于分隔三个组件；<code>rowCaseId</code>
 可含点号。模板路径相对 <code>templates.root</code>；render glob
-匹配必须保持在模板下，<code>renderAs: file</code> 与 Tool/DB Action
-<code>saveAs.path</code> 目标必须保持在 Case artifact 目录下。ATT
-会规范化并检查根包含性。</p>
+匹配必须保持在模板下，Render／Tool／DB 的 <code>result.path</code>
+目标必须保持在 Case artifact 目录下。ATT 会规范化并检查根包含性。</p>
 <h3 id="validation-json-合约">Validation JSON 合约</h3>
 <div class="sourceCode" id="cb54"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
@@ -4015,7 +3982,8 @@ matrix、compatibility/deprecation、migration note、limit/default。</p>
 </tr>
 <tr class="odd">
 <td>Template</td>
-<td><code>att-template/v3.0</code>（相容的舊格式仍可讀）</td>
+<td><code>att-template/v3.1</code>（舊
+<code>renderAs</code>／<code>saveAs</code> 會被拒絕並提供遷移建議）</td>
 </tr>
 <tr class="even">
 <td>Flow</td>

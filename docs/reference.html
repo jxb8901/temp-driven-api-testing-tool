@@ -788,7 +788,7 @@ permits later eligible work to run.</p>
 <code>template.yaml</code>. Category directories may contain other
 template directories but are not callable themselves.</p>
 <div class="sourceCode" id="cb8"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-template/v2.6</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-template/v3.1</span></span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> PAYMENT_INVOKE</span></span>
 <span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> Render and invoke a payment request</span></span>
 <span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
@@ -800,12 +800,12 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="
 <span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Render request for ${EXEC.INPUT.caseId}; status=${output.status}&quot;</span></span>
 <span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> requests/*.xml</span></span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">renderAs</span><span class="kw">:</span><span class="at"> file</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> rendered/{filename</span><span class="kw">}</span><span class="at">}</span></span>
 <span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.targetFiles[0]} != null&quot;</span></span>
 <span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">callApi</span><span class="kw">:</span></span>
 <span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span></span>
-<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">saveAs</span><span class="kw">:</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span></span>
 <span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.caseId}-response.json&quot;</span></span>
 <span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span></span>
 <span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
@@ -833,7 +833,8 @@ templates should have a globally unique symbolic name.</p>
 <tr class="odd">
 <td><code>render</code></td>
 <td>Render one or more UTF-8 payloads</td>
-<td><code>type</code>, <code>payload</code>, <code>renderAs</code></td>
+<td><code>type</code>, <code>payload</code>, <code>result.format</code>;
+optional <code>result.path</code></td>
 <td>nested <code>output.result</code> and
 <code>output.targetFiles</code></td>
 </tr>
@@ -875,13 +876,12 @@ and <code>output.result</code></td>
 <p>Actions run in YAML order. Action IDs are unique within the template
 and cannot contain a dot. Every action may define
 <code>description</code> and <code>onFailure: stop|continue</code>.</p>
-<p>Action validation is type-specific. A render action requires a safe
-non-empty payload glob and
-<code>renderAs: file|text|json|yaml|xml</code>; it cannot contain
-tool/assert-action/log/DB fields. Retry and Action-level timeout are
-valid only for tool actions. Tool and DB actions may use the common
-object-shaped <code>saveAs</code>; no other action type may use it. A DB
-action requires a configured <code>db</code> ID and exactly one
+<p>Action validation is type-specific. Render requires a safe non-empty
+payload glob and <code>result.format: raw|text|json|yaml|xml</code>; an
+optional <code>result.path</code> persists its result. Tool, MQ
+receive/request, and DB use the same optional <code>result</code>
+object. Retry and Action-level timeout are valid only for tool actions.
+A DB action requires a configured <code>db</code> ID and exactly one
 <code>query</code> or <code>update</code> block; the selected block
 requires exactly one <code>sql</code> or <code>sqlFile</code> source. An
 assert action requires <code>assert</code> and may include
@@ -891,12 +891,13 @@ action requires <code>message</code>, <code>file</code>, or both and may
 use <code>level</code> and <code>fields</code>. An assign action
 requires <code>name</code> and <code>expression</code>. Unsupported
 fields are errors rather than ignored values.</p>
-<p>For the common Tool/DB <code>saveAs</code> object, <code>path</code>
-is optional: a pathless object keeps the typed result in memory and
-creates no artifact. <code>saveAs</code> is still validated when
-present, so target-specific format defaults and restrictions apply even
-without a path; if <code>path</code> is present, its safety, collision,
-and overwrite rules apply as well.</p>
+<p><code>result.format</code> selects the in-memory
+<code>output.result</code> representation; <code>result.path</code>
+optionally persists it without changing that representation. A pathless
+result creates no artifact; <code>path: console</code> writes the
+selected representation to the Case log only. Legacy
+<code>renderAs</code> and <code>saveAs</code> fields are rejected with
+migration suggestions by <code>att validate</code>.</p>
 <p>Every action may use <code>assert</code> except that an assert action
 uses it as its required primary expression. Every action outcome is
 nested under <code>output</code>, including <code>status</code>,
@@ -927,16 +928,19 @@ to later actions and later stages as
 <code>${EXEC.ACTIONS.&lt;assignActionId&gt;.output.result}</code>.
 Assign supports optional <code>description</code>, <code>assert</code>,
 and <code>onFailure</code>, but not render, tool-action, log,
-report-only, retry, timeout, or <code>saveAs</code> fields. Assertion
+report-only, retry, timeout, or <code>result</code> fields. Assertion
 FAIL/ERROR does not roll back a value whose expression already evaluated
 successfully; expression failure creates no variable.</p>
 <p>Render payload paths must remain below the template root. Glob
 matches are regular non-symbolic-link files sorted by portable
-template-relative path. <code>renderAs: file</code> writes the rendered
-result under the Case output directory using that same relative path;
-collisions are ERROR. Other render modes write no file and store one
-typed value, or an ordered relative-path-to-value map for multiple
-matches, in <code>output.result</code>.</p>
+template-relative path. A Render <code>result.path</code> can be literal
+for one source or use <code>{filename}</code>, <code>{name}</code>,
+<code>{ext}</code>, <code>{index}</code>, and
+<code>{relativePath}</code> for multiple sources. Expanded targets must
+be unique; <code>overwrite: true</code> never permits intra-Action
+collisions. Render keeps one typed value for one source or an ordered
+source-keyed map for multiple sources, and
+<code>output.targetFiles</code> lists only files actually persisted.</p>
 <p>A log action can emit a rendered <code>message</code>, the complete
 content of one <code>file</code>, or both:</p>
 <div class="sourceCode" id="cb9"><pre
@@ -959,7 +963,7 @@ The source must be an existing regular non-symlink UTF-8 file.
 Path/symlink escapes, malformed UTF-8, blank resolved paths, and
 attempts to read the current Case log are ERROR.</p>
 <p>To print a typed DB result using the same SQL*Plus-style text as DB
-Action <code>saveAs.format: text</code>, format it in the message with
+Action <code>result.format: text</code>, format it in the message with
 the pure <code>dbText(...)</code> built-in:</p>
 <div class="sourceCode" id="cb10"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">printOrders</span><span class="kw">:</span></span>
@@ -1449,10 +1453,12 @@ value is <code>${output.result}</code> while active and
 Final operation evidence is under <code>output.evidence</code>; retries
 preserve per-attempt evidence under
 <code>output.attempts[n].evidence</code>.</p>
-<p>A Tool Action may use object <code>saveAs</code> and post-operation
-evidence collectors where permitted. Collectors execute after the
-primary operation and before that attempt's assertion; collector failure
-policy does not replace the primary <code>result</code>.</p>
+<p>A Tool Action may use the common <code>result</code> object and
+post-operation evidence collectors where permitted.
+<code>result.format</code> selects the in-memory representation, while
+optional <code>result.path</code> persists it. Collectors execute after
+the primary operation and before that attempt's assertion; collector
+failure policy does not replace the primary <code>result</code>.</p>
 <h3 id="52-dbhelper">5.2 DBHelper</h3>
 <p>DBHelper is a first-class JDBC resource, configured independently
 from Tools. Each descriptor uses
@@ -1614,38 +1620,40 @@ from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy
 commit(). <code>encoding</code> is validated as a legal IBM MQ
 integer/decimal/float encoding combination before the descriptor is
 accepted.</p>
-<h4 id="common-saveas">Common saveAs</h4>
-<p>MQ receive/request use the common Action saveAs object; no
-MQ-specific resultType/replyType exists.</p>
+<h4 id="common-action-result">Common Action result</h4>
+<p>MQ receive/request use the common Action <code>result</code> object;
+no MQ-specific resultType/replyType exists.</p>
 <div class="sourceCode" id="cb28"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">result</span><span class="kw">:</span></span>
 <span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span></span>
 <span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> response.bin</span></span>
 <span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p>format defaults to raw and path is optional. raw gives the original
-byte[], text gives String, and json/yaml/xml give existing ATT typed
-values. No saveAs or saveAs: {} keeps the result in memory and creates
-no file. <code>path: console</code> writes the selected representation
-to the Case log and creates no <code>output.targetFiles</code> entry or
-file. No .reply.bin is created unless a real path is explicit. raw plus
-a real path writes exact bytes; overwrite/path safety follow the common
-Action rules.</p>
+<p><code>format</code> selects the in-memory <code>output.result</code>
+representation; <code>path</code> is optional and affects persistence
+only. <code>raw</code> gives the original byte[], <code>text</code>
+gives String, and json/yaml/xml give existing ATT typed values. A
+pathless <code>result</code> keeps the value in memory without creating
+a file. <code>path: console</code> writes the selected representation to
+the Case log and creates no <code>output.targetFiles</code> entry or
+file. No .reply.bin is created unless a real path is explicit.
+<code>raw</code> plus a real path writes exact bytes; overwrite/path
+safety follow the common Action rules.</p>
 <div class="sourceCode" id="cb29"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> requestXml</span></span>
 <span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.request(file=&#39;request.xml&#39;)}&quot;</span></span>
-<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">}</span></span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">}</span></span>
 <span id="cb29-5"><a href="#cb29-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.Response.Status} == &#39;SUCCESS&#39;&quot;</span></span>
 <span id="cb29-6"><a href="#cb29-6" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb29-7"><a href="#cb29-7" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> requestXmlSaved</span></span>
 <span id="cb29-8"><a href="#cb29-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb29-9"><a href="#cb29-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.request(file=&#39;request.xml&#39;)}&quot;</span></span>
-<span id="cb29-10"><a href="#cb29-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> responses/payment.xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
+<span id="cb29-10"><a href="#cb29-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> responses/payment.xml</span><span class="kw">,</span><span class="at"> </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
 <span id="cb29-11"><a href="#cb29-11" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb29-12"><a href="#cb29-12" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> receiveReply</span></span>
 <span id="cb29-13"><a href="#cb29-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb29-14"><a href="#cb29-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.ordersMq.receive(queue=&#39;replyQ&#39;, correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}&quot;</span></span>
-<span id="cb29-15"><a href="#cb29-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
+<span id="cb29-15"><a href="#cb29-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span></code></pre></div>
 <h4 id="output-and-validation">Output and validation</h4>
 <p>output.result is the business payload; MQ metadata is directly under
 output. Every operation publishes <code>mqHelper</code>, selected
@@ -1653,8 +1661,8 @@ physical <code>instance</code>, <code>queueManager</code>, and
 <code>selectionStrategy</code>; v1.0 and single-instance helpers report
 <code>selectionStrategy: single</code>. send publishes sent, queue,
 bytes, messageId, correlationId, and leaves result null/absent.
-<code>send</code> does not produce a business payload and rejects
-<code>saveAs</code>; <code>receive</code> and <code>request</code>
+<code>send</code> does not produce a business payload and rejects Action
+<code>result</code>; <code>receive</code> and <code>request</code>
 support it. receive/request publish received or replyReceived, queue
 names, effective waitMs, messageId, replyMessageId, replyCorrelationId,
 byte counts, reply CCSID/encoding/format when supplied by MQ,
@@ -1672,7 +1680,7 @@ unsupported CCSIDs fail clearly. Logs/reports display raw bytes using
 new String(rawBytes, Charset.defaultCharset()) semantics, not hex and
 not an implicit file. Validation rejects unknown fields, conflicting
 charset/ccsid, invalid encoding/expiry/queues, missing effective
-request/reply queues, unsupported saveAs formats, and unsafe paths.</p>
+request/reply queues, unsupported result formats, and unsafe paths.</p>
 <h4 id="issue-60-v11-logical-groups-and-physical-instances">Issue #60
 v1.1 logical groups and physical instances</h4>
 <p><code>att-mqhelper/v1.1</code> keeps one public logical helper id
@@ -1974,7 +1982,7 @@ location's scope:</p>
 <td>As the action's primary invocation</td>
 </tr>
 <tr class="odd">
-<td>Tool/DB-action <code>saveAs.path</code></td>
+<td>Tool/DB-action <code>result.path</code></td>
 <td>Runtime Context before current output</td>
 <td style="text-align: right;">Yes</td>
 <td style="text-align: right;">Yes</td>
@@ -2028,7 +2036,7 @@ content</td>
 name either a configured Tool or an ATT built-in. A primary built-in
 runs in a bounded daemon executor and publishes its value at
 <code>${output.result}</code>; it has <code>exitCode: 0</code>, supports
-timeout, Action assertion/retry, and optional <code>saveAs</code>, and
+timeout, Action assertion/retry, and optional <code>result</code>, and
 records <code>type: builtin</code> attempt evidence without a
 <code>TOOL</code> process node, argv, stdout, or stderr. Built-ins,
 command-backed Tools, call-backed READ Tools, and direct read-only DB
@@ -2042,7 +2050,7 @@ contain hidden or recursive external execution.</p>
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">normalizeReference</span><span class="kw">:</span></span>
 <span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${EXEC.INPUT.reference})}&quot;</span></span>
-<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span></span>
 <span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;normalized-reference.txt&quot;</span></span>
 <span id="cb36-6"><a href="#cb36-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
 <span id="cb36-7"><a href="#cb36-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result} == &#39;PAY-001&#39;&quot;</span></span></code></pre></div>
@@ -3131,7 +3139,7 @@ not cryptography or reproducible sampling.</p>
 <code>value</code>. The value must be a stable query/update result
 returned by a direct DB Action, DB expression, or DB-backed Tool. It
 uses exactly the same deterministic formatter as direct DB Action
-<code>saveAs.format: text</code> and has no JDBC, transaction,
+<code>result.format: text</code> and has no JDBC, transaction,
 connection, or cache side effects.</p>
 <p><code>prettyPrint</code> accepts exactly one positional argument or
 named <code>value</code>. It formats Maps, Lists, Iterables, arrays,
@@ -3316,7 +3324,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href=
 <span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">renderRequest</span><span class="kw">:</span></span>
 <span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payment/request.json</span></span>
-<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">renderAs</span><span class="kw">:</span><span class="at"> file</span></span>
+<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> rendered/{filename</span><span class="kw">}</span><span class="at">}</span></span>
 <span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb63-7"><a href="#cb63-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queryOrder</span><span class="kw">:</span></span>
 <span id="cb63-8"><a href="#cb63-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
@@ -3392,9 +3400,11 @@ replace <code>--config config/environments/&lt;env&gt;.yaml</code> with
 <code>--config config/config.yaml --env &lt;NAME&gt;</code>.</p>
 <h3 id="schema-catalog">Schema catalog</h3>
 <p>V3.4 adds post-invocation Tool evidence and the independent MQ helper
-schema. V2.6.2 adds <code>att-template/v2.6</code> and
-<code>att-sidecar/v2.2</code> for the unified Tool Action policy. The
-dbhelper schema remains V2.5.</p>
+schema. V2.6.2 added <code>att-template/v2.6</code> and
+<code>att-sidecar/v2.2</code> for the unified Tool Action policy;
+<code>att-template/v3.1</code> is the current template schema and
+introduces the common Action <code>result</code> contract. The dbhelper
+schema remains V2.5.</p>
 <table>
 <thead>
 <tr class="header">
@@ -3463,40 +3473,49 @@ href="../schemas/att-sidecar-v2.1.schema.json">att-sidecar-v2.1.schema.json</a><
 </tr>
 <tr class="even">
 <td>Template descriptor</td>
-<td><code>att-template/v2.6</code></td>
+<td><code>att-template/v3.1</code></td>
 <td><a
-href="../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a></td>
+href="../schemas/att-template-v3.1.schema.json">att-template-v3.1.schema.json</a></td>
 </tr>
 <tr class="odd">
-<td>Legacy template descriptor (read compatibility)</td>
-<td><code>att-template/v2.5</code>, <code>att-template/v2.3</code></td>
+<td>Previous template descriptor (legacy result fields rejected)</td>
+<td><code>att-template/v3.0</code></td>
 <td><a
-href="../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
+href="../schemas/att-template-v3.0.schema.json">att-template-v3.0.schema.json</a></td>
 </tr>
 <tr class="even">
+<td>Legacy template descriptors (read compatibility)</td>
+<td><code>att-template/v2.6</code>, <code>att-template/v2.5</code>,
+<code>att-template/v2.3</code></td>
+<td><a
+href="../schemas/att-template-v2.6.schema.json">att-template-v2.6.schema.json</a>,
+<a
+href="../schemas/att-template-v2.5.schema.json">att-template-v2.5.schema.json</a></td>
+</tr>
+<tr class="odd">
 <td>Run manifest</td>
 <td><code>att-run/v2.1</code></td>
 <td><a
 href="../schemas/att-run-v2.1.schema.json">att-run-v2.1.schema.json</a></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>Validation JSON</td>
 <td><code>att-validation/v2.1</code></td>
 <td><a
 href="../schemas/att-validation-v2.1.schema.json">att-validation-v2.1.schema.json</a></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>CI summary</td>
 <td><code>att-ci-summary/v2.1</code></td>
 <td><a
 href="../schemas/att-ci-summary-v2.1.schema.json">att-ci-summary-v2.1.schema.json</a></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>JUnit XML</td>
 <td>XSD</td>
 <td><a href="../schemas/att-junit-v2.1.xsd">att-junit-v2.1.xsd</a></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>Diagnostic codes</td>
 <td><code>att-diagnostic-catalog/v2.1</code></td>
 <td><a
@@ -3991,15 +4010,15 @@ dot</td>
 </tr>
 <tr class="odd">
 <td>render</td>
-<td>requires <code>payload</code>, <code>renderAs</code>; optional
-<code>assert</code>; no
-saveAs/output/call/expression/message/file/level/fields/timeout/retry/DB
+<td>requires <code>payload</code> and <code>result.format</code>;
+optional <code>result.path</code>, <code>assert</code>; no
+<code>call</code>/expression/message/file/level/fields/timeout/retry/DB
 fields</td>
 </tr>
 <tr class="even">
 <td>tool</td>
 <td>requires <code>call</code>; optional object-shaped
-<code>saveAs</code>, <code>assert</code>, <code>expected</code>,
+<code>result</code>, <code>assert</code>, <code>expected</code>,
 <code>actual</code>, <code>timeoutMs</code>, Action-only
 <code>retry</code>, and <code>evidence</code>; command/call-backed Tools
 share this contract</td>
@@ -4010,9 +4029,8 @@ share this contract</td>
 <code>query</code>/<code>update</code>; selected block requires exactly
 one <code>sql</code>/<code>sqlFile</code> and either typed-list
 <code>params</code> or named <code>parameters</code>; optional
-<code>assert</code> and object-shaped <code>saveAs</code>; no
-action-level <code>overwrite</code>, <code>call</code>, retry, or Action
-timeout</td>
+<code>assert</code> and <code>result</code>; no <code>call</code>,
+retry, or Action timeout</td>
 </tr>
 <tr class="even">
 <td>assert</td>
@@ -4032,14 +4050,13 @@ no render/tool/assert-action-only fields, timeout, or retry</td>
 <code>assert</code>; exact typed calls retain their Java value; name is
 unique below <code>EXEC.VARS</code> for the entire Case; no
 render/tool/DB/assert-action/log-only fields, timeout, retry, or
-saveAs</td>
+result</td>
 </tr>
 <tr class="odd">
-<td><code>saveAs</code></td>
-<td>optional <code>path</code>; optional <code>format</code> and
-<code>overwrite</code>; target-specific format/default rules are
-validated whenever <code>saveAs</code> is supplied;
-<code>overwrite</code> defaults false</td>
+<td><code>result</code></td>
+<td>optional on Render, Tool, and DB; <code>format</code> is
+Action-specific; <code>path</code> is optional; <code>overwrite</code>
+defaults false</td>
 </tr>
 <tr class="even">
 <td>retry</td>
@@ -4049,16 +4066,20 @@ validated whenever <code>saveAs</code> is supplied;
 </tr>
 </tbody>
 </table>
-<p><code>renderAs</code> is <code>file</code>, <code>text</code>,
-<code>json</code>, <code>yaml</code>, or <code>xml</code>. Retry
-<code>maxAttempts</code> is 2–10 and <code>intervalMs</code> is
-0–3600000. <code>ASSERTION</code> requires a non-empty Tool Action
-<code>assert</code>. Log level is <code>TRACE</code>,
-<code>DEBUG</code>, <code>INFO</code>, <code>WARN</code>, or
-<code>ERROR</code>. The template root and action permit
-<code>x-*</code>; <code>fields</code> is an unconstrained log-field map.
-<code>output</code> is runtime evidence and is never an action
-configuration field.</p>
+<p>Template schema <code>att-template/v3.1</code> replaces
+<code>renderAs</code> and <code>saveAs</code> with <code>result</code>;
+legacy fields are rejected with migration suggestions.
+<code>result.format</code> selects <code>output.result</code>;
+<code>result.path</code> only controls optional persistence. A pathless
+result creates no artifact and <code>path: console</code> logs without
+creating a file. Retry <code>maxAttempts</code> is 2–10 and
+<code>intervalMs</code> is 0–3600000. <code>ASSERTION</code> requires a
+non-empty Tool Action <code>assert</code>. Log level is
+<code>TRACE</code>, <code>DEBUG</code>, <code>INFO</code>,
+<code>WARN</code>, or <code>ERROR</code>. The template root and action
+permit <code>x-*</code>; <code>fields</code> is an unconstrained
+log-field map. <code>output</code> is runtime evidence and is never an
+action configuration field.</p>
 <h4 id="assign-variable-uniqueness-and-lifetime">Assign variable
 uniqueness and lifetime</h4>
 <p>An <code>assign</code> action creates one immutable, Case-scoped
@@ -4103,156 +4124,53 @@ the assign action's optional assertion subsequently returns FAIL or
 ERROR, the variable remains available; assertions do not roll back
 successful assignment. <code>EXEC.VARS</code> survives stage/template
 transitions and is discarded only when that Test Case ends.</p>
-<h4 id="action-saveas">Action <code>saveAs</code></h4>
-<p><code>saveAs</code> is an optional property of
-<code>type: tool</code> and <code>type: db</code> actions. V2.6 uses one
-object shape:</p>
+<h4 id="common-action-result-1">Common Action <code>result</code></h4>
 <div class="sourceCode" id="cb69"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callApi</span><span class="kw">:</span></span>
-<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}&quot;</span></span>
-<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">saveAs</span><span class="kw">:</span></span>
-<span id="cb69-5"><a href="#cb69-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;responses/${EXEC.INPUT.rowCaseId}-response.json&quot;</span></span>
-<span id="cb69-6"><a href="#cb69-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> requests/*.xml</span></span>
+<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span></span>
+<span id="cb69-5"><a href="#cb69-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
+<span id="cb69-6"><a href="#cb69-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">path</span><span class="kw">:</span><span class="at"> rendered/{name}-out.{ext}</span></span>
 <span id="cb69-7"><a href="#cb69-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
-<span id="cb69-8"><a href="#cb69-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.status} == &#39;SUCCESS&#39;&quot;</span></span></code></pre></div>
-<p><code>path</code> is optional and <code>overwrite</code> defaults to
-<code>false</code>. Omitting <code>path</code>, including in
-<code>saveAs: {format: ...}</code>, keeps the typed result in memory and
-creates no artifact. A supplied <code>saveAs</code> is still validated
-against the target-specific format defaults and restrictions even when
-<code>path</code> is absent. When <code>path</code> is present, it is
-written using those target-specific rules:</p>
-<table>
-<thead>
-<tr class="header">
-<th>Action target</th>
-<th>Allowed <code>format</code></th>
-<th>Default</th>
-<th>Content</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>configured process Tool</td>
-<td><code>raw</code>, <code>text</code>, <code>json</code>,
-<code>yaml</code>, <code>xml</code></td>
-<td><code>raw</code></td>
-<td>exact stdout bytes for <code>raw</code>; parsed typed
-<code>output.result</code> otherwise</td>
-</tr>
-<tr class="even">
-<td>primary built-in called by <code>type: tool</code></td>
-<td><code>text</code>, <code>json</code>, <code>yaml</code>,
-<code>xml</code></td>
-<td><code>text</code></td>
-<td>typed <code>output.result</code></td>
-</tr>
-<tr class="odd">
-<td>configured call-backed Tool</td>
-<td><code>text</code>, <code>json</code>, <code>yaml</code>,
-<code>xml</code></td>
-<td>none; required</td>
-<td>typed <code>output.result</code>; no stdout exists</td>
-</tr>
-<tr class="even">
-<td><code>type: db</code></td>
-<td><code>text</code>, <code>json</code>, <code>yaml</code>,
-<code>xml</code></td>
-<td>none; required</td>
-<td>SQL*Plus-style rows/update count for <code>text</code>; stable typed
-DB result otherwise</td>
-</tr>
-</tbody>
-</table>
-<p>For a configured Tool, <code>raw</code> writes stdout exactly as
-produced by the process, including any final line ending; it is not the
-trimmed <code>rawOutput</code> string or parsed
-<code>output.result</code>. A built-in and DB action have no process
-stdout, so <code>raw</code> is invalid. For Tool/built-in targets,
-<code>text</code> writes <code>String.valueOf(output.result)</code> as
-UTF-8; for a direct DB Action it uses the SQL*Plus-style formatter
-above. <code>json</code>, <code>yaml</code>, and <code>xml</code>
-serialize the typed result using the selected codec and never serialize
-raw process stdout. Serialization does not replace the typed Context
-value.</p>
-<p>ATT resolves the path below the current Case artifact directory,
-normally alongside <code>case.log</code> under
-<code>output/&lt;RunID&gt;/&lt;CaseID&gt;/</code>. Parent directories
-such as <code>responses/</code> are created. The saved path appears in
-the Action's <code>output.targetFiles</code>; configured Tool attempt
-evidence also records it as <code>outputFile</code>. Without
-<code>saveAs</code>, ATT creates no separate output file.</p>
-<p><code>saveAs.path</code> may be the reserved case-insensitive value
-<code>console</code>, which writes the selected representation to the
-Case log, adds no <code>output.targetFiles</code> entry, and creates no
-file. Otherwise it may contain <code>${...}</code> references plus
-<code>#{...}</code> expressions evaluated before the primary Action
-starts. Canonical Context paths are preferred:</p>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.caseId}-response.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span></span>
-<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;responses/${EXEC.VARS.txnSeq}.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">}</span></span>
-<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;responses/${EXEC.ACTIONS.prepare.output.result}.txt&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">}</span></span>
-<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;responses/#{lower(${EXEC.INPUT.rowCaseId})}.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span></span>
-<span id="cb70-5"><a href="#cb70-5" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> console</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">}</span></span></code></pre></div>
-<p>The current Action has not produced an outcome when
-<code>saveAs.path</code> is evaluated, so <code>${output...}</code>, the
-current Action through <code>${EXEC.ACTIONS...}</code>, and future
-Action outputs are invalid. A configured Tool or DB call in the path is
-a real preceding invocation with normal Case-log evidence; built-ins are
-preferable for filename formatting.</p>
-<p>Except for the reserved <code>console</code> value, the rendered
-value must be a non-blank safe relative path using <code>/</code>
-separators. Absolute paths, backslashes, empty path segments,
-<code>.</code> segments, <code>..</code> segments, and any path that
-escapes the Case artifact directory are rejected. Examples:</p>
-<div class="sourceCode" id="cb71"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;responses/TC001.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span><span class="co">    # valid Tool artifact</span></span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;/tmp/response.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span><span class="co">      # invalid: absolute</span></span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;../response.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span><span class="co">        # invalid: parent traversal</span></span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;responses</span><span class="sc">\\</span><span class="st">TC001.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span><span class="co">   # invalid: backslash separator</span></span>
-<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result}.json&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span><span class="kw">}</span><span class="co">   # invalid: current output unavailable</span></span></code></pre></div>
-<p>If the resolved file already exists within the same Case, the Action
-is ERROR unless <code>saveAs.overwrite: true</code> is configured. When
-Tool retry is enabled, every attempt uses the same resolved path; a
-later attempt may replace only the artifact written by an earlier
-attempt of that same Action so the dedicated file contains the final
-attempt. Separate Cases have separate artifact directories and therefore
-do not collide merely because they use the same relative path.</p>
-<p>Write timing follows the selected content source and precedes the
-optional assertion. A process Tool with <code>raw</code> saves captured
-stdout even when output parsing, exit-code retry, or the final Action
-outcome is unsuccessful. A non-<code>raw</code> Tool artifact requires a
-successfully parsed typed result; a built-in artifact requires a
-successful built-in call; a DB artifact requires successful JDBC
-execution. Codec, path-resolution, collision, and file-write failures
-are Action <code>ERROR</code>. <code>render</code>, <code>assert</code>,
-<code>log</code>, and <code>assign</code> actions reject
-<code>saveAs</code>. A render action writes files through
-<code>renderAs: file</code> and exposes them through its own
-<code>output.targetFiles</code> contract.</p>
-<p>DB therefore uses the same shape without pretending it has process
-output:</p>
-<div class="sourceCode" id="cb72"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">saveAs</span><span class="kw">:</span></span>
-<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;db/${EXEC.INPUT.rowCaseId}-orders.txt&quot;</span></span>
-<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
-<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p><code>path</code> is optional for DB as well, but DB still requires
-<code>format: text|json|yaml|xml</code> whenever <code>saveAs</code> is
-supplied, even when no path is present. A valid pathless DB
-<code>saveAs</code> creates no artifact; when a DB artifact path is
-present, the same format and path rules apply. The written
-representation never replaces <code>${output.result}</code>'s typed Java
-object.</p>
-<p><code>att-template/v2.3</code> remains read-compatible: its legacy
-Tool form <code>saveAs: response.json</code> plus sibling
-<code>overwrite: false</code> keeps its original raw-stdout meaning and
-is normalized internally to
-<code>{path: response.json, format: raw, overwrite: false}</code>. Newly
-authored <code>att-template/v2.6</code> files must use the object form;
-scalar <code>saveAs</code> and Action-level sibling
-<code>overwrite</code> are invalid.</p>
+<span id="cb69-8"><a href="#cb69-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb69-9"><a href="#cb69-9" aria-hidden="true" tabindex="-1"></a><span class="fu">callApi</span><span class="kw">:</span></span>
+<span id="cb69-10"><a href="#cb69-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb69-11"><a href="#cb69-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{invokePaymentApi(...)}&quot;</span></span>
+<span id="cb69-12"><a href="#cb69-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> responses/payment.json</span><span class="kw">}</span></span></code></pre></div>
+<p><code>result.format</code> selects <code>output.result</code>;
+<code>result.path</code> optionally persists that same representation.
+Supported formats remain Action-specific: Render accepts
+<code>raw|text|json|yaml|xml</code>; process Tools and MQ accept
+<code>raw|text|json|yaml|xml</code>; built-in/call-backed Tools accept
+<code>text|json|yaml|xml</code>; DB accepts
+<code>text|json|yaml|xml</code>. DB <code>text</code> uses its stable
+SQL*Plus-style formatter. Omitting <code>path</code> never creates an
+artifact. <code>path: console</code> writes the representation to the
+Case log without creating a file or <code>output.targetFiles</code>
+entry. All real paths remain safe, relative to the Case artifact
+directory, and are containment-checked.</p>
+<p>Render supports literal paths for one source and these path-only
+tokens for source sets: <code>{filename}</code> (including extension),
+<code>{name}</code> (without final extension), <code>{ext}</code>
+(without dot), <code>{index}</code> (one-based deterministic order),
+<code>{relativePath}</code> (relative to the matched source root). No
+expression interpolation is performed inside these patterns.
+Multi-source paths must expand uniquely even when
+<code>overwrite: true</code>; every expanded path is safety-checked
+before writing. <code>output.result</code> remains a typed value for one
+source and an ordered source-keyed map for multiple sources;
+<code>output.targetFiles</code> lists only persisted paths.</p>
+<p>Migration for <code>att-template/v3.1</code>: <code>renderAs</code>
+becomes <code>result.format</code>; <code>saveAs.format</code> becomes
+<code>result.format</code>; <code>saveAs.path</code> becomes
+<code>result.path</code>; <code>saveAs.overwrite</code> becomes
+<code>result.overwrite</code>. <code>renderAs: file</code> is ambiguous
+because it mixed output representation and persistence: choose a real
+format and a path explicitly. <code>att validate</code> rejects legacy
+fields and emits a concrete replacement suggestion (including the
+required representation choice for <code>file</code>) in human and JSON
+diagnostics; it never rewrites files.</p>
 <h3 id="tool-contract">Tool contract</h3>
 <p>Each Tool requires <code>name</code>, <code>description</code>, and
 exactly one of <code>command</code> or <code>call</code>. Optional
@@ -4311,32 +4229,31 @@ sidecar <code>id</code> supplies <code>workbookId</code>, the left side
 of <code>excel.sheet</code> supplies <code>groupId</code>, and the
 configured Case ID cell supplies <code>rowCaseId</code>. Template paths
 are relative to <code>templates.root</code>; render glob matches remain
-below the template and <code>renderAs: file</code> targets remain below
-the Case output directory. Tool/DB Action <code>saveAs.path</code> stays
-below the Case artifact directory. ATT normalizes and checks root
+below the template and all Action <code>result.path</code> targets
+remain below the Case artifact directory. ATT normalizes and checks root
 containment before reads and writes.</p>
 <h3 id="validation-json-contract">Validation JSON contract</h3>
-<div class="sourceCode" id="cb73"><pre
-class="sourceCode json"><code class="sourceCode json"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.5.2&quot;</span><span class="fu">,</span></span>
-<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
-<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
-<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
-<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
-<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
-<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
-<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
-<span id="cb73-11"><a href="#cb73-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
-<span id="cb73-12"><a href="#cb73-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
-<span id="cb73-13"><a href="#cb73-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb73-14"><a href="#cb73-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb73-15"><a href="#cb73-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb73-16"><a href="#cb73-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
-<span id="cb73-17"><a href="#cb73-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
-<span id="cb73-18"><a href="#cb73-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
-<span id="cb73-19"><a href="#cb73-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
-<span id="cb73-20"><a href="#cb73-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb70"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
+<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.5.2&quot;</span><span class="fu">,</span></span>
+<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb70-5"><a href="#cb70-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
+<span id="cb70-6"><a href="#cb70-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
+<span id="cb70-7"><a href="#cb70-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
+<span id="cb70-8"><a href="#cb70-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
+<span id="cb70-9"><a href="#cb70-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
+<span id="cb70-10"><a href="#cb70-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
+<span id="cb70-11"><a href="#cb70-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
+<span id="cb70-12"><a href="#cb70-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
+<span id="cb70-13"><a href="#cb70-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb70-14"><a href="#cb70-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb70-15"><a href="#cb70-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb70-16"><a href="#cb70-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
+<span id="cb70-17"><a href="#cb70-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
+<span id="cb70-18"><a href="#cb70-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
+<span id="cb70-19"><a href="#cb70-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
+<span id="cb70-20"><a href="#cb70-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
 <p>Every diagnostic always contains <code>code</code>,
 <code>severity</code>, <code>message</code>, <code>file</code>,
 <code>field</code>, <code>sheet</code>, <code>row</code>,
@@ -4682,23 +4599,24 @@ dependency closure, or the selected Tool definition. It does not require
 unrelated workbook snapshots or unrelated malformed Template descriptors
 to pass. The selected target still uses the normal Template/Flow/Tool
 runner, including Context resolution, Flow nesting, Tool retry/timeout,
-evidence, saveAs, DB finalization, and Case-log behavior.</p>
+evidence, Action result persistence, DB finalization, and Case-log
+behavior.</p>
 <h4 id="configuration-examples">Configuration examples</h4>
 <p>The following examples show the supported placement of debug values.
 Every file is a complete <code>att-debug/v1.0</code> document.</p>
 <p>Template sidecar
 (<code>templates/PAYMENT_INVOKE/debug.yaml</code>):</p>
-<div class="sourceCode" id="cb74"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
-<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="fu">case</span><span class="kw">:</span></span>
-<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">caseName</span><span class="kw">:</span><span class="at"> PAYMENT debug</span></span>
-<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span></span>
-<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
-<span id="cb74-6"><a href="#cb74-6" aria-hidden="true" tabindex="-1"></a><span class="fu">stage</span><span class="kw">:</span></span>
-<span id="cb74-7"><a href="#cb74-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">key</span><span class="kw">:</span><span class="at"> invoke</span></span>
-<span id="cb74-8"><a href="#cb74-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">values</span><span class="kw">:</span></span>
-<span id="cb74-9"><a href="#cb74-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">channel</span><span class="kw">:</span><span class="at"> WEB</span></span>
-<span id="cb74-10"><a href="#cb74-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sourceRef</span><span class="kw">:</span><span class="at"> SRC-001</span></span></code></pre></div>
+<div class="sourceCode" id="cb71"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="fu">case</span><span class="kw">:</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">caseName</span><span class="kw">:</span><span class="at"> PAYMENT debug</span></span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span></span>
+<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
+<span id="cb71-6"><a href="#cb71-6" aria-hidden="true" tabindex="-1"></a><span class="fu">stage</span><span class="kw">:</span></span>
+<span id="cb71-7"><a href="#cb71-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">key</span><span class="kw">:</span><span class="at"> invoke</span></span>
+<span id="cb71-8"><a href="#cb71-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">values</span><span class="kw">:</span></span>
+<span id="cb71-9"><a href="#cb71-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">channel</span><span class="kw">:</span><span class="at"> WEB</span></span>
+<span id="cb71-10"><a href="#cb71-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sourceRef</span><span class="kw">:</span><span class="at"> SRC-001</span></span></code></pre></div>
 <p>Run it with <code>./att.sh debug template PAYMENT_INVOKE</code>.
 Template expressions should prefer <code>${EXEC.INPUT.amount}</code>,
 <code>${EXEC.INPUT.environment}</code>, and the current Stage value
@@ -4709,54 +4627,54 @@ paths remain compatibility aliases, while <code>CASE.STAGES.*</code> is
 retained only as the legacy execution/evidence view.</p>
 <p>Flow sidecar
 (<code>templates/flows/common/compose/debug.yaml</code>):</p>
-<div class="sourceCode" id="cb75"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
-<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="fu">case</span><span class="kw">:</span></span>
-<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">caseName</span><span class="kw">:</span><span class="at"> Compose debug</span></span>
-<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">traceId</span><span class="kw">:</span><span class="at"> TRACE-001</span></span>
-<span id="cb75-5"><a href="#cb75-5" aria-hidden="true" tabindex="-1"></a><span class="fu">stage</span><span class="kw">:</span></span>
-<span id="cb75-6"><a href="#cb75-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">key</span><span class="kw">:</span><span class="at"> DEBUG</span></span>
-<span id="cb75-7"><a href="#cb75-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">values</span><span class="kw">:</span></span>
-<span id="cb75-8"><a href="#cb75-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> SIT</span></span>
-<span id="cb75-9"><a href="#cb75-9" aria-hidden="true" tabindex="-1"></a><span class="fu">inputs</span><span class="kw">:</span></span>
-<span id="cb75-10"><a href="#cb75-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">source</span><span class="kw">:</span><span class="at"> payment</span></span>
-<span id="cb75-11"><a href="#cb75-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">suffix</span><span class="kw">:</span><span class="at"> -debug</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="fu">case</span><span class="kw">:</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">caseName</span><span class="kw">:</span><span class="at"> Compose debug</span></span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">traceId</span><span class="kw">:</span><span class="at"> TRACE-001</span></span>
+<span id="cb72-5"><a href="#cb72-5" aria-hidden="true" tabindex="-1"></a><span class="fu">stage</span><span class="kw">:</span></span>
+<span id="cb72-6"><a href="#cb72-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">key</span><span class="kw">:</span><span class="at"> DEBUG</span></span>
+<span id="cb72-7"><a href="#cb72-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">values</span><span class="kw">:</span></span>
+<span id="cb72-8"><a href="#cb72-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> SIT</span></span>
+<span id="cb72-9"><a href="#cb72-9" aria-hidden="true" tabindex="-1"></a><span class="fu">inputs</span><span class="kw">:</span></span>
+<span id="cb72-10"><a href="#cb72-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">source</span><span class="kw">:</span><span class="at"> payment</span></span>
+<span id="cb72-11"><a href="#cb72-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">suffix</span><span class="kw">:</span><span class="at"> -debug</span></span></code></pre></div>
 <p>Run it with <code>./att.sh debug flow common.compose.v1</code>. Flow
 inputs are available as <code>${EXEC.INPUT.source}</code> and, when
 there is no same-named Case value, as the compatibility alias
 <code>${EXEC.INPUT.source}</code>.</p>
 <p>Grouped Tool sidecar (<code>config/tools/fpp.debug.yaml</code> for
 <code>fpp.invokeApi</code>):</p>
-<div class="sourceCode" id="cb76"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
-<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a><span class="fu">case</span><span class="kw">:</span></span>
-<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">RefNo</span><span class="kw">:</span><span class="at"> REF001</span></span>
-<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb76-5"><a href="#cb76-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokeApi</span><span class="kw">:</span></span>
-<span id="cb76-6"><a href="#cb76-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb76-7"><a href="#cb76-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestId</span><span class="kw">:</span><span class="at"> REF001</span></span>
-<span id="cb76-8"><a href="#cb76-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestType</span><span class="kw">:</span><span class="at"> PAYMENT</span></span>
-<span id="cb76-9"><a href="#cb76-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span><span class="at"> /tmp/payment-request.xml</span></span>
-<span id="cb76-10"><a href="#cb76-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">apiLogPath</span><span class="kw">:</span><span class="at"> /tmp/payment-api.log</span></span></code></pre></div>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="fu">case</span><span class="kw">:</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">RefNo</span><span class="kw">:</span><span class="at"> REF001</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokeApi</span><span class="kw">:</span></span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestId</span><span class="kw">:</span><span class="at"> REF001</span></span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestType</span><span class="kw">:</span><span class="at"> PAYMENT</span></span>
+<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">requestFile</span><span class="kw">:</span><span class="at"> /tmp/payment-request.xml</span></span>
+<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">apiLogPath</span><span class="kw">:</span><span class="at"> /tmp/payment-api.log</span></span></code></pre></div>
 <p>Run it with <code>./att.sh debug tool fpp.invokeApi</code>. The
 <code>invokeApi</code> key is the group-local Tool key. Values must be
 scalar or list values accepted by the Tool descriptor; map literals are
 not supported by the standalone Tool adapter.</p>
 <p>Ungrouped Tool sidecar
 (<code>config/tools/invokePaymentApi.debug.yaml</code>):</p>
-<div class="sourceCode" id="cb77"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
-<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
-<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestFile</span><span class="kw">:</span><span class="at"> /tmp/payment-request.xml</span></span>
-<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span></code></pre></div>
+<div class="sourceCode" id="cb74"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.0</span></span>
+<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
+<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestFile</span><span class="kw">:</span><span class="at"> /tmp/payment-request.xml</span></span>
+<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span></code></pre></div>
 <p>Run it with <code>./att.sh debug tool invokePaymentApi</code>. For an
 ungrouped Tool, root <code>arguments</code> is passed directly; it is
 not wrapped under <code>tools</code>.</p>
 <p>An explicit file overrides sidecar discovery, which is useful for
 temporary values in CI or local diagnosis:</p>
-<div class="sourceCode" id="cb78"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--input</span> /tmp/payment-debug.yaml <span class="dt">\</span></span>
-<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-dir</span> /tmp/att-debug <span class="at">--format</span> json</span></code></pre></div>
+<div class="sourceCode" id="cb75"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--input</span> /tmp/payment-debug.yaml <span class="dt">\</span></span>
+<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-dir</span> /tmp/att-debug <span class="at">--format</span> json</span></code></pre></div>
 <p>The selected input is validated before execution. Missing files,
 invalid schema, unknown or missing Tool arguments, and other
 input/configuration errors return exit code <code>2</code>.
@@ -4832,11 +4750,11 @@ control process-level output-root concurrency, not Case workers.
 <p>Load uses the scenario as the base and explicit workload options
 override the corresponding fields before the effective scenario is
 validated again:</p>
-<div class="sourceCode" id="cb80"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
-<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
-<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
-<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
+<div class="sourceCode" id="cb77"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
+<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
 <p>The complete workload override set is <code>--users</code>,
 <code>--arrival-rate</code>, <code>--warmup</code>,
 <code>--ramp-up</code>, <code>--duration</code>,
@@ -5019,8 +4937,8 @@ idempotent, and reports what it removed.</p>
 Diagnostics</h2>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, or tool change:</p>
-<div class="sourceCode" id="cb82"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb82-1"><a href="#cb82-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb79"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>Then use the diagnostic code and structured location. Do not automate
 against message text.</p>
 <table>
@@ -5235,11 +5153,11 @@ Operations</h2>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb83"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb83-2"><a href="#cb83-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb83-3"><a href="#cb83-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb83-4"><a href="#cb83-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb80"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
 Reference Manual, builds the application jar and release/source
 archives, and verifies the packaged launcher. It requires Java/Maven
@@ -5311,8 +5229,9 @@ Matrix</h3>
 </tr>
 <tr class="odd">
 <td>Template</td>
-<td><code>att-template/v3.0</code> (older supported forms remain
-readable where compatible)</td>
+<td><code>att-template/v3.1</code>
+(<code>renderAs</code>/<code>saveAs</code> are rejected with migration
+suggestions)</td>
 </tr>
 <tr class="even">
 <td>Flow</td>

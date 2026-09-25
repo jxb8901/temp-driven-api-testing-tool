@@ -192,7 +192,7 @@ public class CaseExecutionLog implements AutoCloseable {
             copyIfPresent(output, compact, "level", "sourceFile", "fields", "assertion");
         } else {
             copyResultUnlessTargetDuplicate(output, compact);
-            copyIfPresent(output, compact, "renderAs", "sources", "level", "sourceFile", "fields", "name", "assertion", "expected", "actual");
+            copyIfPresent(output, compact, "format", "sources", "level", "sourceFile", "fields", "name", "assertion", "expected", "actual");
         }
         Object exception = output.get("exception");
         if (exception instanceof Map) compact.put("exception", compactException((Map<String, Object>) exception));

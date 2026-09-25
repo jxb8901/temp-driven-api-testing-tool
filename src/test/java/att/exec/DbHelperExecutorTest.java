@@ -284,10 +284,10 @@ class DbHelperExecutorTest {
         actions.add(new TemplateAction("query", map("type", "db", "db", "orders",
                 "query", map("sqlFile", "sql/orders.sql", "params",
                         Collections.<Object>singletonList("${CASE.customerId}")),
-                "saveAs", map("path", "db/orders.json", "format", "json")), "att-template/v2.5"));
+                "result", map("path", "db/orders.json", "format", "json")), "att-template/v3.1"));
         actions.add(new TemplateAction("queryText", map("type", "db", "db", "orders",
                 "query", map("sql", "select ONE", "params", Collections.emptyList()),
-                "saveAs", map("path", "db/orders.txt", "format", "text")), "att-template/v2.5"));
+                "result", map("path", "db/orders.txt", "format", "text")), "att-template/v3.1"));
         actions.add(new TemplateAction("assign", map("type", "assign", "name", "orders",
                 "expression", "#{db.orders.query(sql='select ONE', params=[${CASE.customerId}, 'OPEN'])}"),
                 "att-template/v2.5"));
@@ -295,7 +295,7 @@ class DbHelperExecutorTest {
                 "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"),
                 "att-template/v2.5"));
         actions.add(new TemplateAction("printRows", map("type", "log",
-                "message", "#{dbText(${ACTIONS.queryText.output.result})}"), "att-template/v2.5"));
+                "message", "${ACTIONS.queryText.output.result}"), "att-template/v3.1"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, executor))
                 .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v2.5"), context, log);
@@ -312,7 +312,7 @@ class DbHelperExecutorTest {
         assertEquals("A100", context.resolve("CASE.VARS.orders.rows[0].ID"));
         assertEquals("A100", context.resolve("CASE.VARS.orderId"));
         Path artifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.query.output.targetFiles[0]")));
-        assertTrue(artifact.startsWith(tempDir));
+        assertTrue(artifact.toRealPath().startsWith(context.caseOutputDirectory().toRealPath()));
         assertTrue(new String(java.nio.file.Files.readAllBytes(artifact), "UTF-8").contains("\"rows\""));
         Path textArtifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.queryText.output.targetFiles[0]")));
         assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
@@ -376,7 +376,7 @@ class DbHelperExecutorTest {
 
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.add(new TemplateAction("scalar", map("type", "tool", "call", "#{orders.id()}",
-                "saveAs", map("path", "db/order-id.txt", "format", "text")), "att-template/v2.5"));
+                "result", map("path", "db/order-id.txt", "format", "text")), "att-template/v3.1"));
         actions.add(new TemplateAction("close", map("type", "tool", "call", "#{orders.close(status='DONE')}"),
                 "att-template/v2.5"));
         List<ValidationResult> results = new StageTemplateRunner(engine).execute("verify",

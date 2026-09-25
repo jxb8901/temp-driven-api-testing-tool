@@ -19,6 +19,19 @@ class JsonSchemaVerifierTest {
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v3.0.schema.json"), template.replace("common.one.v1", "${CASE.flow}")));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
     }
+    @Test void v31TemplateUsesCommonResultAndRejectsLegacyFields() throws Exception {
+        Path schema = java.nio.file.Paths.get("").toAbsolutePath().resolve("schemas/att-template-v3.1.schema.json");
+        String valid = "{\"schemaVersion\":\"att-template/v3.1\",\"description\":\"result\",\"actions\":{" +
+                "\"render\":{\"type\":\"render\",\"payload\":\"requests/*.xml\",\"result\":{\"format\":\"text\",\"path\":\"rendered/{filename}\"}}," +
+                "\"tool\":{\"type\":\"tool\",\"call\":\"#{upper('ok')}\",\"result\":{\"format\":\"text\"}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
+                valid.replace("\"result\":{\"format\":\"text\"}", "\"renderAs\":\"text\"")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
+                valid.replace("\"result\":{\"format\":\"text\"}", "\"saveAs\":{\"format\":\"text\"}")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
+                valid.replace("\"format\":\"text\",", "\"format\":\"file\",")));
+    }
     @TempDir Path tempDir;
     @Test void enforcesDraft202012CompositionAndConstraints() throws Exception {
         JsonSchemaVerifier.clearForTests();

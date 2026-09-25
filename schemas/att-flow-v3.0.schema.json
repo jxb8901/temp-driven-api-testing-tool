@@ -16,7 +16,7 @@
       "type": "object", "required": ["type"],
       "properties": {
         "type": {"enum": ["render", "tool", "db", "assert", "log", "assign", "flow"]}, "description": {"type": "string"}, "onFailure": {"enum": ["stop", "continue"]}, "runWhen": {"type": "string", "minLength": 1},
-        "name": {"type": "string"}, "expression": {"type": "string"}, "payload": {"type": "string"}, "renderAs": {"enum": ["file", "text", "json", "yaml", "xml"]}, "saveAs": {}, "call": {"type": "string"},
+        "name": {"type": "string"}, "expression": {"type": "string"}, "payload": {"type": "string"}, "result": {"type": "object", "properties": {"format": {"enum": ["raw", "text", "json", "yaml", "xml"]}, "path": {"type": "string", "minLength": 1}, "overwrite": {"type": "boolean"}}, "additionalProperties": false}, "call": {"type": "string"},
         "db": {"type": "string"}, "query": {"type": "object"}, "update": {"type": "object"}, "assert": {"type": "string"}, "expected": {"type": "string"}, "actual": {"type": "string"},
         "message": {"type": "string"}, "file": {"type": "string"}, "level": {"enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]}, "fields": {"type": "object"}, "timeoutMs": {"type": "integer"}, "retry": {"type": "object"},
         "evidence": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[^.]+$"}, "additionalProperties": {"$ref": "#/$defs/evidenceCollector"}},

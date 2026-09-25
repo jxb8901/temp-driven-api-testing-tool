@@ -9,31 +9,53 @@ import static org.junit.jupiter.api.Assertions.*;
 class StageTemplateLoaderTest {
     @TempDir Path tempDir;
 
-    @Test void loadsV25DbActionAndNormalizesLegacySaveAs() throws Exception {
+    @Test void loadsCurrentResultConfigAndRejectsLegacyFieldsWithMigrationGuidance() throws Exception {
         StageTemplateLoader.clearForTests();
         Path current = tempDir.resolve("templates/current");
         Path legacy = tempDir.resolve("templates/legacy");
+        Path legacySave = tempDir.resolve("templates/legacy-save");
+        Path legacyFile = tempDir.resolve("templates/legacy-file");
         Files.createDirectories(current);
         Files.createDirectories(legacy);
-        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v2.5\n" +
+        Files.createDirectories(legacySave);
+        Files.createDirectories(legacyFile);
+        Files.createDirectories(tempDir.resolve("schemas"));
+        Files.copy(Paths.get("schemas/att-template-v3.1.schema.json"), tempDir.resolve("schemas/att-template-v3.1.schema.json"));
+        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.1\n" +
                 "name: current\ndescription: DB template\nactions:\n" +
                 "  query:\n    type: db\n    db: orders\n    query: {sql: 'select 1'}\n" +
-                "    saveAs: {path: result.json, format: json, overwrite: true}\n").getBytes("UTF-8"));
-        Files.write(legacy.resolve("template.yaml"), ("schemaVersion: att-template/v2.3\n" +
+                "    result: {path: result.json, format: json, overwrite: true}\n").getBytes("UTF-8"));
+        Files.write(legacy.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
                 "name: legacy\ndescription: Legacy template\nactions:\n" +
-                "  call: {type: tool, call: '#{sample()}', saveAs: result.txt, overwrite: true}\n")
+                "  render: {type: render, payload: request.json, renderAs: json}\n")
+                .getBytes("UTF-8"));
+        Files.write(legacySave.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
+                "name: legacy-save\ndescription: Legacy save template\nactions:\n" +
+                "  call: {type: tool, call: '#{upper(\"ok\")}', saveAs: {path: response.json, format: json, overwrite: true}}\n")
+                .getBytes("UTF-8"));
+        Files.write(legacyFile.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
+                "name: legacy-file\ndescription: Legacy file template\nactions:\n" +
+                "  render: {type: render, payload: request.xml, renderAs: file}\n")
                 .getBytes("UTF-8"));
 
         StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
         TemplateAction db = loader.load("current").actions().get(0);
         assertEquals("db", db.type());
         assertEquals("orders", db.db());
-        assertEquals("json", db.saveConfig().format());
-        assertTrue(db.saveConfig().overwrite());
-        TemplateAction old = loader.load("legacy").actions().get(0);
-        assertTrue(old.saveConfig().legacy());
-        assertEquals("raw", old.saveConfig().format());
-        assertTrue(old.saveConfig().overwrite());
+        assertEquals("json", db.resultConfig().format());
+        assertTrue(db.resultConfig().overwrite());
+        att.validation.DiagnosticException legacyError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy"));
+        assertTrue(legacyError.getMessage().contains("renderAs"));
+        assertTrue(legacyError.suggestion().contains("result:"));
+        assertTrue(att.validation.DiagnosticRenderer.exception(legacyError.toDiagnostic()).contains("actions.render.renderAs"));
+        assertTrue(att.validation.DiagnosticRenderer.jsonError(legacyError.toDiagnostic()).contains("format: json"));
+        att.validation.DiagnosticException saveError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-save"));
+        assertTrue(saveError.field().endsWith("saveAs"));
+        assertTrue(saveError.suggestion().contains("path: response.json"));
+        att.validation.DiagnosticException fileError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-file"));
+        assertTrue(fileError.suggestion().contains("mixed representation and persistence"));
+        assertTrue(fileError.suggestion().contains("result.format"));
+        assertTrue(att.validation.DiagnosticRenderer.jsonError(fileError.toDiagnostic()).contains("rendered/{filename}"));
     }
 
     @Test void resolvesChineseSymbolicNameAndFullPath() throws Exception {
@@ -110,9 +132,9 @@ class StageTemplateLoaderTest {
         Path array = tempDir.resolve("templates/array");
         Files.createDirectories(dynamic);
         Files.createDirectories(array);
-        Files.write(dynamic.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\nname: dynamic\ndescription: test\nactions:\n"
+        Files.write(dynamic.resolve("template.yaml"), ("schemaVersion: att-template/v3.1\nname: dynamic\ndescription: test\nactions:\n"
                 + "  call: {type: flow, use: '${CASE.flow}'}\n").getBytes("UTF-8"));
-        Files.write(array.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\nname: array\ndescription: test\nactions:\n"
+        Files.write(array.resolve("template.yaml"), ("schemaVersion: att-template/v3.1\nname: array\ndescription: test\nactions:\n"
                 + "  call: {type: flow, use: common.copy.v1, with: [one]}\n").getBytes("UTF-8"));
         StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
 

@@ -53,7 +53,7 @@ public final class MqHelperExecutor {
         return execute(instance, operation, arguments, context, timeoutMs, invocationId, null, null, "raw", false);
     }
 
-    /** Executes an MQ call with the common Action saveAs contract. */
+    /** Executes an MQ call with the common Action result contract. */
     public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
                                       CaseRuntimeContext context, Long timeoutMs, String invocationId,
                                       String actionId, String savePath, String saveFormat, boolean overwrite) {
@@ -74,7 +74,7 @@ public final class MqHelperExecutor {
             helper = select(logical, args.get("instance"));
             validateArguments(instance, operation, args, helper);
             if ("send".equals(operation) && savePath != null && !savePath.trim().isEmpty()) {
-                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support saveAs");
+                throw new IllegalArgumentException("MQ send does not produce a business payload and does not support result persistence");
             }
         } catch (Exception error) {
             return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
@@ -209,8 +209,8 @@ public final class MqHelperExecutor {
         long duration = Duration.between(started, Instant.now()).toMillis();
         result.put("durationMs", duration); evidence.put("durationMs", duration);
         if (result.get("outputFile") != null) evidence.put("outputFile", portable(Paths.get(String.valueOf(result.get("outputFile")))));
-        if (savePath != null && !savePath.trim().isEmpty()) evidence.put("saveAsPath", savePath);
-        evidence.put("saveAsFormat", representation);
+        if (savePath != null && !savePath.trim().isEmpty()) evidence.put("resultPath", savePath);
+        evidence.put("resultFormat", representation);
         evidence.put("status", success ? "PASS" : "ERROR");
         return new MqInvocationResult(result, evidence, success);
     }
@@ -281,7 +281,7 @@ public final class MqHelperExecutor {
         String result = value == null || value.trim().isEmpty() ? "raw" : value.trim().toLowerCase(Locale.ROOT);
         if (!("raw".equals(result) || "text".equals(result) || "json".equals(result)
                 || "yaml".equals(result) || "xml".equals(result))) {
-            throw new IllegalArgumentException("MQ saveAs.format must be raw, text, json, yaml, or xml");
+            throw new IllegalArgumentException("MQ result.format must be raw, text, json, yaml, or xml");
         }
         return result;
     }
@@ -300,20 +300,20 @@ public final class MqHelperExecutor {
                                  String savePath, String format, byte[] raw, Object value, boolean overwrite) throws Exception {
         if (savePath == null || savePath.trim().isEmpty()) return;
         if ("console".equalsIgnoreCase(savePath.trim())) {
-            if (log == null) throw new IOException("MQ saveAs.path=console requires the active Case execution log");
-            log.appendRaw("ACTION " + (actionId == null || actionId.trim().isEmpty() ? "MQ" : actionId) + " SAVE",
+            if (log == null) throw new IOException("MQ result.path=console requires the active Case execution log");
+            log.appendRaw("ACTION " + (actionId == null || actionId.trim().isEmpty() ? "MQ" : actionId) + " RESULT",
                     consoleValue(format, raw, value));
             return;
         }
         Path root = (context.inFlow() ? context.actionOutputDir(actionId) : context.caseOutputDirectory())
                 .toAbsolutePath().normalize();
-        Path target = root.resolve(IdentifierValidator.relativePath(savePath, "action saveAs.path")).normalize();
-        if (!target.startsWith(root) || target.equals(root)) throw new IOException("MQ saveAs path escapes the Action artifact directory: " + savePath);
+        Path target = root.resolve(IdentifierValidator.relativePath(savePath, "action result.path")).normalize();
+        if (!target.startsWith(root) || target.equals(root)) throw new IOException("MQ result path escapes the Action artifact directory: " + savePath);
         Files.createDirectories(root);
-        PathSafety.ensureContained(root, target, "MQ saveAs path");
+        PathSafety.ensureContained(root, target, "MQ result.path");
         Files.createDirectories(target.getParent());
-        PathSafety.ensureContained(root, target, "MQ saveAs path");
-        if (Files.exists(target) && !overwrite) throw new IOException("saveAs file already exists and overwrite is false: " + savePath);
+        PathSafety.ensureContained(root, target, "MQ result.path");
+        if (Files.exists(target) && !overwrite) throw new IOException("result file already exists and overwrite is false: " + savePath);
         if ("raw".equals(format)) {
             Files.write(target, raw == null ? new byte[0] : raw,
                     overwrite ? new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}

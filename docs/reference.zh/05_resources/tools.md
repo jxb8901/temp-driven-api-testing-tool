@@ -14,4 +14,4 @@ Call-backed Tool 執行 typed framework-native call，例如支援的 DB read/up
 
 兩種 backend 都發布相同 public Action envelope。Active Action 使用 `${output.result}`，完成後使用 `${EXEC.ACTIONS.<id>.output.result}`。Final operation evidence 位於 `output.evidence`；retry 的 per-attempt evidence 保留在 `output.attempts[n].evidence`。
 
-Tool Action 在支援位置可以使用 object `saveAs` 和 post-operation evidence collector。Collector 在 primary operation 後、該 attempt assertion 前執行；collector failure policy 不會取代 primary `result`。
+Tool Action 在支援位置可以使用共同的 `result` object 和 post-operation evidence collector。`result.format` 決定內存表示，`result.path` 可選持久化。Collector 在 primary operation 後、該 attempt assertion 前執行；collector failure policy 不會取代 primary `result`。

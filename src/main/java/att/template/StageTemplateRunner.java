@@ -209,9 +209,25 @@ public class StageTemplateRunner {
                                Map<String, Object> output, List<String> targets) throws Exception {
         Path templateRoot = template.directory().toRealPath();
         List<Path> matches = payloadResolver.resolve(template.directory(), action.payload());
+        ActionResultConfig resultConfig = action.resultConfig();
+        String format = requiredFormat(resultConfig, "Render", "");
+        String configuredPath = resultConfig.configured() ? templateEngine.render(resultConfig.path(), context, log) : "";
+        List<String> expandedTargets = new ArrayList<String>();
+        if (resultConfig.configured() && !console(configuredPath)) {
+            Path payloadRoot = renderPayloadRoot(template.directory(), action.payload());
+            for (int i = 0; i < matches.size(); i++) {
+                String relative = RenderPayloadResolver.portable(payloadRoot.relativize(matches.get(i)));
+                String target = expandRenderPath(configuredPath, relative, i + 1);
+                if (matches.size() > 1 && expandedTargets.contains(target)) {
+                    throw new IllegalArgumentException("Render result.path pattern maps multiple sources to the same target: " + target);
+                }
+                expandedTargets.add(target);
+            }
+        }
         Map<String, Object> multiple = new LinkedHashMap<String, Object>();
         Object single = null;
-        for (Path source : matches) {
+        for (int index = 0; index < matches.size(); index++) {
+            Path source = matches.get(index);
             String relative = RenderPayloadResolver.portable(templateRoot.relativize(source));
             String content = PayloadCache.readUtf8(source);
             String rendered;
@@ -221,21 +237,57 @@ public class StageTemplateRunner {
                         att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
                         "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
             }
-            Object value;
-            if ("file".equalsIgnoreCase(action.renderAs())) {
-                Path renderRoot = context.inFlow() ? context.actionOutputDir(action.id()) : context.caseOutputDirectory();
-                Path target = renderRoot.resolve(relative.replace('/', java.io.File.separatorChar)).normalize();
-                if (!target.startsWith(renderRoot)) throw new IllegalArgumentException("Render target escapes Action output directory: " + relative);
-                Files.createDirectories(target.getParent());
-                Files.write(target, rendered.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW);
-                value = target.toString();
-                targets.add(target.toString());
-            } else value = templateEngine.parseRendered(rendered, action.renderAs());
+            Object value = templateEngine.parseRendered(rendered, format);
+            if (resultConfig.configured()) {
+                if (console(configuredPath)) {
+                    log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, value));
+                } else {
+                    Path saved = artifactWriter.write(context, action.id(), expandedTargets.get(index), format, value, resultConfig.overwrite());
+                    targets.add(saved.toString());
+                }
+            }
             if (matches.size() == 1) single = value; else multiple.put(relative, value);
         }
-        output.put("result", "file".equalsIgnoreCase(action.renderAs()) ? new ArrayList<String>(targets) : (matches.size() == 1 ? single : multiple));
-        output.put("renderAs", action.renderAs().toLowerCase(java.util.Locale.ROOT));
+        output.put("result", matches.size() == 1 ? single : multiple);
+        output.put("format", format.toLowerCase(java.util.Locale.ROOT));
         output.put("sources", sourceNames(templateRoot, matches));
+    }
+
+    private Path renderPayloadRoot(Path templateDirectory, String payload) throws Exception {
+        int wildcard = firstGlobCharacter(payload);
+        String prefix = wildcard < 0 ? payload : payload.substring(0, wildcard);
+        int slash = prefix.lastIndexOf('/');
+        String directory = slash < 0 ? "" : prefix.substring(0, slash);
+        return templateDirectory.toRealPath().resolve(directory.replace('/', java.io.File.separatorChar)).normalize().toRealPath();
+    }
+
+    private int firstGlobCharacter(String value) {
+        int result = -1;
+        for (char token : new char[]{'*', '?', '{', '['}) {
+            int found = value.indexOf(token);
+            if (found >= 0 && (result < 0 || found < result)) result = found;
+        }
+        return result;
+    }
+
+    private String expandRenderPath(String pattern, String relativePath, int index) {
+        String filename = relativePath.substring(relativePath.lastIndexOf('/') + 1);
+        int dot = filename.lastIndexOf('.');
+        String name = dot <= 0 ? filename : filename.substring(0, dot);
+        String ext = dot < 0 || dot == filename.length() - 1 ? "" : filename.substring(dot + 1);
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("filename", filename); values.put("name", name); values.put("ext", ext);
+        values.put("index", String.valueOf(index)); values.put("relativePath", relativePath);
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{([^{}]+)\\}").matcher(pattern);
+        StringBuffer expanded = new StringBuffer();
+        while (matcher.find()) {
+            String value = values.get(matcher.group(1));
+            if (value == null) throw new IllegalArgumentException("Unknown Render result.path token: {" + matcher.group(1) + "}");
+            matcher.appendReplacement(expanded, java.util.regex.Matcher.quoteReplacement(value));
+        }
+        matcher.appendTail(expanded);
+        if (expanded.indexOf("{") >= 0 || expanded.indexOf("}") >= 0) throw new IllegalArgumentException("Malformed Render result.path token: " + pattern);
+        return expanded.toString();
     }
 
     private void executeLog(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output) throws Exception {
@@ -371,6 +423,9 @@ public class StageTemplateRunner {
 
             ActionExecutionResult operationResult = result.operationResult();
             publishOperationResult(output, operationResult);
+            if (action.resultConfig().specified() && "text".equalsIgnoreCase(action.resultConfig().format())) {
+                output.put("result", artifactWriter.renderDb("text", operationResult.result()));
+            }
             Map<String, Object> attempt = new LinkedHashMap<String, Object>();
             attempt.put("attempt", number);
             attempt.put("invocationId", invocationId);
@@ -420,14 +475,15 @@ public class StageTemplateRunner {
 
     private void saveDbResult(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
                               List<String> targets, Object result) throws Exception {
-        if (!action.saveConfig().configured()) return;
-        String path = templateEngine.render(action.saveConfig().path(), context, log);
-        String format = requiredFormat(action.saveConfig(), "DB", "");
+        ActionResultConfig resultConfig = action.resultConfig();
+        if (!resultConfig.configured()) return;
+        String path = templateEngine.render(resultConfig.path(), context, log);
+        String format = requiredFormat(resultConfig, "DB", "");
         if (console(path)) {
-            try { log.appendRaw("ACTION " + action.id() + " SAVE", artifactWriter.renderDb(format, result)); }
+            try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.renderDb(format, result)); }
             catch (Exception error) { /* saving evidence must not replace the operation result */ }
         } else {
-            Path saved = artifactWriter.writeDb(context, action.id(), path, format, result, action.saveConfig().overwrite());
+            Path saved = artifactWriter.writeDb(context, action.id(), path, format, result, resultConfig.overwrite());
             targets.add(saved.toString());
         }
     }
@@ -449,7 +505,7 @@ public class StageTemplateRunner {
         int intervalMs = integer(retry.get("intervalMs"), 0);
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
         output.put("attempts", attempts);
-        ActionSaveConfig save = action.saveConfig();
+        ActionResultConfig save = action.resultConfig();
         String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
         boolean console = console(saveAs);
         String kind = templateEngine.callKind(action.call());
@@ -483,6 +539,8 @@ public class StageTemplateRunner {
                 attempts.add(invocation);
                 ActionExecutionResult operation = result.operationResult();
                 publishOperationResult(output, operation);
+                Object selectedResult = resultValue(action, kind, result, operation.result(), format);
+                output.put("result", selectedResult);
                 invocation.put("evidence", operation.evidence());
                 copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 Object saved = invocation.get("outputFile");
@@ -655,34 +713,40 @@ public class StageTemplateRunner {
         }
     }
 
-    private String toolFormat(ActionSaveConfig save, String kind) {
-        if (save.legacy()) {
-            if ("call-tool".equals(kind)) throw new IllegalArgumentException("call-backed Tool saveAs must use {path, format, overwrite}");
-            return "builtin".equals(kind) ? "text" : "raw";
-        }
+    private String toolFormat(ActionResultConfig save, String kind) {
         String fallback = "builtin".equals(kind) ? "text" : ("call-tool".equals(kind) ? "" : "raw");
         String format = requiredFormat(save, "Tool", fallback);
         if (("builtin".equals(kind) || "call-tool".equals(kind)) && "raw".equals(format)) {
-            throw new IllegalArgumentException("Built-in and call-backed Tool saveAs.format do not support raw; use text, json, yaml, or xml");
+            throw new IllegalArgumentException("Built-in and call-backed Tool result.format do not support raw; use text, json, yaml, or xml");
         }
         if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
                 || "yaml".equals(format) || "xml".equals(format))) {
-            throw new IllegalArgumentException("Tool saveAs.format must be raw, text, json, yaml, or xml: " + format);
+            throw new IllegalArgumentException("Tool result.format must be raw, text, json, yaml, or xml: " + format);
         }
         return format;
     }
 
-    private String requiredFormat(ActionSaveConfig save, String owner, String fallback) {
+    private String requiredFormat(ActionResultConfig save, String owner, String fallback) {
         String format = save.format() == null ? "" : save.format().trim().toLowerCase(java.util.Locale.ROOT);
         if (format.isEmpty()) format = fallback;
-        if (format.isEmpty()) throw new IllegalArgumentException(owner + " saveAs.format is required");
+        if (format.isEmpty()) throw new IllegalArgumentException(owner + " result.format is required");
         if ("DB".equals(owner) && !("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
-            throw new IllegalArgumentException("DB saveAs.format must be text, json, yaml, or xml: " + format);
+            throw new IllegalArgumentException("DB result.format must be text, json, yaml, or xml: " + format);
         }
         return format;
     }
 
     private boolean console(String path) { return "console".equalsIgnoreCase(path == null ? "" : path.trim()); }
+
+    private Object resultValue(TemplateAction action, String kind, att.exec.ToolInvocationResult invocation,
+                               Object nativeResult, String format) throws Exception {
+        if (!action.resultConfig().specified()) return nativeResult;
+        if ("raw".equalsIgnoreCase(format) && invocation.invocation().get("rawOutput") != null) return invocation.invocation().get("rawOutput");
+        if ("text".equalsIgnoreCase(format)) return nativeResult == null ? "" : String.valueOf(nativeResult);
+        if ("tool".equals(kind) && ("json".equalsIgnoreCase(format) || "yaml".equalsIgnoreCase(format) || "xml".equalsIgnoreCase(format))
+                && nativeResult instanceof String) return templateEngine.parseRendered((String) nativeResult, format);
+        return nativeResult;
+    }
 
     private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log,
                                         boolean invocationSucceeded) throws Exception {
@@ -843,7 +907,7 @@ public class StageTemplateRunner {
                     "Check the action fields, Context references, input files, call arguments, and detailed Case-log evidence.", error);
         }
         String sourceField = "actions." + action.id() + "." + executionField;
-        if (typed.file() == null && typed.field() != null && (typed.field().startsWith("saveAs") || typed.field().equals("sqlFile")))
+        if (typed.file() == null && typed.field() != null && (typed.field().startsWith("result") || typed.field().equals("sqlFile")))
             sourceField = "actions." + action.id() + "." + typed.field();
         return att.config.YamlSupport.locate(typed, template.sourceFile(), sourceField)
                 .withLocation(null, null, null, null, null, template.name(), action.id());

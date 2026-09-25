@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class StageTemplateRunnerTest {
     @TempDir Path tempDir;
 
-    @Test void v25BuiltInSaveAsUsesTypedFormatAndTextDefault() throws Exception {
+    @Test void commonResultUsesTypedFormatAndTextRepresentation() throws Exception {
         Path caseDir = tempDir.resolve("v25-save");
         Files.createDirectories(caseDir);
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),
@@ -22,12 +22,12 @@ class StageTemplateRunnerTest {
         context.beginStage(new StageCaseData("prepare","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         List<TemplateAction> actions = Arrays.asList(
                 new TemplateAction("json", map("type","tool","call","#{upper('abc')}",
-                        "saveAs",map("path","saved/value.json","format","json")), "att-template/v2.5"),
+                        "result",map("path","saved/value.json","format","json")), "att-template/v3.1"),
                 new TemplateAction("text", map("type","tool","call","#{upper('def')}",
-                        "saveAs",map("path","saved/value.txt")), "att-template/v2.5"));
+                        "result",map("path","saved/value.txt","format","text")), "att-template/v3.1"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
-                .execute("prepare",new StageTemplate("T",tempDir,actions,"att-template/v2.5"),context,
+                .execute("prepare",new StageTemplate("T",tempDir,actions,"att-template/v3.1"),context,
                         new CaseExecutionLog(caseDir.resolve("case.log")));
 
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
@@ -44,12 +44,12 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("prepare","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         TemplateAction action = new TemplateAction("normalize", map("type","tool","call","#{upper('abc')}",
-                "saveAs","normalized.txt","assert","${output.result} == 'ABC'"));
+                "result",map("path","normalized.txt","format","text"),"assert","${output.result} == 'ABC'"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
                 .execute("prepare",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(caseDir.resolve("case.log")));
 
-        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
         assertEquals("ABC", context.resolve("ACTIONS.normalize.output.result"));
         assertEquals(0, context.resolve("ACTIONS.normalize.output.exitCode"));
         assertEquals("builtin", context.resolve("ACTIONS.normalize.output.attempts[0].type"));
@@ -215,15 +215,15 @@ class StageTemplateRunnerTest {
         tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         List<TemplateAction> actions = Arrays.asList(
-                new TemplateAction("builtin", map("type","tool","call","#{upper('abc')}","saveAs",map("path","console","format","text"))),
-                new TemplateAction("process", map("type","tool","call","#{sample()}","saveAs",map("path","console","format","raw"))));
+                new TemplateAction("builtin", map("type","tool","call","#{upper('abc')}","result",map("path","console","format","text"))),
+                new TemplateAction("process", map("type","tool","call","#{sample()}","result",map("path","console","format","raw"))));
         CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new FixedRunner(0,"line1\nline2\n"))))
                 .execute("invoke",new StageTemplate("T",tempDir,actions),context,log);
 
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS), Arrays.asList(results.get(0).status(), results.get(1).status()));
         String text = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
-        assertTrue(text.contains("[ACTION builtin SAVE]\nABC\n"));
+        assertTrue(text.contains("[ACTION builtin SAVE]\nABC\n") || text.contains("[ACTION builtin RESULT]\nABC\n"));
         assertTrue(text.contains("[TOOL process STDOUT]\nline1\nline2\n"));
         assertFalse(Files.exists(caseDir.resolve("console")));
         assertFalse(Files.exists(caseDir.resolve("process-output")));
@@ -239,7 +239,7 @@ class StageTemplateRunnerTest {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         SequencedRunner runner = new SequencedRunner(false);
         Map<String,Object> retry = map("maxAttempts",3,"intervalMs",0,"retryOn",Arrays.asList("ASSERTION"));
-        TemplateAction action = new TemplateAction("call",map("type","tool","call","#{sample()}","saveAs","${CASE.caseId}-response.txt","assert","${output.result} == 'ok'","retry",retry));
+        TemplateAction action = new TemplateAction("call",map("type","tool","call","#{sample()}","result",map("path","${CASE.caseId}-response.txt","format","raw"),"assert","${output.result} == 'ok'","retry",retry));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,runner))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(tempDir.resolve("case1.log")));
         assertEquals(ResultStatus.PASS, results.get(0).status()); assertEquals(2, runner.calls);
         assertEquals(2, ((List<?>) context.resolve("ACTIONS.call.output.attempts")).size());
@@ -299,7 +299,7 @@ class StageTemplateRunnerTest {
         tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         List<TemplateAction> actions = Arrays.asList(
-            new TemplateAction("render", map("type","render","payload","payload.txt","renderAs","file","assert","${output.targetFiles[0]} != null")),
+            new TemplateAction("render", map("type","render","payload","payload.txt","result",map("format","text","path","payload.txt"),"assert","${output.targetFiles[0]} != null")),
             new TemplateAction("call", map("type","tool","call","#{sample()}","assert","${output.result} == 'expected'","onFailure","continue"))
         );
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new SequencedRunner(false, true)))).execute("invoke",new StageTemplate("T",tempDir,actions),context,new CaseExecutionLog(logDirectory.resolve("case.log")));
@@ -309,14 +309,14 @@ class StageTemplateRunnerTest {
         assertFalse(Files.exists(logDirectory.resolve("payload.txt")));
     }
 
-    @Test void saveAsCollisionFailsUnlessOverwriteIsTrue() throws Exception {
+    @Test void resultPathCollisionFailsUnlessOverwriteIsTrue() throws Exception {
         Files.write(tempDir.resolve("payload.txt"), "new".getBytes("UTF-8"));
         Files.createDirectories(tempDir.resolve("output"));
         Files.write(tempDir.resolve("output/payload.txt"), "old".getBytes("UTF-8"));
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
         CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("output"),"R",tempDir,tempDir.resolve("case.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
-        TemplateAction action = new TemplateAction("render", map("type","render","payload","payload.txt","renderAs","file"));
+        TemplateAction action = new TemplateAction("render", map("type","render","payload","payload.txt","result",map("format","text","path","payload.txt")));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(tempDir.resolve("case.log")));
         assertEquals(ResultStatus.ERROR, results.get(0).status());
         assertEquals("old", new String(Files.readAllBytes(tempDir.resolve("output/payload.txt")),"UTF-8"));
@@ -335,17 +335,17 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("render","T",Collections.<String,Object>emptyMap()),"T",template);
         List<TemplateAction> actions = Arrays.asList(
-                new TemplateAction("json", map("type","render","payload","data/*.json","renderAs","json","description","Render ${CASE.caseId}; status=${output.status}")),
-                new TemplateAction("yaml", map("type","render","payload","value.yaml","renderAs","yaml")),
-                new TemplateAction("xml", map("type","render","payload","value.xml","renderAs","xml")),
-                new TemplateAction("text", map("type","render","payload","value.txt","renderAs","text")),
+                new TemplateAction("json", map("type","render","payload","data/*.json","result",map("format","json"),"description","Render ${CASE.caseId}; status=${output.status}")),
+                new TemplateAction("yaml", map("type","render","payload","value.yaml","result",map("format","yaml"))),
+                new TemplateAction("xml", map("type","render","payload","value.xml","result",map("format","xml"))),
+                new TemplateAction("text", map("type","render","payload","value.txt","result",map("format","text"))),
                 new TemplateAction("check", map("type","assert","description","Check ${CASE.caseId}","assert","${ACTIONS.json.output.result['data/a.json'].value} == 1","expected","want ${CASE.caseId}\r\nline2","actual","${output.success}"))
         );
         FrameworkConfig parseConfig = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,template,Collections.<String,ToolConfig>emptyMap(),null,null);
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,parseConfig))).execute("render",new StageTemplate("T",template,actions),context,new CaseExecutionLog(caseDir.resolve("case.log")));
         assertEquals(5, results.size());
         assertEquals(Arrays.asList("data/a.json","data/b.json"), new ArrayList<Object>(((Map<?,?>)context.resolve("ACTIONS.json.output.result")).keySet()));
-        assertEquals("json", context.resolve("ACTIONS.json.output.renderAs"));
+        assertEquals("json", context.resolve("ACTIONS.json.output.format"));
         assertEquals("Render g.TC1; status=PASS", context.resolve("ACTIONS.json.description"));
         assertEquals("g.TC1", context.resolve("ACTIONS.yaml.output.result.name"));
         assertEquals("OK", context.resolve("ACTIONS.xml.output.result.Status"));
@@ -353,6 +353,51 @@ class StageTemplateRunnerTest {
         assertEquals("Check g.TC1", results.get(4).description());
         assertEquals("Check g.TC1\nwant g.TC1\nline2", results.get(4).expected());
         assertEquals("true", results.get(4).actual());
+    }
+
+    @Test void renderResultPathPatternsExpandAllTokensAndRejectIntraActionCollisions() throws Exception {
+        Path template = tempDir.resolve("pattern-template");
+        Files.createDirectories(template.resolve("requests"));
+        Files.write(template.resolve("requests/payment.xml"), "<payment/>".getBytes("UTF-8"));
+        Files.write(template.resolve("requests/refund.xml"), "<refund/>".getBytes("UTF-8"));
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.emptyMap(), null);
+        Path output = tempDir.resolve("pattern-output");
+        CaseRuntimeContext context = new CaseRuntimeContext(test, output, "R", tempDir, output.resolve("case.log"));
+        context.beginStage(new StageCaseData("render", "T", Collections.<String,Object>emptyMap()), "T", template);
+        TemplateAction action = new TemplateAction("render", map("type", "render", "payload", "requests/*.xml",
+                "result", map("format", "text", "path", "artifacts/{index}-{relativePath}-{name}.{ext}")));
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("render",
+                new StageTemplate("T", template, Collections.singletonList(action)), context,
+                new CaseExecutionLog(output.resolve("case.log")));
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals("<payment/>", context.resolve("ACTIONS.render.output.result['requests/payment.xml']"));
+        assertEquals("<payment/>", new String(Files.readAllBytes(output.resolve("artifacts/1-payment.xml-payment.xml")), "UTF-8"));
+        assertEquals("<refund/>", new String(Files.readAllBytes(output.resolve("artifacts/2-refund.xml-refund.xml")), "UTF-8"));
+        assertEquals(2, ((List<?>) context.resolve("ACTIONS.render.output.targetFiles")).size());
+
+        TemplateAction collision = new TemplateAction("collision", map("type", "render", "payload", "requests/*.xml",
+                "result", map("format", "text", "path", "artifacts/same.xml", "overwrite", true)));
+        CaseRuntimeContext collisionContext = new CaseRuntimeContext(test, tempDir.resolve("collision-output"), "R2", tempDir,
+                tempDir.resolve("collision-output/case.log"));
+        collisionContext.beginStage(new StageCaseData("render", "T", Collections.<String,Object>emptyMap()), "T", template);
+        List<ValidationResult> collisionResults = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("render",
+                new StageTemplate("T", template, Collections.singletonList(collision)), collisionContext,
+                new CaseExecutionLog(tempDir.resolve("collision-output/case.log")));
+        assertEquals(ResultStatus.ERROR, collisionResults.get(0).status());
+        assertFalse(Files.exists(tempDir.resolve("collision-output/artifacts/same.xml")));
+
+        TemplateAction console = new TemplateAction("console", map("type", "render", "payload", "requests/payment.xml",
+                "result", map("format", "text", "path", "console")));
+        CaseRuntimeContext consoleContext = new CaseRuntimeContext(test, tempDir.resolve("console-output"), "R3", tempDir,
+                tempDir.resolve("console-output/case.log"));
+        consoleContext.beginStage(new StageCaseData("render", "T", Collections.<String,Object>emptyMap()), "T", template);
+        List<ValidationResult> consoleResults = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("render",
+                new StageTemplate("T", template, Collections.singletonList(console)), consoleContext,
+                new CaseExecutionLog(tempDir.resolve("console-output/case.log")));
+        assertEquals(ResultStatus.PASS, consoleResults.get(0).status());
+        assertTrue(((List<?>) consoleContext.resolve("ACTIONS.console.output.targetFiles")).isEmpty());
+        assertFalse(Files.exists(tempDir.resolve("console-output/console")));
     }
 
     @Test void toolExitCodeIsEvidenceAndAssertionControlsResult() throws Exception {
@@ -379,7 +424,7 @@ class StageTemplateRunnerTest {
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
         CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("glob-case"),"R",tempDir,tempDir.resolve("glob.log"));
         context.beginStage(new StageCaseData("render","T",Collections.<String,Object>emptyMap()),"T",tempDir);
-        TemplateAction action = new TemplateAction("render",map("type","render","description","Render ${CASE.caseId}; status=${output.status}","payload","../*.txt","renderAs","text","onFailure","continue"));
+        TemplateAction action = new TemplateAction("render",map("type","render","description","Render ${CASE.caseId}; status=${output.status}","payload","../*.txt","result",map("format","text"),"onFailure","continue"));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("render",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(tempDir.resolve("glob.log")));
         assertEquals(ResultStatus.ERROR, results.get(0).status());
         assertEquals("ERROR", context.resolve("ACTIONS.render.output.status"));

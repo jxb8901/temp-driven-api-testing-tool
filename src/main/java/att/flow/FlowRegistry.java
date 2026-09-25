@@ -166,6 +166,7 @@ public final class FlowRegistry {
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Flow must be a YAML map: " + descriptor);
             map = objectMap((Map<?, ?>) loaded);
         }
+        rejectLegacyResultFields(map, descriptor);
         Path schema = projectRoot.resolve("schemas/att-flow-v3.0.schema.json");
         if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
@@ -173,7 +174,7 @@ public final class FlowRegistry {
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
-        Path templateSchema = projectRoot.resolve("schemas/att-template-v3.0.schema.json");
+        Path templateSchema = projectRoot.resolve("schemas/att-template-v3.1.schema.json");
         if (Files.isRegularFile(templateSchema)) att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
         SchemaSupport.requireVersion(map, Version.FLOW_SCHEMA, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");
@@ -182,6 +183,39 @@ public final class FlowRegistry {
         SchemaSupport.string(map.get("name"), "flow.name", true);
         SchemaSupport.string(map.get("description"), "flow.description", true);
         return new FlowDefinition(id, text(map.get("name")), text(map.get("description")), descriptor.getParent(), actions(map.get("actions"), id));
+    }
+
+    private void rejectLegacyResultFields(Map<String, Object> flow, Path descriptor) {
+        Object configured = flow.get("actions");
+        if (!(configured instanceof Map)) return;
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (!(entry.getValue() instanceof Map)) continue;
+            Map<?, ?> action = (Map<?, ?>) entry.getValue();
+            String id = String.valueOf(entry.getKey());
+            if (action.containsKey("renderAs")) {
+                String old = String.valueOf(action.get("renderAs"));
+                String suggestion = "Legacy field 'renderAs' is no longer supported. Replace it with:\n  result:\n    format: " + old;
+                if ("file".equalsIgnoreCase(old)) suggestion = "Legacy 'renderAs: file' mixed representation and persistence. Choose result.format and result.path explicitly, for example:\n  result:\n    format: text\n    path: rendered/{filename}";
+                throw migrationError(descriptor, id, "renderAs", suggestion);
+            }
+            if (action.containsKey("saveAs")) {
+                Object old = action.get("saveAs");
+                Map<?, ?> save = old instanceof Map ? (Map<?, ?>) old : Collections.emptyMap();
+                String format = save.get("format") == null ? "text" : String.valueOf(save.get("format"));
+                String path = save.get("path") == null ? (old instanceof String ? String.valueOf(old) : null) : String.valueOf(save.get("path"));
+                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n    format: ").append(format);
+                if (path != null) suggestion.append("\n    path: ").append(path);
+                if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append("\n    overwrite: true");
+                throw migrationError(descriptor, id, "saveAs", suggestion.toString());
+            }
+        }
+    }
+
+    private att.validation.DiagnosticException migrationError(Path descriptor, String action, String field, String suggestion) {
+        String fullField = "actions." + action + "." + field;
+        return new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                "Legacy Action field '" + field + "' is not supported", "Flow Action " + action + " uses " + field,
+                descriptor.toString(), fullField, null, null, null, null, action, suggestion, null);
     }
 
     private List<TemplateAction> actions(Object configured, String id) {
