@@ -490,12 +490,13 @@ public class StageTemplateRunner {
         boolean console = console(saveAs);
         String kind = templateEngine.callKind(action.call());
         String format = save.specified() ? toolFormat(save, kind) : "";
-        boolean invokerWritesRaw = save.configured() && !console && "tool".equals(kind) && "raw".equals(format);
         boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             try {
-                String invokerSaveAs = invokerWritesRaw ? context.scopedArtifactPath(action.id(), saveAs) : "";
-                String operationSaveAs = "mq".equals(kind) ? saveAs : invokerSaveAs;
+                // Process capture files are bounded stream/log evidence, not the
+                // selected Action result. Persist raw output.result through the
+                // common writer so output.result and result.path cannot diverge.
+                String operationSaveAs = "mq".equals(kind) ? saveAs : "";
                 att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
                         context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, format,
                         save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
@@ -503,7 +504,7 @@ public class StageTemplateRunner {
                 invocation.put("attempt", number);
                 ActionExecutionResult operation = result.operationResult();
                 Object selectedResult = resultValue(action, kind, result, operation.result(), format);
-                if (save.configured() && !invokerWritesRaw && !"mq".equals(kind)) {
+                if (save.configured() && !"mq".equals(kind)) {
                     if (console) {
                         if (!("tool".equals(kind) && "raw".equals(format))) {
                             try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, selectedResult)); }

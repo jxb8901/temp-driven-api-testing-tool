@@ -63,6 +63,49 @@ class StageTemplateRunnerTest {
         assertEquals(Boolean.TRUE, saved.get("ok"));
     }
 
+    @Test void rawProcessResultPathPersistsTheSelectedValueForWhitespaceAndStreamedCapture() throws Exception {
+        Path caseDir = tempDir.resolve("raw-result-capture");
+        Files.createDirectories(caseDir);
+        Path whitespaceScript = tempDir.resolve("whitespace-output.sh");
+        Files.write(whitespaceScript, "#!/bin/sh\nprintf '  abc \\n\\n'\n".getBytes("UTF-8"));
+        whitespaceScript.toFile().setExecutable(true);
+        Path largeScript = tempDir.resolve("large-output.sh");
+        Files.write(largeScript, "#!/bin/sh\nhead -c 2048 /dev/zero | tr '\\000' x\nprintf '\\n'\n".getBytes("UTF-8"));
+        largeScript.toFile().setExecutable(true);
+
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("whitespace", new ToolConfig("whitespace", "Whitespace", "test", "./whitespace-output.sh", "txt",
+                Collections.<String, ToolArgumentConfig>emptyMap()));
+        tools.put("large", new ToolConfig("large", "Large", "test", "./large-output.sh", "txt",
+                Collections.<String, ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+                tools, null, null, null, "", "", null, null, 1, "ignore", "", false,
+                new ProcessOutputConfig(1024, 4096));
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("whitespace", map("type", "tool", "call", "#{whitespace()}",
+                        "result", map("format", "raw", "path", "whitespace.txt"))),
+                new TemplateAction("large", map("type", "tool", "call", "#{large()}",
+                        "result", map("format", "raw", "path", "large.txt"))));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config)))
+                .execute("invoke", new StageTemplate("T", tempDir, actions), context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
+                Arrays.asList(results.get(0).status(), results.get(1).status()));
+        for (String action : new String[]{"whitespace", "large"}) {
+            String selected = String.valueOf(context.resolve("ACTIONS." + action + ".output.result"));
+            assertEquals(selected, new String(Files.readAllBytes(caseDir.resolve(action + ".txt")), "UTF-8"));
+        }
+        assertEquals("abc", context.resolve("ACTIONS.whitespace.output.result"));
+        assertEquals(Boolean.TRUE, context.resolve("ACTIONS.large.output.attempts[0].stdoutTruncated"));
+        assertEquals(Boolean.FALSE, context.resolve("ACTIONS.large.output.attempts[0].stdoutArtifactTruncated"));
+    }
+
     @Test void toolActionCanInvokeBuiltInAndPersistItsResult() throws Exception {
         Path caseDir = tempDir.resolve("builtin-case");
         Files.createDirectories(caseDir);

@@ -899,6 +899,13 @@ representation. A pathless result creates no artifact;
 Case log only. Legacy <code>renderAs</code> and <code>saveAs</code>
 fields are rejected with migration suggestions by
 <code>att validate</code>.</p>
+<p>For a configured process Tool with <code>result.format: raw</code>,
+<code>output.result</code> is the trimmed, bounded stdout preview
+(<code>rawOutput</code>), not the complete capture file. A real
+<code>result.path</code> persists exactly that same selected value as
+UTF-8, so whitespace trimming and any preview truncation are consistent
+between the Context value and the artifact. Full streamed stdout remains
+separate process evidence/log capture.</p>
 <p>Every action may use <code>assert</code> except that an assert action
 uses it as its required primary expression. Every action outcome is
 nested under <code>output</code>, including <code>status</code>,

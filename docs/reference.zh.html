@@ -831,6 +831,12 @@ value，不会改变该表示。省略 path 不会建立
 artifact；<code>path: console</code> 只将选定表示写入 Case log。旧
 <code>renderAs</code> 与 <code>saveAs</code>
 会被拒绝，<code>att validate</code> 会提供迁移建议。</p>
+<p>对于已配置的 process Tool，<code>result.format: raw</code> 的
+<code>output.result</code> 是经过 trim 的有限长度 stdout
+preview（<code>rawOutput</code>），而不是完整 capture file。指定真正的
+<code>result.path</code> 时，会以 UTF-8 持久化完全相同的选定值，因此
+Context 值与 artifact 的空白裁剪及 preview 截断行为一致。完整串流 stdout
+仍作为独立的 process evidence/log capture 保存。</p>
 <p>每个动作都可以使用 <code>assert</code>，但 assert
 动作本身把它作为必需主表达式。每个动作结果都嵌套在 <code>output</code>
 下，包括
