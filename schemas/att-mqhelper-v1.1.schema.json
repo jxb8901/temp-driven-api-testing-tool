@@ -37,7 +37,7 @@
       "properties": {
         "charset": {"type": "integer", "minimum": 1, "maximum": 65535},
         "ccsid": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "encoding": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "encoding": {"type": "integer", "enum": [0, 1, 2, 16, 17, 18, 32, 33, 34, 256, 257, 258, 272, 273, 274, 288, 289, 290, 512, 513, 514, 528, 529, 530, 544, 545, 546, 768, 769, 770, 784, 785, 786, 800, 801, 802, 1024, 1025, 1026, 1040, 1041, 1042, 1056, 1057, 1058]},
         "format": {"enum": ["", "MQSTR", "MQHRF2", "MQFMT_STRING", "MQFMT_NONE", "NONE"]},
         "persistence": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 2}, {"enum": ["asQueue", "persistent", "notPersistent", "nonPersistent"]}]},
         "expiry": {"type": "integer", "minimum": -1, "maximum": 2147483647},

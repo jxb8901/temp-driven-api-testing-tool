@@ -43,12 +43,13 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         private final Class<?> constants;
         private ReflectiveConnection(Object manager, Class<?> constants) { this.manager = manager; this.constants = constants; }
         @Override public MqTransport.Queue open(String queue, boolean input, boolean output) throws Exception {
+            return open(queue, input, output, false);
+        }
+        @Override public MqTransport.Queue open(String queue, boolean input, boolean output, boolean bindNotFixed) throws Exception {
             int options = constant(constants, "MQOO_FAIL_IF_QUIESCING", 0x2000);
             if (input) options |= constant(constants, "MQOO_INPUT_SHARED", 0x0002);
-            if (output) {
-                options |= constant(constants, "MQOO_OUTPUT", 0x0010);
-                options |= constant(constants, "MQOO_BIND_NOT_FIXED", 0x00080000);
-            }
+            if (output) options |= constant(constants, "MQOO_OUTPUT", 0x0010);
+            if (output && bindNotFixed) options |= constant(constants, "MQOO_BIND_NOT_FIXED", 0x00080000);
             try {
                 Object destination = invoke(manager, "accessQueue", new Class<?>[]{String.class, Integer.TYPE}, queue, Integer.valueOf(options));
                 return new ReflectiveQueue(destination, constants);
@@ -81,7 +82,8 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                         | constant(constants, "MQPMO_NEW_MSG_ID", 0x00000040);
                 set(options, "options", Integer.valueOf(flags));
                 invoke(queue, "put", new Class<?>[]{messageClass, optionsClass}, message, options);
-                return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload);
+                return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload,
+                        number(message, "characterSet"), number(message, "encoding"), stringValue(message, "format"));
             } catch (Exception error) { throw translate(error); }
         }
         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
@@ -100,7 +102,8 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 int length = ((Number) invoke(message, "getDataLength", new Class<?>[0])).intValue();
                 byte[] payload = new byte[length];
                 invoke(message, "readFully", new Class<?>[]{byte[].class}, payload);
-                return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload);
+                return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload,
+                        number(message, "characterSet"), number(message, "encoding"), stringValue(message, "format"));
             } catch (Exception error) { throw translate(error); }
         }
         @Override public void close() throws Exception { try { invoke(queue, "close", new Class<?>[0]); } catch (Exception error) { throw translate(error); } }
@@ -149,6 +152,14 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
     }
     private static Integer number(Throwable error, String field) {
         try { Object value = error.getClass().getField(field).get(error); return value instanceof Number ? Integer.valueOf(((Number) value).intValue()) : null; }
+        catch (Exception ignored) { return null; }
+    }
+    private static Integer number(Object target, String field) {
+        try { Object value = target.getClass().getField(field).get(target); return value instanceof Number ? Integer.valueOf(((Number) value).intValue()) : null; }
+        catch (Exception ignored) { return null; }
+    }
+    private static String stringValue(Object target, String field) {
+        try { Object value = target.getClass().getField(field).get(target); return value == null ? null : String.valueOf(value); }
         catch (Exception ignored) { return null; }
     }
     private static String reasonName(int reason) {

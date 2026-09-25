@@ -5,6 +5,7 @@ import att.config.FrameworkConfig;
 import att.config.MqHelperConfig;
 import att.config.ProcessOutputConfig;
 import att.core.CaseRuntimeContext;
+import att.core.CaseExecutionLog;
 import att.core.TestCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -80,6 +81,42 @@ class MqHelperExecutorTest {
         Path output = Paths.get(String.valueOf(result.result().get("outputFile")));
         assertArrayEquals(new byte[]{0, 1, (byte) 0xff}, Files.readAllBytes(output));
         assertEquals(output.toString(), result.result().get("outputFile"));
+    }
+
+    @Test void typedReplyUsesReplyCcsidAndPathConsoleWritesPresentationOnly() throws Exception {
+        Path caseDir = tempDir.resolve("typed-case"); Files.createDirectories(caseDir);
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{(byte) 0xe9}, new byte[]{1}, new byte[]{(byte) 0xe9},
+                819, 273, "MQSTR   ");
+        Path logPath = caseDir.resolve("case.log");
+        MqInvocationResult result;
+        try (CaseExecutionLog log = new CaseExecutionLog(logPath)) {
+            result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                    map("queue", "REPLY.Q"), context(caseDir), null, "receive-typed",
+                    "reply", "console", "text", false, log);
+        }
+
+        assertTrue(result.success());
+        assertEquals("é", result.result().get("result"));
+        assertEquals(819, result.result().get("replyCcsid"));
+        assertFalse(result.result().containsKey("outputFile"));
+        String log = new String(Files.readAllBytes(logPath), "UTF-8");
+        assertTrue(log.contains("[ACTION reply SAVE]"), log);
+        assertTrue(log.contains("é"), log);
+    }
+
+    @Test void requestNoReplyPreservesEffectiveWaitMsAndScopesBindNotFixedToRequestOutput() throws Exception {
+        Path caseDir = tempDir.resolve("request-timeout-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
+        FakeFactory factory = new FakeFactory(); factory.noMessage = true;
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString(), "waitMs", 321),
+                context(caseDir), null, "request-2033");
+
+        assertTrue(result.success());
+        assertEquals(Boolean.FALSE, result.result().get("replyReceived"));
+        assertEquals(321, result.result().get("waitMs"));
+        assertEquals(java.util.Arrays.asList(Boolean.TRUE, Boolean.FALSE), factory.bindNotFixed);
     }
 
     @Test void noMessageAvailableIsSuccessfulReceiveWithoutResendSemantics() throws Exception {
@@ -170,6 +207,7 @@ class MqHelperExecutorTest {
         MqTransport.GetRequest getRequest;
         MqTransport.Message reply;
         boolean noMessage;
+        final List<Boolean> bindNotFixed = new ArrayList<Boolean>();
         int disconnects;
         int queueCloses;
         String connectedInstance;
@@ -180,6 +218,14 @@ class MqHelperExecutorTest {
             connectedInstances.add(config.instanceId());
             return new MqTransport.Connection() {
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
+                    bindNotFixed.add(Boolean.FALSE);
+                    return queue(queue, input, output);
+                }
+                @Override public MqTransport.Queue open(String queue, boolean input, boolean output, boolean bind) {
+                    bindNotFixed.add(Boolean.valueOf(bind));
+                    return queue(queue, input, output);
+                }
+                private MqTransport.Queue queue(String queue, boolean input, boolean output) {
                     return new MqTransport.Queue() {
                         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) {
                             putPayload = payload.clone(); putRequest = request;

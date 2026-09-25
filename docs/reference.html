@@ -890,6 +890,11 @@ action requires <code>message</code>, <code>file</code>, or both and may
 use <code>level</code> and <code>fields</code>. An assign action
 requires <code>name</code> and <code>expression</code>. Unsupported
 fields are errors rather than ignored values.</p>
+<p>For the common Tool/DB <code>saveAs</code> object, <code>path</code>
+is optional: a pathless object keeps the typed result in memory and
+creates no artifact. If <code>path</code> is present, the
+target-specific format, safety, collision, and overwrite rules
+apply.</p>
 <p>Every action may use <code>assert</code> except that an assert action
 uses it as its required primary expression. Every action outcome is
 nested under <code>output</code>, including <code>status</code>,
@@ -1458,11 +1463,15 @@ values use IBM MQ tenths-of-a-second units, not milliseconds.</p>
 precedence is call argument &gt; message default &gt; validation error.
 send(queue=...) and receive(queue=...) do not use these defaults.
 Request payload files stay byte-preserving through
-MQMessage.write(byte[]). Request output uses bind-not-fixed; reply input
-uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply
-correlationId to the generated request MsgId with MQGMO_WAIT,
-MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses
-NO_SYNCPOINT for put/get and does not call legacy commit().</p>
+MQMessage.write(byte[]). Only the request output queue uses
+<code>MQOO_BIND_NOT_FIXED</code>; send output uses ordinary
+<code>MQOO_OUTPUT</code>, and reply input uses shared input. ATT sets
+MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated
+request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval
+from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy
+commit(). <code>encoding</code> is validated as a legal IBM MQ
+integer/decimal/float encoding combination before the descriptor is
+accepted.</p>
 <h4 id="common-saveas">Common saveAs</h4>
 <p>MQ receive/request use the common Action saveAs object; no
 MQ-specific resultType/replyType exists.</p>
@@ -1474,9 +1483,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb25-1"><a href=
 <p>format defaults to raw and path is optional. raw gives the original
 byte[], text gives String, and json/yaml/xml give existing ATT typed
 values. No saveAs or saveAs: {} keeps the result in memory and creates
-no file. No .reply.bin is created unless path is explicit. raw plus a
-path writes exact bytes; overwrite/path safety follow the common Action
-rules.</p>
+no file. <code>path: console</code> writes the selected representation
+to the Case log and creates no <code>output.targetFiles</code> entry or
+file. No .reply.bin is created unless a real path is explicit. raw plus
+a real path writes exact bytes; overwrite/path safety follow the common
+Action rules.</p>
 <div class="sourceCode" id="cb26"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> requestXml</span></span>
 <span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
@@ -1497,19 +1508,22 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href=
 <p>output.result is the business payload; MQ metadata is directly under
 output. send publishes sent, queue, bytes, messageId, correlationId, and
 leaves result null/absent. receive/request publish received or
-replyReceived, queue names, waitMs, messageId, replyMessageId,
-replyCorrelationId, byte counts, completion/reason fields, and put the
-parsed payload only in result. A normal request satisfies
-output.messageId == output.replyCorrelationId. MQRC 2033 leaves result
-null and publishes received/replyReceived false plus reasonCode 2033 and
-MQRC_NO_MSG_AVAILABLE.</p>
+replyReceived, queue names, effective waitMs, messageId, replyMessageId,
+replyCorrelationId, byte counts, reply CCSID/encoding/format when
+supplied by MQ, completion/reason fields, and put the parsed payload
+only in result. A normal request satisfies output.messageId ==
+output.replyCorrelationId. MQRC 2033 leaves result null and publishes
+received/replyReceived false plus reasonCode 2033,
+MQRC_NO_MSG_AVAILABLE, and the effective waitMs.</p>
 <p>Public MsgId/CorrelId values are lowercase hex, two characters per
 byte, no separators, with leading zeroes; a 24-byte ID is 48 characters.
-Raw runtime values remain byte[]. Logs/reports display raw bytes using
-new String(rawBytes, Charset.defaultCharset()) semantics, not hex and
-not an implicit file. Validation rejects unknown fields, conflicting
-charset/ccsid, invalid encoding/expiry/queues, missing effective
-request/reply queues, unsupported saveAs formats, and unsafe paths.</p>
+Raw runtime values remain byte[]. Typed reply decoding uses the received
+MQMessage.characterSet/CCSID when available, with the configured charset
+as fallback; logs/reports display raw bytes using new String(rawBytes,
+Charset.defaultCharset()) semantics, not hex and not an implicit file.
+Validation rejects unknown fields, conflicting charset/ccsid, invalid
+encoding/expiry/queues, missing effective request/reply queues,
+unsupported saveAs formats, and unsafe paths.</p>
 <h4 id="issue-60-v11-logical-groups-and-physical-instances">Issue #60
 v1.1 logical groups and physical instances</h4>
 <p><code>att-mqhelper/v1.1</code> keeps one public logical helper id
@@ -3947,8 +3961,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href=
 <span id="cb66-6"><a href="#cb66-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> raw</span></span>
 <span id="cb66-7"><a href="#cb66-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
 <span id="cb66-8"><a href="#cb66-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.result.status} == &#39;SUCCESS&#39;&quot;</span></span></code></pre></div>
-<p><code>path</code> is required and <code>overwrite</code> defaults to
-<code>false</code>. <code>format</code> has target-specific rules:</p>
+<p><code>path</code> is optional and <code>overwrite</code> defaults to
+<code>false</code>. Omitting <code>path</code>, including in
+<code>saveAs: {format: ...}</code>, keeps the typed result in memory and
+creates no artifact. When <code>path</code> is present, it is written
+using the target-specific <code>format</code> rules:</p>
 <table>
 <thead>
 <tr class="header">
@@ -4064,10 +4081,12 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href=
 <span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;db/${EXEC.INPUT.rowCaseId}-orders.txt&quot;</span></span>
 <span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
 <span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p><code>path</code> and <code>format</code> are required for DB; format
-is <code>text</code>, <code>json</code>, <code>yaml</code>, or
-<code>xml</code>. The written representation never replaces
-<code>${output.result}</code>'s typed Java object.</p>
+<p><code>path</code> is optional for DB as well. A pathless
+<code>saveAs: {}</code> or <code>saveAs: {format: ...}</code> creates no
+artifact; when a DB artifact path is present, <code>format</code>
+remains required and is <code>text</code>, <code>json</code>,
+<code>yaml</code>, or <code>xml</code>. The written representation never
+replaces <code>${output.result}</code>'s typed Java object.</p>
 <p><code>att-template/v2.3</code> remains read-compatible: its legacy
 Tool form <code>saveAs: response.json</code> plus sibling
 <code>overwrite: false</code> keeps its original raw-stdout meaning and

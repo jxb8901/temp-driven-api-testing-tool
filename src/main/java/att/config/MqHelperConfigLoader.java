@@ -109,6 +109,7 @@ public final class MqHelperConfigLoader {
         }
         int charset = charsetValue != null ? charsetValue.intValue() : (ccsidValue == null ? 1208 : ccsidValue.intValue());
         Integer encoding = optionalInteger(message.get("encoding"), 0, Integer.MAX_VALUE, "mqhelper.message.encoding");
+        validateEncoding(encoding, "mqhelper.message.encoding");
         Integer expiry = optionalInteger(message.get("expiry"), -1, Integer.MAX_VALUE, "mqhelper.message.expiry");
         String format = format(message.get("format"));
         String persistence = persistence(message.get("persistence"));
@@ -214,6 +215,7 @@ public final class MqHelperConfigLoader {
         }
         int charset = charsetValue != null ? charsetValue.intValue() : (ccsidValue == null ? 1208 : ccsidValue.intValue());
         Integer encoding = optionalInteger(message.get("encoding"), 0, Integer.MAX_VALUE, "mqhelper.instances[" + instanceId + "].message.encoding");
+        validateEncoding(encoding, "mqhelper.instances[" + instanceId + "].message.encoding");
         Integer expiry = optionalInteger(message.get("expiry"), -1, Integer.MAX_VALUE, "mqhelper.instances[" + instanceId + "].message.expiry");
         String format = format(message.get("format"));
         String persistence = persistence(message.get("persistence"));
@@ -304,6 +306,12 @@ public final class MqHelperConfigLoader {
 
     private Integer optionalInteger(Object value, int min, int max, String owner) {
         return value == null ? null : Integer.valueOf(integer(value, 0, min, max, owner));
+    }
+
+    private void validateEncoding(Integer value, String owner) {
+        if (value != null && !MqEncoding.isValid(value.intValue())) {
+            throw new IllegalArgumentException(owner + " must be a valid IBM MQ encoding combination");
+        }
     }
 
     private long durationMs(Object value, long fallback, String owner) {

@@ -337,7 +337,7 @@ callApi:
   assert: "${output.result.status} == 'SUCCESS'"
 ```
 
-`path` is required and `overwrite` defaults to `false`. `format` has target-specific rules:
+`path` is optional and `overwrite` defaults to `false`. Omitting `path`, including in `saveAs: {format: ...}`, keeps the typed result in memory and creates no artifact. When `path` is present, it is written using the target-specific `format` rules:
 
 | Action target | Allowed `format` | Default | Content |
 |---|---|---|---|
@@ -385,7 +385,7 @@ saveAs:
   overwrite: false
 ```
 
-`path` and `format` are required for DB; format is `text`, `json`, `yaml`, or `xml`. The written representation never replaces `${output.result}`'s typed Java object.
+`path` is optional for DB as well. A pathless `saveAs: {}` or `saveAs: {format: ...}` creates no artifact; when a DB artifact path is present, `format` remains required and is `text`, `json`, `yaml`, or `xml`. The written representation never replaces `${output.result}`'s typed Java object.
 
 `att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.6` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
 

@@ -77,6 +77,22 @@ class MqHelperConfigLoaderTest {
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
     }
 
+    @Test void rejectsInvalidMqEncodingBits() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        Path helper = directory.resolve("broker.yaml");
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+                "id: broker\nname: Broker\ndescription: Test broker\n" +
+                "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n" +
+                "message: {encoding: 999}\n").getBytes("UTF-8"));
+
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
+        assertTrue(MqEncoding.isValid(273));
+        assertTrue(MqEncoding.isValid(546));
+        assertFalse(MqEncoding.isValid(999));
+    }
+
     @Test void loadsV11InstancesWithSectionInheritanceAndPhysicalIdentity() throws Exception {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("payment.yaml");

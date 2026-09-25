@@ -144,6 +144,7 @@ class JsonSchemaVerifierTest {
         String issue59Mq = mq.replace("\"ccsid\":1208,\"format\":\"MQSTR\",\"persistence\":\"asQueue\"",
                 "\"charset\":1208,\"encoding\":273,\"format\":\"\",\"persistence\":0,\"expiry\":-1,\"requestQueue\":\"REQUEST.Q\",\"replyQueue\":\"REPLY.Q\"");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), issue59Mq));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.0.schema.json"), issue59Mq.replace("\"encoding\":273", "\"encoding\":999")));
         String mqV11 = "{\"schemaVersion\":\"att-mqhelper/v1.1\",\"id\":\"payment\",\"name\":\"Payment\",\"description\":\"MQ\",\"defaults\":{\"connection\":{\"queueManager\":\"QM1\",\"host\":\"localhost\",\"port\":1414,\"channel\":\"APP.SVRCONN\"}},\"instances\":[{\"id\":\"payment-a\"},{\"id\":\"payment-b\",\"message\":{\"replyQueue\":\"REPLY.B\"}}],\"selection\":{\"strategy\":\"roundRobin\"}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.1.schema.json"), mqV11));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.1.schema.json"), mqV11.replace("roundRobin", "invalid")));

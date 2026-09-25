@@ -317,7 +317,7 @@ public class UnifiedTemplateEngine {
         if (name.startsWith("mq.")) {
             context.setMqHelperMetadata(name.split("\\.", -1)[1]);
             if (!attempt) throw new IllegalArgumentException("An MQ operation must be the primary call of a type: tool Action");
-            return executeMqResolvedCall(name, input, context, timeoutMs, invocationId, actionId, saveAs, saveFormat, overwrite);
+            return executeMqResolvedCall(name, input, context, log, timeoutMs, invocationId, actionId, saveAs, saveFormat, overwrite);
         }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             context.setToolMetadata(name);
@@ -343,7 +343,7 @@ public class UnifiedTemplateEngine {
     }
 
     private att.exec.ToolInvocationResult executeMqResolvedCall(String name, Map<String, Object> input,
-                                                                  CaseRuntimeContext context, Long timeoutMs,
+                                                                  CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs,
                                                                   String requestedId, String actionId,
                                                                   String savePath, String saveFormat, boolean overwrite) {
         if (mqHelperExecutor == null) throw new IllegalStateException("MQ invocation is unavailable: " + name);
@@ -352,7 +352,7 @@ public class UnifiedTemplateEngine {
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextInvocationId(name) : requestedId;
         MqInvocationResult result = mqHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id,
-                actionId, savePath, saveFormat, overwrite);
+                actionId, savePath, saveFormat, overwrite, log);
         Map<String, Object> operation = result.result();
         Object business = operation.get("result");
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();

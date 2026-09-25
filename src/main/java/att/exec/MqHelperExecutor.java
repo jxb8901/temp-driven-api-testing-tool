@@ -4,11 +4,13 @@ package att.exec;
 import att.config.FrameworkConfig;
 import att.config.MqHelperConfig;
 import att.core.CaseRuntimeContext;
+import att.core.CaseExecutionLog;
 import att.core.IdentifierValidator;
 import att.core.PathSafety;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -55,6 +57,15 @@ public final class MqHelperExecutor {
     public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
                                       CaseRuntimeContext context, Long timeoutMs, String invocationId,
                                       String actionId, String savePath, String saveFormat, boolean overwrite) {
+        return execute(instance, operation, arguments, context, timeoutMs, invocationId, actionId, savePath,
+                saveFormat, overwrite, null);
+    }
+
+    /** Action-aware execution overload that can append path: console output to the active Case log. */
+    public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
+                                      CaseRuntimeContext context, Long timeoutMs, String invocationId,
+                                      String actionId, String savePath, String saveFormat, boolean overwrite,
+                                      CaseExecutionLog log) {
         MqHelperConfig logical = config.mqHelper(instance);
         if (logical == null) return failure(instance, operation, invocationId, "MQ_CONFIG", "Unknown MQ helper instance '" + instance + "'", null);
         Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
@@ -97,7 +108,7 @@ public final class MqHelperExecutor {
                 result.put("queue", queue); result.put("payloadFile", payloadFile.toString()); result.put("bytes", payload.length);
                 evidence.put("queue", queue); evidence.put("payloadFile", portable(payloadFile)); evidence.put("bytes", payload.length);
                 connection = factory.connect(helper);
-                requestQueue = connection.open(queue, false, true);
+                requestQueue = connection.open(queue, false, true, "request".equals(operation));
                 String replyName = "request".equals(operation)
                         ? effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue") : "";
                 MqTransport.Message sent = requestQueue.put(payload, new MqTransport.PutRequest(
@@ -113,7 +124,8 @@ public final class MqHelperExecutor {
                     closeQueue(requestQueue); requestQueue = null;
                     String reply = effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue");
                     int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), timeoutMs);
-                    result.put("replyQueue", reply); evidence.put("replyQueue", reply); evidence.put("waitMs", waitMs);
+                    result.put("replyQueue", reply); result.put("waitMs", waitMs);
+                    evidence.put("replyQueue", reply); evidence.put("waitMs", waitMs);
                     replyQueue = connection.open(reply, true, false);
                     MqTransport.Message received;
                     try {
@@ -135,9 +147,10 @@ public final class MqHelperExecutor {
                         evidence.put("replyReceived", true);
                         evidence.put("replyMessageId", replyMessageId); evidence.put("replyCorrelationId", correlationId);
                         evidence.put("replyBytes", received.payload() == null ? 0 : received.payload().length);
-                        Object business = represent(received.payload(), representation);
+                        addReplyMetadata(result, evidence, received);
+                        Object business = represent(received, representation, helper);
                         result.put("result", business);
-                        saveIfRequested(result, context, actionId, savePath, representation, received.payload(), business, overwrite);
+                        saveIfRequested(result, context, log, actionId, savePath, representation, received.payload(), business, overwrite);
                         success = true;
                     }
                 }
@@ -159,9 +172,10 @@ public final class MqHelperExecutor {
                     evidence.put("messageId", id(received == null ? null : received.messageId()));
                     evidence.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
                     evidence.put("bytes", received == null || received.payload() == null ? 0 : received.payload().length);
-                    Object business = represent(received == null ? null : received.payload(), representation);
+                    addReplyMetadata(result, evidence, received);
+                    Object business = represent(received, representation, helper);
                     result.put("result", business);
-                    saveIfRequested(result, context, actionId, savePath, representation,
+                    saveIfRequested(result, context, log, actionId, savePath, representation,
                             received == null ? null : received.payload(), business, overwrite);
                     success = true;
                 } catch (MqTransport.Exception noReply) {
@@ -262,16 +276,25 @@ public final class MqHelperExecutor {
         return result;
     }
 
-    private Object represent(byte[] payload, String format) throws Exception {
+    private Object represent(MqTransport.Message message, String format, MqHelperConfig helper) throws Exception {
+        byte[] payload = message == null ? null : message.payload();
         if ("raw".equals(format)) return payload == null ? null : Arrays.copyOf(payload, payload.length);
-        String text = new String(payload == null ? new byte[0] : payload, StandardCharsets.UTF_8);
+        int ccsid = message == null || message.ccsid() == null || message.ccsid().intValue() <= 0
+                ? helper.charset() : message.ccsid().intValue();
+        String text = new String(payload == null ? new byte[0] : payload, mqCharset(ccsid));
         if ("text".equals(format)) return text;
         return new ToolInvoker(projectRoot, config).parseOutput(text, format);
     }
 
-    private void saveIfRequested(Map<String, Object> result, CaseRuntimeContext context, String actionId,
+    private void saveIfRequested(Map<String, Object> result, CaseRuntimeContext context, CaseExecutionLog log, String actionId,
                                  String savePath, String format, byte[] raw, Object value, boolean overwrite) throws Exception {
-        if (savePath == null || savePath.trim().isEmpty() || "console".equalsIgnoreCase(savePath.trim())) return;
+        if (savePath == null || savePath.trim().isEmpty()) return;
+        if ("console".equalsIgnoreCase(savePath.trim())) {
+            if (log == null) throw new IOException("MQ saveAs.path=console requires the active Case execution log");
+            log.appendRaw("ACTION " + (actionId == null || actionId.trim().isEmpty() ? "MQ" : actionId) + " SAVE",
+                    consoleValue(format, raw, value));
+            return;
+        }
         Path root = actionId == null || actionId.trim().isEmpty()
                 ? context.caseOutputDirectory().toAbsolutePath().normalize()
                 : context.actionOutputDir(actionId).toAbsolutePath().normalize();
@@ -293,6 +316,31 @@ public final class MqHelperExecutor {
                             : new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE});
         }
         result.put("outputFile", target.toString());
+    }
+
+    private String consoleValue(String format, byte[] raw, Object value) throws Exception {
+        if ("raw".equals(format)) return new String(raw == null ? new byte[0] : raw, Charset.defaultCharset());
+        if ("text".equals(format)) return value == null ? "" : String.valueOf(value);
+        return new ObjectOutputCodec().encode(value, format);
+    }
+
+    private Charset mqCharset(int ccsid) {
+        if (ccsid == 1208) return StandardCharsets.UTF_8;
+        if (ccsid == 819) return StandardCharsets.ISO_8859_1;
+        if (ccsid == 1200) return Charset.forName("UTF-16");
+        if (ccsid == 1201 || ccsid == 13488) return StandardCharsets.UTF_16BE;
+        try { return Charset.forName("IBM" + ccsid); }
+        catch (Exception ignored) {
+            try { return Charset.forName("Cp" + ccsid); }
+            catch (Exception unsupported) { throw new IllegalArgumentException("Unsupported IBM MQ reply CCSID: " + ccsid, unsupported); }
+        }
+    }
+
+    private void addReplyMetadata(Map<String, Object> result, Map<String, Object> evidence, MqTransport.Message message) {
+        if (message == null) return;
+        if (message.ccsid() != null) { result.put("replyCcsid", message.ccsid()); evidence.put("replyCcsid", message.ccsid()); }
+        if (message.encoding() != null) { result.put("replyEncoding", message.encoding()); evidence.put("replyEncoding", message.encoding()); }
+        if (message.format() != null) { result.put("replyFormat", message.format()); evidence.put("replyFormat", message.format()); }
     }
 
     private int effectiveWait(Object value, int fallback, Long timeoutMs) {

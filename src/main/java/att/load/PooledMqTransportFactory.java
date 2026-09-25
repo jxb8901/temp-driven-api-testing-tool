@@ -87,7 +87,11 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         PooledConnection(LoadResourcePool<MqTransport.Connection>.Lease lease) { this.lease = lease; }
 
         @Override public MqTransport.Queue open(String queue, boolean input, boolean output) throws Exception {
-            try { return new PooledQueue(lease.value().open(queue, input, output), lease); }
+            return open(queue, input, output, false);
+        }
+
+        @Override public MqTransport.Queue open(String queue, boolean input, boolean output, boolean bindNotFixed) throws Exception {
+            try { return new PooledQueue(lease.value().open(queue, input, output, bindNotFixed), lease); }
             catch (MqTransport.Exception error) { invalidateIfBroken(error); throw error; }
             catch (Exception error) { broken = true; lease.invalidate(); throw error; }
         }
