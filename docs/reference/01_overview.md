@@ -27,7 +27,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 | Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
 | Load | `att-load/v1.0` scenario | one Template, Flow or Tool target repeatedly |
 
-Mode-specific identity is carried by `EXEC.MODE` and, for load only, `EXEC.LOAD`. Reusable Templates/Flows should normally depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`, not on a second mode-specific runtime tree.
+Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
 ### Resources are peers
 

@@ -97,6 +97,7 @@ public class FrameworkEngine {
         List<TestResult> results = new ArrayList<>();
         Map<ExecutionPlan.Suite, List<TestResult>> suiteReportResults = new LinkedHashMap<ExecutionPlan.Suite, List<TestResult>>();
         boolean stopRun = false;
+        att.template.DefaultBuiltInProvider runBuiltIns = new att.template.DefaultBuiltInProvider(new att.template.SequenceService());
         verbose(options, "[RUN] id=" + runId + " suites=" + plan.suites().size() + " output=" + portable(outputRoot));
 
         phaseStarted = profile.begin();
@@ -106,7 +107,7 @@ public class FrameworkEngine {
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, suiteConfig);
             att.exec.MqHelperExecutor mqHelperExecutor = new att.exec.MqHelperExecutor(projectRoot, suiteConfig);
-            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor);
+            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor, runBuiltIns);
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
@@ -114,7 +115,7 @@ public class FrameworkEngine {
             try {
                 for (TestCase testCase : cases) {
                     verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
-                    TestResult result = runCase(testCase, suiteConfig, options, runId, runDirectory, suitePlan, templateRunner, dbHelperExecutor);
+                    TestResult result = runCase(testCase, suiteConfig, options, runId, runStarted, runDirectory, suitePlan, templateRunner, dbHelperExecutor);
                     verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
                     results.add(result);
                     suiteResults.add(result);
@@ -169,7 +170,7 @@ public class FrameworkEngine {
         }
     }
 
-    private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Path runDirectory,
+    private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Instant runStartedAt, Path runDirectory,
                                ExecutionPlan.Suite suitePlan, StageTemplateRunner templateRunner, att.exec.DbHelperExecutor dbHelperExecutor) throws Exception {
         if (!testCase.valid()) {
             return invalid(testCase, testCase.invalidReason());
@@ -186,7 +187,8 @@ public class FrameworkEngine {
                 options.verbose() && !options.quiet() && "human".equals(options.format())
                         ? new java.util.function.Consumer<String>() { @Override public void accept(String text) { System.out.print(text); } }
                         : null);
-        CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, runId, runDirectory, caseLogPath);
+        CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, testCase.caseId(), runId,
+                runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
         context.setProject(projectRoot);
         context.put("CASE.environment", suiteConfig.environment());
         caseLog.append("CASE", context.caseTree());

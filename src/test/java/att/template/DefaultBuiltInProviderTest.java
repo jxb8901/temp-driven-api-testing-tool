@@ -26,6 +26,22 @@ class DefaultBuiltInProviderTest {
         assertEquals("0007", provider.invoke("str.lpad", args("value", "7", "length", 4, "pad", "0")));
         assertEquals("fallback", provider.invoke("misc.nvl", args("value", "", "defaultValue", "fallback")));
         assertTrue(provider.names().contains("file.move"));
+        assertTrue(provider.names().contains("seq.next"));
+    }
+
+    @Test void sequenceBuiltInSupportsIndependentCountersAndPadding() {
+        SequenceService service = new SequenceService();
+        DefaultBuiltInProvider provider = new DefaultBuiltInProvider(service);
+        assertEquals(Long.valueOf(1), provider.invoke("seq.next", Collections.<String, Object>emptyMap()));
+        assertEquals("02", provider.invoke("seq.next", args("arg0", 2)));
+        assertEquals("0001", provider.invoke("seq.next", args("arg0", "payment", "arg1", 4)));
+        assertEquals(Long.valueOf(1), provider.invoke("seq.next", args("arg0", "other")));
+        assertThrows(IllegalArgumentException.class, () -> provider.invoke("seq.next", args("arg0", "  ")));
+        assertThrows(IllegalArgumentException.class, () -> provider.invoke("seq.next", args("arg0", 0)));
+        SequenceService overflow = new SequenceService();
+        assertEquals("1", overflow.next("tiny", Integer.valueOf(1)));
+        for (int i = 0; i < 8; i++) overflow.next("tiny", Integer.valueOf(1));
+        assertThrows(IllegalStateException.class, () -> overflow.next("tiny", Integer.valueOf(1)));
     }
     @TempDir Path tempDir;
 

@@ -309,13 +309,17 @@ class ContextsTest {
                 tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
         context.beginStage(stage, "PAYMENT", tempDir.resolve("templates/PAYMENT"));
 
-        assertEquals("testcase", context.resolve("EXEC.MODE"));
+        assertNull(context.resolve("EXEC.MODE"));
+        assertEquals("testcase", CaseRuntimeContext.getPath(context.diagnosticsTree(), "execution.mode"));
         assertEquals("REF-001", context.resolve("EXEC.INPUT.RefNo"));
         assertEquals("STAGE", context.resolve("EXEC.INPUT.channel"));
         assertEquals("STAGE", context.resolve("CASE.channel"));
         assertEquals("stage-value", context.resolve("EXEC.INPUT.stageOnly"));
         assertEquals("REF-001", context.resolve("CASE.RefNo"));
-        assertEquals(context.resolve("EXEC.ID"), context.resolve("RUN.id"));
+        assertEquals("payment.TC001", context.resolve("EXEC.ID"));
+        assertEquals("RUN-1", context.resolve("EXEC.RUN_ID"));
+        assertEquals("RUN-1", context.resolve("RUN.id"));
+        assertTrue(context.resolve("EXEC.RUN_STARTED_AT") != null);
         assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("EXEC.OUTPUT_DIR"));
         assertEquals(context.resolve("EXEC.OUTPUT_DIR"), context.resolve("CASE.outputDirectory"));
         assertEquals("PAYMENT", context.resolve("META.TEMPLATE.id"));
@@ -364,7 +368,10 @@ class ContextsTest {
                         Collections.<String, Object>emptyMap(), Collections.singletonMap("invoke", stage), null),
                 tempDir, "DEBUG-1", tempDir, tempDir.resolve("debug.log"), "debug");
         debug.setSourceMetadata("debug", tempDir.resolve("debug.yaml"), "DEBUG.template.PAYMENT");
-        assertEquals("debug", debug.resolve("EXEC.MODE"));
+        assertEquals("debug", CaseRuntimeContext.getPath(debug.diagnosticsTree(), "execution.mode"));
+        assertEquals("DEBUG-1", debug.resolve("EXEC.ID"));
+        assertEquals("DEBUG-1", debug.resolve("EXEC.RUN_ID"));
+        assertNull(debug.resolve("EXEC.MODE"));
         assertEquals("debug", debug.resolve("META.SOURCE.type"));
         assertEquals(tempDir.resolve("debug.yaml").toAbsolutePath().normalize().toString(),
                 debug.resolve("META.SOURCE.path"));

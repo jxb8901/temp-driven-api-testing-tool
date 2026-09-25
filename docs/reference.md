@@ -34,7 +34,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 | Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
 | Load | `att-load/v1.0` scenario | one Template, Flow or Tool target repeatedly |
 
-Mode-specific identity is carried by `EXEC.MODE` and, for load only, `EXEC.LOAD`. Reusable Templates/Flows should normally depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`, not on a second mode-specific runtime tree.
+Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
 ### Resources are peers
 
@@ -327,12 +327,14 @@ output
 
 While an Action is active, use `${output...}`. After it completes in the current scope, use `${EXEC.ACTIONS.<id>.output...}`. `result` is the final/winning primary operation result. Retry history and per-attempt collectors remain under `attempts[n]`; they do not replace the top-level final result.
 
-### Load-only Context
+### Execution identity and diagnostics
 
-`EXEC.LOAD` is conditional data added to the same Context model, not a second runtime. It may contain:
+`EXEC.ID` identifies the current execution unit; `EXEC.RUN_ID` identifies its enclosing ATT run. Testcase IDs are canonical Case IDs, debug uses the debug ID for both, and each load iteration receives a unique execution ID across the run. Legacy `RUN.id` and `RUN.runId` remain deterministic aliases of `EXEC.RUN_ID`. These framework-owned fields cannot be overridden by input.
+
+The framework records mode, timestamps, and load scheduler metadata in the `DIAG` evidence section. `DIAG` is deliberately absent from expression Context: `${EXEC.MODE}`, `${EXEC.LOAD...}`, and `${DIAG...}` are invalid. Use `EXEC.INPUT` for business variation. Load evidence may contain:
 
 ```text
-EXEC.LOAD
+DIAG.load
 ├── RUN_ID
 ├── WORKLOAD_ID     # att-load/v1.1 multi-workload runs
 ├── MODEL
@@ -347,7 +349,7 @@ EXEC.LOAD
 
 For `att-load/v1.1`, `WORKLOAD_ID` is the configured workload `id`. `TARGET_TYPE` and `TARGET_ID` identify the fixed target owned by that workload. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.
 
-Different closed-VU workload pools may both contain a `VU-1`. The durable identity is therefore the pair `(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)`. ATT does not introduce a separate `EXEC.USER` root or shared mutable VU Context; each iteration still gets isolated `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, transient Tool/DB state and Action-local `output`.
+Different closed-VU workload pools may both contain a `VU-1`. The durable evidence identity is therefore the pair `(workloadId, userId)`. Each iteration still gets isolated `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, transient Tool/DB state and Action-local `output`.
 
 ### Optional lookup
 
@@ -361,11 +363,13 @@ Deterministic legacy views such as `CASE`, `RUN`, and `ACTIONS` remain readable 
 
 Run, Debug and Load are peer adapters over the same reusable Template/Flow/Tool/DB/MQ execution semantics.
 
-| Mode | Context `EXEC.MODE` | Unit of execution | Primary result location |
+| Mode | `EXEC.ID` | Unit of execution | Primary result location |
 |---|---|---|---|
-| Run | `testcase` | selected Testcase | `output/<RunID>/` |
-| Debug | `debug` | one target invocation | `output/debug/<debugId>/` |
-| Load | `load` | repeated target iterations | `output/load/<runId>/` |
+| Run | canonical Case ID | selected Testcase | `output/<RunID>/` |
+| Debug | debug ID | one target invocation | `output/debug/<debugId>/` |
+| Load | unique iteration execution ID | repeated target iterations | `output/load/<runId>/` |
+
+`EXEC.RUN_ID` identifies the enclosing ATT run. Mode and scheduler-specific information are retained under evidence-only `DIAG`; neither `EXEC.MODE`, `EXEC.LOAD`, nor `DIAG` is available to expressions.
 
 All three resolve the selected environment before execution, construct canonical Context, validate the target/dependency closure, and use the same component contracts. Mode-specific scheduling, selection and reporting do not create alternate Template or expression semantics.
 
@@ -518,7 +522,9 @@ All workloads in one v1.1 run must use the same scheduler model: either all `arr
 
 Before scheduling starts, ATT resolves and validates **every** workload target and dependency. If any workload is invalid, no workload begins execution. Workloads share the same run-scoped DB/MQ resource layer so they contend realistically for configured pools, while mutable iteration Context and output remain isolated.
 
-For v1.1, the existing `EXEC.LOAD` node additionally exposes `WORKLOAD_ID`, `TARGET_TYPE`, and `TARGET_ID`. Closed pools retain stable `USER_ID`. Because separate pools may each contain `VU-1`, the durable virtual-user identity is `(WORKLOAD_ID, USER_ID)`.
+For v1.1, retained `DIAG.load` evidence additionally exposes `workloadId`, `targetType`, and `targetId`. Closed pools retain stable `userId`. Because separate pools may each contain `VU-1`, the durable virtual-user identity is `(workloadId, userId)`. Scheduler diagnostics are not expression Context.
+
+The former expression path `EXEC.LOAD` is no longer public; existing templates that reference it must move business inputs to `EXEC.INPUT` and inspect retained scheduler evidence outside expressions.
 
 #### Workload models
 
@@ -526,7 +532,7 @@ For v1.1, the existing `EXEC.LOAD` node additionally exposes `WORKLOAD_ID`, `TAR
 
 **Fixed arrival rate** uses `load.arrivalRate` plus positive `maxConcurrent` and `overloadPolicy: drop`. It has no persistent VU identity. Arrivals that cannot start because the workload's concurrency limit is full are recorded as `dropped`; they are not queued and are not counted as SUT errors. Arrival-rate workloads reject `execution.thinkTime`.
 
-`duration` is required. Optional `warmup`, `rampUp`, and `rampDown` define phases; `EXEC.LOAD.PHASE` identifies `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. Warm-up traffic executes but is excluded from measured threshold aggregates.
+`duration` is required. Optional `warmup`, `rampUp`, and `rampDown` define phases; `DIAG.load.phase` evidence identifies `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. Warm-up traffic executes but is excluded from measured threshold aggregates.
 
 #### Closed-VU think time and deterministic randomization
 
@@ -586,7 +592,7 @@ DB/MQ resource diagnostics remain aggregate/run-scoped. Successful iteration wor
 
 `--profile` measures ATT generator/runtime overhead; it is not a target-host CPU/memory benchmark. Load exit codes are `0` PASS, `1` threshold failure, `2` invalid scenario/configuration/target, and `3` runtime/infrastructure error.
 
-`EXEC.LOAD` is defined centrally in Chapter 3; artifact schemas and report details are in Chapter 11.
+Load execution identity and evidence-only scheduler diagnostics are defined centrally in Chapter 3; artifact schemas and report details are in Chapter 11.
 
 ## 05 Resources and Integrations
 
@@ -639,7 +645,7 @@ Queries return typed rows/scalars; updates return the documented update result. 
 
 Direct DB Actions may declare `timeoutMs` from 1 to 3,600,000 ms. The executor applies the shorter effective limit between the Action timeout and the DBHelper `statement.timeoutSeconds`; each retry attempt gets a fresh Action timeout and the retry interval is outside that timeout.
 
-A direct `query` Action may also use the standard retry block with `maxAttempts` 2–10, `intervalMs` 0–3,600,000, and a non-empty unique `retryOn` list containing `ASSERTION` and/or `TIMEOUT`. `ASSERTION` requires an Action `assert`. Ordinary SQL errors are terminal. Retry-enabled query attempts are retained in `output.attempts[n]`; the top-level `output.result` / `output.evidence` represent the final or winning attempt, with `winningAttempt` or `finalAttempt` recording the terminal attempt number.
+A direct `query` Action may also use the standard retry block with `maxAttempts` 2–10, `intervalMs` 0–3,600,000, and a non-empty unique `retryOn` list containing `ASSERTION` and/or `TIMEOUT`. An explicit Action `timeoutMs` overrides the helper's statement-timeout default; without it, the helper default applies. JDBC query timeout is rounded up to whole seconds while ATT retains millisecond deadline cancellation. `ASSERTION` requires an Action `assert`. Ordinary SQL errors are terminal. Retry-enabled query attempts are retained in `output.attempts[n]`; the top-level `output.result` / `output.evidence` represent the final or winning attempt, with `winningAttempt` or `finalAttempt` recording the terminal attempt number.
 
 ```yaml
 actions:
@@ -677,6 +683,8 @@ Primary calls are:
 Payloads are file-based so request bytes do not have to be duplicated into Context/evidence. `request` combines send and correlated receive behavior. Correlation identifiers, queue/operation metadata, timing and diagnostic information are evidence; credentials and payload bytes are not copied into evidence.
 
 Timeout behavior is operation-specific and remains distinct from assertion failure. MQ connection/pool lifecycle is framework-owned resource state, especially in Load mode; it is not exposed as a public `EXEC.MQ` tree.
+
+An Action `timeoutMs` takes precedence over the helper's default `requestReply.waitMs` and caps receive/request waits to the remaining Action deadline. A call-level `waitMs` takes precedence over the helper default but cannot extend that deadline. Tool Action retry applies to every MQ operation (`send`, `receive`, and `request`); retrying a send may enqueue duplicates, which the package author must account for. Per-attempt timing and retry outcomes remain in Action evidence.
 
 ATT's default build does not require IBM MQ client classes. Runtime MQ use requires the IBM MQ client jar/profile documented by the package/release instructions. MQ operations feed the same Action result/evidence envelope as Tool and DB operations.
 
@@ -965,23 +973,22 @@ output
 └── current Action/attempt-local result; unavailable outside that Action scope
 ```
 
-`EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
+`EXEC.ID` identifies the current execution unit and `EXEC.RUN_ID` its enclosing run. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are shared runtime concepts across all modes. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win on collision and Case-level values are restored after the Stage. Framework-owned identity/input fields cannot be overwritten. Mode and scheduler state live in evidence-only `DIAG` and cannot be referenced through `${...}` or `#{...}`; in particular, `EXEC.MODE`, `EXEC.LOAD`, and `DIAG` are not expression APIs. Use `EXEC.INPUT` for business variation. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in result/evidence and legacy `CASE.STAGES`.
 
 ### Load V1 Context (3.5.2)
 
-Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
+Each load iteration has an `EXEC.ID` unique across all workloads and virtual users in its ATT run; `EXEC.RUN_ID` is shared by the run. Iteration state (`EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output`) remains isolated. Scheduler-owned fields are retained only in `DIAG.load` evidence:
 
 | Path | Meaning |
 |---|---|
-| `EXEC.LOAD.RUN_ID` | Enclosing load run identity shared by its iterations. |
-| `EXEC.LOAD.MODEL` | `closed` or `arrivalRate`. |
-| `EXEC.LOAD.USER_ID` | Stable closed-model Virtual User identity; `null` or absent for arrival-rate. |
-| `EXEC.LOAD.ITERATION_ID` | Globally unique iteration identity within the load run. |
-| `EXEC.LOAD.ITERATION` | Scheduler sequence number. |
-| `EXEC.LOAD.PHASE` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
-| `EXEC.LOAD.RUN_STARTED_AT` | Optional enclosing load-run start timestamp. |
+| `DIAG.load.runId` | Enclosing load run identity. |
+| `DIAG.load.model` | `closed` or `arrivalRate`. |
+| `DIAG.load.userId` | Stable closed-model Virtual User identity; absent for arrival-rate. |
+| `DIAG.load.iterationId` | Scheduler iteration identity. |
+| `DIAG.load.iteration` | Scheduler sequence number. |
+| `DIAG.load.phase` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
 
-Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; iteration identity remains under `EXEC.ID` and `EXEC.LOAD.*`, and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
+Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; scheduler identity stays in retained evidence and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
 
 `att load` validates the scenario and target before starting one of two schedulers. Closed mode keeps a stable Virtual User identity and waits for target completion before think time and the next iteration. Arrival-rate mode uses absolute planned due times; when `maxConcurrent` is full, the arrival is recorded as generator `dropped` work rather than queued or counted as a SUT failure. Both schedulers publish compact events to bounded-memory metrics, and both write isolated `output/load/<runId>/load-summary.json`, `load-summary.yaml`, and `report/index.html`. Warm-up is real traffic but is excluded from measured threshold aggregates by default. Successful iterations retain metrics only unless evidence sampling is configured; a bounded sampled success gets a physical iteration workspace with `case.log` and `case.yaml`, while a failure creates that workspace lazily when its diagnostic is retained. Evidence links are written below the load run's `samples/` or `failures/` directories and never enter ordinary functional-run artifacts.
 
@@ -1332,10 +1339,11 @@ Comparison first recognizes boolean literals. If both operands are valid decimal
 
 ### Built-in functions
 
-Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, and `misc.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
+Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, `misc.*`, and `seq.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
 
 | Function | Purpose | Example |
 |---|---|---|
+| `seq.next` | Return a run-scoped `Long`; optional sequence name and width produce independent named counters or exact-width zero-padded text | `#{seq.next('payment', 10)}` |
 | `str.upper` | Convert text to upper case | `#{str.upper(value=${EXEC.INPUT.currency})}` |
 | `str.lower` | Convert text to lower case | `#{str.lower(value=${EXEC.INPUT.channel})}` |
 | `str.trim` | Remove surrounding whitespace | `#{str.trim(value=${EXEC.INPUT.reference})}` |
@@ -2028,7 +2036,7 @@ An explicit file overrides sidecar discovery, which is useful for temporary valu
   --output-dir /tmp/att-debug --format json
 ```
 
-The selected input is validated before execution. Missing files, invalid schema, unknown or missing Tool arguments, and other input/configuration errors return exit code `2`. Framework-owned values such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.VARS`, and `EXEC.ACTIONS`, together with the corresponding `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` aliases, remain authoritative even if they appear in the input `case` map. `EXEC.STAGES` is not a canonical Context node; Stage history remains in the legacy `CASE.STAGES` evidence view.
+The selected input is validated before execution. Missing files, invalid schema, unknown or missing Tool arguments, and other input/configuration errors return exit code `2`. Framework-owned values such as `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.OUTPUT_DIR`, `EXEC.VARS`, and `EXEC.ACTIONS`, together with the corresponding `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` aliases, remain authoritative even if they appear in the input `case` map. Mode/scheduler diagnostics are not expression-visible. `EXEC.STAGES` is not a canonical Context node; Stage history remains in the legacy `CASE.STAGES` evidence view.
 
 Each invocation writes:
 
@@ -2311,7 +2319,7 @@ Use the owning schema/configuration chapter for normative field defaults. Import
 - load V1 chooses exactly one workload model;
 - arrival-rate overload policy is `drop`;
 - Flow invocation receives a fresh Action scope and caller scope is restored on return;
-- `EXEC.LOAD` exists only for Load iterations;
+- `DIAG` is framework-owned evidence and is not part of the expression tree;
 - resource lifecycle state is not a public Context tree;
 - unknown schema fields are rejected except documented extension locations such as root `x-*` where supported.
 

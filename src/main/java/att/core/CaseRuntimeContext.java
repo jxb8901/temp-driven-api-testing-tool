@@ -27,7 +27,9 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> execNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> inputNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> varsNode = new LinkedHashMap<String, Object>();
-    /** Load-only scheduler state published below the canonical EXEC root. */
+    /** ATT-owned diagnostics, deliberately excluded from the expression Context. */
+    private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
+    /** Load-only scheduler state published below diagnosticsNode.load. */
     private final Map<String, Object> loadNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> metaNode = new LinkedHashMap<String, Object>();
@@ -75,19 +77,36 @@ public final class CaseRuntimeContext {
     /** Creates a Context with an adapter-provided iteration start timestamp. */
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog,
                               String mode, String startedAtOverride) {
+        this(testCase, caseOutputDir,
+                "debug".equalsIgnoreCase(mode) ? runId : testCase.caseId(), runId, runDirectory, caseLog,
+                mode, startedAtOverride, null);
+    }
+
+    /** Creates a Context with distinct current-execution and enclosing-run identities. */
+    public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String executionId, String runId,
+                              Path runDirectory, Path caseLog, String mode, String startedAtOverride,
+                              String runStartedAtOverride) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
         this.caseLogPath = caseLog.toAbsolutePath().normalize();
         this.mode = normalizeMode(mode);
         String startedAt = startedAtOverride == null ? java.time.Instant.now().toString() : startedAtOverride;
+        String runStartedAt = runStartedAtOverride == null ? startedAt : runStartedAtOverride;
 
-        execNode.put("ID", runId);
-        execNode.put("MODE", this.mode);
+        execNode.put("ID", executionId);
+        execNode.put("RUN_ID", runId);
         execNode.put("STARTED_AT", startedAt);
+        execNode.put("RUN_STARTED_AT", runStartedAt);
         execNode.put("OUTPUT_DIR", this.caseOutputDir.toString());
         execNode.put("INPUT", inputNode);
         execNode.put("VARS", varsNode);
         execNode.put("ACTIONS", actionsView);
-        if ("load".equals(this.mode)) execNode.put("LOAD", loadNode);
+        Map<String, Object> executionDiagnostics = new LinkedHashMap<String, Object>();
+        executionDiagnostics.put("mode", this.mode);
+        executionDiagnostics.put("id", executionId);
+        executionDiagnostics.put("runId", runId);
+        executionDiagnostics.put("startedAt", startedAt);
+        executionDiagnostics.put("runStartedAt", runStartedAt);
+        diagnosticsNode.put("execution", executionDiagnostics);
         lifecycleNode.put("status", "RUNNING");
 
         inputNode.putAll(testCase.caseData());
@@ -452,18 +471,11 @@ public final class CaseRuntimeContext {
         }
         if (!ContextPathPolicy.isCanonicalExecField(first)) {
             throw new IllegalArgumentException("Unknown EXEC field: EXEC." + first
-                    + "; the public tree exposes ID, MODE, STARTED_AT, OUTPUT_DIR, INPUT, VARS, ACTIONS, and load-only LOAD");
+                    + "; the public tree exposes ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR, INPUT, VARS, and ACTIONS");
         }
         if ("INPUT".equals(first)) putPath(inputNode, suffix(path, first), value);
         else if ("VARS".equals(first)) putPath(varsNode, suffix(path, first), value);
         else if ("ACTIONS".equals(first)) putPath(actionsView, suffix(path, first), value);
-        else if ("LOAD".equals(first)) {
-            String loadPath = suffix(path, first);
-            if (!loadPath.isEmpty() && !ContextPathPolicy.isCanonicalLoadField(firstSegment(loadPath)))
-                throw new IllegalArgumentException("Unknown EXEC.LOAD field: " + firstSegment(loadPath));
-            putPath(loadNode, loadPath, value);
-            execNode.put("LOAD", loadNode);
-        }
         else putPath(execNode, path, value);
     }
 
@@ -608,25 +620,25 @@ public final class CaseRuntimeContext {
     /** Publishes one load iteration and its enclosing load-run identity. */
     public void setLoad(String runId, String model, String iterationId, long iteration, String phase,
                         String startedAt, String userId, String runStartedAt) {
-        if (!"load".equals(mode)) throw new IllegalStateException("EXEC.LOAD requires load execution mode");
+        if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
         loadNode.clear();
-        loadNode.put("RUN_ID", runId);
-        loadNode.put("MODEL", model);
-        loadNode.put("USER_ID", userId);
-        loadNode.put("ITERATION_ID", iterationId);
-        loadNode.put("ITERATION", Long.valueOf(iteration));
-        loadNode.put("PHASE", phase);
-        if (runStartedAt != null) loadNode.put("RUN_STARTED_AT", runStartedAt);
-        execNode.put("LOAD", loadNode);
+        loadNode.put("runId", runId);
+        loadNode.put("model", model);
+        if (userId != null) loadNode.put("userId", userId);
+        loadNode.put("iterationId", iterationId);
+        loadNode.put("iteration", Long.valueOf(iteration));
+        loadNode.put("phase", phase);
+        if (runStartedAt != null) loadNode.put("runStartedAt", runStartedAt);
+        diagnosticsNode.put("load", loadNode);
     }
 
     /** Adds v1.1 workload and fixed-target identity to the existing EXEC.LOAD node. */
     public void setLoadWorkload(String workloadId, String targetType, String targetId) {
-        if (!"load".equals(mode)) throw new IllegalStateException("EXEC.LOAD requires load execution mode");
-        if (workloadId != null) loadNode.put("WORKLOAD_ID", workloadId);
-        if (targetType != null) loadNode.put("TARGET_TYPE", targetType);
-        if (targetId != null) loadNode.put("TARGET_ID", targetId);
-        execNode.put("LOAD", loadNode);
+        if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
+        if (workloadId != null) loadNode.put("workloadId", workloadId);
+        if (targetType != null) loadNode.put("targetType", targetType);
+        if (targetId != null) loadNode.put("targetId", targetId);
+        diagnosticsNode.put("load", loadNode);
     }
 
     /** Compatibility overload for scheduler adapters that do not expose run start time. */
@@ -660,6 +672,7 @@ public final class CaseRuntimeContext {
 
     /** Declares a validation-only value whose existence is known but whose nested runtime shape is not. */
     public void putValidationPlaceholder(String key) {
+        if ("EXEC.MODE".equals(key) || (key != null && key.startsWith("EXEC.LOAD."))) return;
         if (key != null && key.startsWith("EXEC.")) putExecutionPath(key.substring("EXEC.".length()), DEFERRED_VALIDATION_VALUE, true);
         else put(key, DEFERRED_VALIDATION_VALUE);
     }
@@ -702,11 +715,18 @@ public final class CaseRuntimeContext {
     /** Canonical execution data, exposed read-only for adapters and diagnostics. */
     public Map<String, Object> executionTree() { return immutable(execNode); }
 
+    /** ATT-owned execution diagnostics, exposed only to evidence/reporting code. */
+    public Map<String, Object> diagnosticsTree() { return immutable(diagnosticsNode); }
+
     /** Curated, secret-safe metadata, exposed read-only. */
     public Map<String, Object> metadataTree() { return immutable(metaNode); }
 
-    /** Persisted legacy Case evidence view; its mutable state is backed by EXEC. */
-    public Map<String, Object> caseTree() { return legacyCaseView(); }
+    /** Persisted Case evidence view. DIAG is attached here but never added to expression roots. */
+    public Map<String, Object> caseTree() {
+        Map<String, Object> result = legacyCaseView();
+        result.put("DIAG", diagnosticsTree());
+        return result;
+    }
     public Path caseOutputDirectory() { return caseOutputDir; }
 
     public void setActionOutput(Map<String, Object> output) { actionOutput = output; }

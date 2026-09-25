@@ -257,7 +257,7 @@ public final class DbHelperExecutor implements AutoCloseable {
             int effectiveTimeoutSeconds = managed.config.timeoutSeconds();
             if (timeoutMs != null) {
                 int actionSeconds = (int) Math.max(1L, Math.min(Integer.MAX_VALUE, (timeoutMs.longValue() + 999L) / 1000L));
-                effectiveTimeoutSeconds = Math.min(effectiveTimeoutSeconds, actionSeconds);
+                effectiveTimeoutSeconds = actionSeconds;
             }
             statement.setQueryTimeout(effectiveTimeoutSeconds);
             if ("query".equals(operation)) statement.setMaxRows(managed.config.maxRows() + 1);
@@ -474,7 +474,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         if (timeoutMs != null) {
             evidence.put("toolTimeoutMs", timeoutMs);
             long actionSeconds = Math.max(1L, (timeoutMs.longValue() + 999L) / 1000L);
-            evidence.put("effectiveTimeoutSeconds", Math.min((long) config.timeoutSeconds(), actionSeconds));
+            evidence.put("effectiveTimeoutSeconds", actionSeconds);
         } else evidence.put("effectiveTimeoutSeconds", config.timeoutSeconds());
         evidence.put("result", result);
         return evidence;

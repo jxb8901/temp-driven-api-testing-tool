@@ -99,23 +99,22 @@ output
 └── current Action/attempt-local result; unavailable outside that Action scope
 ```
 
-`EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
+`EXEC.ID` identifies the current execution unit and `EXEC.RUN_ID` its enclosing run. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are shared runtime concepts across all modes. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win on collision and Case-level values are restored after the Stage. Framework-owned identity/input fields cannot be overwritten. Mode and scheduler state live in evidence-only `DIAG` and cannot be referenced through `${...}` or `#{...}`; in particular, `EXEC.MODE`, `EXEC.LOAD`, and `DIAG` are not expression APIs. Use `EXEC.INPUT` for business variation. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in result/evidence and legacy `CASE.STAGES`.
 
 ### Load V1 Context (3.5.2)
 
-Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
+Each load iteration has an `EXEC.ID` unique across all workloads and virtual users in its ATT run; `EXEC.RUN_ID` is shared by the run. Iteration state (`EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output`) remains isolated. Scheduler-owned fields are retained only in `DIAG.load` evidence:
 
 | Path | Meaning |
 |---|---|
-| `EXEC.LOAD.RUN_ID` | Enclosing load run identity shared by its iterations. |
-| `EXEC.LOAD.MODEL` | `closed` or `arrivalRate`. |
-| `EXEC.LOAD.USER_ID` | Stable closed-model Virtual User identity; `null` or absent for arrival-rate. |
-| `EXEC.LOAD.ITERATION_ID` | Globally unique iteration identity within the load run. |
-| `EXEC.LOAD.ITERATION` | Scheduler sequence number. |
-| `EXEC.LOAD.PHASE` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
-| `EXEC.LOAD.RUN_STARTED_AT` | Optional enclosing load-run start timestamp. |
+| `DIAG.load.runId` | Enclosing load run identity. |
+| `DIAG.load.model` | `closed` or `arrivalRate`. |
+| `DIAG.load.userId` | Stable closed-model Virtual User identity; absent for arrival-rate. |
+| `DIAG.load.iterationId` | Scheduler iteration identity. |
+| `DIAG.load.iteration` | Scheduler sequence number. |
+| `DIAG.load.phase` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
 
-Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; iteration identity remains under `EXEC.ID` and `EXEC.LOAD.*`, and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
+Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; scheduler identity stays in retained evidence and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
 
 `att load` validates the scenario and target before starting one of two schedulers. Closed mode keeps a stable Virtual User identity and waits for target completion before think time and the next iteration. Arrival-rate mode uses absolute planned due times; when `maxConcurrent` is full, the arrival is recorded as generator `dropped` work rather than queued or counted as a SUT failure. Both schedulers publish compact events to bounded-memory metrics, and both write isolated `output/load/<runId>/load-summary.json`, `load-summary.yaml`, and `report/index.html`. Warm-up is real traffic but is excluded from measured threshold aggregates by default. Successful iterations retain metrics only unless evidence sampling is configured; a bounded sampled success gets a physical iteration workspace with `case.log` and `case.yaml`, while a failure creates that workspace lazily when its diagnostic is retained. Evidence links are written below the load run's `samples/` or `failures/` directories and never enter ordinary functional-run artifacts.
 
@@ -466,10 +465,11 @@ Comparison first recognizes boolean literals. If both operands are valid decimal
 
 ### Built-in functions
 
-Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, and `misc.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
+Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, `misc.*`, and `seq.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
 
 | Function | Purpose | Example |
 |---|---|---|
+| `seq.next` | Return a run-scoped `Long`; optional sequence name and width produce independent named counters or exact-width zero-padded text | `#{seq.next('payment', 10)}` |
 | `str.upper` | Convert text to upper case | `#{str.upper(value=${EXEC.INPUT.currency})}` |
 | `str.lower` | Convert text to lower case | `#{str.lower(value=${EXEC.INPUT.channel})}` |
 | `str.trim` | Remove surrounding whitespace | `#{str.trim(value=${EXEC.INPUT.reference})}` |

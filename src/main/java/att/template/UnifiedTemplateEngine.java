@@ -60,8 +60,8 @@ public class UnifiedTemplateEngine {
         this(toolInvoker, dbHelperExecutor, mqHelperExecutor, new DefaultBuiltInProvider());
     }
 
-    UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
-                          MqHelperExecutor mqHelperExecutor, BuiltInProvider builtIns) {
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                 MqHelperExecutor mqHelperExecutor, BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
         this.dbHelperExecutor = dbHelperExecutor;
         this.mqHelperExecutor = mqHelperExecutor;

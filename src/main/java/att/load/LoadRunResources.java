@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Run-scoped owner for resources shared by load iterations. */
 public final class LoadRunResources implements AutoCloseable {
@@ -19,6 +20,8 @@ public final class LoadRunResources implements AutoCloseable {
     private final MqHelperExecutor mq;
     private final PooledMqTransportFactory mqFactory;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicLong executionSequence = new AtomicLong();
+    private final att.template.SequenceService sequences = new att.template.SequenceService();
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -35,6 +38,13 @@ public final class LoadRunResources implements AutoCloseable {
 
     public DbHelperExecutor db() { ensureOpen(); return db; }
     public MqHelperExecutor mq() { ensureOpen(); return mq; }
+    public att.template.SequenceService sequences() { ensureOpen(); return sequences; }
+    public String nextExecutionId(String runId) {
+        ensureOpen();
+        long sequence = executionSequence.incrementAndGet();
+        if (sequence <= 0L) throw new IllegalStateException("Load execution identity sequence exhausted");
+        return runId + "-execution-" + sequence;
+    }
     public HikariDbPool dbPool(String helperId, att.config.FrameworkConfig config) {
         ensureOpen();
         att.config.DbHelperConfig helper = config.dbHelper(helperId);

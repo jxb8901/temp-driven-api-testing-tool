@@ -69,7 +69,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             iterationDirectory = iterationDirectory(request, retainedWorkspace);
             Path logPath = iterationDirectory.resolve("case.log");
             LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(projectRoot, config, target)
-                    .prepare(request, iterationDirectory, logPath);
+                    .prepare(request, resources.nextExecutionId(request.runId()), iterationDirectory, logPath);
             context = prepared.context();
             log = CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
@@ -77,7 +77,8 @@ public final class IterationExecutor implements LoadIterationRunner {
             db.beginCase();
             ToolInvoker tools = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = resources.mq();
-            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq);
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq,
+                    new att.template.DefaultBuiltInProvider(resources.sequences()));
             results.addAll(new StageTemplateRunner(engine, flows).execute("LOAD", target.template(), context, log));
             if (Thread.currentThread().isInterrupted()) resources.db().abortCase();
             else results.addAll(db.finishCase(context, log));

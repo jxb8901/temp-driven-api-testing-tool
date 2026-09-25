@@ -1,10 +1,10 @@
 # ATT Load Scenario Examples
 
-本目錄的 scenario 使用 `att-load/v1.0`。`att load` 會先完成 schema、語義、target 解析及依賴驗證，再啟動 3.5.0 的 closed-VU 或 fixed-arrival-rate scheduler。兩種 scheduler 共用同一個 `IterationExecutor` 和普通 run/debug 的 `EXEC`/`META` Context；只有 scheduler identity 放在 `EXEC.LOAD`。
+本目錄的 scenario 使用 `att-load/v1.0`。`att load` 會先完成 schema、語義、target 解析及依賴驗證，再啟動 closed-VU 或 fixed-arrival-rate scheduler。兩種 scheduler 共用同一個 `IterationExecutor` 和普通 run/debug 的 `EXEC`/`META` Context；mode 與 scheduler identity 只保存在 evidence-only `DIAG`，不會出現在 expression tree。
 
 ## 1. 最小 closed workload
 
-`closed` model 用固定數量的 Virtual Users。每個 user 可以連續產生多個 iteration，因此 scheduler 必須為同一 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`。
+`closed` model 用固定數量的 Virtual Users。每個 user 可以連續產生多個 iteration，因此 scheduler 必須在 evidence 中為同一 Virtual User 維持穩定的 `userId`。
 
 ```yaml
 schemaVersion: att-load/v1.0
@@ -76,7 +76,7 @@ closed model 的規則：
 - 必須提供正整數 `load.users`。
 - 不可同時提供 `load.arrivalRate`、`load.maxConcurrent` 或 `load.overloadPolicy`。
 - `execution.thinkTime` 只適用 closed model。
-- `EXEC.LOAD.USER_ID` 對同一 Virtual User 保持穩定；`EXEC.LOAD.ITERATION_ID` 對每次 iteration 唯一，並且同時作為 `EXEC.ID`。
+- `DIAG.load.userId` 對同一 Virtual User 保持穩定；每次 iteration 都有獨立的 `EXEC.ID`，且在整個 run 內唯一。
 
 ## 3. 完整 fixed arrival-rate scenario
 
@@ -115,7 +115,7 @@ arrival-rate model 的規則：
 - `load.arrivalRate` 必須是正數加 `/s` 或 `/m`，例如 `100/s`、`6000/m`。
 - 必須同時提供正整數 `maxConcurrent` 和 `overloadPolicy: drop`。
 - 不可提供 `load.users` 或 `execution.thinkTime`。
-- `EXEC.LOAD.USER_ID` 是 `null` 或 absent；不要把一次 arrival-rate iteration 當成長期 Virtual User。
+- `DIAG.load.userId` 不存在；不要把一次 arrival-rate iteration 當成長期 Virtual User。
 
 ## 4. 三種 target
 
@@ -197,22 +197,21 @@ scheduler 呼叫共用 `IterationExecutor` 時，每個 iteration 都建立獨�
 
 | Context | 意義 |
 |---|---|
-| `EXEC.ID` | 當前 iteration identity，與 `EXEC.LOAD.ITERATION_ID` 相同。 |
-| `EXEC.MODE` | 固定為 `load`。 |
+| `EXEC.ID` | 當前 iteration execution identity，在整個 load run 內唯一。 |
+| `EXEC.RUN_ID` | enclosing ATT run identity。 |
 | `EXEC.STARTED_AT` | 當前 iteration 的 ISO-8601 start timestamp。 |
 | `EXEC.OUTPUT_DIR` | 當前 iteration 隔離的 output directory。 |
 | `EXEC.INPUT.*` | scenario `inputs` 與 scheduler 傳入的 iteration input。 |
 | `EXEC.VARS.*` / `EXEC.ACTIONS.*` | 每個 iteration 內獨立的 mutable variables 和 current-scope Action 結果。 |
-| `EXEC.LOAD.RUN_ID` | enclosing load run identity；同一 load run 的 iterations 共用。 |
-| `EXEC.LOAD.MODEL` | `closed` 或 `arrivalRate`。 |
-| `EXEC.LOAD.USER_ID` | closed model 的穩定 VU identity；arrival-rate 為 `null` 或 absent。 |
-| `EXEC.LOAD.ITERATION_ID` | load run 內唯一的 iteration identity，亦是 `EXEC.ID`。 |
-| `EXEC.LOAD.ITERATION` | scheduler 提供的 iteration sequence。 |
-| `EXEC.LOAD.PHASE` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
-| `EXEC.LOAD.RUN_STARTED_AT` | enclosing load run start timestamp（若 scheduler 提供）。 |
+| `DIAG.load.runId` | enclosing load run identity。 |
+| `DIAG.load.model` | `closed` 或 `arrivalRate`。 |
+| `DIAG.load.userId` | closed model 的穩定 VU identity；arrival-rate 不存在。 |
+| `DIAG.load.iterationId` | scheduler iteration identity。 |
+| `DIAG.load.iteration` | scheduler 提供的 iteration sequence。 |
+| `DIAG.load.phase` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
 | `META.SOURCE` / `META.TARGET` | secret-safe 的 load scenario、target type/id 及來源 metadata；不暴露整份 config 或 secrets。 |
 
-Template、Flow 和 Tool 的 reusable component 仍使用 `EXEC.INPUT.*`、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 與 action-local `output.*`；不使用 root-level `LOAD.*`、`EXEC.OUTPUT` 或 public `CALL`/`INVOCATION` worker fields。
+Template、Flow 和 Tool 的 reusable component 仍使用 `EXEC.INPUT.*`、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 與 action-local `output.*`；不要在 expression 中使用 `EXEC.MODE`、`EXEC.LOAD`、`DIAG`、root-level `LOAD.*`、`EXEC.OUTPUT` 或 public `CALL`/`INVOCATION` worker fields。
 
 `CASE.VARS`、Action/Flow scope、DB state、Tool transient state 和 MQ state 不會在 concurrent iterations 之間共享。成功 iteration 預設不留下完整 Case artifact；需要輸出時由 scheduler 傳入 output directory。
 
@@ -256,7 +255,7 @@ execution:
 
 ## 9. Runtime、metrics 和 report
 
-closed workload 會為每個 Virtual User 維持穩定的 `EXEC.LOAD.USER_ID`，完成一個 iteration 後才進入 think time；arrival-rate workload 按絕對 planned due time 送出 arrival，超過 `maxConcurrent` 時記錄 `dropped`，不排隊，也不把 generator saturation 算成 SUT error。warm-up traffic 會執行，但預設不納入 thresholds 的 measured aggregates。
+closed workload 會在 `DIAG.load.userId` 為每個 Virtual User 維持穩定 identity，完成一個 iteration 後才進入 think time；arrival-rate workload 按絕對 planned due time 送出 arrival，超過 `maxConcurrent` 時記錄 `dropped`，不排隊，也不把 generator saturation 算成 SUT error。warm-up traffic 會執行，但預設不納入 thresholds 的 measured aggregates。
 
 每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、current/max in-flight、scheduled/started/completed/dropped。arrival-rate 的 `achievedArrivalRate` 若以 `%` 作 threshold，表示 measured phase 的 `measuredStarted / measuredScheduled`；warmup 不計入這兩個 measured counters，ramp-up、steady 和 ramp-down 仍按 integrated planned arrivals 保持可比較。若以 `/s` 或 `/m` 作 threshold，則比較整個 phase window 的實際平均 started rate；`/m` 會先換算成每秒。threshold failure 會以 exit code `1` 結束；load runtime/infrastructure error 以 `3` 結束；validation/configuration failure 以 `2` 結束；只有 PASS 返回 `0`。JSON 與 load summary 會同時輸出 `status`、`exitCode` 及每個 threshold 的 expected/actual/status/diagnostic。
 

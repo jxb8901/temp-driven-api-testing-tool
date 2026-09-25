@@ -267,8 +267,8 @@ lifetime</a></li>
 <li><a href="#action-local-output-與-publication"
 id="toc-action-local-output-與-publication">Action-local output 與
 publication</a></li>
-<li><a href="#load-only-context" id="toc-load-only-context">Load-only
-Context</a></li>
+<li><a href="#執行身份與診斷資料"
+id="toc-執行身份與診斷資料">執行身份與診斷資料</a></li>
 <li><a href="#optional-lookup" id="toc-optional-lookup">Optional
 lookup</a></li>
 <li><a href="#compatibility-aliases"
@@ -476,11 +476,10 @@ expression call 所使用的 Tool、DBHelper 或 MQHelper。</p>
 </tr>
 </tbody>
 </table>
-<p>模式差異由 <code>EXEC.MODE</code> 表達；只有 load 會額外出現
-<code>EXEC.LOAD</code>。可重用 Template/Flow 應主要依賴
+<p>可重用 Template/Flow 應依賴
 <code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>、<code>META</code>
-和 Action-local <code>output</code>，而不是建立另一套 mode-specific
-runtime tree。</p>
+和 Action-local <code>output</code>。執行模式與 scheduler identity
+只保留在 framework evidence，不會成為 expression data。</p>
 <h3 id="三種-resource-是同級概念">三種 Resource 是同級概念</h3>
 <p>Tool、DBHelper、MQHelper 是獨立 Resource 類型。它們的配置與 lifecycle
 不同，但 operation data 最終都收斂到同一 Action envelope。公開
@@ -960,10 +959,18 @@ publication</h3>
 是最後／勝出的 primary operation result；retry history 與每次 attempt 的
 collector 保留在 <code>attempts[n]</code>，不會取代 top-level final
 result。</p>
-<h3 id="load-only-context">Load-only Context</h3>
-<p><code>EXEC.LOAD</code> 只是加在同一 Context 上的 conditional
-data，不是第二套 runtime。它可包含：</p>
-<pre class="text"><code>EXEC.LOAD
+<h3 id="執行身份與診斷資料">執行身份與診斷資料</h3>
+<p><code>EXEC.ID</code> 表示目前執行單位；<code>EXEC.RUN_ID</code>
+表示外層 ATT run。Run 使用 canonical Case ID，Debug 的兩者均使用 debug
+ID；Load 為每個 iteration 分配 run 內全域唯一的 execution ID。舊有
+<code>RUN.id</code> 和 <code>RUN.runId</code> 仍確定性地對應
+<code>EXEC.RUN_ID</code>，且這些 framework-owned 值不可由輸入覆寫。</p>
+<p>執行模式、時間戳和 load scheduler metadata 保存在 evidence-only
+<code>DIAG</code>，不屬於 expression Context。因此
+<code>${EXEC.MODE}</code>、<code>${EXEC.LOAD...}</code> 和
+<code>${DIAG...}</code> 均無效；業務差異請透過 <code>EXEC.INPUT</code>
+傳入。Load evidence 可包含：</p>
+<pre class="text"><code>DIAG.load
 ├── RUN_ID
 ├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
 ├── MODEL
@@ -980,9 +987,8 @@ scenario 配置的 workload
 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定
 <code>USER_ID</code>；fixed-arrival-rate iteration 沒有 persistent VU
 identity。</p>
-<p>不同 closed-VU workload pool 可以各自出現 <code>VU-1</code>，因此跨
-workload 的完整 VU 身份是
-<code>(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)</code>。ATT 不會新增
+<p>不同 closed-VU workload pool 可各自有 <code>VU-1</code>，因此
+evidence 中應用 <code>(workloadId, userId)</code> 識別 VU。ATT 不新增
 <code>EXEC.USER</code> root，也不會在 VU 之間共享 mutable Context；每個
 iteration 的
 <code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>、Tool/DB
@@ -1004,7 +1010,7 @@ deterministic legacy view 在能與 canonical data
 <thead>
 <tr class="header">
 <th>模式</th>
-<th>Context <code>EXEC.MODE</code></th>
+<th><code>EXEC.ID</code></th>
 <th>執行單位</th>
 <th>主要結果位置</th>
 </tr>
@@ -1012,24 +1018,28 @@ deterministic legacy view 在能與 canonical data
 <tbody>
 <tr class="odd">
 <td>Run</td>
-<td><code>testcase</code></td>
+<td>canonical Case ID</td>
 <td>selected Testcase</td>
 <td><code>output/&lt;RunID&gt;/</code></td>
 </tr>
 <tr class="even">
 <td>Debug</td>
-<td><code>debug</code></td>
+<td>debug ID</td>
 <td>單一 target invocation</td>
 <td><code>output/debug/&lt;debugId&gt;/</code></td>
 </tr>
 <tr class="odd">
 <td>Load</td>
-<td><code>load</code></td>
+<td>run 內唯一的 iteration execution ID</td>
 <td>重複 target iterations</td>
 <td><code>output/load/&lt;runId&gt;/</code></td>
 </tr>
 </tbody>
 </table>
+<p><code>EXEC.RUN_ID</code> 表示外層 ATT run。模式與 scheduler
+資料只保存在 evidence-only
+<code>DIAG</code>，<code>EXEC.MODE</code>、<code>EXEC.LOAD</code> 和
+<code>DIAG</code> 均不能供 expression 使用。</p>
 <p>三種模式都會先解析 environment、建立 canonical Context、驗證
 target/dependency closure，再使用相同 component contract。Mode-specific
 scheduling、selection、reporting 不會建立另一套 Template 或 expression
@@ -1207,11 +1217,16 @@ window。</p>
 workload 無效，所有 workload 都不會開始執行。Workload 共用同一個
 run-scoped DB/MQ resource layer，因此會真實競爭 configured pool；但
 mutable iteration Context 與 output 仍彼此隔離。</p>
-<p>v1.1 在原有 <code>EXEC.LOAD</code> node 中增加
-<code>WORKLOAD_ID</code>、<code>TARGET_TYPE</code>、<code>TARGET_ID</code>。Closed
-pool 仍保留穩定 <code>USER_ID</code>。由於不同 pool 可以各自有一個
+<p>v1.1 在 retained <code>DIAG.load</code> evidence 中增加
+<code>workloadId</code>、<code>targetType</code> 和
+<code>targetId</code>。Closed pool 仍保留穩定
+<code>userId</code>。由於不同 pool 可以各自有一個
 <code>VU-1</code>，完整 VU identity 是
-<code>(WORKLOAD_ID, USER_ID)</code>。</p>
+<code>(workloadId, userId)</code>。Scheduler diagnostics 不屬於
+expression Context。</p>
+<p>舊有 expression path <code>EXEC.LOAD</code> 已不再公開；既有 template
+應將業務輸入改用 <code>EXEC.INPUT</code>，並在 expression 之外檢視
+retained scheduler evidence。</p>
 <h4 id="workload-models">Workload models</h4>
 <p><strong>Closed VU</strong> 使用正整數 <code>load.users</code>。每個
 virtual user 只會重複執行自己 workload 的固定 target，等待一次 iteration
@@ -1225,7 +1240,7 @@ workload concurrency limit 已滿而無法開始的 arrival 會記為
 會拒絕 <code>execution.thinkTime</code>。</p>
 <p><code>duration</code> 必填；可選
 <code>warmup</code>、<code>rampUp</code>、<code>rampDown</code> 定義
-phase。<code>EXEC.LOAD.PHASE</code> 為
+phase。<code>DIAG.load.phase</code> evidence 為
 <code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code> 或
 <code>RAMP_DOWN</code>。Warm-up traffic 會執行，但不納入 measured
 threshold aggregate。</p>
@@ -1296,8 +1311,8 @@ target host 的 CPU/memory benchmark。Load exit code：<code>0</code>
 PASS、<code>1</code> threshold failure、<code>2</code>
 scenario/configuration/target 無效、<code>3</code>
 runtime/infrastructure error。</p>
-<p><code>EXEC.LOAD</code> 的中央定義見第 3 章；artifact schema/report
-細節見第 11 章。</p>
+<p>Load execution identity 與 evidence-only scheduler diagnostics
+的中央定義見第 3 章；artifact schema/report 細節見第 11 章。</p>
 <h2 id="05-資源與整合">05 資源與整合</h2>
 <p>Tool、DBHelper、MQHelper 是同級 integration/resource 類型。它們的
 descriptor 與 lifecycle rule 不同，但最後都收斂到 5.4 的 common
@@ -1362,10 +1377,12 @@ result。Operation、SQL/parameter evidence 進入 common Action
 envelope；secret credential 永遠不是 evidence。Parameter evidence 按
 descriptor/Action 的 masking/type policy 處理。</p>
 <p>Direct DB Action 可設定 <code>timeoutMs</code>，範圍為 1 至 3,600,000
-ms。Executor 會在 Action timeout 與 DBHelper
-<code>statement.timeoutSeconds</code> 之間採用較短者；每次 retry attempt
-都重新取得完整 Action timeout，<code>retry.intervalMs</code>
-的等待時間不計入該 attempt timeout。</p>
+ms。明確的 Action timeout 會覆蓋 DBHelper
+<code>statement.timeoutSeconds</code> 預設值；未設定時才使用 helper
+timeout。JDBC statement timeout 以秒向上取整，ATT 仍保留毫秒級 deadline
+cancellation；每次 retry attempt 都重新取得完整 Action
+timeout，<code>retry.intervalMs</code> 的等待時間不計入該 attempt
+timeout。</p>
 <p>Direct <code>query</code> Action 亦可使用標準 retry
 block：<code>maxAttempts</code> 2–10、<code>intervalMs</code>
 0–3,600,000，<code>retryOn</code> 必須是非空且不重複的
@@ -1421,9 +1438,16 @@ Context/evidence。<code>request</code> 結合 send 與 correlated
 receive。Correlation identifier、queue/operation
 metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes
 不複製到 evidence。</p>
-<p>Timeout 是 operation-specific failure，與 assertion failure 分開。MQ
-connection/pool lifecycle 是 framework-owned resource state，特別是在
-Load mode，不會公開成 <code>EXEC.MQ</code> tree。</p>
+<p>Timeout 是 operation-specific failure，與 assertion failure
+分開。Action <code>timeoutMs</code> 優先於 helper 的
+<code>requestReply.waitMs</code> 預設值，並將 receive/request wait
+限制在 Action deadline 剩餘時間內；call <code>waitMs</code> 優先於
+helper 預設值，但不能延長 deadline。Tool Action retry 可用於所有 MQ
+操作（<code>send</code>、<code>receive</code>、<code>request</code>）；重試
+send 可能造成重複訊息，需由 package author 評估。每次 attempt 的
+timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle
+是 framework-owned resource state，特別是在 Load mode，不會公開成
+<code>EXEC.MQ</code> tree。</p>
 <p>ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要
 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與
 Tool、DB 一樣進入同一 Action result/evidence envelope。</p>
@@ -1760,41 +1784,29 @@ META
 └── TOOL、DBHELPER、MQHELPER（curated invocation metadata）
 output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见</code></pre>
-<p><code>EXEC.MODE</code> 在普通 run 中是
-<code>testcase</code>，standalone debug 中是 <code>debug</code>，load
-iteration 中是 <code>load</code>。<code>EXEC.LOAD</code> 仅在
-<code>EXEC.MODE=load</code> 时存在；普通 TestCase 和 debug execution
-不会物化它。<code>EXEC.INPUT</code>、<code>EXEC.VARS</code> 与各 scope
-内的 <code>EXEC.ACTIONS</code> 是所有 execution mode 共用的 runtime
-state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input
-values 适配到 <code>EXEC.INPUT</code>；同名时 Stage value 在该 Stage
-期间优先，Stage 结束后恢复 Case-level
-value。<code>EXEC.ID</code>、<code>EXEC.MODE</code>、<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>
-和 <code>EXEC.ACTIONS</code> 等框架字段不能被 Case 或 sidecar input
-覆盖。不存在
-<code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>
-或 <code>EXEC.STAGES</code>：helper/resource state 保持 internal，根层
-<code>TOOL.*</code>／<code>DB.*</code> 只可作为 compatibility 或
-transient view；当前 Action 使用 local
-<code>output</code>，完成后只在其所属 scope 通过
-<code>EXEC.ACTIONS</code> 发布。Flow 返回后 parent scope 会恢复，跨
-scope 值必须写入 <code>EXEC.VARS</code>。Stage/template 的
-status、timing 和 history 属于 execution result/evidence model，并由旧的
-<code>CASE.STAGES</code> view 提供读取。严格的
-<code>${EXEC.LOAD.&lt;field&gt;}</code> 在非 load mode 会 validation
-error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；3.5.2
-的 <code>att-load/v1.0</code> adapter 会按下述 contract 增加 load-only
-的 <code>EXEC.LOAD</code>。</p>
+<p><code>EXEC.ID</code> 表示目前 execution
+unit，<code>EXEC.RUN_ID</code> 表示外層 ATT
+run。<code>EXEC.INPUT</code>、<code>EXEC.VARS</code> 和各 scope 的
+<code>EXEC.ACTIONS</code> 是所有 mode 共用的 runtime state。TestCase
+adapter 會把目前 Stage 的 caller/input values 暫時放入
+<code>EXEC.INPUT</code>；同名時 Stage value 優先，Stage 結束後還原
+Case-level value。Framework-owned identity/input 欄位不能由 Case 或
+sidecar 覆寫。模式與 scheduler state 只保留在 evidence-only
+<code>DIAG</code>，不能以 <code>${...}</code> 或 <code>#{...}</code>
+讀取；<code>${EXEC.MODE}</code>、<code>${EXEC.LOAD...}</code> 和
+<code>${DIAG...}</code> 均不是 expression API。業務差異請透過
+<code>EXEC.INPUT</code>
+傳入。<code>EXEC.TOOL</code>、<code>EXEC.DB</code>、<code>EXEC.MQ</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code>、<code>EXEC.INVOCATION</code>、<code>EXEC.STAGE</code>、<code>EXEC.STAGES</code>
+亦不是公開 root。Action result/evidence 透過 local <code>output</code>
+和完成後的 <code>EXEC.ACTIONS</code> 發布；Stage/template
+status、timing、history 留在 result/evidence 及舊有
+<code>CASE.STAGES</code> view。</p>
 <h3 id="load-v1-context352">Load V1 Context（3.5.2）</h3>
-<p>每个 load iteration 使用与普通执行相同的
-<code>EXEC</code>／<code>META</code> tree 和 Action 局部
-<code>output</code>。<code>EXEC.MODE</code> 是
-<code>load</code>；<code>EXEC.ID</code> 与
-<code>EXEC.LOAD.ITERATION_ID</code> 相同；<code>EXEC.STARTED_AT</code>
-是本 iteration
-的开始时间；<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>
-和 local <code>output</code> 均按 iteration 隔离。scheduler-owned fields
-如下：</p>
+<p>每个 load iteration 都有 run 内唯一的
+<code>EXEC.ID</code>，<code>EXEC.RUN_ID</code> 在同一 run
+共用。<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>
+和 local <code>output</code> 按 iteration 隔离。Scheduler-owned fields
+仅保留在 <code>DIAG.load</code> evidence：</p>
 <table>
 <thead>
 <tr class="header">
@@ -1804,34 +1816,30 @@ error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；3.5
 </thead>
 <tbody>
 <tr class="odd">
-<td><code>EXEC.LOAD.RUN_ID</code></td>
-<td>enclosing load run identity，同一 load run 的 iterations 共用。</td>
+<td><code>DIAG.load.runId</code></td>
+<td>enclosing load run identity。</td>
 </tr>
 <tr class="even">
-<td><code>EXEC.LOAD.MODEL</code></td>
+<td><code>DIAG.load.model</code></td>
 <td><code>closed</code> 或 <code>arrivalRate</code>。</td>
 </tr>
 <tr class="odd">
-<td><code>EXEC.LOAD.USER_ID</code></td>
-<td>closed model 的稳定 Virtual User identity；arrival-rate 为
-<code>null</code> 或 absent。</td>
+<td><code>DIAG.load.userId</code></td>
+<td>closed model 的稳定 Virtual User identity；arrival-rate
+不存在。</td>
 </tr>
 <tr class="even">
-<td><code>EXEC.LOAD.ITERATION_ID</code></td>
-<td>load run 内全局唯一的 iteration identity。</td>
+<td><code>DIAG.load.iterationId</code></td>
+<td>scheduler iteration identity。</td>
 </tr>
 <tr class="odd">
-<td><code>EXEC.LOAD.ITERATION</code></td>
+<td><code>DIAG.load.iteration</code></td>
 <td>scheduler sequence number。</td>
 </tr>
 <tr class="even">
-<td><code>EXEC.LOAD.PHASE</code></td>
+<td><code>DIAG.load.phase</code></td>
 <td><code>WARMUP</code>、<code>RAMP_UP</code>、<code>STEADY</code> 或
 <code>RAMP_DOWN</code>。</td>
-</tr>
-<tr class="odd">
-<td><code>EXEC.LOAD.RUN_STARTED_AT</code></td>
-<td>可选的 enclosing load-run start timestamp。</td>
 </tr>
 </tbody>
 </table>
@@ -1840,8 +1848,8 @@ error，可选的 <code>${EXEC.LOAD.&lt;field&gt;?}</code> 会解析为空；3.5
 canonical input
 tree、<code>EXEC.VARS.*</code>、<code>EXEC.ACTIONS.*</code> 及当前
 <code>output.*</code>。<code>META.SOURCE</code> 只标识 load scenario 的
-type、名称和 path；iteration identity 保留在 <code>EXEC.ID</code> 与
-<code>EXEC.LOAD.*</code>，并排除 secrets。根层
+type、名称和 path；scheduler identity 只保存在 retained
+evidence，且不包含 secrets。根层
 <code>LOAD.*</code>、<code>EXEC.OUTPUT</code>、<code>EXEC.CALL</code> 和
 <code>EXEC.INVOCATION</code> 不是公开的 load API。完整的
 closed／arrival-rate 配置、CLI override、target
@@ -2323,8 +2331,8 @@ SQL 风格通配符：</p>
 <h3 id="内建函数">内建函数</h3>
 <p>内建函数通过 <code>#{...}</code> 调用。Canonical 名称使用
 framework-owned
-<code>str.*</code>、<code>date.*</code>、<code>file.*</code> 与
-<code>misc.*</code> package；旧 flat 名称保留为兼容 alias。Tool group
+<code>str.*</code>、<code>date.*</code>、<code>file.*</code>、<code>misc.*</code>
+与 <code>seq.*</code> package；旧 flat 名称保留为兼容 alias。Tool group
 同样以 <code>group.tool</code> 组成 package-like 调用名；配置 Tool
 不得占用 built-in package root 或任何 canonical／legacy built-in
 名称。</p>
@@ -2338,106 +2346,112 @@ framework-owned
 </thead>
 <tbody>
 <tr class="odd">
+<td><code>seq.next</code></td>
+<td>返回 run-scoped
+<code>Long</code>；可选名称及宽度用于独立计数或精确宽度的零填充文字</td>
+<td><code>#{seq.next('payment', 10)}</code></td>
+</tr>
+<tr class="even">
 <td><code>str.upper/lower/trim</code></td>
 <td>大小写与首尾空白处理</td>
 <td><code>#{str.upper(value=${EXEC.INPUT.currency})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.ltrim/rtrim</code></td>
 <td>去除前导／尾随空白</td>
 <td><code>#{str.ltrim(${EXEC.INPUT.reference})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.length</code></td>
 <td>返回文本长度</td>
 <td><code>#{str.length(value=${EXEC.INPUT.reference})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.concat</code></td>
 <td>拼接参数</td>
 <td><code>#{str.concat(a='PAY-', b=${EXEC.INPUT.caseId})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.substr/indexOf</code></td>
 <td>截取子串／返回位置</td>
 <td><code>#{str.substr(${EXEC.INPUT.reference}, 0, 8)}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.contains/startsWith/endsWith</code></td>
 <td>测试字面包含、前缀、后缀</td>
 <td><code>#{str.contains(${EXEC.INPUT.message}, 'SUCCESS')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.replace</code></td>
 <td>字面替换</td>
 <td><code>#{str.replace(${EXEC.INPUT.reference}, '-', '')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.lpad/rpad</code></td>
 <td>左／右填充</td>
 <td><code>#{str.lpad(${EXEC.INPUT.sequence}, 8, '0')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.repeat</code></td>
 <td>重复值</td>
 <td><code>#{str.repeat(3, '9')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>date.sysdate/systimestamp</code></td>
 <td>返回系统日期／时间戳</td>
 <td><code>#{date.sysdate('yyyyMMdd')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>date.format</code></td>
 <td>格式化 ISO 日期</td>
 <td><code>#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>date.add</code></td>
 <td>日期增减</td>
 <td><code>#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>file.exists/directoryExists</code></td>
 <td>测试常规文件／目录</td>
 <td><code>#{file.exists(${EXEC.INPUT.requestFile})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>file.size/mkdirs</code></td>
 <td>返回文件大小／创建目录树</td>
 <td><code>#{file.size(${EXEC.INPUT.requestFile})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>file.copy/move/delete</code></td>
 <td>复制、移动、删除文件</td>
 <td><code>#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.string/number/boolean</code></td>
 <td>类型转换与归一化</td>
 <td><code>#{misc.number(value='12.50')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.coalesce/nvl</code></td>
 <td>返回非空值或默认值</td>
 <td><code>#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.iif</code></td>
 <td>从布尔值选择两个值之一</td>
 <td><code>#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.randomChoice</code></td>
 <td>从输入中随机选择</td>
 <td><code>#{misc.randomChoice('A', 'B', 'C')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.dbText</code></td>
 <td>将稳定 typed DB result 格式化为 SQL*Plus 风格文字</td>
 <td><code>#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.prettyPrint</code></td>
 <td>将 Map/List/array/tree 确定性格式化为缩进文字</td>
 <td><code>#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}</code></td>
@@ -3576,11 +3590,12 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb64-1"><a href=
 <span id="cb64-4"><a href="#cb64-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">outputDirectory</span><span class="kw">:</span><span class="at"> /tmp/pretend-output</span></span>
 <span id="cb64-5"><a href="#cb64-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">VARS</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">shouldNotReplace</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span>
 <span id="cb64-6"><a href="#cb64-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">STAGES</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">shouldNotReplace</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span><span class="kw">}</span></span></code></pre></div>
-<p>即使输入包含这些字段，<code>EXEC.ID</code>、<code>EXEC.MODE</code>、<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>
+<p>即使输入包含这些字段，<code>EXEC.ID</code>、<code>EXEC.RUN_ID</code>、<code>EXEC.OUTPUT_DIR</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>
 以及对应的
 <code>CASE.*</code>、<code>RUN.*</code>、<code>ACTIONS.*</code>、<code>TOOL.*</code>
-和 <code>DB.*</code> aliases 仍由框架生成。<code>EXEC.STAGES</code> 不是
-canonical Context 节点；Stage 历史仍由旧的 <code>CASE.STAGES</code>
+和 <code>DB.*</code> aliases 仍由框架生成。模式及 scheduler
+诊断不会暴露给 expressions。<code>EXEC.STAGES</code> 不是 canonical
+Context 节点；Stage 历史仍由旧的 <code>CASE.STAGES</code>
 证据视图保存。诊断时查看
 <code>output/debug/&lt;debugId&gt;/case.log</code>、<code>result.yaml</code>
 和 <code>artifacts/case.yaml</code>。</p>
@@ -4058,7 +4073,8 @@ evidence/attempt contract；</li>
 <li>arrival-rate overload policy 為 <code>drop</code>；</li>
 <li>每次 Flow invocation 有新的 Action scope，返回後恢復 caller
 scope；</li>
-<li><code>EXEC.LOAD</code> 只在 Load iteration 存在；</li>
+<li><code>DIAG</code> 是 framework-owned evidence，不屬於 expression
+tree；</li>
 <li>resource lifecycle state 不是 public Context tree；</li>
 <li>除文件明確允許的 extension location（例如支援位置的 root
 <code>x-*</code>）外，未知 schema field 會被拒絕。</li>

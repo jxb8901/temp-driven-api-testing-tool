@@ -16,7 +16,7 @@ Load adapter -----/          |
                               `--> Action-local output
 ```
 
-`EXEC.ACTIONS` is scope-local. A Stage/Template receives a fresh Action scope; a Flow invocation installs another fresh scope and restores the caller scope on return. `EXEC.VARS` is the explicit publication mechanism across those boundaries. `EXEC.LOAD` is attached only by the load adapter and does not fork the runtime model.
+`EXEC.ID` identifies the current execution unit and `EXEC.RUN_ID` the enclosing run. Run uses the canonical Case ID, Debug uses its debug ID for both, and Load allocates a globally unique per-run execution ID. The `DIAG` evidence plane records mode, timestamps, and scheduler metadata but is never part of expression roots. `EXEC.ACTIONS` is scope-local. A Stage/Template receives a fresh Action scope; a Flow invocation installs another fresh scope and restores the caller scope on return. `EXEC.VARS` is the explicit publication mechanism across those boundaries. Load keeps the same runtime model and exposes scheduler data only as evidence.
 
 Compatibility aliases are views over canonical state where a deterministic mapping exists. Stage history, resource handles, scheduler workers and invocation frames are not promoted into the public Context tree.
 

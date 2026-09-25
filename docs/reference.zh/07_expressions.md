@@ -63,23 +63,22 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.2 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
+`EXEC.ID` 表示目前 execution unit，`EXEC.RUN_ID` 表示外層 ATT run。`EXEC.INPUT`、`EXEC.VARS` 和各 scope 的 `EXEC.ACTIONS` 是所有 mode 共用的 runtime state。TestCase adapter 會把目前 Stage 的 caller/input values 暫時放入 `EXEC.INPUT`；同名時 Stage value 優先，Stage 結束後還原 Case-level value。Framework-owned identity/input 欄位不能由 Case 或 sidecar 覆寫。模式與 scheduler state 只保留在 evidence-only `DIAG`，不能以 `${...}` 或 `#{...}` 讀取；`${EXEC.MODE}`、`${EXEC.LOAD...}` 和 `${DIAG...}` 均不是 expression API。業務差異請透過 `EXEC.INPUT` 傳入。`EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE`、`EXEC.STAGES` 亦不是公開 root。Action result/evidence 透過 local `output` 和完成後的 `EXEC.ACTIONS` 發布；Stage/template status、timing、history 留在 result/evidence 及舊有 `CASE.STAGES` view。
 
 ### Load V1 Context（3.5.2）
 
-每个 load iteration 使用与普通执行相同的 `EXEC`／`META` tree 和 Action 局部 `output`。`EXEC.MODE` 是 `load`；`EXEC.ID` 与 `EXEC.LOAD.ITERATION_ID` 相同；`EXEC.STARTED_AT` 是本 iteration 的开始时间；`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 均按 iteration 隔离。scheduler-owned fields 如下：
+每个 load iteration 都有 run 内唯一的 `EXEC.ID`，`EXEC.RUN_ID` 在同一 run 共用。`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 按 iteration 隔离。Scheduler-owned fields 仅保留在 `DIAG.load` evidence：
 
 | 路径 | 含义 |
 |---|---|
-| `EXEC.LOAD.RUN_ID` | enclosing load run identity，同一 load run 的 iterations 共用。 |
-| `EXEC.LOAD.MODEL` | `closed` 或 `arrivalRate`。 |
-| `EXEC.LOAD.USER_ID` | closed model 的稳定 Virtual User identity；arrival-rate 为 `null` 或 absent。 |
-| `EXEC.LOAD.ITERATION_ID` | load run 内全局唯一的 iteration identity。 |
-| `EXEC.LOAD.ITERATION` | scheduler sequence number。 |
-| `EXEC.LOAD.PHASE` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
-| `EXEC.LOAD.RUN_STARTED_AT` | 可选的 enclosing load-run start timestamp。 |
+| `DIAG.load.runId` | enclosing load run identity。 |
+| `DIAG.load.model` | `closed` 或 `arrivalRate`。 |
+| `DIAG.load.userId` | closed model 的稳定 Virtual User identity；arrival-rate 不存在。 |
+| `DIAG.load.iterationId` | scheduler iteration identity。 |
+| `DIAG.load.iteration` | scheduler sequence number。 |
+| `DIAG.load.phase` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
 
-Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；iteration identity 保留在 `EXEC.ID` 与 `EXEC.LOAD.*`，并排除 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../../examples/load/README.md)。
+Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；scheduler identity 只保存在 retained evidence，且不包含 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../../examples/load/README.md)。
 
 `att load` 会在 scheduler 启动前完成 scenario 和 target validation，再选择两个 scheduler 之一。closed mode 为 Virtual User 保持稳定 identity，等待 target 完成后才进入 think time 和下一次 iteration；arrival-rate mode 使用 absolute planned due time，`maxConcurrent` 已满时记录 generator `dropped`，不排队，也不算作 SUT failure。两个 scheduler 都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`。warm-up 是真实 traffic，但默认不计入 measured threshold aggregates；成功 iteration 默认只保留 metrics，配置 sampling 后只为有界 sampled success 创建带 `case.log` 和 `case.yaml` 的 physical iteration workspace；失败则在保留 diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的 `samples/` 或 `failures/`，不会污染普通 functional run artifacts。
 
@@ -313,10 +312,11 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 
 ### 内建函数
 
-内建函数通过 `#{...}` 调用。Canonical 名称使用 framework-owned `str.*`、`date.*`、`file.*` 与 `misc.*` package；旧 flat 名称保留为兼容 alias。Tool group 同样以 `group.tool` 组成 package-like 调用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。
+内建函数通过 `#{...}` 调用。Canonical 名称使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 与 `seq.*` package；旧 flat 名称保留为兼容 alias。Tool group 同样以 `group.tool` 组成 package-like 调用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。
 
 | 函数 | 目的 | 示例 |
 |---|---|---|
+| `seq.next` | 返回 run-scoped `Long`；可选名称及宽度用于独立计数或精确宽度的零填充文字 | `#{seq.next('payment', 10)}` |
 | `str.upper/lower/trim` | 大小写与首尾空白处理 | `#{str.upper(value=${EXEC.INPUT.currency})}` |
 | `str.ltrim/rtrim` | 去除前导／尾随空白 | `#{str.ltrim(${EXEC.INPUT.reference})}` |
 | `str.length` | 返回文本长度 | `#{str.length(value=${EXEC.INPUT.reference})}` |

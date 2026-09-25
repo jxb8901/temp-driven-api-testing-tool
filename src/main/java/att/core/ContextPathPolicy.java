@@ -9,7 +9,7 @@ import java.util.Set;
 /** Shared classification rules for Context paths. */
 public final class ContextPathPolicy {
     public enum Scope {
-        CANONICAL_INPUT, CANONICAL_VARS, CANONICAL_ACTIONS, CANONICAL_LOAD, CANONICAL_META,
+        CANONICAL_INPUT, CANONICAL_VARS, CANONICAL_ACTIONS, CANONICAL_META,
         LEGACY_STAGE_EVIDENCE, LEGACY_ALIAS, TRANSIENT_TOOL, TRANSIENT_DB, ACTION_OUTPUT, OTHER
     }
 
@@ -30,17 +30,12 @@ public final class ContextPathPolicy {
     }
     public static boolean isFrameworkOwnedExecField(String field) {
         if (field == null) return false;
-        return "ID".equals(field) || "MODE".equals(field) || "STARTED_AT".equals(field)
+        return "ID".equals(field) || "RUN_ID".equals(field) || "STARTED_AT".equals(field)
+                || "RUN_STARTED_AT".equals(field)
                 || "OUTPUT_DIR".equals(field) || "INPUT".equals(field) || "VARS".equals(field)
-                || "ACTIONS".equals(field) || "LOAD".equals(field);
+                || "ACTIONS".equals(field);
     }
     public static boolean isCanonicalExecField(String field) { return isFrameworkOwnedExecField(field); }
-    public static boolean isCanonicalLoadField(String field) {
-        return "RUN_ID".equals(field) || "WORKLOAD_ID".equals(field) || "MODEL".equals(field)
-                || "USER_ID".equals(field) || "TARGET_TYPE".equals(field) || "TARGET_ID".equals(field)
-                || "ITERATION_ID".equals(field) || "ITERATION".equals(field)
-                || "PHASE".equals(field) || "RUN_STARTED_AT".equals(field);
-    }
     public static boolean isCanonicalMetaField(String field) {
         return "PROJECT".equals(field) || "SOURCE".equals(field) || "TARGET".equals(field)
                 || "TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
@@ -51,7 +46,6 @@ public final class ContextPathPolicy {
         if (path.startsWith("EXEC.INPUT.") || path.startsWith("EXEC.INPUT[")) return Scope.CANONICAL_INPUT;
         if (path.startsWith("EXEC.VARS.") || path.startsWith("EXEC.VARS[")) return Scope.CANONICAL_VARS;
         if (path.startsWith("EXEC.ACTIONS.") || path.startsWith("EXEC.ACTIONS[")) return Scope.CANONICAL_ACTIONS;
-        if (path.startsWith("EXEC.LOAD.") || path.startsWith("EXEC.LOAD[")) return Scope.CANONICAL_LOAD;
         if (path.equals("META") || path.startsWith("META.")) return Scope.CANONICAL_META;
         if (path.equals("CASE.STAGES") || path.startsWith("CASE.STAGES.") || path.startsWith("CASE.STAGES[")) return Scope.LEGACY_STAGE_EVIDENCE;
         if (path.equals("TOOL") || path.startsWith("TOOL.") || path.startsWith("TOOL[")) return Scope.TRANSIENT_TOOL;
@@ -70,7 +64,7 @@ public final class ContextPathPolicy {
     }
     public static boolean isRuntimeDependent(String path) {
         Scope scope = classify(path);
-        if (scope == Scope.LEGACY_STAGE_EVIDENCE || scope == Scope.CANONICAL_ACTIONS || scope == Scope.CANONICAL_LOAD
+        if (scope == Scope.LEGACY_STAGE_EVIDENCE || scope == Scope.CANONICAL_ACTIONS
                 || scope == Scope.TRANSIENT_TOOL || scope == Scope.TRANSIENT_DB || scope == Scope.ACTION_OUTPUT) return true;
         if (scope == Scope.LEGACY_ALIAS && path.startsWith("ACTIONS.")) return true;
         return "CASE.outputDirectory".equals(path)

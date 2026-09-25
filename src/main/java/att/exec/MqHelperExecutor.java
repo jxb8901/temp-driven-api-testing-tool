@@ -80,6 +80,8 @@ public final class MqHelperExecutor {
             return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
         }
         Instant started = Instant.now();
+        final long deadlineNanos = timeoutMs == null ? Long.MAX_VALUE
+                : System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs.longValue());
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         result.put("mqHelper", logical.logicalId()); result.put("instance", helper.instanceId());
@@ -128,7 +130,7 @@ public final class MqHelperExecutor {
                 } else {
                     closeQueue(requestQueue); requestQueue = null;
                     String reply = effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue");
-                    int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), timeoutMs);
+                    int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                     result.put("replyQueue", reply); result.put("waitMs", waitMs);
                     evidence.put("replyQueue", reply); evidence.put("waitMs", waitMs);
                     replyQueue = connection.open(reply, true, false);
@@ -139,7 +141,8 @@ public final class MqHelperExecutor {
                         if (!isNoMessage(noReply)) throw noReply;
                         result.put("replyReceived", false); evidence.put("replyReceived", false);
                         addReason(result, evidence, noReply);
-                        success = true;
+                        success = !deadlineExceeded(deadlineNanos);
+                        if (!success) addDeadlineError(result, evidence);
                         received = null;
                     }
                     if (received != null) {
@@ -162,7 +165,7 @@ public final class MqHelperExecutor {
             } else if ("receive".equals(operation)) {
                 String queue = string(args.get("queue"), "queue");
                 byte[] correlation = args.get("correlationId") == null ? null : messageId(String.valueOf(args.get("correlationId")));
-                int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), timeoutMs);
+                int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                 result.put("queue", queue); result.put("correlationId", id(correlation)); result.put("waitMs", waitMs);
                 evidence.put("queue", queue); evidence.put("correlationId", id(correlation)); evidence.put("waitMs", waitMs);
                 connection = factory.connect(helper);
@@ -185,7 +188,9 @@ public final class MqHelperExecutor {
                     success = true;
                 } catch (MqTransport.Exception noReply) {
                     if (!isNoMessage(noReply)) throw noReply;
-                    result.put("received", false); evidence.put("received", false); addReason(result, evidence, noReply); success = true;
+                    result.put("received", false); evidence.put("received", false); addReason(result, evidence, noReply);
+                    success = !deadlineExceeded(deadlineNanos);
+                    if (!success) addDeadlineError(result, evidence);
                 }
             } else throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         } catch (MqTransport.Exception error) {
@@ -339,10 +344,23 @@ public final class MqHelperExecutor {
         if (message.format() != null) { result.put("replyFormat", message.format()); evidence.put("replyFormat", message.format()); }
     }
 
-    private int effectiveWait(Object value, int fallback, Long timeoutMs) {
+    private int effectiveWait(Object value, int fallback, long deadlineNanos) {
         int requested = value == null ? fallback : integer(value, "waitMs", 0, 3600000);
-        if (timeoutMs == null) return requested;
-        return (int) Math.min((long) requested, Math.max(0L, timeoutMs.longValue()));
+        if (deadlineNanos == Long.MAX_VALUE) return requested;
+        long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
+        long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+        if (remainingNanos > 0L && remainingMs == 0L) remainingMs = 1L;
+        return (int) Math.min((long) requested, remainingMs);
+    }
+
+    private boolean deadlineExceeded(long deadlineNanos) {
+        return deadlineNanos != Long.MAX_VALUE && System.nanoTime() >= deadlineNanos;
+    }
+
+    private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence) {
+        Map<String, Object> error = new LinkedHashMap<String, Object>();
+        error.put("type", "MQ_TIMEOUT"); error.put("message", "Action timeout expired while waiting for an MQ message");
+        result.put("error", error); evidence.put("error", error);
     }
 
     private int integer(Object value, String name, int min, int max) {

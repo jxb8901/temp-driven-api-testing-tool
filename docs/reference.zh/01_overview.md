@@ -27,7 +27,7 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 | Debug | `att-debug/v1.0` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
 | Load | `att-load/v1.0` scenario | 重複執行單一 Template、Flow 或 Tool target |
 
-模式差異由 `EXEC.MODE` 表達；只有 load 會額外出現 `EXEC.LOAD`。可重用 Template/Flow 應主要依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`，而不是建立另一套 mode-specific runtime tree。
+可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
 ### 三種 Resource 是同級概念
 

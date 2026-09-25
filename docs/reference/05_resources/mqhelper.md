@@ -14,6 +14,8 @@ Payloads are file-based so request bytes do not have to be duplicated into Conte
 
 Timeout behavior is operation-specific and remains distinct from assertion failure. MQ connection/pool lifecycle is framework-owned resource state, especially in Load mode; it is not exposed as a public `EXEC.MQ` tree.
 
+An Action `timeoutMs` takes precedence over the helper's default `requestReply.waitMs` and caps receive/request waits to the remaining Action deadline. A call-level `waitMs` takes precedence over the helper default but cannot extend that deadline. Tool Action retry applies to every MQ operation (`send`, `receive`, and `request`); retrying a send may enqueue duplicates, which the package author must account for. Per-attempt timing and retry outcomes remain in Action evidence.
+
 ATT's default build does not require IBM MQ client classes. Runtime MQ use requires the IBM MQ client jar/profile documented by the package/release instructions. MQ operations feed the same Action result/evidence envelope as Tool and DB operations.
 
 

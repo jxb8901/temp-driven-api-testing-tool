@@ -270,8 +270,9 @@ lifetime</a></li>
 <li><a href="#action-local-output-and-publication"
 id="toc-action-local-output-and-publication">Action-local output and
 publication</a></li>
-<li><a href="#load-only-context" id="toc-load-only-context">Load-only
-Context</a></li>
+<li><a href="#execution-identity-and-diagnostics"
+id="toc-execution-identity-and-diagnostics">Execution identity and
+diagnostics</a></li>
 <li><a href="#optional-lookup" id="toc-optional-lookup">Optional
 lookup</a></li>
 <li><a href="#compatibility-aliases"
@@ -511,11 +512,11 @@ execution-neutral Context and reusable components:</p>
 </tr>
 </tbody>
 </table>
-<p>Mode-specific identity is carried by <code>EXEC.MODE</code> and, for
-load only, <code>EXEC.LOAD</code>. Reusable Templates/Flows should
-normally depend on <code>EXEC.INPUT</code>, <code>EXEC.VARS</code>,
-<code>EXEC.ACTIONS</code>, <code>META</code>, and Action-local
-<code>output</code>, not on a second mode-specific runtime tree.</p>
+<p>Reusable Templates/Flows depend on <code>EXEC.INPUT</code>,
+<code>EXEC.VARS</code>, <code>EXEC.ACTIONS</code>, <code>META</code>,
+and Action-local <code>output</code>. Execution mode and scheduler
+identity are framework diagnostics in retained evidence, not expression
+data.</p>
 <h3 id="resources-are-peers">Resources are peers</h3>
 <p>Tool, DBHelper and MQHelper are independent resource types. They
 differ in configuration and lifecycle but publish operation data into
@@ -1038,10 +1039,22 @@ completes in the current scope, use
 is the final/winning primary operation result. Retry history and
 per-attempt collectors remain under <code>attempts[n]</code>; they do
 not replace the top-level final result.</p>
-<h3 id="load-only-context">Load-only Context</h3>
-<p><code>EXEC.LOAD</code> is conditional data added to the same Context
-model, not a second runtime. It may contain:</p>
-<pre class="text"><code>EXEC.LOAD
+<h3 id="execution-identity-and-diagnostics">Execution identity and
+diagnostics</h3>
+<p><code>EXEC.ID</code> identifies the current execution unit;
+<code>EXEC.RUN_ID</code> identifies its enclosing ATT run. Testcase IDs
+are canonical Case IDs, debug uses the debug ID for both, and each load
+iteration receives a unique execution ID across the run. Legacy
+<code>RUN.id</code> and <code>RUN.runId</code> remain deterministic
+aliases of <code>EXEC.RUN_ID</code>. These framework-owned fields cannot
+be overridden by input.</p>
+<p>The framework records mode, timestamps, and load scheduler metadata
+in the <code>DIAG</code> evidence section. <code>DIAG</code> is
+deliberately absent from expression Context: <code>${EXEC.MODE}</code>,
+<code>${EXEC.LOAD...}</code>, and <code>${DIAG...}</code> are invalid.
+Use <code>EXEC.INPUT</code> for business variation. Load evidence may
+contain:</p>
+<pre class="text"><code>DIAG.load
 ├── RUN_ID
 ├── WORKLOAD_ID     # att-load/v1.1 multi-workload runs
 ├── MODEL
@@ -1058,12 +1071,11 @@ configured workload <code>id</code>. <code>TARGET_TYPE</code> and
 Closed workloads provide a stable <code>USER_ID</code> for one virtual
 user; fixed-arrival-rate iterations have no persistent VU identity.</p>
 <p>Different closed-VU workload pools may both contain a
-<code>VU-1</code>. The durable identity is therefore the pair
-<code>(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)</code>. ATT does not
-introduce a separate <code>EXEC.USER</code> root or shared mutable VU
-Context; each iteration still gets isolated <code>EXEC.INPUT</code>,
-<code>EXEC.VARS</code>, <code>EXEC.ACTIONS</code>, transient Tool/DB
-state and Action-local <code>output</code>.</p>
+<code>VU-1</code>. The durable evidence identity is therefore the pair
+<code>(workloadId, userId)</code>. Each iteration still gets isolated
+<code>EXEC.INPUT</code>, <code>EXEC.VARS</code>,
+<code>EXEC.ACTIONS</code>, transient Tool/DB state and Action-local
+<code>output</code>.</p>
 <h3 id="optional-lookup">Optional lookup</h3>
 <p><code>${path}</code> is strict. <code>${path?}</code> returns null
 for a missing map/list path where optional lookup is defined, but it
@@ -1083,7 +1095,7 @@ Template/Flow/Tool/DB/MQ execution semantics.</p>
 <thead>
 <tr class="header">
 <th>Mode</th>
-<th>Context <code>EXEC.MODE</code></th>
+<th><code>EXEC.ID</code></th>
 <th>Unit of execution</th>
 <th>Primary result location</th>
 </tr>
@@ -1091,24 +1103,29 @@ Template/Flow/Tool/DB/MQ execution semantics.</p>
 <tbody>
 <tr class="odd">
 <td>Run</td>
-<td><code>testcase</code></td>
+<td>canonical Case ID</td>
 <td>selected Testcase</td>
 <td><code>output/&lt;RunID&gt;/</code></td>
 </tr>
 <tr class="even">
 <td>Debug</td>
-<td><code>debug</code></td>
+<td>debug ID</td>
 <td>one target invocation</td>
 <td><code>output/debug/&lt;debugId&gt;/</code></td>
 </tr>
 <tr class="odd">
 <td>Load</td>
-<td><code>load</code></td>
+<td>unique iteration execution ID</td>
 <td>repeated target iterations</td>
 <td><code>output/load/&lt;runId&gt;/</code></td>
 </tr>
 </tbody>
 </table>
+<p><code>EXEC.RUN_ID</code> identifies the enclosing ATT run. Mode and
+scheduler-specific information are retained under evidence-only
+<code>DIAG</code>; neither <code>EXEC.MODE</code>,
+<code>EXEC.LOAD</code>, nor <code>DIAG</code> is available to
+expressions.</p>
 <p>All three resolve the selected environment before execution,
 construct canonical Context, validate the target/dependency closure, and
 use the same component contracts. Mode-specific scheduling, selection
@@ -1289,11 +1306,16 @@ is invalid, no workload begins execution. Workloads share the same
 run-scoped DB/MQ resource layer so they contend realistically for
 configured pools, while mutable iteration Context and output remain
 isolated.</p>
-<p>For v1.1, the existing <code>EXEC.LOAD</code> node additionally
-exposes <code>WORKLOAD_ID</code>, <code>TARGET_TYPE</code>, and
-<code>TARGET_ID</code>. Closed pools retain stable <code>USER_ID</code>.
+<p>For v1.1, retained <code>DIAG.load</code> evidence additionally
+exposes <code>workloadId</code>, <code>targetType</code>, and
+<code>targetId</code>. Closed pools retain stable <code>userId</code>.
 Because separate pools may each contain <code>VU-1</code>, the durable
-virtual-user identity is <code>(WORKLOAD_ID, USER_ID)</code>.</p>
+virtual-user identity is <code>(workloadId, userId)</code>. Scheduler
+diagnostics are not expression Context.</p>
+<p>The former expression path <code>EXEC.LOAD</code> is no longer
+public; existing templates that reference it must move business inputs
+to <code>EXEC.INPUT</code> and inspect retained scheduler evidence
+outside expressions.</p>
 <h4 id="workload-models">Workload models</h4>
 <p><strong>Closed VU</strong> uses positive <code>load.users</code>. One
 virtual user repeatedly runs its workload's fixed target and waits for
@@ -1308,7 +1330,7 @@ not counted as SUT errors. Arrival-rate workloads reject
 <code>execution.thinkTime</code>.</p>
 <p><code>duration</code> is required. Optional <code>warmup</code>,
 <code>rampUp</code>, and <code>rampDown</code> define phases;
-<code>EXEC.LOAD.PHASE</code> identifies <code>WARMUP</code>,
+<code>DIAG.load.phase</code> evidence identifies <code>WARMUP</code>,
 <code>RAMP_UP</code>, <code>STEADY</code>, or <code>RAMP_DOWN</code>.
 Warm-up traffic executes but is excluded from measured threshold
 aggregates.</p>
@@ -1386,8 +1408,9 @@ not a target-host CPU/memory benchmark. Load exit codes are
 <code>0</code> PASS, <code>1</code> threshold failure, <code>2</code>
 invalid scenario/configuration/target, and <code>3</code>
 runtime/infrastructure error.</p>
-<p><code>EXEC.LOAD</code> is defined centrally in Chapter 3; artifact
-schemas and report details are in Chapter 11.</p>
+<p>Load execution identity and evidence-only scheduler diagnostics are
+defined centrally in Chapter 3; artifact schemas and report details are
+in Chapter 11.</p>
 <h2 id="05-resources-and-integrations">05 Resources and
 Integrations</h2>
 <p>Tool, DBHelper and MQHelper are peer integration/resource types. They
@@ -1466,7 +1489,10 @@ Action timeout and the retry interval is outside that timeout.</p>
 <p>A direct <code>query</code> Action may also use the standard retry
 block with <code>maxAttempts</code> 2–10, <code>intervalMs</code>
 0–3,600,000, and a non-empty unique <code>retryOn</code> list containing
-<code>ASSERTION</code> and/or <code>TIMEOUT</code>.
+<code>ASSERTION</code> and/or <code>TIMEOUT</code>. An explicit Action
+<code>timeoutMs</code> overrides the helper's statement-timeout default;
+without it, the helper default applies. JDBC query timeout is rounded up
+to whole seconds while ATT retains millisecond deadline cancellation.
 <code>ASSERTION</code> requires an Action <code>assert</code>. Ordinary
 SQL errors are terminal. Retry-enabled query attempts are retained in
 <code>output.attempts[n]</code>; the top-level
@@ -1522,6 +1548,14 @@ bytes are not copied into evidence.</p>
 assertion failure. MQ connection/pool lifecycle is framework-owned
 resource state, especially in Load mode; it is not exposed as a public
 <code>EXEC.MQ</code> tree.</p>
+<p>An Action <code>timeoutMs</code> takes precedence over the helper's
+default <code>requestReply.waitMs</code> and caps receive/request waits
+to the remaining Action deadline. A call-level <code>waitMs</code> takes
+precedence over the helper default but cannot extend that deadline. Tool
+Action retry applies to every MQ operation (<code>send</code>,
+<code>receive</code>, and <code>request</code>); retrying a send may
+enqueue duplicates, which the package author must account for.
+Per-attempt timing and retry outcomes remain in Action evidence.</p>
 <p>ATT's default build does not require IBM MQ client classes. Runtime
 MQ use requires the IBM MQ client jar/profile documented by the
 package/release instructions. MQ operations feed the same Action
@@ -2037,40 +2071,34 @@ META
 └── TOOL, DBHELPER, MQHELPER (curated invocation metadata)
 output
 └── current Action/attempt-local result; unavailable outside that Action scope</code></pre>
-<p><code>EXEC.MODE</code> is <code>testcase</code>, <code>debug</code>,
-or <code>load</code>. <code>EXEC.LOAD</code> exists only when
-<code>EXEC.MODE=load</code>; ordinary TestCase and debug execution do
-not materialize it. <code>EXEC.INPUT</code>, <code>EXEC.VARS</code>, and
-<code>EXEC.ACTIONS</code> are the same mutable runtime state used by all
-modes, not parallel copies. The TestCase adapter overlays current Stage
+<p><code>EXEC.ID</code> identifies the current execution unit and
+<code>EXEC.RUN_ID</code> its enclosing run. <code>EXEC.INPUT</code>,
+<code>EXEC.VARS</code>, and <code>EXEC.ACTIONS</code> are shared runtime
+concepts across all modes. The TestCase adapter overlays current Stage
 caller/input values onto <code>EXEC.INPUT</code> for the active Stage;
-Stage values win over Case-level values on collision and the Case-level
-values are restored after the Stage. Framework-owned fields such as
-<code>EXEC.ID</code>, <code>EXEC.MODE</code>,
-<code>EXEC.OUTPUT_DIR</code>, <code>EXEC.INPUT</code>,
-<code>EXEC.VARS</code>, and <code>EXEC.ACTIONS</code> cannot be
-overwritten by Case or sidecar input. There is intentionally no
+Stage values win on collision and Case-level values are restored after
+the Stage. Framework-owned identity/input fields cannot be overwritten.
+Mode and scheduler state live in evidence-only <code>DIAG</code> and
+cannot be referenced through <code>${...}</code> or <code>#{...}</code>;
+in particular, <code>EXEC.MODE</code>, <code>EXEC.LOAD</code>, and
+<code>DIAG</code> are not expression APIs. Use <code>EXEC.INPUT</code>
+for business variation. There is intentionally no
 <code>EXEC.TOOL</code>, <code>EXEC.DB</code>, <code>EXEC.MQ</code>,
 <code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
 <code>EXEC.INVOCATION</code>, <code>EXEC.STAGE</code>, or
-<code>EXEC.STAGES</code>: helper/resource state remains internal,
-root-level <code>TOOL.*</code> / <code>DB.*</code> remain compatibility
-or transient views, and Action result/evidence is consumed through local
-<code>output</code> while active and <code>EXEC.ACTIONS</code> after
-publication. Stage/Template status, timing, and history remain in the
-execution result/evidence model and legacy <code>CASE.STAGES</code>. The
-<code>att-load/v1.0</code> adapter adds the load-only
-<code>EXEC.LOAD</code> namespace described below.</p>
+<code>EXEC.STAGES</code>: helper/resource state remains internal, and
+Action result/evidence is consumed through local <code>output</code>
+while active and <code>EXEC.ACTIONS</code> after publication.
+Stage/Template status, timing, and history remain in result/evidence and
+legacy <code>CASE.STAGES</code>.</p>
 <h3 id="load-v1-context-352">Load V1 Context (3.5.2)</h3>
-<p>Each load iteration uses the same <code>EXEC</code>/<code>META</code>
-tree and action-local <code>output</code> as normal execution.
-<code>EXEC.MODE</code> is <code>load</code>; <code>EXEC.ID</code> and
-<code>EXEC.LOAD.ITERATION_ID</code> are the same iteration identity;
-<code>EXEC.STARTED_AT</code> is the iteration start; and
-<code>EXEC.OUTPUT_DIR</code>, <code>EXEC.INPUT</code>,
-<code>EXEC.VARS</code>, <code>EXEC.ACTIONS</code>, and local
-<code>output</code> are isolated per iteration. The scheduler-owned
-fields are:</p>
+<p>Each load iteration has an <code>EXEC.ID</code> unique across all
+workloads and virtual users in its ATT run; <code>EXEC.RUN_ID</code> is
+shared by the run. Iteration state (<code>EXEC.OUTPUT_DIR</code>,
+<code>EXEC.INPUT</code>, <code>EXEC.VARS</code>,
+<code>EXEC.ACTIONS</code>, and local <code>output</code>) remains
+isolated. Scheduler-owned fields are retained only in
+<code>DIAG.load</code> evidence:</p>
 <table>
 <thead>
 <tr class="header">
@@ -2080,34 +2108,30 @@ fields are:</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td><code>EXEC.LOAD.RUN_ID</code></td>
-<td>Enclosing load run identity shared by its iterations.</td>
+<td><code>DIAG.load.runId</code></td>
+<td>Enclosing load run identity.</td>
 </tr>
 <tr class="even">
-<td><code>EXEC.LOAD.MODEL</code></td>
+<td><code>DIAG.load.model</code></td>
 <td><code>closed</code> or <code>arrivalRate</code>.</td>
 </tr>
 <tr class="odd">
-<td><code>EXEC.LOAD.USER_ID</code></td>
-<td>Stable closed-model Virtual User identity; <code>null</code> or
-absent for arrival-rate.</td>
+<td><code>DIAG.load.userId</code></td>
+<td>Stable closed-model Virtual User identity; absent for
+arrival-rate.</td>
 </tr>
 <tr class="even">
-<td><code>EXEC.LOAD.ITERATION_ID</code></td>
-<td>Globally unique iteration identity within the load run.</td>
+<td><code>DIAG.load.iterationId</code></td>
+<td>Scheduler iteration identity.</td>
 </tr>
 <tr class="odd">
-<td><code>EXEC.LOAD.ITERATION</code></td>
+<td><code>DIAG.load.iteration</code></td>
 <td>Scheduler sequence number.</td>
 </tr>
 <tr class="even">
-<td><code>EXEC.LOAD.PHASE</code></td>
+<td><code>DIAG.load.phase</code></td>
 <td><code>WARMUP</code>, <code>RAMP_UP</code>, <code>STEADY</code>, or
 <code>RAMP_DOWN</code>.</td>
-</tr>
-<tr class="odd">
-<td><code>EXEC.LOAD.RUN_STARTED_AT</code></td>
-<td>Optional enclosing load-run start timestamp.</td>
 </tr>
 </tbody>
 </table>
@@ -2116,10 +2140,10 @@ absent for arrival-rate.</td>
 that canonical input tree, <code>EXEC.VARS.*</code>,
 <code>EXEC.ACTIONS.*</code>, and current <code>output.*</code>.
 <code>META.SOURCE</code> identifies the load scenario by type, scenario
-name, and path; iteration identity remains under <code>EXEC.ID</code>
-and <code>EXEC.LOAD.*</code>, and secrets are excluded. Root-level
-<code>LOAD.*</code>, <code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>,
-and <code>EXEC.INVOCATION</code> are not public load APIs. See <a
+name, and path; scheduler identity stays in retained evidence and
+secrets are excluded. Root-level <code>LOAD.*</code>,
+<code>EXEC.OUTPUT</code>, <code>EXEC.CALL</code>, and
+<code>EXEC.INVOCATION</code> are not public load APIs. See <a
 href="../examples/load/README.md"><code>examples/load/README.md</code></a>
 for complete closed/arrival-rate configurations, CLI overrides, target
 forms, thresholds, evidence, and validation examples.</p>
@@ -2857,10 +2881,11 @@ string comparison.</p>
 <h3 id="built-in-functions">Built-in functions</h3>
 <p>Built-ins are called with <code>#{...}</code>. Canonical names use
 framework-owned <code>str.*</code>, <code>date.*</code>,
-<code>file.*</code>, and <code>misc.*</code> packages. Legacy flat names
-remain aliases for compatibility. Tool groups use the same package-like
-<code>group.tool</code> shape; configured Tools cannot claim a built-in
-package root or any canonical/legacy built-in name.</p>
+<code>file.*</code>, <code>misc.*</code>, and <code>seq.*</code>
+packages. Legacy flat names remain aliases for compatibility. Tool
+groups use the same package-like <code>group.tool</code> shape;
+configured Tools cannot claim a built-in package root or any
+canonical/legacy built-in name.</p>
 <table>
 <thead>
 <tr class="header">
@@ -2871,166 +2896,173 @@ package root or any canonical/legacy built-in name.</p>
 </thead>
 <tbody>
 <tr class="odd">
+<td><code>seq.next</code></td>
+<td>Return a run-scoped <code>Long</code>; optional sequence name and
+width produce independent named counters or exact-width zero-padded
+text</td>
+<td><code>#{seq.next('payment', 10)}</code></td>
+</tr>
+<tr class="even">
 <td><code>str.upper</code></td>
 <td>Convert text to upper case</td>
 <td><code>#{str.upper(value=${EXEC.INPUT.currency})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.lower</code></td>
 <td>Convert text to lower case</td>
 <td><code>#{str.lower(value=${EXEC.INPUT.channel})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.trim</code></td>
 <td>Remove surrounding whitespace</td>
 <td><code>#{str.trim(value=${EXEC.INPUT.reference})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.ltrim</code> / <code>str.rtrim</code></td>
 <td>Remove leading/trailing whitespace</td>
 <td><code>#{str.ltrim(${EXEC.INPUT.reference})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.length</code></td>
 <td>Return text length</td>
 <td><code>#{str.length(value=${EXEC.INPUT.reference})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.concat</code></td>
 <td>Concatenate arguments in call order</td>
 <td><code>#{str.concat(a='PAY-', b=${EXEC.INPUT.caseId})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.substr</code></td>
 <td>Extract text from a zero-based start</td>
 <td><code>#{str.substr(${EXEC.INPUT.reference}, 0, 8)}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.indexOf</code></td>
 <td>Return zero-based position or <code>-1</code></td>
 <td><code>#{str.indexOf(${EXEC.INPUT.reference}, '-')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.contains</code></td>
 <td>Test literal substring membership</td>
 <td><code>#{str.contains(${EXEC.INPUT.message}, 'SUCCESS')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.startsWith</code> / <code>str.endsWith</code></td>
 <td>Test a literal prefix/suffix</td>
 <td><code>#{str.startsWith(${EXEC.INPUT.reference}, 'PAY')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.replace</code></td>
 <td>Replace every literal target</td>
 <td><code>#{str.replace(${EXEC.INPUT.reference}, '-', '')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>str.lpad</code> / <code>str.rpad</code></td>
 <td>Pad to a minimum length</td>
 <td><code>#{str.lpad(${EXEC.INPUT.sequence}, 8, '0')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>str.repeat</code></td>
 <td>Repeat a value 0–10000 times</td>
 <td><code>#{str.repeat(3, '9')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>date.sysdate</code></td>
 <td>Return system-zone date, optionally formatted</td>
 <td><code>#{date.sysdate('yyyyMMdd')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>date.systimestamp</code></td>
 <td>Return system-zone timestamp, optionally formatted</td>
 <td><code>#{date.systimestamp(format='yyyyMMdd-HHmmssXXX')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>date.format</code></td>
 <td>Format an ISO-8601 value</td>
 <td><code>#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>date.add</code></td>
 <td>Add a calendar/time amount</td>
 <td><code>#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>file.exists</code></td>
 <td>Test whether a regular file exists</td>
 <td><code>#{file.exists(${EXEC.INPUT.requestFile})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>file.directoryExists</code></td>
 <td>Test whether a directory exists</td>
 <td><code>#{file.directoryExists(${EXEC.OUTPUT_DIR})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>file.size</code></td>
 <td>Return regular-file size in bytes</td>
 <td><code>#{file.size(${EXEC.INPUT.requestFile})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>file.mkdirs</code></td>
 <td>Create a directory tree and return its absolute path</td>
 <td><code>#{file.mkdirs(${EXEC.INPUT.archiveDirectory})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>file.copy</code></td>
 <td>Copy a regular file and return the target path</td>
 <td><code>#{file.copy(${EXEC.INPUT.requestFile}, ${EXEC.INPUT.backupFile}, true)}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>file.move</code></td>
 <td>Move a regular file and return the target path</td>
 <td><code>#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>file.delete</code></td>
 <td>Delete a non-directory file</td>
 <td><code>#{file.delete(${EXEC.INPUT.temporaryFile}, true)}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.string</code></td>
 <td>Convert a value to text</td>
 <td><code>#{misc.string(value=${EXEC.INPUT.amount})}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.number</code></td>
 <td>Parse and normalize a number</td>
 <td><code>#{misc.number(value='12.50')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.boolean</code></td>
 <td>Convert true/false, yes/no, or 1/0</td>
 <td><code>#{misc.boolean(yes)}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.coalesce</code></td>
 <td>Return first non-blank value</td>
 <td><code>#{misc.coalesce(${EXEC.INPUT.optional}, 'N/A')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.nvl</code></td>
 <td>Return a default for null/empty text</td>
 <td><code>#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.iif</code></td>
 <td>Select one of two values from a boolean</td>
 <td><code>#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.randomChoice</code></td>
 <td>Return one of 1–1000 input values</td>
 <td><code>#{misc.randomChoice('A', 'B', 'C')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.dbText</code></td>
 <td>Format one stable typed DB result as SQL*Plus-style text</td>
 <td><code>#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>prettyPrint</code> / <code>format.pretty</code></td>
 <td>Deterministically format a Map/List/array tree</td>
 <td><code>#{prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}</code></td>
@@ -4729,14 +4761,15 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb78-1"><a href="#
 invalid schema, unknown or missing Tool arguments, and other
 input/configuration errors return exit code <code>2</code>.
 Framework-owned values such as <code>EXEC.ID</code>,
-<code>EXEC.MODE</code>, <code>EXEC.OUTPUT_DIR</code>,
+<code>EXEC.RUN_ID</code>, <code>EXEC.OUTPUT_DIR</code>,
 <code>EXEC.VARS</code>, and <code>EXEC.ACTIONS</code>, together with the
 corresponding <code>CASE.*</code>, <code>RUN.*</code>,
 <code>ACTIONS.*</code>, <code>TOOL.*</code>, and <code>DB.*</code>
 aliases, remain authoritative even if they appear in the input
-<code>case</code> map. <code>EXEC.STAGES</code> is not a canonical
-Context node; Stage history remains in the legacy
-<code>CASE.STAGES</code> evidence view.</p>
+<code>case</code> map. Mode/scheduler diagnostics are not
+expression-visible. <code>EXEC.STAGES</code> is not a canonical Context
+node; Stage history remains in the legacy <code>CASE.STAGES</code>
+evidence view.</p>
 <p>Each invocation writes:</p>
 <pre class="text"><code>output/debug/&lt;debugId&gt;/
 ├── case.log
@@ -5338,7 +5371,8 @@ defaults. Important architectural limits include:</p>
 <li>arrival-rate overload policy is <code>drop</code>;</li>
 <li>Flow invocation receives a fresh Action scope and caller scope is
 restored on return;</li>
-<li><code>EXEC.LOAD</code> exists only for Load iterations;</li>
+<li><code>DIAG</code> is framework-owned evidence and is not part of the
+expression tree;</li>
 <li>resource lifecycle state is not a public Context tree;</li>
 <li>unknown schema fields are rejected except documented extension
 locations such as root <code>x-*</code> where supported.</li>

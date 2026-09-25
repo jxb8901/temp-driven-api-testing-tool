@@ -115,7 +115,8 @@ public final class DebugEngine {
             caseStarted = true;
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config);
-            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(toolInvoker, db, mq);
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(toolInvoker, db, mq,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             actionResults.addAll(new att.template.StageTemplateRunner(engine, resolved.flows)
                     .execute(stage.key(), resolved.template, context, log));
             actionResults.addAll(db.finishCase(context, log));

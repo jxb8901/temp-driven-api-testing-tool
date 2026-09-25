@@ -355,8 +355,8 @@ public class StageTemplateRunner {
             String invocationId = context.nextDbInvocationId(action.db());
             att.exec.DbInvocationResult result;
             if (action.timeoutMs() != null) {
-                // The timeout-aware executor overload preserves the same effective
-                // helper/action minimum rule. Positional execution is also valid
+                // Explicit Action timeout overrides the helper's statement timeout.
+                // Positional execution is also valid
                 // for SQL normalized from named parameters; parameter order was
                 // fixed by NamedSqlParameters.bind above.
                 result = executor.execute(action.db(), query ? "query" : "update", sql, source,
@@ -490,6 +490,12 @@ public class StageTemplateRunner {
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
                 if (!operation.executionSuccess()) {
+                    if ("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.evidence()))
+                            && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
+                        invocation.put("retryReason", "TIMEOUT");
+                        waitBeforeRetry(intervalMs);
+                        continue;
+                    }
                     output.put("finalAttempt", number);
                     output.put("status", "ERROR"); output.put("success", false);
                     return ResultStatus.ERROR;
@@ -536,6 +542,16 @@ public class StageTemplateRunner {
             }
         }
         throw new IllegalStateException("Tool action completed without a final attempt: " + action.id());
+    }
+
+    @SuppressWarnings("unchecked")
+    private String mqErrorType(Map<String, Object> evidence) {
+        Object mq = evidence == null ? null : evidence.get("MQ");
+        if (!(mq instanceof Map)) return null;
+        Object error = ((Map<String, Object>) mq).get("error");
+        if (!(error instanceof Map)) return null;
+        Object type = ((Map<String, Object>) error).get("type");
+        return type == null ? null : String.valueOf(type);
     }
 
     private void runEvidenceCollectors(TemplateAction action, int attempt, CaseRuntimeContext context,

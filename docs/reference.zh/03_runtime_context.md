@@ -53,12 +53,14 @@ output
 
 Action 執行中使用 `${output...}`；在目前 scope 完成後使用 `${EXEC.ACTIONS.<id>.output...}`。`result` 是最後／勝出的 primary operation result；retry history 與每次 attempt 的 collector 保留在 `attempts[n]`，不會取代 top-level final result。
 
-### Load-only Context
+### 執行身份與診斷資料
 
-`EXEC.LOAD` 只是加在同一 Context 上的 conditional data，不是第二套 runtime。它可包含：
+`EXEC.ID` 表示目前執行單位；`EXEC.RUN_ID` 表示外層 ATT run。Run 使用 canonical Case ID，Debug 的兩者均使用 debug ID；Load 為每個 iteration 分配 run 內全域唯一的 execution ID。舊有 `RUN.id` 和 `RUN.runId` 仍確定性地對應 `EXEC.RUN_ID`，且這些 framework-owned 值不可由輸入覆寫。
+
+執行模式、時間戳和 load scheduler metadata 保存在 evidence-only `DIAG`，不屬於 expression Context。因此 `${EXEC.MODE}`、`${EXEC.LOAD...}` 和 `${DIAG...}` 均無效；業務差異請透過 `EXEC.INPUT` 傳入。Load evidence 可包含：
 
 ```text
-EXEC.LOAD
+DIAG.load
 ├── RUN_ID
 ├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
 ├── MODEL
@@ -73,7 +75,7 @@ EXEC.LOAD
 
 在 `att-load/v1.1` 中，`WORKLOAD_ID` 就是 scenario 配置的 workload `id`；`TARGET_TYPE`、`TARGET_ID` 標識該 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。
 
-不同 closed-VU workload pool 可以各自出現 `VU-1`，因此跨 workload 的完整 VU 身份是 `(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)`。ATT 不會新增 `EXEC.USER` root，也不會在 VU 之間共享 mutable Context；每個 iteration 的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Tool/DB transient state 及 Action-local `output` 仍然彼此隔離。
+不同 closed-VU workload pool 可各自有 `VU-1`，因此 evidence 中應用 `(workloadId, userId)` 識別 VU。ATT 不新增 `EXEC.USER` root，也不會在 VU 之間共享 mutable Context；每個 iteration 的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Tool/DB transient state 及 Action-local `output` 仍然彼此隔離。
 
 ### Optional lookup
 

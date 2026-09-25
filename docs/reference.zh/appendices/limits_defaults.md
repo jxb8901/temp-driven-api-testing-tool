@@ -5,7 +5,7 @@ Normative field default 以其 owner schema/configuration chapter 為準。重�
 - load V1 必須二選一 workload model；
 - arrival-rate overload policy 為 `drop`；
 - 每次 Flow invocation 有新的 Action scope，返回後恢復 caller scope；
-- `EXEC.LOAD` 只在 Load iteration 存在；
+- `DIAG` 是 framework-owned evidence，不屬於 expression tree；
 - resource lifecycle state 不是 public Context tree；
 - 除文件明確允許的 extension location（例如支援位置的 root `x-*`）外，未知 schema field 會被拒絕。
 

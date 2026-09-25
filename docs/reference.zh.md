@@ -34,7 +34,7 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 | Debug | `att-debug/v1.0` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
 | Load | `att-load/v1.0` scenario | 重複執行單一 Template、Flow 或 Tool target |
 
-模式差異由 `EXEC.MODE` 表達；只有 load 會額外出現 `EXEC.LOAD`。可重用 Template/Flow 應主要依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`，而不是建立另一套 mode-specific runtime tree。
+可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
 ### 三種 Resource 是同級概念
 
@@ -327,12 +327,14 @@ output
 
 Action 執行中使用 `${output...}`；在目前 scope 完成後使用 `${EXEC.ACTIONS.<id>.output...}`。`result` 是最後／勝出的 primary operation result；retry history 與每次 attempt 的 collector 保留在 `attempts[n]`，不會取代 top-level final result。
 
-### Load-only Context
+### 執行身份與診斷資料
 
-`EXEC.LOAD` 只是加在同一 Context 上的 conditional data，不是第二套 runtime。它可包含：
+`EXEC.ID` 表示目前執行單位；`EXEC.RUN_ID` 表示外層 ATT run。Run 使用 canonical Case ID，Debug 的兩者均使用 debug ID；Load 為每個 iteration 分配 run 內全域唯一的 execution ID。舊有 `RUN.id` 和 `RUN.runId` 仍確定性地對應 `EXEC.RUN_ID`，且這些 framework-owned 值不可由輸入覆寫。
+
+執行模式、時間戳和 load scheduler metadata 保存在 evidence-only `DIAG`，不屬於 expression Context。因此 `${EXEC.MODE}`、`${EXEC.LOAD...}` 和 `${DIAG...}` 均無效；業務差異請透過 `EXEC.INPUT` 傳入。Load evidence 可包含：
 
 ```text
-EXEC.LOAD
+DIAG.load
 ├── RUN_ID
 ├── WORKLOAD_ID     # att-load/v1.1 multi-workload run
 ├── MODEL
@@ -347,7 +349,7 @@ EXEC.LOAD
 
 在 `att-load/v1.1` 中，`WORKLOAD_ID` 就是 scenario 配置的 workload `id`；`TARGET_TYPE`、`TARGET_ID` 標識該 workload 固定擁有的 target。Closed workload 對同一 virtual user 提供穩定 `USER_ID`；fixed-arrival-rate iteration 沒有 persistent VU identity。
 
-不同 closed-VU workload pool 可以各自出現 `VU-1`，因此跨 workload 的完整 VU 身份是 `(EXEC.LOAD.WORKLOAD_ID, EXEC.LOAD.USER_ID)`。ATT 不會新增 `EXEC.USER` root，也不會在 VU 之間共享 mutable Context；每個 iteration 的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Tool/DB transient state 及 Action-local `output` 仍然彼此隔離。
+不同 closed-VU workload pool 可各自有 `VU-1`，因此 evidence 中應用 `(workloadId, userId)` 識別 VU。ATT 不新增 `EXEC.USER` root，也不會在 VU 之間共享 mutable Context；每個 iteration 的 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Tool/DB transient state 及 Action-local `output` 仍然彼此隔離。
 
 ### Optional lookup
 
@@ -361,11 +363,13 @@ EXEC.LOAD
 
 Run、Debug、Load 是同級 adapter，共用相同的 Template/Flow/Tool/DB/MQ 執行語義。
 
-| 模式 | Context `EXEC.MODE` | 執行單位 | 主要結果位置 |
+| 模式 | `EXEC.ID` | 執行單位 | 主要結果位置 |
 |---|---|---|---|
-| Run | `testcase` | selected Testcase | `output/<RunID>/` |
-| Debug | `debug` | 單一 target invocation | `output/debug/<debugId>/` |
-| Load | `load` | 重複 target iterations | `output/load/<runId>/` |
+| Run | canonical Case ID | selected Testcase | `output/<RunID>/` |
+| Debug | debug ID | 單一 target invocation | `output/debug/<debugId>/` |
+| Load | run 內唯一的 iteration execution ID | 重複 target iterations | `output/load/<runId>/` |
+
+`EXEC.RUN_ID` 表示外層 ATT run。模式與 scheduler 資料只保存在 evidence-only `DIAG`，`EXEC.MODE`、`EXEC.LOAD` 和 `DIAG` 均不能供 expression 使用。
 
 三種模式都會先解析 environment、建立 canonical Context、驗證 target/dependency closure，再使用相同 component contract。Mode-specific scheduling、selection、reporting 不會建立另一套 Template 或 expression 語義。
 
@@ -518,7 +522,9 @@ workloads:
 
 任何 scheduler 開始之前，ATT 會先 resolve 並 validate **全部** workload target 及 dependency；只要其中一個 workload 無效，所有 workload 都不會開始執行。Workload 共用同一個 run-scoped DB/MQ resource layer，因此會真實競爭 configured pool；但 mutable iteration Context 與 output 仍彼此隔離。
 
-v1.1 在原有 `EXEC.LOAD` node 中增加 `WORKLOAD_ID`、`TARGET_TYPE`、`TARGET_ID`。Closed pool 仍保留穩定 `USER_ID`。由於不同 pool 可以各自有一個 `VU-1`，完整 VU identity 是 `(WORKLOAD_ID, USER_ID)`。
+v1.1 在 retained `DIAG.load` evidence 中增加 `workloadId`、`targetType` 和 `targetId`。Closed pool 仍保留穩定 `userId`。由於不同 pool 可以各自有一個 `VU-1`，完整 VU identity 是 `(workloadId, userId)`。Scheduler diagnostics 不屬於 expression Context。
+
+舊有 expression path `EXEC.LOAD` 已不再公開；既有 template 應將業務輸入改用 `EXEC.INPUT`，並在 expression 之外檢視 retained scheduler evidence。
 
 #### Workload models
 
@@ -526,7 +532,7 @@ v1.1 在原有 `EXEC.LOAD` node 中增加 `WORKLOAD_ID`、`TARGET_TYPE`、`TARGE
 
 **Fixed arrival rate** 使用 `load.arrivalRate`、正整數 `maxConcurrent` 及 `overloadPolicy: drop`。它沒有 persistent VU identity。因該 workload concurrency limit 已滿而無法開始的 arrival 會記為 `dropped`；不排隊，也不計作 SUT error。Arrival-rate workload 會拒絕 `execution.thinkTime`。
 
-`duration` 必填；可選 `warmup`、`rampUp`、`rampDown` 定義 phase。`EXEC.LOAD.PHASE` 為 `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。Warm-up traffic 會執行，但不納入 measured threshold aggregate。
+`duration` 必填；可選 `warmup`、`rampUp`、`rampDown` 定義 phase。`DIAG.load.phase` evidence 為 `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。Warm-up traffic 會執行，但不納入 measured threshold aggregate。
 
 #### Closed-VU think time 與 deterministic randomization
 
@@ -586,7 +592,7 @@ DB/MQ resource diagnostics 仍屬 aggregate/run-scoped；成功 iteration worksp
 
 `--profile` 量度 ATT generator/runtime overhead，不是 target host 的 CPU/memory benchmark。Load exit code：`0` PASS、`1` threshold failure、`2` scenario/configuration/target 無效、`3` runtime/infrastructure error。
 
-`EXEC.LOAD` 的中央定義見第 3 章；artifact schema/report 細節見第 11 章。
+Load execution identity 與 evidence-only scheduler diagnostics 的中央定義見第 3 章；artifact schema/report 細節見第 11 章。
 
 ## 05 資源與整合
 
@@ -637,7 +643,7 @@ Credential 可從 environment variable 解析，但不能發布到 `META`、repo
 
 Query 返回 typed row/scalar；update 返回規範的 update result。Operation、SQL/parameter evidence 進入 common Action envelope；secret credential 永遠不是 evidence。Parameter evidence 按 descriptor/Action 的 masking/type policy 處理。
 
-Direct DB Action 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。Executor 會在 Action timeout 與 DBHelper `statement.timeoutSeconds` 之間採用較短者；每次 retry attempt 都重新取得完整 Action timeout，`retry.intervalMs` 的等待時間不計入該 attempt timeout。
+Direct DB Action 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。明確的 Action timeout 會覆蓋 DBHelper `statement.timeoutSeconds` 預設值；未設定時才使用 helper timeout。JDBC statement timeout 以秒向上取整，ATT 仍保留毫秒級 deadline cancellation；每次 retry attempt 都重新取得完整 Action timeout，`retry.intervalMs` 的等待時間不計入該 attempt timeout。
 
 Direct `query` Action 亦可使用標準 retry block：`maxAttempts` 2–10、`intervalMs` 0–3,600,000，`retryOn` 必須是非空且不重複的 `ASSERTION` / `TIMEOUT` 列表。使用 `ASSERTION` 時必須同時定義 Action `assert`。一般 SQL error 為 terminal，不會自動 retry。啟用 retry 後，每次 query attempt 會保留在 `output.attempts[n]`；top-level `output.result` / `output.evidence` 永遠代表 final 或 winning attempt，並以 `winningAttempt` 或 `finalAttempt` 記錄終止 attempt 編號。
 
@@ -676,7 +682,7 @@ MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: at
 
 Payload 採 file-based contract，因此 request bytes 不需要複製到 Context/evidence。`request` 結合 send 與 correlated receive。Correlation identifier、queue/operation metadata、timing、diagnostic 屬 evidence；credential 與 payload bytes 不複製到 evidence。
 
-Timeout 是 operation-specific failure，與 assertion failure 分開。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
+Timeout 是 operation-specific failure，與 assertion failure 分開。Action `timeoutMs` 優先於 helper 的 `requestReply.waitMs` 預設值，並將 receive/request wait 限制在 Action deadline 剩餘時間內；call `waitMs` 優先於 helper 預設值，但不能延長 deadline。Tool Action retry 可用於所有 MQ 操作（`send`、`receive`、`request`）；重試 send 可能造成重複訊息，需由 package author 評估。每次 attempt 的 timing/retry 結果會保留在 Action evidence。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
 
 ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與 Tool、DB 一樣進入同一 Action result/evidence envelope。
 
@@ -929,23 +935,22 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.2 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
+`EXEC.ID` 表示目前 execution unit，`EXEC.RUN_ID` 表示外層 ATT run。`EXEC.INPUT`、`EXEC.VARS` 和各 scope 的 `EXEC.ACTIONS` 是所有 mode 共用的 runtime state。TestCase adapter 會把目前 Stage 的 caller/input values 暫時放入 `EXEC.INPUT`；同名時 Stage value 優先，Stage 結束後還原 Case-level value。Framework-owned identity/input 欄位不能由 Case 或 sidecar 覆寫。模式與 scheduler state 只保留在 evidence-only `DIAG`，不能以 `${...}` 或 `#{...}` 讀取；`${EXEC.MODE}`、`${EXEC.LOAD...}` 和 `${DIAG...}` 均不是 expression API。業務差異請透過 `EXEC.INPUT` 傳入。`EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE`、`EXEC.STAGES` 亦不是公開 root。Action result/evidence 透過 local `output` 和完成後的 `EXEC.ACTIONS` 發布；Stage/template status、timing、history 留在 result/evidence 及舊有 `CASE.STAGES` view。
 
 ### Load V1 Context（3.5.2）
 
-每个 load iteration 使用与普通执行相同的 `EXEC`／`META` tree 和 Action 局部 `output`。`EXEC.MODE` 是 `load`；`EXEC.ID` 与 `EXEC.LOAD.ITERATION_ID` 相同；`EXEC.STARTED_AT` 是本 iteration 的开始时间；`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 均按 iteration 隔离。scheduler-owned fields 如下：
+每个 load iteration 都有 run 内唯一的 `EXEC.ID`，`EXEC.RUN_ID` 在同一 run 共用。`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 按 iteration 隔离。Scheduler-owned fields 仅保留在 `DIAG.load` evidence：
 
 | 路径 | 含义 |
 |---|---|
-| `EXEC.LOAD.RUN_ID` | enclosing load run identity，同一 load run 的 iterations 共用。 |
-| `EXEC.LOAD.MODEL` | `closed` 或 `arrivalRate`。 |
-| `EXEC.LOAD.USER_ID` | closed model 的稳定 Virtual User identity；arrival-rate 为 `null` 或 absent。 |
-| `EXEC.LOAD.ITERATION_ID` | load run 内全局唯一的 iteration identity。 |
-| `EXEC.LOAD.ITERATION` | scheduler sequence number。 |
-| `EXEC.LOAD.PHASE` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
-| `EXEC.LOAD.RUN_STARTED_AT` | 可选的 enclosing load-run start timestamp。 |
+| `DIAG.load.runId` | enclosing load run identity。 |
+| `DIAG.load.model` | `closed` 或 `arrivalRate`。 |
+| `DIAG.load.userId` | closed model 的稳定 Virtual User identity；arrival-rate 不存在。 |
+| `DIAG.load.iterationId` | scheduler iteration identity。 |
+| `DIAG.load.iteration` | scheduler sequence number。 |
+| `DIAG.load.phase` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
 
-Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；iteration identity 保留在 `EXEC.ID` 与 `EXEC.LOAD.*`，并排除 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../examples/load/README.md)。
+Scenario `inputs` 只会复制到 `EXEC.INPUT.*`；可复用的 Template、Flow 和 Tool 必须使用 canonical input tree、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 及当前 `output.*`。`META.SOURCE` 只标识 load scenario 的 type、名称和 path；scheduler identity 只保存在 retained evidence，且不包含 secrets。根层 `LOAD.*`、`EXEC.OUTPUT`、`EXEC.CALL` 和 `EXEC.INVOCATION` 不是公开的 load API。完整的 closed／arrival-rate 配置、CLI override、target 形式、threshold、evidence 和 validation 例子见 [`examples/load/README.md`](../examples/load/README.md)。
 
 `att load` 会在 scheduler 启动前完成 scenario 和 target validation，再选择两个 scheduler 之一。closed mode 为 Virtual User 保持稳定 identity，等待 target 完成后才进入 think time 和下一次 iteration；arrival-rate mode 使用 absolute planned due time，`maxConcurrent` 已满时记录 generator `dropped`，不排队，也不算作 SUT failure。两个 scheduler 都只发布 compact events，由 bounded-memory metrics 汇总，并写入独立的 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`。warm-up 是真实 traffic，但默认不计入 measured threshold aggregates；成功 iteration 默认只保留 metrics，配置 sampling 后只为有界 sampled success 创建带 `case.log` 和 `case.yaml` 的 physical iteration workspace；失败则在保留 diagnostic 时 lazy 创建该 workspace。证据链接写入 load run 下的 `samples/` 或 `failures/`，不会污染普通 functional run artifacts。
 
@@ -1179,10 +1184,11 @@ V2.6 call-backed Tool 使用相同的声明参数理念，但保留 typed value�
 
 ### 内建函数
 
-内建函数通过 `#{...}` 调用。Canonical 名称使用 framework-owned `str.*`、`date.*`、`file.*` 与 `misc.*` package；旧 flat 名称保留为兼容 alias。Tool group 同样以 `group.tool` 组成 package-like 调用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。
+内建函数通过 `#{...}` 调用。Canonical 名称使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 与 `seq.*` package；旧 flat 名称保留为兼容 alias。Tool group 同样以 `group.tool` 组成 package-like 调用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。
 
 | 函数 | 目的 | 示例 |
 |---|---|---|
+| `seq.next` | 返回 run-scoped `Long`；可选名称及宽度用于独立计数或精确宽度的零填充文字 | `#{seq.next('payment', 10)}` |
 | `str.upper/lower/trim` | 大小写与首尾空白处理 | `#{str.upper(value=${EXEC.INPUT.currency})}` |
 | `str.ltrim/rtrim` | 去除前导／尾随空白 | `#{str.ltrim(${EXEC.INPUT.reference})}` |
 | `str.length` | 返回文本长度 | `#{str.length(value=${EXEC.INPUT.reference})}` |
@@ -1738,7 +1744,7 @@ case:
   STAGES: {shouldNotReplace: true}
 ```
 
-即使输入包含这些字段，`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及对应的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。`EXEC.STAGES` 不是 canonical Context 节点；Stage 历史仍由旧的 `CASE.STAGES` 证据视图保存。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
+即使输入包含这些字段，`EXEC.ID`、`EXEC.RUN_ID`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及对应的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。模式及 scheduler 诊断不会暴露给 expressions。`EXEC.STAGES` 不是 canonical Context 节点；Stage 历史仍由旧的 `CASE.STAGES` 证据视图保存。诊断时查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
 
 ### 退出码
 
@@ -1999,7 +2005,7 @@ Normative field default 以其 owner schema/configuration chapter 為準。重�
 - load V1 必須二選一 workload model；
 - arrival-rate overload policy 為 `drop`；
 - 每次 Flow invocation 有新的 Action scope，返回後恢復 caller scope；
-- `EXEC.LOAD` 只在 Load iteration 存在；
+- `DIAG` 是 framework-owned evidence，不屬於 expression tree；
 - resource lifecycle state 不是 public Context tree；
 - 除文件明確允許的 extension location（例如支援位置的 root `x-*`）外，未知 schema field 會被拒絕。
 
