@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +45,35 @@ public final class LoadIsolation {
     public static Map<String, Object> deepCopyMap(Map<String, Object> source) {
         return source == null ? new LinkedHashMap<String, Object>()
                 : (Map<String, Object>) deepCopy(source);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Object deepImmutable(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                result.put(String.valueOf(entry.getKey()), deepImmutable(entry.getValue()));
+            return Collections.unmodifiableMap(result);
+        }
+        if (value instanceof Collection) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (Collection<?>) value) result.add(deepImmutable(item));
+            return Collections.unmodifiableList(result);
+        }
+        if (value != null && value.getClass().isArray()) {
+            List<Object> result = new ArrayList<Object>();
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int index = 0; index < length; index++)
+                result.add(deepImmutable(java.lang.reflect.Array.get(value, index)));
+            return Collections.unmodifiableList(result);
+        }
+        return value;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> deepImmutableMap(Map<String, Object> source) {
+        if (source == null || source.isEmpty()) return Collections.emptyMap();
+        return (Map<String, Object>) deepImmutable(source);
     }
 
     /** Safe, deterministic and collision-resistant physical directory name. */

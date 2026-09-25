@@ -91,7 +91,7 @@ public final class LoadMetrics implements LoadEventListener {
             int current = inFlight.incrementAndGet();
             updateMax(maxInFlight, current);
             if (event.userId() != null) {
-                activeUsers.add(event.userId());
+                activeUsers.add(activeUserKey(event));
                 int currentVus = activeUsers.size();
                 activeVus.set(currentVus);
                 updateMax(maxActiveVus, currentVus);
@@ -103,7 +103,7 @@ public final class LoadMetrics implements LoadEventListener {
             completed.incrementAndGet();
             inFlight.updateAndGet(value -> Math.max(0, value - 1));
             if (event.userId() != null) {
-                activeUsers.remove(event.userId());
+                activeUsers.remove(activeUserKey(event));
                 activeVus.set(activeUsers.size());
             }
             if (event.status() == ResultStatus.PASS) {
@@ -292,6 +292,10 @@ public final class LoadMetrics implements LoadEventListener {
         Map<String, Long> result = new LinkedHashMap<String, Long>();
         for (String key : keys) result.put(key, errorClassifications.get(key).get());
         return result;
+    }
+
+    private static String activeUserKey(LoadEvent event) {
+        return event.workloadId() == null ? event.userId() : event.workloadId() + "/" + event.userId();
     }
 
     private static boolean isWarmup(LoadEvent event) { return "WARMUP".equals(event.phase()); }

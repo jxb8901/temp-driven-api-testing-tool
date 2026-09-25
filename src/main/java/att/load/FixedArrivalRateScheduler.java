@@ -22,6 +22,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final LoadEvidenceStore evidenceStore;
     private final Path evidenceOutputRoot;
     private final Runnable beforeSubmitHook;
+    private final LoadSchedulerStartGate startGate;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private volatile ExecutorService workers;
     private final AtomicInteger inFlight = new AtomicInteger();
@@ -32,19 +33,19 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId, LoadEventListener listener) { this(scenario, executor, runId, adapt(listener)); }
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId,
                                      LoadEvidenceStore evidenceStore, Path outputRoot) {
-        this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), null, evidenceStore, outputRoot);
+        this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), null, evidenceStore, outputRoot, null);
     }
     FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                               Consumer<LoadEvent> listener, LoadSchedulerTiming timing) {
-        this(scenario, executor, runId, listener, timing, null, null, null);
+        this(scenario, executor, runId, listener, timing, null, null, null, null);
     }
     FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                               Consumer<LoadEvent> listener, LoadSchedulerTiming timing, Runnable beforeSubmitHook) {
-        this(scenario, executor, runId, listener, timing, beforeSubmitHook, null, null);
+        this(scenario, executor, runId, listener, timing, beforeSubmitHook, null, null, null);
     }
-    private FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
-                                      Consumer<LoadEvent> listener, LoadSchedulerTiming timing,
-                                      Runnable beforeSubmitHook, LoadEvidenceStore evidenceStore, Path evidenceOutputRoot) {
+    FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
+                              Consumer<LoadEvent> listener, LoadSchedulerTiming timing, Runnable beforeSubmitHook,
+                              LoadEvidenceStore evidenceStore, Path evidenceOutputRoot, LoadSchedulerStartGate startGate) {
         if (scenario == null || scenario.model() != LoadScenario.Model.ARRIVAL_RATE) throw new IllegalArgumentException("FixedArrivalRateScheduler requires an arrivalRate scenario");
         if (executor == null) throw new IllegalArgumentException("FixedArrivalRateScheduler requires an iteration executor");
         this.scenario = scenario;
@@ -55,13 +56,19 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         this.beforeSubmitHook = beforeSubmitHook;
         this.evidenceStore = evidenceStore;
         this.evidenceOutputRoot = evidenceOutputRoot == null ? null : evidenceOutputRoot.toAbsolutePath().normalize();
+        this.startGate = startGate;
     }
     private static Consumer<LoadEvent> adapt(final LoadEventListener listener) { return listener == null ? null : new Consumer<LoadEvent>() { @Override public void accept(LoadEvent event) { listener.onEvent(event); } }; }
 
     @Override public LoadRunResult run() throws Exception {
-        long startedAt = timing.now(); Instant start = LoadSchedulerSupport.instant(startedAt);
+        if (scenario.coordinatorRequired()) {
+            if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload arrival scheduling requires IterationExecutor");
+            return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
+        }
+        long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
+        Instant start = LoadSchedulerSupport.instant(startedAt);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
-        workers = Executors.newFixedThreadPool(scenario.maxConcurrent(), new NamedFactory("att-load-arrival"));
+        workers = Executors.newFixedThreadPool(scenario.maxConcurrent(), new NamedFactory("att-load-arrival-" + safe(scenario.workloadId())));
         long scheduledCount = 0L;
         try {
             while (!cancelled.get()) {
@@ -71,10 +78,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 while (scheduledCount < desired) {
                     long plannedSequence = ++scheduledCount; long dueAt = plannedDue(scenario, startedAt, plannedSequence);
                     String phase = LoadPhase.at(scenario, Math.max(0L, dueAt - startedAt)).name();
-                    String iterationId = runId + "-arrival-" + plannedSequence;
+                    String prefix = scenario.legacyV1() ? runId : runId + "-" + safe(scenario.workloadId());
+                    String iterationId = prefix + "-arrival-" + plannedSequence;
                     if (inFlight.get() >= scenario.maxConcurrent()) {
-                        LoadSchedulerSupport.emit(metrics, listener, LoadEvent.dropped(runId, "arrivalRate", phase, iterationId,
-                                plannedSequence, dueAt, timing.now()));
+                        LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.dropped(runId, "arrivalRate", phase, iterationId,
+                                plannedSequence, dueAt, timing.now())));
                     } else submit(metrics, phase, iterationId, plannedSequence, dueAt, startedAt);
                 }
                 if (elapsed >= total) break;
@@ -95,10 +103,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;
                 try {
-                    LoadSchedulerSupport.emit(metrics, listener, LoadEvent.started(runId, "arrivalRate", phase, id, null,
-                            sequenceValue, dueAt, iterationStarted));
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "arrivalRate", phase, id, null,
+                            sequenceValue, dueAt, iterationStarted)));
                     IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
+                    if (!scenario.legacyV1()) request = request.withWorkloadId(scenario.workloadId());
                     Path sampleRoot = sampleOutputRoot(id);
                     if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
                     request = request.withFailureEvidence(evidenceStore == null || evidenceStore.retainsFailureEvidence());
@@ -107,21 +116,21 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
                 finally {
                     long completedAt = timing.now(); inFlight.decrementAndGet();
-                    LoadSchedulerSupport.emit(metrics, listener, LoadEvent.completion(runId, "arrivalRate", phase, id, null,
-                            sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence));
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "arrivalRate", phase, id, null,
+                            sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence)));
                 }
             });
-        } catch (RejectedExecutionException rejected) {
-            // cancel()/shutdownNow() may win after admission but before submit().
-            // The due arrival was never started, so release the admission slot and
-            // let the outer loop observe cancellation without turning it into a run error.
-            inFlight.decrementAndGet();
-        }
+        } catch (RejectedExecutionException rejected) { inFlight.decrementAndGet(); }
     }
 
+    private LoadEvent tag(LoadEvent event) {
+        return scenario.legacyV1() ? event : event.withWorkloadIdentity(
+                scenario.workloadId(), scenario.targetType(), scenario.targetId());
+    }
     private Path sampleOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccess(iterationId)) return null;
-        return evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
+        Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
+        return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
     }
     static long arrivalsDueAt(LoadScenario scenario, long elapsedMs) {
         if (elapsedMs < 0L) return 0L;
@@ -129,13 +138,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         if (Double.isInfinite(cumulative) || cumulative >= Long.MAX_VALUE - 1.0) return Long.MAX_VALUE;
         return (long) Math.floor(Math.max(0.0, cumulative)) + 1L;
     }
-
     static long arrivalsBeforeDeadline(LoadScenario scenario) {
         double cumulative = cumulativeArrivals(scenario, LoadPhase.totalMs(scenario));
         if (Double.isInfinite(cumulative) || cumulative >= Long.MAX_VALUE) return Long.MAX_VALUE;
         return (long) Math.ceil(Math.max(0.0, cumulative));
     }
-
     static double cumulativeArrivals(LoadScenario scenario, long elapsedMs) {
         long total = LoadPhase.totalMs(scenario); long step = Math.max(0L, Math.min(total, elapsedMs));
         double rate = scenario.arrivalRatePerSecond(); double result = 0.0; long cursor = 0L;
@@ -154,10 +161,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     }
     private void waitForWorkers() throws InterruptedException {
         ExecutorService value = workers;
-        if (value != null) {
-            value.shutdown();
-            if (!value.awaitTermination(30L, TimeUnit.SECONDS)) value.shutdownNow();
-        }
+        if (value != null) { value.shutdown(); if (!value.awaitTermination(30L, TimeUnit.SECONDS)) value.shutdownNow(); }
     }
     @Override public void cancel() { cancelled.set(true); shutdown(); }
     @Override public void close() { cancel(); }
@@ -169,5 +173,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
         }
     }
-    private static final class NamedFactory implements ThreadFactory { private final String prefix; private final AtomicLong index = new AtomicLong(); NamedFactory(String prefix) { this.prefix = prefix; } @Override public Thread newThread(Runnable r) { Thread t = new Thread(r, prefix + "-" + index.incrementAndGet()); t.setDaemon(true); return t; } }
+    private static String safe(String value) { return value == null ? "default" : value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
+    private static final class NamedFactory implements ThreadFactory {
+        private final String prefix; private final AtomicLong index = new AtomicLong();
+        NamedFactory(String prefix) { this.prefix = prefix; }
+        @Override public Thread newThread(Runnable r) { Thread t = new Thread(r, prefix + "-" + index.incrementAndGet()); t.setDaemon(true); return t; }
+    }
 }

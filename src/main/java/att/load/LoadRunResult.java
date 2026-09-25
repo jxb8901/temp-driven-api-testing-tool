@@ -1,17 +1,18 @@
 package att.load;
 
+import att.Version;
 import att.core.ResultAggregator;
 import att.core.ResultStatus;
-import att.Version;
-import java.time.Instant;
+
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Completed scheduler result shared by threshold evaluation and reporting. */
+/** Completed load-run result shared by threshold evaluation and reporting. */
 public final class LoadRunResult {
     private final String runId;
     private final LoadScenario scenario;
@@ -20,23 +21,36 @@ public final class LoadRunResult {
     private final LoadThresholdSummary thresholds;
     private final Map<String, Object> evidence;
     private final Map<String, Object> resources;
+    private final Map<String, LoadRunResult> workloads;
 
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics) {
         this(runId, scenario, startedAt, endedAt, metrics, LoadThresholdSummary.empty(),
-                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                Collections.<String, LoadRunResult>emptyMap());
     }
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence) {
-        this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, Collections.<String, Object>emptyMap());
+        this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence,
+                Collections.<String, Object>emptyMap(), Collections.<String, LoadRunResult>emptyMap());
     }
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
                          Map<String, Object> resources) {
+        this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, resources,
+                Collections.<String, LoadRunResult>emptyMap());
+    }
+    LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
+                  LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
+                  Map<String, Object> resources, Map<String, LoadRunResult> workloads) {
         this.runId = runId; this.scenario = scenario; this.startedAt = startedAt; this.endedAt = endedAt;
         this.metrics = metrics; this.thresholds = thresholds == null ? LoadThresholdSummary.empty() : thresholds;
         this.evidence = immutable(evidence); this.resources = immutable(resources);
+        this.workloads = workloads == null || workloads.isEmpty()
+                ? Collections.<String, LoadRunResult>emptyMap()
+                : Collections.unmodifiableMap(new LinkedHashMap<String, LoadRunResult>(workloads));
     }
+
     public String runId() { return runId; }
     public LoadScenario scenario() { return scenario; }
     public Instant startedAt() { return startedAt; }
@@ -45,25 +59,59 @@ public final class LoadRunResult {
     public LoadThresholdSummary thresholds() { return thresholds; }
     public Map<String, Object> evidence() { return evidence; }
     public Map<String, Object> resources() { return resources; }
-    public ResultStatus status() { return runtimeErrorCount() > 0L ? ResultStatus.ERROR : (thresholds.passed() ? ResultStatus.PASS : ResultStatus.FAIL); }
+    public Map<String, LoadRunResult> workloads() { return workloads; }
+    public boolean multiWorkload() { return !workloads.isEmpty(); }
+
+    public ResultStatus status() {
+        if (runtimeErrorCount() > 0L) return ResultStatus.ERROR;
+        for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.ERROR) return ResultStatus.ERROR;
+        if (!thresholds.passed()) return ResultStatus.FAIL;
+        for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.FAIL) return ResultStatus.FAIL;
+        return ResultStatus.PASS;
+    }
     public int exitCode() { return ResultAggregator.exitCode(status()); }
     public boolean passed() { return status() == ResultStatus.PASS; }
-    public LoadRunResult withThresholds(LoadThresholdSummary value) { return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, value, evidence, resources); }
-    public LoadRunResult withEvidence(Map<String, Object> value) { return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources); }
-    public LoadRunResult withResources(Map<String, Object> value) { return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, value); }
+    public LoadRunResult withThresholds(LoadThresholdSummary value) {
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, value, evidence, resources, workloads);
+    }
+    public LoadRunResult withEvidence(Map<String, Object> value) {
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources, workloads);
+    }
+    public LoadRunResult withResources(Map<String, Object> value) {
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, value, workloads);
+    }
+
     public Map<String, Object> toMap() {
-        Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put("schemaVersion", Version.LOAD_SUMMARY_SCHEMA);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("schemaVersion", Version.LOAD_SUMMARY_SCHEMA);
         result.put("status", status().name()); result.put("exitCode", exitCode());
         result.put("runId", runId); result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
         Map<String, Object> scenarioSummary = scenario.toSummaryMap();
-        if (scenario.thinkTimePolicy().randomized())
-            scenarioSummary.put("effectiveSeed", Long.valueOf(LoadRandomization.effectiveSeed(scenario, runId)));
+        if (scenario.randomizedThinkTime()) scenarioSummary.put("effectiveSeed", Long.valueOf(LoadRandomization.effectiveSeed(scenario, runId)));
         result.put("scenario", scenarioSummary); result.put("timing", timing());
         result.put("metrics", metrics.toMap()); result.put("thresholds", thresholds.toMap());
+        if (!workloads.isEmpty()) result.put("workloads", workloadMaps());
         result.put("resources", resources);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
         result.put("report", "report/index.html");
+        return result;
+    }
+
+    private Map<String, Object> workloadMaps() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
+            LoadRunResult value = entry.getValue();
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("status", value.status().name());
+            Map<String, Object> target = new LinkedHashMap<String, Object>();
+            target.put("type", value.scenario().targetType()); target.put("id", value.scenario().targetId());
+            item.put("target", target);
+            item.put("model", value.scenario().model().wireName());
+            item.put("metrics", value.metrics().toMap());
+            item.put("thresholds", value.thresholds().toMap());
+            result.put(entry.getKey(), item);
+        }
         return result;
     }
 

@@ -1,6 +1,7 @@
 package att.load;
 
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /** Injectable timing boundary for deterministic scheduler tests. */
 final class LoadSchedulerTiming {
@@ -21,7 +22,17 @@ final class LoadSchedulerTiming {
     }
 
     static LoadSchedulerTiming system() {
-        return new LoadSchedulerTiming(LoadSchedulerSupport::now, LoadSchedulerSupport::sleep);
+        final long monotonicOriginNanos = System.nanoTime();
+        final long epochOriginMillis = System.currentTimeMillis();
+        Clock elapsedMillis = () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - monotonicOriginNanos);
+        return anchored(elapsedMillis, epochOriginMillis, 0L, LoadSchedulerSupport::sleep);
+    }
+
+    static LoadSchedulerTiming anchored(Clock monotonicMillis, long epochOriginMillis,
+                                       long monotonicOriginMillis, Sleeper sleeper) {
+        Objects.requireNonNull(monotonicMillis, "monotonicMillis");
+        Clock epochMillis = () -> epochOriginMillis + (monotonicMillis.now() - monotonicOriginMillis);
+        return new LoadSchedulerTiming(epochMillis, sleeper);
     }
 
     long now() {

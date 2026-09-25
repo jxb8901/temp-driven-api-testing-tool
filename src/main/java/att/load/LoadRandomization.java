@@ -14,7 +14,7 @@ public final class LoadRandomization {
 
     static String workloadKey(LoadScenario scenario) {
         if (scenario == null) return "default";
-        return "default:" + scenario.targetType() + ":" + scenario.targetId();
+        return scenario.workloadId() + ":" + scenario.targetType() + ":" + scenario.targetId();
     }
 
     static long streamSeed(long runSeed, String workloadId, String userId) {
@@ -30,10 +30,7 @@ public final class LoadRandomization {
     private static long hash64(String value) {
         long hash = 0xcbf29ce484222325L;
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        for (byte b : bytes) {
-            hash ^= (b & 0xffL);
-            hash *= 0x100000001b3L;
-        }
+        for (byte b : bytes) { hash ^= (b & 0xffL); hash *= 0x100000001b3L; }
         return hash;
     }
 

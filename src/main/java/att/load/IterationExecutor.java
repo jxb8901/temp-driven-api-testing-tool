@@ -1,10 +1,8 @@
 package att.load;
 
-import att.Version;
 import att.config.FrameworkConfig;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
-import att.core.IdentifierValidator;
 import att.core.ResultAggregator;
 import att.core.ResultStatus;
 import att.core.ValidationResult;
@@ -24,10 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Workload-agnostic execution layer. Schedulers provide timing and identity;
- * this class creates all mutable ATT runtime state for exactly one iteration.
- */
+/** Workload-agnostic execution layer; one instance binds one fixed target and shared run resources. */
 public final class IterationExecutor implements LoadIterationRunner {
     private final Path projectRoot;
     private final FrameworkConfig config;
@@ -41,16 +36,13 @@ public final class IterationExecutor implements LoadIterationRunner {
         this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true,
                 projectRoot.resolve(config.outputDirectory()));
     }
-
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target, LoadRunResources resources) {
         this(projectRoot, config, target, resources, false, projectRoot.resolve(config.outputDirectory()));
     }
-
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
                              LoadRunResources resources, Path outputRoot) {
         this(projectRoot, config, target, resources, false, outputRoot);
     }
-
     private IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
                               LoadRunResources resources, boolean ownsResources, Path outputRoot) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize(); this.config = config; this.target = target;
@@ -61,7 +53,7 @@ public final class IterationExecutor implements LoadIterationRunner {
         this.ownsResources = resources == null || ownsResources;
     }
 
-    public IterationResult execute(IterationRequest request) {
+    @Override public IterationResult execute(IterationRequest request) {
         resources.ensureOpen();
         Instant started = Instant.now();
         Path iterationDirectory = null;
@@ -79,9 +71,6 @@ public final class IterationExecutor implements LoadIterationRunner {
             LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(projectRoot, config, target)
                     .prepare(request, iterationDirectory, logPath);
             context = prepared.context();
-            // Keep the log in memory until the outcome is known. A reserved
-            // success sample may fail, and failure:none must not create a
-            // failure-only case.log merely because it had a sample slot.
             log = CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
@@ -132,10 +121,9 @@ public final class IterationExecutor implements LoadIterationRunner {
     }
 
     private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {
-        if (!retainedWorkspace) {
-            return outputRoot.resolve("load").resolve(safe(request.runId()))
-                    .resolve("iterations").resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
-        }
+        Path base = outputRoot.resolve("load").resolve(safe(request.runId())).resolve("iterations");
+        if (request.workloadId() != null) base = base.resolve(safe(request.workloadId()));
+        if (!retainedWorkspace) return base.resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
         Path root = request.outputDirectory().toAbsolutePath().normalize();
         Path candidate = root.resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration())).normalize();
         if (!candidate.startsWith(root)) throw new IllegalArgumentException("Load iteration directory escapes output root");
@@ -154,5 +142,11 @@ public final class IterationExecutor implements LoadIterationRunner {
     }
     private String safe(String value) { return value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
     private String message(Exception error) { return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(); }
+
+    Path projectRoot() { return projectRoot; }
+    FrameworkConfig config() { return config; }
+    LoadRunResources resources() { return resources; }
+    Path outputRoot() { return outputRoot; }
+
     public void close() { if (ownsResources) resources.close(); }
 }
