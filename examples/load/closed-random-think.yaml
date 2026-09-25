@@ -1,0 +1,18 @@
+schemaVersion: att-load/v1.0
+seed: 12345
+
+target:
+  type: tool
+  id: sample.getAcDate
+
+load:
+  users: 2
+  duration: 2s
+
+execution:
+  thinkTime:
+    min: 100ms
+    max: 300ms
+
+evidence:
+  mode: metrics
