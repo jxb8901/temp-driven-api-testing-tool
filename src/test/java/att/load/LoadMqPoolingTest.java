@@ -45,7 +45,7 @@ class LoadMqPoolingTest {
             Future<IterationResult> second = workers.submit(() -> executor.execute(request("mq-2", "VU-2")));
             IterationResult timedOut = second.get(2L, TimeUnit.SECONDS);
             assertEquals(ResultStatus.ERROR, timedOut.status());
-            assertEquals("MQ_POOL_TIMEOUT", timedOut.context().resolve("EXEC.ACTIONS.receive.output.result.error.type"));
+            assertEquals("MQ_POOL_TIMEOUT", timedOut.context().resolve("EXEC.ACTIONS.receive.output.error.type"));
             assertEquals(1, delegate.maxConcurrentGets.get());
 
             delegate.releaseGet.countDown();

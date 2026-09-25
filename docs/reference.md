@@ -236,6 +236,8 @@ Actions run in YAML order. Action IDs are unique within the template and cannot 
 
 Action validation is type-specific. A render action requires a safe non-empty payload glob and `renderAs: file|text|json|yaml|xml`; it cannot contain tool/assert-action/log/DB fields. Retry and Action-level timeout are valid only for tool actions. Tool and DB actions may use the common object-shaped `saveAs`; no other action type may use it. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
+For the common Tool/DB `saveAs` object, `path` is optional: a pathless object keeps the typed result in memory and creates no artifact. `saveAs` is still validated when present, so target-specific format defaults and restrictions apply even without a path; if `path` is present, its safety, collision, and overwrite rules apply as well.
+
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 
 Every action supports expression-bearing `description`. Validation checks `${...}` references and `#{...}` calls without invoking them, resolves available static Case values where needed, and preserves runtime-dependent references. After successful execution, ATT evaluates both forms against the current action-local `${output...}` scope before persisting the final description.
@@ -662,7 +664,7 @@ DBHelper owns connection/statement limits, query timeout and transaction behavio
 
 ### 5.3 MQHelper
 
-MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0`, a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID.
+MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0` or `att-mqhelper/v1.1`, with a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID. v1.0 remains the compatible single-instance form; v1.1 adds logical groups of physical instances.
 
 Primary calls are:
 
@@ -677,6 +679,125 @@ Payloads are file-based so request bytes do not have to be duplicated into Conte
 Timeout behavior is operation-specific and remains distinct from assertion failure. MQ connection/pool lifecycle is framework-owned resource state, especially in Load mode; it is not exposed as a public `EXEC.MQ` tree.
 
 ATT's default build does not require IBM MQ client classes. Runtime MQ use requires the IBM MQ client jar/profile documented by the package/release instructions. MQ operations feed the same Action result/evidence envelope as Tool and DB operations.
+
+
+#### Issue #59 configuration and public contract
+
+A complete descriptor can contain connection, message, requestReply, evidence, and pool fields:
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.0
+id: ordersMq
+name: Orders MQ
+description: IBM MQ connection used by SIT/UAT order tests
+connection:
+  queueManager: QM1
+  host: 10.12.13.14
+  port: 1414
+  channel: CHANNEL
+  username: ${ENV:MQ_USERNAME}
+  password: ${ENV:MQ_PASSWORD}
+message:
+  charset: 1208
+  encoding: 273
+  format: ""
+  persistence: asQueue
+  expiry: -1
+  requestQueue: requestQ
+  replyQueue: replyQ
+requestReply: {waitMs: 40000}
+evidence: {payload: metadata}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+~~~
+
+username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY before constructing MQQueueManager. `evidence.payload` accepts `metadata` or `none`; `metadata` keeps only the policy marker in evidence, while `none` omits it. Environment credentials are secret and never enter evidence, logs, reports, or generated docs.
+
+message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
+
+requestQueue and replyQueue are optional request defaults. Queue precedence is call argument > message default > validation error. send(queue=...) and receive(queue=...) do not use these defaults. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
+
+#### Common saveAs
+
+MQ receive/request use the common Action saveAs object; no MQ-specific resultType/replyType exists.
+
+~~~yaml
+saveAs:
+  format: raw
+  path: response.bin
+  overwrite: false
+~~~
+
+format defaults to raw and path is optional. raw gives the original byte[], text gives String, and json/yaml/xml give existing ATT typed values. No saveAs or saveAs: {} keeps the result in memory and creates no file. `path: console` writes the selected representation to the Case log and creates no `output.targetFiles` entry or file. No .reply.bin is created unless a real path is explicit. raw plus a real path writes exact bytes; overwrite/path safety follow the common Action rules.
+
+~~~yaml
+- id: requestXml
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml}
+  assert: "${output.result.Response.Status} == 'SUCCESS'"
+
+- id: requestXmlSaved
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml, path: responses/payment.xml, overwrite: false}
+
+- id: receiveReply
+  type: tool
+  call: "#{mq.ordersMq.receive(queue='replyQ', correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}"
+  saveAs: {format: json}
+~~~
+
+#### Output and validation
+
+output.result is the business payload; MQ metadata is directly under output. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects `saveAs`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
+
+Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Typed reply decoding uses the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and the configured charset as fallback; unsupported CCSIDs fail clearly. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported saveAs formats, and unsafe paths.
+
+#### Issue #60 v1.1 logical groups and physical instances
+
+`att-mqhelper/v1.1` keeps one public logical helper id while declaring one or more physical connection instances. A v1.0 descriptor remains valid without changes. The v1.1 descriptor has group defaults and per-instance overrides for `connection`, `message`, `requestReply`, and `pool`:
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.1
+id: payment
+name: Payment MQ
+description: Payment MQ endpoints
+defaults:
+  connection:
+    queueManager: QM1
+    host: mq.default.example
+    port: 1414
+    channel: APP.SVRCONN
+    username: ${ENV:MQ_USERNAME}
+    password: ${ENV:MQ_PASSWORD}
+  message: {charset: 1208, requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+  requestReply: {waitMs: 40000}
+  pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+instances:
+  - id: payment-a
+    connection: {host: mq-a.example}
+  - id: payment-b
+    connection: {host: mq-b.example}
+    message: {replyQueue: PAYMENT.REPLY.B}
+selection: {strategy: roundRobin}
+evidence: {payload: none}
+~~~
+
+Each physical instance is materialized into an immutable effective configuration before an invocation. For every section the precedence is invocation override, instance override, group default, runtime default, then validation error. Effective `queueManager`, `host`, `port`, and `channel` are required; username/password are optional and are never emitted as evidence.
+
+The public call remains logical:
+
+~~~text
+#{mq.payment.send(queue='PAYMENT.REQUEST', file='request.bin')}
+#{mq.payment.request(file='request.bin', instance='payment-b')}
+#{mq.payment.receive(queue='PAYMENT.REPLY', instance='payment-a')}
+~~~
+
+A single-instance v1.1 group uses that instance directly. A group with multiple instances must declare `selection.strategy: random` or `roundRobin`; selection occurs once per MQ invocation, before connecting, so a `request` PUT and correlated GET always use the same physical instance. An explicit `instance` call argument selects that physical id and is rejected when it is unknown. Each physical instance has an isolated pool; pool identity is logical id plus physical id.
+
+Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. With `evidence.payload: none`, the payload policy marker is omitted; credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.
+
+`output.selectionStrategy` identifies the configured group policy (`single`, `random`, or `roundRobin`), not the selection source for an individual invocation. When a call explicitly supplies `instance`, that policy value remains unchanged and `output.instance` identifies the physical instance actually selected.
 
 ### 5.4 Common Operation Result and Evidence
 
@@ -846,7 +967,7 @@ output
 
 `EXEC.MODE` is `testcase`, `debug`, or `load`. `EXEC.LOAD` exists only when `EXEC.MODE=load`; ordinary TestCase and debug execution do not materialize it. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are the same mutable runtime state used by all modes, not parallel copies. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win over Case-level values on collision and the Case-level values are restored after the Stage. Framework-owned fields such as `EXEC.ID`, `EXEC.MODE`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` cannot be overwritten by Case or sidecar input. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, root-level `TOOL.*` / `DB.*` remain compatibility or transient views, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in the execution result/evidence model and legacy `CASE.STAGES`. The `att-load/v1.0` adapter adds the load-only `EXEC.LOAD` namespace described below.
 
-### Load V1 Context (3.5.1)
+### Load V1 Context (3.5.2)
 
 Each load iteration uses the same `EXEC`/`META` tree and action-local `output` as normal execution. `EXEC.MODE` is `load`; `EXEC.ID` and `EXEC.LOAD.ITERATION_ID` are the same iteration identity; `EXEC.STARTED_AT` is the iteration start; and `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output` are isolated per iteration. The scheduler-owned fields are:
 
@@ -1329,9 +1450,9 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment profiles in V3.5.1
+### Multi-environment profiles in V3.5.2
 
-ATT V3.5.1 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1440,7 +1561,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../schemas/att-config-v2.6.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper instance | `att-mqhelper/v1.0` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json) |
+| MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../schemas/att-mqhelper-v1.1.schema.json) |
 | Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../schemas/att-tool-group-v2.6.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
@@ -1509,7 +1630,7 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
 | `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
@@ -1555,7 +1676,7 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 ### MQ helper configuration
 
-Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` object:
+Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` or `att-mqhelper/v1.1` object. v1.0 is a flat single-instance descriptor. v1.1 has `defaults`, a non-empty `instances[]` list, optional `selection.strategy` (`random` or `roundRobin` for multiple instances), and group-level `evidence`; each physical instance receives effective `connection`, `message`, `requestReply`, and `pool` values before execution. The detailed v1.1 model and invocation examples are maintained in the MQHelper resource module.
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
@@ -1563,7 +1684,7 @@ Each path in global `mqhelpers` resolves from the package root and contains one 
 | `connection` | required | `queueManager`, `host`, `port`, and `channel` required; optional `username`, `password`; port 1–65535 |
 | `message` | defaults | `ccsid` defaults to 1208; `format` is `MQSTR`, `MQHRF2`, `MQFMT_STRING`, `MQFMT_NONE`, or `NONE`; `persistence` is `asQueue`, `persistent`, `notPersistent`, or `nonPersistent` |
 | `requestReply` | defaults | `waitMs` defaults to 10000 and is 0–3600000 milliseconds |
-| `evidence` | defaults | `payload: metadata` is the only V1 mode; full payload bytes are never placed in structured evidence |
+| `evidence` | defaults | `payload: none|metadata`; `none` omits payload evidence and `metadata` records only the policy marker; full payload bytes are never placed in structured evidence |
 | `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `borrowTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize` |
 
 Connection credentials may be complete `${ENV:NAME}` references. The loader resolves them without putting the secret or the environment variable value in diagnostics, metadata, or Case evidence. Queue names supplied in calls are non-blank, at most 48 characters, and restricted to IBM MQ queue-name characters. A helper instance is selected case-insensitively by its `id`; configured paths and IDs must be unique.
@@ -1595,7 +1716,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
 | assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `EXEC.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or saveAs |
-| `saveAs` | requires safe relative `path`; optional `format` and `overwrite`; target-specific format/default rules below; `overwrite` defaults false |
+| `saveAs` | optional `path`; optional `format` and `overwrite`; target-specific format/default rules are validated whenever `saveAs` is supplied; `overwrite` defaults false |
 | retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
 
 `renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
@@ -1651,7 +1772,7 @@ callApi:
   assert: "${output.result.status} == 'SUCCESS'"
 ```
 
-`path` is required and `overwrite` defaults to `false`. `format` has target-specific rules:
+`path` is optional and `overwrite` defaults to `false`. Omitting `path`, including in `saveAs: {format: ...}`, keeps the typed result in memory and creates no artifact. A supplied `saveAs` is still validated against the target-specific format defaults and restrictions even when `path` is absent. When `path` is present, it is written using those target-specific rules:
 
 | Action target | Allowed `format` | Default | Content |
 |---|---|---|---|
@@ -1699,7 +1820,7 @@ saveAs:
   overwrite: false
 ```
 
-`path` and `format` are required for DB; format is `text`, `json`, `yaml`, or `xml`. The written representation never replaces `${output.result}`'s typed Java object.
+`path` is optional for DB as well, but DB still requires `format: text|json|yaml|xml` whenever `saveAs` is supplied, even when no path is present. A valid pathless DB `saveAs` creates no artifact; when a DB artifact path is present, the same format and path rules apply. The written representation never replaces `${output.result}`'s typed Java object.
 
 `att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.6` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
 
@@ -1726,7 +1847,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1932,7 +2053,7 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 | 2 | CLI/configuration/validation/INVALID failure |
 | 3 | One or more ERROR results or unrecoverable runtime failure |
 
-### Complete option matrix (3.5.1)
+### Complete option matrix (3.5.2)
 
 `--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.6` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 
@@ -2151,7 +2272,7 @@ The appendices collect stable lookup material that should not drive the main pro
 |---|---|
 | Global configuration | `att-config/v2.6` |
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0` |
+| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
 | Tool group | `att-tool-group/v2.6` |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |

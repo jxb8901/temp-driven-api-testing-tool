@@ -35,6 +35,23 @@ class PooledMqTransportFactoryTest {
     }
 
     @Test
+    void logicalGroupPhysicalInstancesUseIndependentPools() throws Exception {
+        FakeFactory delegate = new FakeFactory();
+        PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);
+        MqHelperConfig first = MqHelperConfig.physical(config(1, 0, 100L), "payment", "a");
+        MqHelperConfig second = MqHelperConfig.physical(config(1, 0, 100L), "payment", "b");
+        MqTransport.Connection a = factory.connect(first);
+        MqTransport.Connection b = factory.connect(second);
+        a.disconnect(); b.disconnect();
+        assertEquals(2, delegate.connections.get());
+        assertTrue(factory.metrics().containsKey("payment::a"));
+        assertTrue(factory.metrics().containsKey("payment::b"));
+        assertEquals(1, factory.pool("payment::a").created());
+        assertEquals(1, factory.pool("payment::b").created());
+        factory.close();
+    }
+
+    @Test
     void maxSizeAndBorrowTimeoutAreBoundedAndDistinct() throws Exception {
         FakeFactory delegate = new FakeFactory();
         PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);

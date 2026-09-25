@@ -236,6 +236,8 @@ actions:
 
 动作校验按类型进行。render 动作要求安全且非空的 payload glob，以及 `renderAs: file|text|json|yaml|xml`；它不能包含 Tool、assert-action、log 或 DB 字段。重试和 Action 级 timeout 仅对 Tool 动作有效。Tool 与 DB Action 可使用共同的 object-shaped `saveAs`，其他类型不可使用。DB Action 必须指定已配置的 `db` ID，并在 `query` 与 `update` 中恰好选择一个；所选 block 又必须在 `sql` 与 `sqlFile` 中恰好选择一个。assert 动作要求 `assert`，并可包含 `expected` 和 `actual`；`expression`、`acture`、`actural` 都是非法字段。log 动作要求 `message`、`file` 或两者；并可使用 `level` 和 `fields`。assign 动作要求 `name` 和 `expression`。不支持的字段会报错，而不是被忽略。
 
+共同的 Tool/DB `saveAs` object 中，`path` 可以省略：省略时只保留 typed result，不创建 artifact。只要提供 `saveAs` 仍会校验目标专属的 format 默认值与限制，即使没有 path；提供 `path` 后再应用路径安全、冲突和 overwrite 规则。
+
 每个动作都可以使用 `assert`，但 assert 动作本身把它作为必需主表达式。每个动作结果都嵌套在 `output` 下，包括 `status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及可选断言详情。操作错误保持 ERROR；否则显式断言决定 PASS/FAIL。一个已完成的工具进程即使返回非零退出码，也不会自动变成 ERROR：需要在 `assert` 中检查 `output.exitCode`。
 
 每个动作都支持表达式型 `description`。验证时会检查 `${...}` 引用和 `#{...}` 调用而不执行它们，尽量解析可知的静态 Case 值，并保留运行时相关引用。执行成功后，ATT 会在当前动作局部 `${output...}` 作用域下对两种表达式形式进行求值，然后再持久化最终 description。
@@ -662,7 +664,7 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 
 ### 5.3 MQHelper
 
-MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: att-mqhelper/v1.0`、穩定 logical `id`、connection topology 與可選 credential。Global `mqhelpers` 引用 descriptor file；environment profile 可讓相同 logical ID 在不同環境選擇不同 descriptor。
+MQHelper 是一級 IBM MQ resource。每個 descriptor 使用 `schemaVersion: att-mqhelper/v1.0` 或 `att-mqhelper/v1.1`，具備穩定 logical `id`、connection topology 與可選 credential。Global `mqhelpers` 引用 descriptor file；environment profile 可讓相同 logical ID 在不同環境選擇不同 descriptor。v1.0 仍是相容的單一 instance 形式；v1.1 增加由多個 physical instance 組成的 logical group。
 
 主要 call：
 
@@ -677,6 +679,125 @@ Payload 採 file-based contract，因此 request bytes 不需要複製到 Contex
 Timeout 是 operation-specific failure，與 assertion failure 分開。MQ connection/pool lifecycle 是 framework-owned resource state，特別是在 Load mode，不會公開成 `EXEC.MQ` tree。
 
 ATT default build 不要求 IBM MQ client class；真正執行 MQ 需要 package/release 文件所述 IBM MQ client jar/profile。MQ operation 與 Tool、DB 一樣進入同一 Action result/evidence envelope。
+
+
+#### Issue #59 配置與 public contract
+
+完整 descriptor 可包含 connection、message、requestReply、evidence、pool：
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.0
+id: ordersMq
+name: Orders MQ
+description: IBM MQ connection used by SIT/UAT order tests
+connection:
+  queueManager: QM1
+  host: 10.12.13.14
+  port: 1414
+  channel: CHANNEL
+  username: ${ENV:MQ_USERNAME}
+  password: ${ENV:MQ_PASSWORD}
+message:
+  charset: 1208
+  encoding: 273
+  format: ""
+  persistence: asQueue
+  expiry: -1
+  requestQueue: requestQ
+  replyQueue: replyQ
+requestReply: {waitMs: 40000}
+evidence: {payload: metadata}
+pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+~~~
+
+username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_PROPERTY/PASSWORD_PROPERTY。`evidence.payload` 支援 `metadata` 或 `none`；`metadata` 只在 evidence 保留 policy marker，`none` 則省略。Environment credential 是 secret，不會進入 evidence、log、report 或 generated docs。
+
+message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
+
+requestQueue/replyQueue 是 optional request defaults。Queue precedence 是 call argument > message default > validation error。send(queue=...) 和 receive(queue=...) 不會套用這些 defaults。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
+
+#### Common saveAs
+
+MQ receive/request 使用 common Action saveAs，不增加 MQ-specific resultType/replyType：
+
+~~~yaml
+saveAs:
+  format: raw
+  path: response.bin
+  overwrite: false
+~~~
+
+format 預設 raw，path 可省略。raw 是原始 byte[]，text 是 String，json/yaml/xml 是現有 ATT typed value。沒有 saveAs 或 saveAs: {} 只保留 memory result，不建立 file。`path: console` 會把所選表示寫入 Case log，不加入 `output.targetFiles`，也不建立 file。沒有真正的 path 不會建立 .reply.bin。raw 加真正的 path 逐 byte 寫入，overwrite/path safety 沿用 common Action rules。
+
+~~~yaml
+- id: requestXml
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml}
+  assert: "${output.result.Response.Status} == 'SUCCESS'"
+
+- id: requestXmlSaved
+  type: tool
+  call: "#{mq.ordersMq.request(file='request.xml')}"
+  saveAs: {format: xml, path: responses/payment.xml, overwrite: false}
+
+- id: receiveReply
+  type: tool
+  call: "#{mq.ordersMq.receive(queue='replyQ', correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}"
+  saveAs: {format: json}
+~~~
+
+#### Output 與 validation
+
+output.result 是 business payload；MQ metadata 直接放在 output。每個 operation 都發布 `mqHelper`、選中的 physical `instance`、`queueManager` 與 `selectionStrategy`；v1.0 及單一 instance helper 的 `selectionStrategy` 為 `single`。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。`send` 不產生 business payload，因此拒絕 `saveAs`；`receive` 與 `request` 支援 `saveAs`。receive/request 發布 received/replyReceived、queue names、effective waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ 提供時的 reply CCSID/encoding/format、completion/reason fields，parsed payload 只在 result。正常 request 滿足 output.messageId == output.replyCorrelationId。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033、MQRC_NO_MSG_AVAILABLE 及 effective waitMs。
+
+Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Raw runtime value 保持 byte[]。Typed reply 會優先使用收到的 MQMessage.characterSet/CCSID，經 explicit IBM MQ CCSID-to-Java charset resolver 解碼；不支援的 CCSID 會清楚失敗，沒有 metadata 才 fallback 到 configured charset。Log/report 以 new String(rawBytes, Charset.defaultCharset()) 顯示 raw，不轉 hex，也不建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、缺少 effective request/reply queue、不支援 saveAs format 及 unsafe path。
+
+#### Issue #60 v1.1 logical group 與 physical instance
+
+`att-mqhelper/v1.1` 保留一個 public logical helper id，同時宣告一個或多個 physical connection instance。v1.0 descriptor 不需修改仍然有效。v1.1 descriptor 為 `connection`、`message`、`requestReply`、`pool` 提供 group defaults 及 per-instance override：
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.1
+id: payment
+name: Payment MQ
+description: Payment MQ endpoints
+defaults:
+  connection:
+    queueManager: QM1
+    host: mq.default.example
+    port: 1414
+    channel: APP.SVRCONN
+    username: ${ENV:MQ_USERNAME}
+    password: ${ENV:MQ_PASSWORD}
+  message: {charset: 1208, requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+  requestReply: {waitMs: 40000}
+  pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+instances:
+  - id: payment-a
+    connection: {host: mq-a.example}
+  - id: payment-b
+    connection: {host: mq-b.example}
+    message: {replyQueue: PAYMENT.REPLY.B}
+selection: {strategy: roundRobin}
+evidence: {payload: none}
+~~~
+
+每個 physical instance 在 invocation 前先 materialize 成 immutable effective configuration。每個 section 的 precedence 是 invocation override、instance override、group default、runtime default，最後才是 validation error。Effective `queueManager`、`host`、`port`、`channel` 必須存在；username/password 可選，而且永遠不會輸出到 evidence。
+
+Public call 維持 logical id：
+
+~~~text
+#{mq.payment.send(queue='PAYMENT.REQUEST', file='request.bin')}
+#{mq.payment.request(file='request.bin', instance='payment-b')}
+#{mq.payment.receive(queue='PAYMENT.REPLY', instance='payment-a')}
+~~~
+
+單一 instance 的 v1.1 group 直接使用該 instance。多 instance group 必須宣告 `selection.strategy: random` 或 `roundRobin`；每次 MQ invocation 只選擇一次，並在 connect 前完成，因此同一個 `request` 的 PUT 與 correlated GET 一定使用同一個 physical instance。明確的 `instance` call argument 可選定 physical id；未知 id 會被拒絕。每個 physical instance 都有獨立 pool，pool identity 是 logical id 加 physical id。
+
+Output 與 evidence 同時保留 logical helper id 並公開選中的 physical instance。Evidence 也會記錄適用 strategy、queue manager、operation、queue names、MsgId/CorrelId 及安全的 connection metadata。使用 `evidence.payload: none` 時會省略 payload policy marker；credential 與 payload bytes 永不包含其中。Validation 會拒絕重複 physical id、未知 inherited field、缺少 effective connection field、非法 strategy 或 override，以及無效的 effective message/requestReply/pool 值。
+
+`output.selectionStrategy` 表示已設定的 group policy（`single`、`random` 或 `roundRobin`），而非單次 invocation 的選擇來源。若呼叫明確提供 `instance`，此 policy 值仍維持不變；`output.instance` 則表示實際選中的 physical instance。
 
 ### 5.4 Common Operation Result 與 Evidence
 
@@ -808,9 +929,9 @@ output
 └── 当前 Action／attempt 的局部结果；离开该 Action 后不可见
 ```
 
-`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.1 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
+`EXEC.MODE` 在普通 run 中是 `testcase`，standalone debug 中是 `debug`，load iteration 中是 `load`。`EXEC.LOAD` 仅在 `EXEC.MODE=load` 时存在；普通 TestCase 和 debug execution 不会物化它。`EXEC.INPUT`、`EXEC.VARS` 与各 scope 内的 `EXEC.ACTIONS` 是所有 execution mode 共用的 runtime state，不是平行副本。TestCase adapter 会把当前 Stage 的 caller/input values 适配到 `EXEC.INPUT`；同名时 Stage value 在该 Stage 期间优先，Stage 结束后恢复 Case-level value。`EXEC.ID`、`EXEC.MODE`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS` 和 `EXEC.ACTIONS` 等框架字段不能被 Case 或 sidecar input 覆盖。不存在 `EXEC.TOOL`、`EXEC.DB`、`EXEC.MQ`、`EXEC.OUTPUT`、`EXEC.CALL`、`EXEC.INVOCATION`、`EXEC.STAGE` 或 `EXEC.STAGES`：helper/resource state 保持 internal，根层 `TOOL.*`／`DB.*` 只可作为 compatibility 或 transient view；当前 Action 使用 local `output`，完成后只在其所属 scope 通过 `EXEC.ACTIONS` 发布。Flow 返回后 parent scope 会恢复，跨 scope 值必须写入 `EXEC.VARS`。Stage/template 的 status、timing 和 history 属于 execution result/evidence model，并由旧的 `CASE.STAGES` view 提供读取。严格的 `${EXEC.LOAD.<field>}` 在非 load mode 会 validation error，可选的 `${EXEC.LOAD.<field>?}` 会解析为空；3.5.2 的 `att-load/v1.0` adapter 会按下述 contract 增加 load-only 的 `EXEC.LOAD`。
 
-### Load V1 Context（3.5.1）
+### Load V1 Context（3.5.2）
 
 每个 load iteration 使用与普通执行相同的 `EXEC`／`META` tree 和 Action 局部 `output`。`EXEC.MODE` 是 `load`；`EXEC.ID` 与 `EXEC.LOAD.ITERATION_ID` 相同；`EXEC.STARTED_AT` 是本 iteration 的开始时间；`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS` 和 local `output` 均按 iteration 隔离。scheduler-owned fields 如下：
 
@@ -1136,7 +1257,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 |---|---|---|
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
-| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 IBM MQ TCP client 实例的队列管理器、连接、消息及 request/reply 默认值 |
+| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -1144,9 +1265,9 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-### V3.5.1 多环境 Profile 选择
+### V3.5.2 多环境 Profile 选择
 
-ATT V3.5.1 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1297,10 +1418,12 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
-| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` YAML 路径；每个文件声明一个实例 |
+| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `environments` | absent | 非空 profile 映射；每个 profile 只可包含 `dbhelpers` 和/或 `mqhelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
+
+每个 `mqhelpers` path 都从 package root 解析，并包含一个 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` object。v1.0 是 flat single-instance descriptor；v1.1 使用 `defaults`、非空 `instances[]`、group-level `evidence`，并在多 instance 时要求 `selection.strategy` 为 `random` 或 `roundRobin`。每个 physical instance 会在执行前取得 effective `connection`、`message`、`requestReply`、`pool`；详细 v1.1 model 与 invocation 例子维护在 MQHelper resource module。
 
 ### Dbhelper 配置
 
@@ -1369,7 +1492,7 @@ saveAs:
   overwrite: false
 ```
 
-`path` 必填，`overwrite` 默认 false。`format` 只控制写入表示，不改变 `${output.result}` 的 typed value。`att-template/v2.6` 不允许 sibling `overwrite` 或 scalar `saveAs: file.name`。
+`path` 可省略，`overwrite` 默认 false。省略 `path`（包括 `saveAs: {format: ...}`）只把 typed result 保留在 memory，不建立 artifact。只要提供 `saveAs`，即使没有 path，也会按目标专属的 format 默认值与限制校验；提供 `path` 时才按这些规则写入。`format` 只控制写入表示，不改变 `${output.result}` 的 typed value。`att-template/v2.6` 不允许 sibling `overwrite` 或 scalar `saveAs: file.name`。
 
 | Action target | 允许格式 | 默认 | 保存内容 |
 |---|---|---|---|
@@ -1409,7 +1532,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1626,7 +1749,7 @@ case:
 | 2 | CLI/配置/校验/INVALID 失败 |
 | 3 | 至少一个 ERROR，或不可恢复运行时失败 |
 
-### 完整選項矩陣（3.5.1）
+### 完整選項矩陣（3.5.2）
 
 `--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.6` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
 
@@ -1837,7 +1960,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 |---|---|
 | Global configuration | `att-config/v2.6` |
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0` |
+| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
 | Tool group | `att-tool-group/v2.6` |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |

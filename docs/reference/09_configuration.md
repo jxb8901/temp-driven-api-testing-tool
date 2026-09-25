@@ -15,9 +15,9 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment profiles in V3.5.1
+### Multi-environment profiles in V3.5.2
 
-ATT V3.5.1 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -126,7 +126,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../../schemas/att-config-v2.6.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper instance | `att-mqhelper/v1.0` | [att-mqhelper-v1.0.schema.json](../../schemas/att-mqhelper-v1.0.schema.json) |
+| MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../../schemas/att-mqhelper-v1.1.schema.json) |
 | Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../../schemas/att-tool-group-v2.6.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../../schemas/att-sidecar-v2.2.schema.json) |
@@ -195,7 +195,7 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
 | `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
@@ -241,7 +241,7 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 ### MQ helper configuration
 
-Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` object:
+Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` or `att-mqhelper/v1.1` object. v1.0 is a flat single-instance descriptor. v1.1 has `defaults`, a non-empty `instances[]` list, optional `selection.strategy` (`random` or `roundRobin` for multiple instances), and group-level `evidence`; each physical instance receives effective `connection`, `message`, `requestReply`, and `pool` values before execution. The detailed v1.1 model and invocation examples are maintained in the MQHelper resource module.
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
@@ -249,7 +249,7 @@ Each path in global `mqhelpers` resolves from the package root and contains one 
 | `connection` | required | `queueManager`, `host`, `port`, and `channel` required; optional `username`, `password`; port 1–65535 |
 | `message` | defaults | `ccsid` defaults to 1208; `format` is `MQSTR`, `MQHRF2`, `MQFMT_STRING`, `MQFMT_NONE`, or `NONE`; `persistence` is `asQueue`, `persistent`, `notPersistent`, or `nonPersistent` |
 | `requestReply` | defaults | `waitMs` defaults to 10000 and is 0–3600000 milliseconds |
-| `evidence` | defaults | `payload: metadata` is the only V1 mode; full payload bytes are never placed in structured evidence |
+| `evidence` | defaults | `payload: none|metadata`; `none` omits payload evidence and `metadata` records only the policy marker; full payload bytes are never placed in structured evidence |
 | `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `borrowTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize` |
 
 Connection credentials may be complete `${ENV:NAME}` references. The loader resolves them without putting the secret or the environment variable value in diagnostics, metadata, or Case evidence. Queue names supplied in calls are non-blank, at most 48 characters, and restricted to IBM MQ queue-name characters. A helper instance is selected case-insensitively by its `id`; configured paths and IDs must be unique.
@@ -281,7 +281,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 | assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
 | log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
 | assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `EXEC.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or saveAs |
-| `saveAs` | requires safe relative `path`; optional `format` and `overwrite`; target-specific format/default rules below; `overwrite` defaults false |
+| `saveAs` | optional `path`; optional `format` and `overwrite`; target-specific format/default rules are validated whenever `saveAs` is supplied; `overwrite` defaults false |
 | retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
 
 `renderAs` is `file`, `text`, `json`, `yaml`, or `xml`. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
@@ -337,7 +337,7 @@ callApi:
   assert: "${output.result.status} == 'SUCCESS'"
 ```
 
-`path` is required and `overwrite` defaults to `false`. `format` has target-specific rules:
+`path` is optional and `overwrite` defaults to `false`. Omitting `path`, including in `saveAs: {format: ...}`, keeps the typed result in memory and creates no artifact. A supplied `saveAs` is still validated against the target-specific format defaults and restrictions even when `path` is absent. When `path` is present, it is written using those target-specific rules:
 
 | Action target | Allowed `format` | Default | Content |
 |---|---|---|---|
@@ -385,7 +385,7 @@ saveAs:
   overwrite: false
 ```
 
-`path` and `format` are required for DB; format is `text`, `json`, `yaml`, or `xml`. The written representation never replaces `${output.result}`'s typed Java object.
+`path` is optional for DB as well, but DB still requires `format: text|json|yaml|xml` whenever `saveAs` is supplied, even when no path is present. A valid pathless DB `saveAs` creates no artifact; when a DB artifact path is present, the same format and path rules apply. The written representation never replaces `${output.result}`'s typed Java object.
 
 `att-template/v2.3` remains read-compatible: its legacy Tool form `saveAs: response.json` plus sibling `overwrite: false` keeps its original raw-stdout meaning and is normalized internally to `{path: response.json, format: raw, overwrite: false}`. Newly authored `att-template/v2.6` files must use the object form; scalar `saveAs` and Action-level sibling `overwrite` are invalid.
 
@@ -412,7 +412,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

@@ -1,6 +1,10 @@
 # Changelog
 
-## 3.5.2 - 2026-09-24
+## 3.5.2 - 2026-09-25
+
+- Implement issue #59: extend MQHelper message defaults and IBM MQ metadata, preserve MsgId/CorrelId request/reply behavior, adopt common `saveAs` payload handling, publish MQ metadata directly under Action output, and document the complete English/Chinese contract.
+
+- Implement issue #60: add `att-mqhelper/v1.1` logical groups with inherited defaults, immutable physical instances, random/round-robin selection, explicit instance overrides, isolated pools, secret-safe output/evidence, and EN/ZH documentation while preserving v1.0 descriptors.
 
 - Implemented Issue #53 randomized think-time ranges for closed-VU load workloads while preserving the existing fixed `execution.thinkTime` syntax and keeping arrival-rate workloads unchanged.
 - Added reusable `ThinkTimePolicy` normalization, deterministic run-level seeding with isolated per-VU random streams, inclusive millisecond range sampling, report-safe effective-seed/policy output, schema updates, an offline example, and EN/ZH Reference coverage.

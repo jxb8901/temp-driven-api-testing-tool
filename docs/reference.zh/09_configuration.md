@@ -8,7 +8,7 @@
 |---|---|---|
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
-| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 IBM MQ TCP client 实例的队列管理器、连接、消息及 request/reply 默认值 |
+| MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -16,9 +16,9 @@
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-### V3.5.1 多环境 Profile 选择
+### V3.5.2 多环境 Profile 选择
 
-ATT V3.5.1 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -169,10 +169,12 @@ environments:
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
-| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` YAML 路径；每个文件声明一个实例 |
+| `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `environments` | absent | 非空 profile 映射；每个 profile 只可包含 `dbhelpers` 和/或 `mqhelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
+
+每个 `mqhelpers` path 都从 package root 解析，并包含一个 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` object。v1.0 是 flat single-instance descriptor；v1.1 使用 `defaults`、非空 `instances[]`、group-level `evidence`，并在多 instance 时要求 `selection.strategy` 为 `random` 或 `roundRobin`。每个 physical instance 会在执行前取得 effective `connection`、`message`、`requestReply`、`pool`；详细 v1.1 model 与 invocation 例子维护在 MQHelper resource module。
 
 ### Dbhelper 配置
 
@@ -241,7 +243,7 @@ saveAs:
   overwrite: false
 ```
 
-`path` 必填，`overwrite` 默认 false。`format` 只控制写入表示，不改变 `${output.result}` 的 typed value。`att-template/v2.6` 不允许 sibling `overwrite` 或 scalar `saveAs: file.name`。
+`path` 可省略，`overwrite` 默认 false。省略 `path`（包括 `saveAs: {format: ...}`）只把 typed result 保留在 memory，不建立 artifact。只要提供 `saveAs`，即使没有 path，也会按目标专属的 format 默认值与限制校验；提供 `path` 时才按这些规则写入。`format` 只控制写入表示，不改变 `${output.result}` 的 typed value。`att-template/v2.6` 不允许 sibling `overwrite` 或 scalar `saveAs: file.name`。
 
 | Action target | 允许格式 | 默认 | 保存内容 |
 |---|---|---|---|
@@ -281,7 +283,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.1",
+  "attVersion": "3.5.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

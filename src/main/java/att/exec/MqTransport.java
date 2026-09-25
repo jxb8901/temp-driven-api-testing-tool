@@ -13,6 +13,10 @@ public final class MqTransport {
 
     public interface Connection extends AutoCloseable {
         Queue open(String queue, boolean input, boolean output) throws java.lang.Exception;
+        /** Opens a queue with an explicit bind-not-fixed scope for output handles. */
+        default Queue open(String queue, boolean input, boolean output, boolean bindNotFixed) throws java.lang.Exception {
+            return open(queue, input, output);
+        }
         void disconnect() throws java.lang.Exception;
         @Override void close() throws java.lang.Exception;
     }
@@ -24,20 +28,33 @@ public final class MqTransport {
     }
 
     public static final class PutRequest {
+        private final String replyQueueManager;
         private final String replyQueue;
         private final int ccsid;
+        private final Integer encoding;
         private final String format;
         private final String persistence;
+        private final Integer expiry;
         public PutRequest(String replyQueue, int ccsid, String format, String persistence) {
+            this("", replyQueue, ccsid, null, format, persistence, null);
+        }
+        public PutRequest(String replyQueueManager, String replyQueue, int ccsid, Integer encoding,
+                          String format, String persistence, Integer expiry) {
+            this.replyQueueManager = replyQueueManager == null ? "" : replyQueueManager;
             this.replyQueue = replyQueue == null ? "" : replyQueue;
             this.ccsid = ccsid;
+            this.encoding = encoding;
             this.format = format;
             this.persistence = persistence;
+            this.expiry = expiry;
         }
+        public String replyQueueManager() { return replyQueueManager; }
         public String replyQueue() { return replyQueue; }
         public int ccsid() { return ccsid; }
+        public Integer encoding() { return encoding; }
         public String format() { return format; }
         public String persistence() { return persistence; }
+        public Integer expiry() { return expiry; }
     }
 
     public static final class GetRequest {
@@ -55,12 +72,23 @@ public final class MqTransport {
         private final byte[] messageId;
         private final byte[] correlationId;
         private final byte[] payload;
+        private final Integer ccsid;
+        private final Integer encoding;
+        private final String format;
         public Message(byte[] messageId, byte[] correlationId, byte[] payload) {
+            this(messageId, correlationId, payload, null, null, null);
+        }
+        public Message(byte[] messageId, byte[] correlationId, byte[] payload,
+                       Integer ccsid, Integer encoding, String format) {
             this.messageId = copy(messageId); this.correlationId = copy(correlationId); this.payload = copy(payload);
+            this.ccsid = ccsid; this.encoding = encoding; this.format = format;
         }
         public byte[] messageId() { return copy(messageId); }
         public byte[] correlationId() { return copy(correlationId); }
         public byte[] payload() { return copy(payload); }
+        public Integer ccsid() { return ccsid; }
+        public Integer encoding() { return encoding; }
+        public String format() { return format; }
         private static byte[] copy(byte[] value) { return value == null ? null : Arrays.copyOf(value, value.length); }
     }
 

@@ -21,6 +21,7 @@ public final class ActionExecutionResult {
     private final Object result;
     private final Map<String, Object> evidence;
     private final Map<String, Object> diagnostic;
+    private final Map<String, Object> outputMetadata;
     private final boolean executionSuccess;
     private final long durationMs;
 
@@ -31,9 +32,16 @@ public final class ActionExecutionResult {
     public ActionExecutionResult(Object result, Map<String, Object> evidence, boolean success,
                                  Map<String, Object> diagnostic,
                                  long durationMs) {
+        this(result, evidence, success, diagnostic, durationMs, Collections.<String, Object>emptyMap());
+    }
+
+    public ActionExecutionResult(Object result, Map<String, Object> evidence, boolean success,
+                                 Map<String, Object> diagnostic, long durationMs,
+                                 Map<String, Object> outputMetadata) {
         this.result = result;
         this.evidence = snapshotMap(evidence);
         this.diagnostic = diagnostic;
+        this.outputMetadata = snapshotMap(outputMetadata);
         this.executionSuccess = success;
         this.durationMs = durationMs;
     }
@@ -41,6 +49,8 @@ public final class ActionExecutionResult {
     public Object result() { return result; }
     public Map<String, Object> evidence() { return evidence; }
     public Map<String, Object> diagnostic() { return diagnostic; }
+    /** Action-level metadata published beside, rather than inside, result. */
+    public Map<String, Object> outputMetadata() { return outputMetadata; }
     public boolean executionSuccess() { return executionSuccess; }
     /** @deprecated Use {@link #executionSuccess()} for the operation boundary. */
     @Deprecated public boolean success() { return executionSuccess; }
