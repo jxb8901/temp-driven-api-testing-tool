@@ -18,6 +18,7 @@ public final class LoadRunResources implements AutoCloseable {
     private final DbHelperExecutor db;
     private final HikariDbConnectionProvider dbProvider;
     private final MqHelperExecutor mq;
+    private final att.exec.HttpHelperExecutor http;
     private final PooledMqTransportFactory mqFactory;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicLong executionSequence = new AtomicLong();
@@ -34,10 +35,12 @@ public final class LoadRunResources implements AutoCloseable {
         this.db = new DbHelperExecutor(projectRoot, config, dbProvider);
         this.mqFactory = new PooledMqTransportFactory(mqTransportFactory, 20, 2000L);
         this.mq = new MqHelperExecutor(projectRoot, config, mqFactory);
+        this.http = new att.exec.HttpHelperExecutor(projectRoot, config);
     }
 
     public DbHelperExecutor db() { ensureOpen(); return db; }
     public MqHelperExecutor mq() { ensureOpen(); return mq; }
+    public att.exec.HttpHelperExecutor http() { ensureOpen(); return http; }
     public att.template.SequenceService sequences() { ensureOpen(); return sequences; }
     public String nextExecutionId(String runId) {
         ensureOpen();
@@ -68,6 +71,6 @@ public final class LoadRunResources implements AutoCloseable {
     public void ensureOpen() { if (closed.get()) throw new IllegalStateException("Load run resources are closed"); }
 
     @Override public void close() {
-        if (closed.compareAndSet(false, true)) { mqFactory.close(); db.closeAll(); dbProvider.close(); }
+        if (closed.compareAndSet(false, true)) { http.close(); mqFactory.close(); db.closeAll(); dbProvider.close(); }
     }
 }

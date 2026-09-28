@@ -136,6 +136,22 @@ public final class ExpressionBlockEvaluator {
         @Override public void collectContextPaths(List<String> paths) { for (Node value : values) value.collectContextPaths(paths); }
     }
 
+    private static final class MapNode extends BaseNode {
+        private final Map<String, Node> values;
+        MapNode(String source, Map<String, Node> values) { super(source); this.values = values; }
+        @Override public Object evaluate(Resolver resolver) throws Exception {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<String, Node> entry : values.entrySet()) result.put(entry.getKey(), entry.getValue().evaluate(resolver));
+            return result;
+        }
+        @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) {
+            for (Node value : values.values()) value.collectCalls(calls);
+        }
+        @Override public void collectContextPaths(List<String> paths) {
+            for (Node value : values.values()) value.collectContextPaths(paths);
+        }
+    }
+
     private static final class UnaryNode extends BaseNode {
         private final String operator; private final Node value;
         UnaryNode(String source, String operator, Node value) { super(source); this.operator = operator; this.value = value; }
@@ -270,7 +286,7 @@ public final class ExpressionBlockEvaluator {
     private static String text(Object value) { return value == null ? "" : String.valueOf(value); }
     private static String type(Object value) { return value == null ? "null" : value.getClass().getSimpleName(); }
 
-    private enum TokenType { NUMBER, STRING, CONTEXT, IDENTIFIER, EMBEDDED, LPAREN, RPAREN, LBRACKET, RBRACKET, COMMA, EQUALS, OPERATOR, END }
+    private enum TokenType { NUMBER, STRING, CONTEXT, IDENTIFIER, EMBEDDED, LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE, COLON, COMMA, EQUALS, OPERATOR, END }
     private static final class Token {
         private final TokenType type; private final String text; private final int start, end;
         private Token(TokenType type, String text, int start, int end) { this.type = type; this.text = text; this.start = start; this.end = end; }
@@ -299,6 +315,9 @@ public final class ExpressionBlockEvaluator {
             if (value == ')') return new Token(TokenType.RPAREN, ")", start, index);
             if (value == '[') return new Token(TokenType.LBRACKET, "[", start, index);
             if (value == ']') return new Token(TokenType.RBRACKET, "]", start, index);
+            if (value == '{') return new Token(TokenType.LBRACE, "{", start, index);
+            if (value == '}') return new Token(TokenType.RBRACE, "}", start, index);
+            if (value == ':') return new Token(TokenType.COLON, ":", start, index);
             if (value == ',') return new Token(TokenType.COMMA, ",", start, index);
             if (value == '=' && (index >= source.length() || source.charAt(index) != '=')) return new Token(TokenType.EQUALS, "=", start, index);
             if ((value == '=' || value == '!' || value == '>' || value == '<') && index < source.length() && source.charAt(index) == '=') {
@@ -404,6 +423,21 @@ public final class ExpressionBlockEvaluator {
                 List<Node> items = new ArrayList<Node>();
                 if (!check(TokenType.RBRACKET)) { do { items.add(parseOr()); } while (match(TokenType.COMMA)); }
                 Token close = expect(TokenType.RBRACKET); return new ListNode(source.substring(token.start, close.end), items);
+            }
+            if (token.type == TokenType.LBRACE) {
+                Map<String, Node> items = new LinkedHashMap<String, Node>();
+                if (!check(TokenType.RBRACE)) {
+                    do {
+                        Token key = consume();
+                        if (key.type != TokenType.IDENTIFIER && key.type != TokenType.STRING)
+                            throw new ExpressionSyntaxException(key.start, key.end, "a map key", key.type.name().toLowerCase(java.util.Locale.ROOT));
+                        expect(TokenType.COLON);
+                        if (items.put(key.text, parseOr()) != null)
+                            throw new ExpressionSyntaxException(key.start, key.end, "a unique map key", "duplicate key");
+                    } while (match(TokenType.COMMA));
+                }
+                Token close = expect(TokenType.RBRACE);
+                return new MapNode(source.substring(token.start, close.end), items);
             }
             if (token.type == TokenType.IDENTIFIER) {
                 if ("true".equalsIgnoreCase(token.text)) return new LiteralNode(raw(token), Boolean.TRUE, false);

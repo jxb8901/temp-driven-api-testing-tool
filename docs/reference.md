@@ -623,16 +623,17 @@ Load execution identity and evidence-only scheduler diagnostics are defined cent
 
 ## 05 Resources and Integrations
 
-Tool, DBHelper, MQHelper and SSHHelper are peer integration/resource types. SSHHelper routes command-backed Tools. They converge on the common operation-result/evidence contract in 5.5.
+Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer integration/resource types. SSHHelper routes command-backed Tools. They converge on the common operation-result/evidence contract.
 
 ```text
 Tool      -> process/call operation --\
 DBHelper  -> JDBC operation ----------+--> Action output
 MQHelper  -> MQ operation ------------/
+HTTPHelper -> HTTP operation ---------/
 SSHHelper -> Tool SSH routing --------/
 ```
 
-Resource IDs are logical contracts referenced by Templates/expressions or Tool groups. Environment profiles may bind the same DB/MQ/SSH logical ID to different descriptors without changing Action YAML.
+Resource IDs are logical contracts referenced by Templates/expressions or Tool groups. Environment profiles may bind the same DB/MQ/HTTP/SSH logical ID to different descriptors without changing Action YAML.
 
 ### 5.1 Tool
 
@@ -834,6 +835,69 @@ A single-instance v1.1 group uses that instance directly. A group with multiple 
 Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. With `evidence.payload: none`, the payload policy marker is omitted; credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.
 
 `output.selectionStrategy` identifies the configured group policy (`single`, `random`, or `roundRobin`), not the selection source for an individual invocation. When a call explicitly supplies `instance`, that policy value remains unchanged and `output.instance` identifies the physical instance actually selected.
+
+### 5.5 HTTPHelper
+
+HTTPHelper is a first-class, environment-bound HTTP resource. A Template or Flow calls a stable logical ID; the selected `att-config/v2.8` profile supplies the physical endpoint. Unlike a command-backed curl Tool, HTTPHelper owns a bounded, reusable client, typed response conversion and HTTP metadata.
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.8
+environment: SIT
+environments:
+  SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
+  UAT: {httphelpers: [config/httphelpers/uat/payment.yaml]}
+```
+
+Both descriptor files use `id: paymentApi`; only environment-owned values such as `baseUrl`, credentials or trust material differ. A root `httphelpers` list is inherited when a profile omits its own list; a profile list replaces it in full. IDs and paths must be unique (IDs case-insensitively), safe and package-contained. Validate each selected environment before execution.
+
+```yaml
+schemaVersion: att-httphelper/v1.0
+id: paymentApi
+name: Payment API
+description: Payment service
+baseUrl: https://sit-payments.example.internal
+defaults:
+  headers: {Accept: application/json, X-Channel: ATT}
+  connectTimeoutMs: 5000
+  readTimeoutMs: 30000
+  followRedirects: false
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 20
+  connectionRequestTimeoutMs: 5000
+  keepAliveMs: 30000
+  idleEvictMs: 60000
+auth:
+  type: bearer
+  token: ${ENV:PAYMENT_API_TOKEN}
+tls:
+  verifyHostname: true
+```
+
+The [schema](../schemas/att-httphelper-v1.0.schema.json) rejects unknown fields and unsafe values. `baseUrl` must be absolute HTTP/HTTPS without embedded credentials, query or fragment. Path resolution uses standard URI resolution: `/v1/orders` starts at the origin root, whereas `v1/orders` resolves against the configured base path. Absolute per-call URLs, protocol-relative paths, and paths with a literal query/fragment are rejected. Pass an encoded `query` map instead; query values are omitted from recorded URLs.
+
+Use `#{http.<id>.request(method='POST', path='/v1/orders', ...)}` or convenience `get`, `post`, `put`, `patch`, `delete`, `head`, `options`. Calls must be the primary call of a `type: tool` Action. Arguments are named: `method` (only for `request`), `path`, `query`, `headers`, `body`, `file`, `contentType`, `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs`, and `followRedirects`. Header names compare case-insensitively; call headers override helper defaults. `file` reads exact bytes from a safe Case output or package path; relative file paths start at the Case output directory. `body` accepts bytes, text or a typed value serialized as UTF-8 JSON. `body` and `file` are exclusive; GET and HEAD reject both. Content type may be overridden per call. No implicit cookie session is shared across Cases.
+
+```yaml
+actions:
+  createPayment:
+    type: tool
+    call: >-
+      #{http.paymentApi.post(path='/v1/payments',
+        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        contentType='application/json')}
+    result: {format: json, path: responses/payment.json}
+    assert: "${output.statusCode} == 201"
+```
+
+`result.format` is `raw`, `text`, `json`, `yaml`, or `xml`; without `result`, the response is text. `raw` keeps exact `byte[]` in `output.result` and writes those bytes unchanged to `result.path`; raw console display is Base64. `text` decodes the response `Content-Type` charset or UTF-8 fallback. Structured formats use ATT's existing parsers and fail explicitly on malformed content. `result.path` is optional and affects persistence only; `path: console` writes to the Case log. HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Header-name lookup follows HTTP case-insensitive semantics. `Authorization`, cookies, API-key/token/password-like response headers are redacted in output/evidence. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
+
+A received 4xx/5xx is a completed exchange, so assertions may deliberately expect 404 or 500. Transport/configuration/format failures make the Action `ERROR` with an HTTP-specific error type; an assertion mismatch is `FAIL`. Evidence contains helper ID, method, safe URL, byte counts, status when received, duration and any error/redirect count. The existing Action attempt list retains retries. HTTPHelper never retries statuses automatically. `retry.retryOn: [TIMEOUT]` can replay a request after an HTTP or pool-borrow timeout; `ASSERTION` can replay after a failed assertion. Authors must assess side effects for **every** method, including GET/PUT—POST/PATCH/DELETE may create duplicate work.
+
+The Action timeout is the overall deadline; pool-borrow, connect and read timeouts use the smaller of call override, helper default and remaining Action time. Late responses are still timeouts. Each helper client has a thread-safe Apache HTTP connection pool bounded by `maxConnections` and `maxConnectionsPerRoute`; pool waits have an HTTP-specific timeout. Idle connections are evicted before reuse and the run/load resource owner closes the pool once. TLS certificate and hostname verification are on by default and cannot be disabled by the descriptor. Optional `tls.trustStore` is a safe package-relative Java trust store path, with optional `${ENV:...}` path/password; no mutual TLS in v1.0. `auth.type` is `none`, `basic` (`username`, `password`) or `bearer` (`token`); `${ENV:NAME}` resolves secrets without logging values. Redirects are off by default; if enabled, at most five redirects are followed and cross-origin redirects are rejected to prevent credential forwarding.
+
+Existing command-backed curl/script Tools remain supported. To migrate a common curl call, move the endpoint and credentials to the selected HTTPHelper descriptor, keep a stable logical ID in the Template, replace curl argv with `http.<id>.<method>(...)`, and select the response representation via the common Action `result` field.
 
 ### 5.4 SSHHelper: logical SSH targets
 
@@ -1571,10 +1635,11 @@ This chapter is the authoritative reading reference for author-authored configur
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/SSHHelper paths, optional legacy inline SSH |
+| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
 | Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
 | SSHHelper | configured `sshhelpers` YAML path | logical SSH ID, physical instances, defaults, selection and fan-out cap |
+| HTTPHelper | configured `httphelpers` YAML path | logical HTTP ID, base URL, defaults, pool, auth and TLS |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -1583,7 +1648,7 @@ Tool Action timeout overrides Tool descriptor timeout, which overrides global ti
 
 ### Multi-environment profiles in V3.5.2
 
-`att-config/v2.7` extends the v2.6 profile model with `sshhelpers`. A profile may replace its SSHHelper list in addition to DB/MQ lists. New logical SSH Tool groups use `att-tool-group/v2.7` and `att-sshhelper/v1.0`; see [SSHHelper](../docs/reference/05_resources/sshhelper.md) for complete SIT/UAT configs, selection rules, evidence, migration and safety warnings. The v2.6 examples below remain valid for existing DB/MQ-only packages.
+`att-config/v2.8` extends the v2.7 profile model with `httphelpers`. Profiles replace each DB/MQ/SSH/HTTP descriptor list as a whole. See [HTTPHelper](../docs/reference/05_resources/httphelper.md) and [SSHHelper](../docs/reference/05_resources/sshhelper.md). The v2.6 examples below remain valid for existing DB/MQ-only packages.
 
 ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
@@ -1691,25 +1756,26 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.7` | [att-config-v2.7.schema.json](../schemas/att-config-v2.7.schema.json) |
-| Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
+| Global configuration | `att-config/v2.8` | [att-config-v2.8.schema.json](../schemas/att-config-v2.8.schema.json) |
+| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.7` | [v2.7](../schemas/history/att-config-v2.7.schema.json), [v2.5](../schemas/history/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../schemas/att-mqhelper-v1.1.schema.json) |
+| MQ helper descriptor | `att-mqhelper/v1.1` (current), `v1.0` (legacy) | [v1.1](../schemas/att-mqhelper-v1.1.schema.json), [v1.0](../schemas/history/att-mqhelper-v1.0.schema.json) |
+| HTTP helper descriptor | `att-httphelper/v1.0` | [att-httphelper-v1.0.schema.json](../schemas/att-httphelper-v1.0.schema.json) |
 | SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../schemas/att-sshhelper-v1.0.schema.json) |
 | Tool group | `att-tool-group/v2.7` | [att-tool-group-v2.7.schema.json](../schemas/att-tool-group-v2.7.schema.json) |
-| Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
+| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6` | [v2.2](../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../schemas/history/att-tool-group-v2.6.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
-| Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
+| Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/history/att-sidecar-v2.1.schema.json) |
 | Template descriptor | `att-template/v3.1` | [att-template-v3.1.schema.json](../schemas/att-template-v3.1.schema.json) |
-| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../schemas/att-template-v3.0.schema.json) |
-| Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [att-template-v2.6.schema.json](../schemas/att-template-v2.6.schema.json), [att-template-v2.5.schema.json](../schemas/att-template-v2.5.schema.json) |
+| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../schemas/history/att-template-v3.0.schema.json) |
+| Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [v2.6](../schemas/history/att-template-v2.6.schema.json), [v2.5](../schemas/history/att-template-v2.5.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) |
 | CI summary | `att-ci-summary/v2.1` | [att-ci-summary-v2.1.schema.json](../schemas/att-ci-summary-v2.1.schema.json) |
 | JUnit XML | XSD | [att-junit-v2.1.xsd](../schemas/att-junit-v2.1.xsd) |
 | Diagnostic codes | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../schemas/diagnostic-codes.yaml) |
 
-All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
+Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
 
 ### Global configuration
 
@@ -1746,7 +1812,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | `att-config/v2.6`; V2.1/V2.2/V2.5 remain readable, but only V2.6 Tool descriptors accept `call`/`cache` |
+| `schemaVersion` | required | Current: `att-config/v2.8`; v2.1–v2.7 remain readable under their declared contracts. The example above intentionally shows v2.6. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -1767,7 +1833,8 @@ environments:
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths; v2.7 only |
-| `environments` | absent | Non-empty map of profile names; v2.7 profiles may contain `dbhelpers`, `mqhelpers`, and/or `sshhelpers` typed lists |
+| `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.0` YAML paths; v2.8 only |
+| `environments` | absent | Non-empty map of profile names; v2.8 profiles may also contain `httphelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -1775,7 +1842,7 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -2233,11 +2300,15 @@ Clean never removes testcase, template, tool, configuration, documentation, sche
 
 ### Start with validation
 
-Run this after every workbook, sidecar, template, or tool change:
+Run this after every workbook, sidecar, template, helper, or tool change:
 
 ```sh
 ./att.sh validate --package
 ```
+
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with `actions.fetch.result` should be upgraded to `att-flow/v3.1` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
+
+Current schemas are in [`schemas/`](../schemas/); retained older versions are only in [`schemas/history/`](../schemas/history/). Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
 
 Then use the diagnostic code and structured location. Do not automate against message text.
 
@@ -2364,9 +2435,10 @@ The appendices collect stable lookup material that should not drive the main pro
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.7` (v2.6 remains readable) |
+| Global configuration | `att-config/v2.8` (v2.1–v2.7 remain readable) |
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
+| MQHelper | `att-mqhelper/v1.1` (`v1.0` remains readable) |
+| HTTPHelper | `att-httphelper/v1.0` |
 | SSHHelper | `att-sshhelper/v1.0` |
 | Tool group | `att-tool-group/v2.7` (v2.6 remains readable) |
 | Sidecar | `att-sidecar/v2.2` |
@@ -2374,10 +2446,10 @@ The appendices collect stable lookup material that should not drive the main pro
 | Template | `att-template/v3.1` (`renderAs`/`saveAs` are rejected with migration suggestions) |
 | Flow | `att-flow/v3.1` (legacy read: `att-flow/v3.0`) |
 | Debug input | `att-debug/v1.0` |
-| Load scenario | `att-load/v1.0` |
+| Load scenario | `att-load/v1.1` (`v1.0` remains readable) |
 | Load summary | `att-load-summary/v1.0` |
 
-`schemas/catalog.yaml` is the authoritative repository catalog. Compatibility is a reader contract; new authoring should use the current schema for the feature being authored.
+`schemas/catalog.yaml` is the authoritative repository catalog. Current schemas live in `schemas/`, retained older schemas in `schemas/history/`. Compatibility is a reader contract; new authoring should use the current schema for the feature being authored.
 
 ### 14.2 Compatibility and Deprecated Aliases
 
@@ -2393,8 +2465,10 @@ Key current migrations are:
 
 - prefer `EXEC` / `META` over legacy Context aliases;
 - use `output.result` / `EXEC.ACTIONS.<id>.output.result` and the common evidence/attempt contract;
-- treat Tool, DBHelper and MQHelper as peer resources;
-- use environment profiles when DB/MQ/SSHHelper bindings vary;
+- treat Tool, DBHelper, MQHelper and HTTPHelper as peer resources;
+- use environment profiles when DB/MQ/SSH/HTTPHelper bindings vary;
+- move common curl invocations to a logical `http.<id>.<method>` Action when pooled transport and typed response metadata are useful; existing curl Tools remain valid;
+- when an older descriptor uses newer fields, follow the validation diagnostic, migrate `schemaVersion` and any named legacy fields, then validate again; historical schema definitions live in `schemas/history/`;
 - migrate physical group SSH to `ssh: {helper: <id>}` with `att-tool-group/v2.7` when logical multi-instance routing is needed;
 - treat Run, Debug and Load as peer execution modes.
 

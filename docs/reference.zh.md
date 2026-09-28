@@ -623,16 +623,17 @@ Load execution identity 與 evidence-only scheduler diagnostics 的中央定義�
 
 ## 05 資源與整合
 
-Tool、DBHelper、MQHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由；它們最終收斂到 5.5 的 common operation-result/evidence contract。
+Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由；它們最終收斂到 common operation-result/evidence contract。
 
 ```text
 Tool      -> process/call operation --\
 DBHelper  -> JDBC operation ----------+--> Action output
 MQHelper  -> MQ operation ------------/
+HTTPHelper -> HTTP operation ---------/
 SSHHelper -> Tool SSH routing --------/
 ```
 
-Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
+Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/HTTP/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
 
 ### 5.1 Tool
 
@@ -832,6 +833,69 @@ Public call 維持 logical id：
 Output 與 evidence 同時保留 logical helper id 並公開選中的 physical instance。Evidence 也會記錄適用 strategy、queue manager、operation、queue names、MsgId/CorrelId 及安全的 connection metadata。使用 `evidence.payload: none` 時會省略 payload policy marker；credential 與 payload bytes 永不包含其中。Validation 會拒絕重複 physical id、未知 inherited field、缺少 effective connection field、非法 strategy 或 override，以及無效的 effective message/requestReply/pool 值。
 
 `output.selectionStrategy` 表示已設定的 group policy（`single`、`random` 或 `roundRobin`），而非單次 invocation 的選擇來源。若呼叫明確提供 `instance`，此 policy 值仍維持不變；`output.instance` 則表示實際選中的 physical instance。
+
+### 5.5 HTTPHelper
+
+HTTPHelper 是依環境綁定的一級 HTTP 資源。Template／Flow 呼叫固定的 logical ID；選定的 `att-config/v2.8` profile 提供實體 endpoint。與 command-backed curl Tool 不同，HTTPHelper 自行管理有界、可重用的 client、型別化回應及 HTTP metadata。
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.8
+environment: SIT
+environments:
+  SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
+  UAT: {httphelpers: [config/httphelpers/uat/payment.yaml]}
+```
+
+兩份 descriptor 均使用 `id: paymentApi`，只有 `baseUrl`、憑證及信任材料等環境資訊不同。profile 未列出 `httphelpers` 時繼承 root 清單；列出時整組替換。ID 不分大小寫須唯一，路徑須安全且位於 package 內。執行前應逐一驗證所選環境。
+
+```yaml
+schemaVersion: att-httphelper/v1.0
+id: paymentApi
+name: Payment API
+description: Payment service
+baseUrl: https://sit-payments.example.internal
+defaults:
+  headers: {Accept: application/json, X-Channel: ATT}
+  connectTimeoutMs: 5000
+  readTimeoutMs: 30000
+  followRedirects: false
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 20
+  connectionRequestTimeoutMs: 5000
+  keepAliveMs: 30000
+  idleEvictMs: 60000
+auth:
+  type: bearer
+  token: ${ENV:PAYMENT_API_TOKEN}
+tls:
+  verifyHostname: true
+```
+
+[Schema](../schemas/att-httphelper-v1.0.schema.json) 拒絕未知欄位及不安全數值。`baseUrl` 必須是沒有內嵌憑證、query 或 fragment 的絕對 HTTP/HTTPS URL。路徑依標準 URI 規則解析：`/v1/orders` 從 origin root 開始，`v1/orders` 則依 base path 解析。每次呼叫不得使用絕對 URL、`//` path 或內含 query/fragment 的 path；請用 `query` map，由 client 編碼，並從記錄的 URL 移除 query 值。
+
+可使用 `#{http.<id>.request(method='POST', path='/v1/orders', ...)}`，或 `get`、`post`、`put`、`patch`、`delete`、`head`、`options`。HTTP 呼叫必須是 `type: tool` Action 的 primary call。具名參數為 `method`（僅 `request`）、`path`、`query`、`headers`、`body`、`file`、`contentType`、`connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs`、`followRedirects`。Header 名稱不分大小寫，call 值覆蓋 helper 預設。`file` 從安全的 Case output 或 package 路徑逐 byte 讀取；相對路徑從 Case output 開始。`body` 可為 bytes、文字或序列化為 UTF-8 JSON 的型別值。`body` 與 `file` 不可同時設定；GET/HEAD 均不接受 body。`contentType` 可逐次覆蓋。Case 之間不會隱式共享 cookie session。
+
+```yaml
+actions:
+  createPayment:
+    type: tool
+    call: >-
+      #{http.paymentApi.post(path='/v1/payments',
+        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        contentType='application/json')}
+    result: {format: json, path: responses/payment.json}
+    assert: "${output.statusCode} == 201"
+```
+
+`result.format` 支援 `raw`、`text`、`json`、`yaml`、`xml`；省略 `result` 時回應為 text。`raw` 在 `output.result` 保留精確 `byte[]`，`result.path` 也逐 byte 寫入；raw console 以 Base64 顯示。`text` 按 `Content-Type` charset 解碼，缺省為 UTF-8。結構化格式使用 ATT 既有 parser，格式錯誤會明確失敗。`result.path` 可省略，只控制持久化；`path: console` 寫入 Case log。`output` 直接提供 `httpHelper`、`method`、不含 query 的安全 `url`、`statusCode`、`reasonPhrase`、`contentType`、`requestBytes`、`responseBytes`、多值 `headers`。Header 名稱依 HTTP 規則不分大小寫。`Authorization`、cookie、API-key/token/password 類 response header 在 output/evidence 中遮蔽；request header、query 值、認證 secret 與 payload 不進入 HTTP evidence。
+
+收到 4xx/5xx 仍屬完成的 HTTP exchange，可斷言預期 404 或 500。transport/config/format 失敗使 Action 為 `ERROR`；斷言不符則為 `FAIL`。Evidence 含 helper ID、method、安全 URL、bytes、收到的 status、duration、錯誤／redirect 數。既有 Action attempt list 保留 retry；HTTPHelper 不會自動重試 status。`retry.retryOn: [TIMEOUT]` 可於 HTTP 或連線池等待 timeout 後重送，`ASSERTION` 可在斷言失敗後重送。作者須評估**每一種** method 的副作用，POST/PATCH/DELETE 尤其可能重複執行。
+
+Action `timeoutMs` 是總 deadline；pool borrow、connect、read 取 call override、helper 預設與剩餘 Action 時間的較小值。遲到的回應仍算 timeout。每個 helper 使用 thread-safe、有 `maxConnections`／`maxConnectionsPerRoute` 上限的連線池；pool wait 有專用 timeout，閒置連線在重用前清理，run/load owner 只關閉一次。TLS 憑證與 hostname 預設驗證且不能於 descriptor 關閉。可選的 `tls.trustStore` 是安全的 package-relative Java trust store 路徑，path/password 可使用 `${ENV:...}`；v1.0 不支援 mutual TLS。`auth.type` 為 `none`、`basic`（`username`、`password`）或 `bearer`（`token`）；`${ENV:NAME}` 解析後不記錄 secret 值。Redirect 預設關閉；開啟後最多跟隨五次，跨 origin redirect 會被拒絕以避免轉送憑證。
+
+既有 command-backed curl/script Tool 保持相容。遷移常見 curl 呼叫時，將 endpoint／認證移入所選 HTTPHelper descriptor，Template 保留固定 logical ID，以 `http.<id>.<method>(...)` 取代 curl argv，並以共用 Action `result` 選擇回應格式。
 
 ### 5.4 SSHHelper：邏輯 SSH 目標
 
@@ -1387,6 +1451,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
 | MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
+| HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -1396,7 +1461,7 @@ Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeou
 
 ### V3.5.2 多环境 Profile 选择
 
-`att-config/v2.7` 在 v2.6 profile 機制中新增 `sshhelpers`，profile 可整組替換 SSHHelper 清單。新的邏輯 SSH Tool group 使用 `att-tool-group/v2.7` 和 `att-sshhelper/v1.0`。完整 SIT/UAT 配置、選擇規則、evidence、遷移和安全警告見 [SSHHelper](../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 例子仍適用於既有的 DB/MQ-only package。
+`att-config/v2.8` 在 v2.7 profile 機制中新增 `httphelpers`。DB/MQ/SSH/HTTP 各清單均按整組替換。詳見 [HTTPHelper](../docs/reference.zh/05_resources/httphelper.md) 與 [SSHHelper](../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 範例仍適用於既有 DB/MQ-only package。
 
 ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
@@ -1499,7 +1564,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.7`、`att-tool-group/v2.7`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`（仍可讀取舊版配置和 group）。舊 Template／Flow schema 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位須遷移至 v3.1。`att validate` 會提供遷移建議。
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、HTTPHelper、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.8`、`att-tool-group/v2.7`、`att-httphelper/v1.0`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`。現行 schema 位於 `schemas/`；歷史版本僅位於 [`schemas/history/`](../schemas/history/)，仍用於驗證與遷移診斷。舊 `renderAs`／`saveAs` 欄位須遷移至 `result`；不會自動改寫檔案。
 
 ### 全局配置
 
@@ -1533,7 +1598,7 @@ environments:
 
 | 路径 | 必填/默认值 | 约束 |
 |---|---|---|
-| `schemaVersion` | 必填 | 当前为 `att-config/v2.6`；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool |
+| `schemaVersion` | 必填 | 現行為 `att-config/v2.8`；v2.1–v2.7 仍按宣告的舊版契約讀取。上面的 v2.6 範例為歷史用法。 |
 | `outputDirectory` | `output` | 非空包相对输出根 |
 | `environment` | `SIT` | 存在 `environments` 时是 default profile 名称；否则只是 exposed metadata |
 | `timeoutMs` | `10000` | 整数 1–3600000 毫秒 |
@@ -1551,7 +1616,8 @@ environments:
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
 | `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `sshhelpers` | `[]` | 唯一、安全、package-relative 的 `att-sshhelper/v1.0` YAML 路徑；僅 v2.7 |
-| `environments` | absent | 非空 profile 映射；v2.7 profile 可包含 `dbhelpers`、`mqhelpers` 和／或 `sshhelpers` typed list |
+| `httphelpers` | `[]` | 唯一、安全、package-relative 的 `att-httphelper/v1.0` YAML 路徑；僅 v2.8 |
+| `environments` | absent | 非空 profile 映射；v2.8 profile 亦可包含 `httphelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
@@ -1950,11 +2016,15 @@ ATT 会复制源工作簿，并使用 `report.mode: append-to-copy` 追加配置
 
 ### 先从校验开始
 
-在每次工作簿、侧车、模板或工具变更后执行：
+在每次工作簿、侧车、模板、helper 或工具变更后执行：
 
 ```sh
 ./att.sh validate --package
 ```
+
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如 `att-flow/v3.0` 的 `actions.fetch.result` 應升至 `att-flow/v3.1` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
+
+現行 schema 位於 [`schemas/`](../schemas/)，保留的舊版僅位於 [`schemas/history/`](../schemas/history/)。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
 
 然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。
 
@@ -2081,9 +2151,10 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.7`（仍可讀取 v2.6）|
+| Global configuration | `att-config/v2.8`（仍可讀取 v2.1–v2.7）|
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
+| MQHelper | `att-mqhelper/v1.1`（仍可讀取 v1.0） |
+| HTTPHelper | `att-httphelper/v1.0` |
 | SSHHelper | `att-sshhelper/v1.0` |
 | Tool group | `att-tool-group/v2.7`（仍可讀取 v2.6）|
 | Sidecar | `att-sidecar/v2.2` |
@@ -2091,10 +2162,10 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Template | `att-template/v3.1`（舊 `renderAs`／`saveAs` 會被拒絕並提供遷移建議） |
 | Flow | `att-flow/v3.1`（相容讀取：`att-flow/v3.0`）|
 | Debug input | `att-debug/v1.0` |
-| Load scenario | `att-load/v1.0` |
+| Load scenario | `att-load/v1.1`（仍可讀取 v1.0） |
 | Load summary | `att-load-summary/v1.0` |
 
-`schemas/catalog.yaml` 是 repository 的 authoritative catalog。Compatibility 是 reader contract；新 authoring 應使用相應 feature 的 current schema。
+`schemas/catalog.yaml` 是 repository 的 authoritative catalog。現行 schema 位於 `schemas/`，保留的舊版位於 `schemas/history/`。Compatibility 是 reader contract；新 authoring 應使用相應 feature 的 current schema。
 
 ### 14.2 相容性與已棄用 Alias
 
@@ -2110,8 +2181,10 @@ Current Reference 依產品概念描述 ATT，不再按 release chronology 組�
 
 - 新 authoring 優先使用 `EXEC` / `META`，而非 legacy Context alias；
 - 使用 `output.result` / `EXEC.ACTIONS.<id>.output.result` 及 common evidence/attempt contract；
-- 把 Tool、DBHelper、MQHelper 視為 peer resource；
-- 若只改 DB/MQ/SSHHelper binding，使用 environment profile；
+- 把 Tool、DBHelper、MQHelper、HTTPHelper 視為 peer resource；
+- 若只改 DB/MQ/SSH/HTTPHelper binding，使用 environment profile；
+- 需要連線池與型別化 HTTP metadata 時，以固定的 `http.<id>.<method>` Action 取代常見 curl 呼叫；既有 curl Tool 仍然有效；
+- 舊版 descriptor 使用新欄位時，依驗證診斷更新 `schemaVersion` 與必要欄位後再驗證；歷史 schema 位於 `schemas/history/`；
 - 需要邏輯多實例路由時，以 `att-tool-group/v2.7` 的 `ssh: {helper: <id>}` 取代實體 group SSH；
 - 把 Run、Debug、Load 視為 peer execution mode。
 

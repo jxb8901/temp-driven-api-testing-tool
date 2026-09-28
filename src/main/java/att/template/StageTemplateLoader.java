@@ -157,11 +157,12 @@ public final class StageTemplateLoader {
         boolean oldest = Version.OLDEST_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean modern = current || previousVersion || legacy || older;
         if (!(modern || oldest)) throw new IllegalArgumentException("Unsupported template schemaVersion: " + schemaVersion);
-        Path schema = projectRoot.resolve(current ? "schemas/att-template-v3.1.schema.json"
-                : (previousVersion ? "schemas/att-template-v3.0.schema.json"
-                : (legacy ? "schemas/att-template-v2.6.schema.json"
-                : (older ? "schemas/att-template-v2.5.schema.json" : "schemas/att-template-v2.3.schema.json"))));
-        if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, current ? "att-template-v3.1.schema.json"
+                : (previousVersion ? "att-template-v3.0.schema.json"
+                : (legacy ? "att-template-v2.6.schema.json"
+                : (older ? "att-template-v2.5.schema.json" : "att-template-v2.3.schema.json"))));
+        if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+                projectRoot.resolve("schemas/att-template-v3.1.schema.json"), map, schemaVersion, Version.TEMPLATE_SCHEMA);
         SchemaSupport.requireVersion(map, schemaVersion, "template");
         SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
         SchemaSupport.string(map.get("description"), "template.description", true);

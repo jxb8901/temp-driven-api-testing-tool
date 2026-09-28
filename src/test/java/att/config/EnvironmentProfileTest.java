@@ -105,7 +105,7 @@ class EnvironmentProfileTest {
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.6.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(Paths.get("schemas/history/att-config-v2.6.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());

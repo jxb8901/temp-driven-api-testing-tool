@@ -2,6 +2,9 @@
 
 ## 3.5.2 - 2026-09-25
 
+- Implement issue #70: introduce `att-httphelper/v1.0` with environment-bound logical HTTP services, bounded pooled transport, secure auth/TLS defaults, typed Action results, HTTP metadata/evidence, and EN/ZH documentation.
+- Implement issue #71: enrich older-schema validation errors with current-version migration guidance, preserve original violations and source locations, and relocate legacy schemas to `schemas/history/` without changing their contracts.
+
 - Implement issue #59: extend MQHelper message defaults and IBM MQ metadata, preserve MsgId/CorrelId request/reply behavior, adopt common `saveAs` payload handling, publish MQ metadata directly under Action output, and document the complete English/Chinese contract.
 
 - Implement issue #60: add `att-mqhelper/v1.1` logical groups with inherited defaults, immutable physical instances, random/round-robin selection, explicit instance overrides, isolated pools, secret-safe output/evidence, and EN/ZH documentation while preserving v1.0 descriptors.

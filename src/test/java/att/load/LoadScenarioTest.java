@@ -537,11 +537,11 @@ class LoadScenarioTest {
         Path project = temp.resolve("project-" + System.nanoTime());
         Files.createDirectories(project.resolve("templates/LOAD_TEMPLATE"));
         Files.createDirectories(project.resolve("templates/flows/load/echo"));
-        Files.createDirectories(project.resolve("schemas"));
+        Files.createDirectories(project.resolve("schemas/history"));
         Files.createDirectories(project.resolve("output"));
-        Files.copy(Paths.get("schemas/att-load-v1.0.schema.json"), project.resolve("schemas/att-load-v1.0.schema.json"));
-        Files.copy(Paths.get("schemas/att-template-v3.0.schema.json"), project.resolve("schemas/att-template-v3.0.schema.json"));
-        Files.copy(Paths.get("schemas/att-flow-v3.0.schema.json"), project.resolve("schemas/att-flow-v3.0.schema.json"));
+        Files.copy(Paths.get("schemas/history/att-load-v1.0.schema.json"), project.resolve("schemas/history/att-load-v1.0.schema.json"));
+        Files.copy(Paths.get("schemas/history/att-template-v3.0.schema.json"), project.resolve("schemas/history/att-template-v3.0.schema.json"));
+        Files.copy(Paths.get("schemas/history/att-flow-v3.0.schema.json"), project.resolve("schemas/history/att-flow-v3.0.schema.json"));
         Files.write(project.resolve("templates/LOAD_TEMPLATE/template.yaml"), (
                 "schemaVersion: att-template/v3.0\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
                 + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.INPUT.input}\"\n"

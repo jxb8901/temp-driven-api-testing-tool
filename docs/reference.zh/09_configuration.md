@@ -10,6 +10,7 @@
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
 | MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
+| HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -19,7 +20,7 @@ Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeou
 
 ### V3.5.2 多环境 Profile 选择
 
-`att-config/v2.7` 在 v2.6 profile 機制中新增 `sshhelpers`，profile 可整組替換 SSHHelper 清單。新的邏輯 SSH Tool group 使用 `att-tool-group/v2.7` 和 `att-sshhelper/v1.0`。完整 SIT/UAT 配置、選擇規則、evidence、遷移和安全警告見 [SSHHelper](../../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 例子仍適用於既有的 DB/MQ-only package。
+`att-config/v2.8` 在 v2.7 profile 機制中新增 `httphelpers`。DB/MQ/SSH/HTTP 各清單均按整組替換。詳見 [HTTPHelper](../../docs/reference.zh/05_resources/httphelper.md) 與 [SSHHelper](../../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 範例仍適用於既有 DB/MQ-only package。
 
 ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
@@ -122,7 +123,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.7`、`att-tool-group/v2.7`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`（仍可讀取舊版配置和 group）。舊 Template／Flow schema 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位須遷移至 v3.1。`att validate` 會提供遷移建議。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、HTTPHelper、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.8`、`att-tool-group/v2.7`、`att-httphelper/v1.0`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`。現行 schema 位於 `schemas/`；歷史版本僅位於 [`schemas/history/`](../../schemas/history/)，仍用於驗證與遷移診斷。舊 `renderAs`／`saveAs` 欄位須遷移至 `result`；不會自動改寫檔案。
 
 ### 全局配置
 
@@ -156,7 +157,7 @@ environments:
 
 | 路径 | 必填/默认值 | 约束 |
 |---|---|---|
-| `schemaVersion` | 必填 | 当前为 `att-config/v2.6`；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool |
+| `schemaVersion` | 必填 | 現行為 `att-config/v2.8`；v2.1–v2.7 仍按宣告的舊版契約讀取。上面的 v2.6 範例為歷史用法。 |
 | `outputDirectory` | `output` | 非空包相对输出根 |
 | `environment` | `SIT` | 存在 `environments` 时是 default profile 名称；否则只是 exposed metadata |
 | `timeoutMs` | `10000` | 整数 1–3600000 毫秒 |
@@ -174,7 +175,8 @@ environments:
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
 | `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `sshhelpers` | `[]` | 唯一、安全、package-relative 的 `att-sshhelper/v1.0` YAML 路徑；僅 v2.7 |
-| `environments` | absent | 非空 profile 映射；v2.7 profile 可包含 `dbhelpers`、`mqhelpers` 和／或 `sshhelpers` typed list |
+| `httphelpers` | `[]` | 唯一、安全、package-relative 的 `att-httphelper/v1.0` YAML 路徑；僅 v2.8 |
+| `environments` | absent | 非空 profile 映射；v2.8 profile 亦可包含 `httphelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 

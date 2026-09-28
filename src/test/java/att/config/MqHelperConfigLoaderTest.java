@@ -140,4 +140,27 @@ class MqHelperConfigLoaderTest {
                 "instances: [{id: a}, {id: b}]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
     }
+
+    @Test void olderMqSchemaFailureIncludesCurrentSchemaMigrationContext() throws Exception {
+        Path currentSchemas = tempDir.resolve("schemas");
+        Path historicalSchemas = currentSchemas.resolve("history");
+        Files.createDirectories(historicalSchemas);
+        Files.copy(java.nio.file.Paths.get("schemas/att-mqhelper-v1.1.schema.json"),
+                currentSchemas.resolve("att-mqhelper-v1.1.schema.json"));
+        Files.copy(java.nio.file.Paths.get("schemas/history/att-mqhelper-v1.0.schema.json"),
+                historicalSchemas.resolve("att-mqhelper-v1.0.schema.json"));
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        Path helper = directory.resolve("broker.yaml");
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\nid: broker\nname: Broker\ndescription: Test broker\n"
+                + "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.CH}\n"
+                + "selection: {strategy: random}\n").getBytes("UTF-8"));
+        att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
+                () -> new FrameworkConfigLoader().load(config));
+        assertTrue(error.detail().contains("att-mqhelper/v1.0"));
+        assertTrue(error.detail().contains("att-mqhelper/v1.1"));
+        assertTrue(error.detail().contains("selection"));
+        assertFalse(error.schemaViolations().isEmpty());
+    }
 }

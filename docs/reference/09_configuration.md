@@ -6,10 +6,11 @@ This chapter is the authoritative reading reference for author-authored configur
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/SSHHelper paths, optional legacy inline SSH |
+| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
 | Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
 | SSHHelper | configured `sshhelpers` YAML path | logical SSH ID, physical instances, defaults, selection and fan-out cap |
+| HTTPHelper | configured `httphelpers` YAML path | logical HTTP ID, base URL, defaults, pool, auth and TLS |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -18,7 +19,7 @@ Tool Action timeout overrides Tool descriptor timeout, which overrides global ti
 
 ### Multi-environment profiles in V3.5.2
 
-`att-config/v2.7` extends the v2.6 profile model with `sshhelpers`. A profile may replace its SSHHelper list in addition to DB/MQ lists. New logical SSH Tool groups use `att-tool-group/v2.7` and `att-sshhelper/v1.0`; see [SSHHelper](../../docs/reference/05_resources/sshhelper.md) for complete SIT/UAT configs, selection rules, evidence, migration and safety warnings. The v2.6 examples below remain valid for existing DB/MQ-only packages.
+`att-config/v2.8` extends the v2.7 profile model with `httphelpers`. Profiles replace each DB/MQ/SSH/HTTP descriptor list as a whole. See [HTTPHelper](../../docs/reference/05_resources/httphelper.md) and [SSHHelper](../../docs/reference/05_resources/sshhelper.md). The v2.6 examples below remain valid for existing DB/MQ-only packages.
 
 ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
@@ -126,25 +127,26 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.7` | [att-config-v2.7.schema.json](../../schemas/att-config-v2.7.schema.json) |
-| Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../../schemas/att-config-v2.5.schema.json) |
+| Global configuration | `att-config/v2.8` | [att-config-v2.8.schema.json](../../schemas/att-config-v2.8.schema.json) |
+| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.7` | [v2.7](../../schemas/history/att-config-v2.7.schema.json), [v2.5](../../schemas/history/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../../schemas/att-mqhelper-v1.1.schema.json) |
+| MQ helper descriptor | `att-mqhelper/v1.1` (current), `v1.0` (legacy) | [v1.1](../../schemas/att-mqhelper-v1.1.schema.json), [v1.0](../../schemas/history/att-mqhelper-v1.0.schema.json) |
+| HTTP helper descriptor | `att-httphelper/v1.0` | [att-httphelper-v1.0.schema.json](../../schemas/att-httphelper-v1.0.schema.json) |
 | SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../../schemas/att-sshhelper-v1.0.schema.json) |
 | Tool group | `att-tool-group/v2.7` | [att-tool-group-v2.7.schema.json](../../schemas/att-tool-group-v2.7.schema.json) |
-| Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../../schemas/att-tool-group-v2.2.schema.json) |
+| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6` | [v2.2](../../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../../schemas/history/att-tool-group-v2.6.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../../schemas/att-sidecar-v2.2.schema.json) |
-| Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../../schemas/att-sidecar-v2.1.schema.json) |
+| Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../../schemas/history/att-sidecar-v2.1.schema.json) |
 | Template descriptor | `att-template/v3.1` | [att-template-v3.1.schema.json](../../schemas/att-template-v3.1.schema.json) |
-| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../../schemas/att-template-v3.0.schema.json) |
-| Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [att-template-v2.6.schema.json](../../schemas/att-template-v2.6.schema.json), [att-template-v2.5.schema.json](../../schemas/att-template-v2.5.schema.json) |
+| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../../schemas/history/att-template-v3.0.schema.json) |
+| Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [v2.6](../../schemas/history/att-template-v2.6.schema.json), [v2.5](../../schemas/history/att-template-v2.5.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../../schemas/att-validation-v2.1.schema.json) |
 | CI summary | `att-ci-summary/v2.1` | [att-ci-summary-v2.1.schema.json](../../schemas/att-ci-summary-v2.1.schema.json) |
 | JUnit XML | XSD | [att-junit-v2.1.xsd](../../schemas/att-junit-v2.1.xsd) |
 | Diagnostic codes | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../../schemas/diagnostic-codes.yaml) |
 
-All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
+Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
 
 ### Global configuration
 
@@ -181,7 +183,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | `att-config/v2.6`; V2.1/V2.2/V2.5 remain readable, but only V2.6 Tool descriptors accept `call`/`cache` |
+| `schemaVersion` | required | Current: `att-config/v2.8`; v2.1–v2.7 remain readable under their declared contracts. The example above intentionally shows v2.6. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -202,7 +204,8 @@ environments:
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths; v2.7 only |
-| `environments` | absent | Non-empty map of profile names; v2.7 profiles may contain `dbhelpers`, `mqhelpers`, and/or `sshhelpers` typed lists |
+| `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.0` YAML paths; v2.8 only |
+| `environments` | absent | Non-empty map of profile names; v2.8 profiles may also contain `httphelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -210,7 +213,7 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |

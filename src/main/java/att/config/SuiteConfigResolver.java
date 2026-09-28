@@ -34,8 +34,10 @@ public final class SuiteConfigResolver {
             boolean current = Version.SIDECAR_SCHEMA.equals(schemaVersion);
             boolean legacy = Version.LEGACY_SIDECAR_SCHEMA.equals(schemaVersion);
             if (!(current || legacy)) throw new IllegalArgumentException("Unsupported sidecar schemaVersion: " + schemaVersion);
-            Path schema = projectRoot.resolve(current ? "schemas/att-sidecar-v2.2.schema.json" : "schemas/att-sidecar-v2.1.schema.json");
-            if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
+            Path schema = att.validation.SchemaFiles.resolve(projectRoot, current ? "att-sidecar-v2.2.schema.json" : "att-sidecar-v2.1.schema.json");
+            if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+                    att.validation.SchemaFiles.resolve(projectRoot, "att-sidecar-v2.2.schema.json"), map,
+                    schemaVersion, Version.SIDECAR_SCHEMA);
             SchemaSupport.requireVersion(map, schemaVersion, "sidecar");
             SchemaSupport.rejectUnknown(map, "sidecar", "schemaVersion", "id", "excel", "stages", "report");
             String workbookId = required(map, "id");

@@ -76,6 +76,7 @@ public final class DebugEngine {
         CaseRuntimeContext context = null;
         CaseExecutionLog log = null;
         DbHelperExecutor db = null;
+        att.exec.HttpHelperExecutor http = null;
         boolean caseStarted = false;
         boolean stageStarted = false;
         boolean stageFinished = false;
@@ -115,7 +116,8 @@ public final class DebugEngine {
             caseStarted = true;
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config);
-            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(toolInvoker, db, mq,
+            http = new att.exec.HttpHelperExecutor(projectRoot, config);
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(toolInvoker, db, mq, http,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             actionResults.addAll(new att.template.StageTemplateRunner(engine, resolved.flows)
                     .execute(stage.key(), resolved.template, context, log));
@@ -164,6 +166,7 @@ public final class DebugEngine {
             }
             if (log != null) try { log.close(); } catch (Exception ignored) { }
             if (db != null) db.close();
+            if (http != null) http.close();
         }
 
         long durationMs = Duration.between(started, Instant.now()).toMillis();

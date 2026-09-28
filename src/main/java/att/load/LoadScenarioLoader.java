@@ -43,15 +43,17 @@ public final class LoadScenarioLoader {
             Path schema;
             if (Version.LOAD_SCHEMA.equals(version)) {
                 applyLegacyOverrides(map, effectiveOverrides);
-                schema = projectRoot.resolve("schemas/att-load-v1.0.schema.json");
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.0.schema.json");
             } else if (Version.LOAD_SCHEMA_V1_1.equals(version)) {
                 applyV11Overrides(map, effectiveOverrides);
-                schema = projectRoot.resolve("schemas/att-load-v1.1.schema.json");
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.1.schema.json");
             } else {
                 throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; expected "
                         + Version.LOAD_SCHEMA + " or " + Version.LOAD_SCHEMA_V1_1);
             }
-            if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+            if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+                    att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.1.schema.json"), map,
+                    version, Version.LOAD_SCHEMA_CURRENT);
             if (Version.LOAD_SCHEMA.equals(version)) {
                 SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA, "load scenario");
                 return semanticV10(source, map);

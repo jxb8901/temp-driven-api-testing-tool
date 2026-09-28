@@ -1013,6 +1013,13 @@ public final class PackageValidator {
             }
             return;
         }
+        if (parsed.name().startsWith("http.")) {
+            String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!format.isEmpty() && !("raw".equals(format) || "text".equals(format) || "json".equals(format)
+                    || "yaml".equals(format) || "xml".equals(format)))
+                throw new IllegalArgumentException("HTTP result.format must be raw, text, json, yaml, or xml: " + action.id());
+            return;
+        }
         boolean builtIn = BUILT_INS.contains(parsed.name().toLowerCase(java.util.Locale.ROOT));
         ToolConfig configured = config.tool(parsed.name());
         boolean callBacked = configured != null && configured.callBacked();
@@ -1694,6 +1701,11 @@ public final class PackageValidator {
             validateMqCall(parsed, config);
             return;
         }
+        if (toolName.startsWith("http.")) {
+            if (!allowWriteFacade) throw new IllegalArgumentException("HTTP operations may only be the primary call of a type: tool Action");
+            validateHttpCall(parsed, config);
+            return;
+        }
         if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
@@ -1740,6 +1752,57 @@ public final class PackageValidator {
         for (ToolArgumentConfig argument : tool.arguments().values()) if (argument.required() && !supplied.contains(argument.key())) throw toolCallError(tool,
                 "Missing required argument '" + argument.key() + "'", "required=true; supplied arguments=" + supplied,
                 "Add " + argument.key() + "=<value> to the call.");
+    }
+
+    private void validateHttpCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length != 3 || parts[1].isEmpty() || !("request".equals(parts[2])
+                || "get".equals(parts[2]) || "post".equals(parts[2]) || "put".equals(parts[2])
+                || "patch".equals(parts[2]) || "delete".equals(parts[2]) || "head".equals(parts[2])
+                || "options".equals(parts[2])))
+            throw new IllegalArgumentException("HTTP call must be http.<helper>.request|get|post|put|patch|delete|head|options");
+        if (config.httpHelper(parts[1]) == null) throw new IllegalArgumentException("Unknown HTTP helper: " + parts[1]);
+        Set<String> supplied = new LinkedHashSet<String>();
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            String key = argument.key();
+            if (argument.positional()) throw new IllegalArgumentException("HTTP call requires named arguments");
+            if (!("method".equals(key) || "path".equals(key) || "query".equals(key) || "headers".equals(key)
+                    || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
+                    || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
+                    || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)))
+                throw new IllegalArgumentException("Unknown HTTP argument: " + key);
+            if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate HTTP argument: " + key);
+            String expression = argument.expression();
+            if (expression.contains("${") || expression.contains("#{")) continue;
+            Object value = callParser.literal(expression);
+            if ("method".equals(key)) {
+                if (!(value instanceof String) || !String.valueOf(value).toUpperCase(java.util.Locale.ROOT)
+                        .matches("GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"))
+                    throw new IllegalArgumentException("Unsupported HTTP method");
+            } else if ("path".equals(key)) {
+                if (!(value instanceof String)) throw new IllegalArgumentException("HTTP path must be a string");
+                String path = (String) value;
+                if (path.startsWith("//") || path.contains("?") || path.contains("#"))
+                    throw new IllegalArgumentException("HTTP path must be relative and query/fragment-free");
+                try { if (new java.net.URI(path).isAbsolute()) throw new IllegalArgumentException("Absolute per-call HTTP URL is forbidden"); }
+                catch (java.net.URISyntaxException invalid) { throw new IllegalArgumentException("Invalid HTTP path"); }
+            } else if ("connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
+                    || "connectionRequestTimeoutMs".equals(key)) {
+                if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).longValue()
+                        || ((Number) value).longValue() < 1 || ((Number) value).longValue() > 3600000)
+                    throw new IllegalArgumentException("HTTP timeout must be 1..3600000 ms: " + key);
+            } else if ("followRedirects".equals(key) && !(value instanceof Boolean))
+                throw new IllegalArgumentException("HTTP followRedirects must be boolean");
+        }
+        if ("request".equals(parts[2]) && !supplied.contains("method"))
+            throw new IllegalArgumentException("http.<helper>.request requires method");
+        if (!"request".equals(parts[2]) && supplied.contains("method"))
+            throw new IllegalArgumentException("HTTP method argument is only valid with request()");
+        if (supplied.contains("file") && supplied.contains("body"))
+            throw new IllegalArgumentException("HTTP file and body are mutually exclusive");
+        if (("get".equals(parts[2]) || "head".equals(parts[2]))
+                && (supplied.contains("file") || supplied.contains("body")))
+            throw new IllegalArgumentException("HTTP GET/HEAD do not accept a request body");
     }
 
     private void validateMqCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {

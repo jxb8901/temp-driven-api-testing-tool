@@ -2,11 +2,15 @@
 
 ### Start with validation
 
-Run this after every workbook, sidecar, template, or tool change:
+Run this after every workbook, sidecar, template, helper, or tool change:
 
 ```sh
 ./att.sh validate --package
 ```
+
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with `actions.fetch.result` should be upgraded to `att-flow/v3.1` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
+
+Current schemas are in [`schemas/`](../../schemas/); retained older versions are only in [`schemas/history/`](../../schemas/history/). Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
 
 Then use the diagnostic code and structured location. Do not automate against message text.
 

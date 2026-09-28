@@ -33,6 +33,10 @@ com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar
 com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar
 com/networknt/json-schema-validator/1.4.0/json-schema-validator-1.4.0.jar
 com/zaxxer/HikariCP/4.0.3/HikariCP-4.0.3.jar
+org/apache/httpcomponents/httpclient/4.5.13/httpclient-4.5.13.jar
+org/apache/httpcomponents/httpcore/4.4.13/httpcore-4.4.13.jar
+commons-logging/commons-logging/1.2/commons-logging-1.2.jar
+commons-codec/commons-codec/1.11/commons-codec-1.11.jar
 com/github/mwiede/jsch/2.28.2/jsch-2.28.2.jar
 com/ethlo/time/itu/1.8.0/itu-1.8.0.jar
 org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar

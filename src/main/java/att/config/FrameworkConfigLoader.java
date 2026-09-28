@@ -38,16 +38,20 @@ public final class FrameworkConfigLoader {
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> rawMap = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
-            boolean v27 = Version.CONFIG_SCHEMA.equals(schemaVersion);
-            boolean v26 = Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v28 = Version.CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v27 = Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v26 = "att-config/v2.6".equals(schemaVersion);
             boolean v25 = Version.LEGACY_CONFIG_SCHEMA.equals(schemaVersion);
             boolean v22 = "att-config/v2.2".equals(schemaVersion);
-            if (!(v27 || v26 || v25 || v22 || "att-config/v2.1".equals(schemaVersion))) throw new IllegalArgumentException("Unsupported config schemaVersion: " + schemaVersion);
+            if (!(v28 || v27 || v26 || v25 || v22 || "att-config/v2.1".equals(schemaVersion))) throw new IllegalArgumentException("Unsupported config schemaVersion: " + schemaVersion);
             projectRoot = projectRoot.toAbsolutePath().normalize();
-            String schemaName = v27 ? "att-config-v2.7.schema.json" : (v26 ? "att-config-v2.6.schema.json" : (v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json")));
+            String schemaName = v28 ? "att-config-v2.8.schema.json" : (v27 ? "att-config-v2.7.schema.json" : (v26 ? "att-config-v2.6.schema.json" : (v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json"))));
             Path schema = schema(projectRoot, schemaName);
-            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, rawMap); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
-            SchemaSupport.rejectUnknown(rawMap, "config", v27
+            if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+                    schema(projectRoot, "att-config-v2.8.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
+            SchemaSupport.rejectUnknown(rawMap, "config", v28
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "ssh", "tools", "environments"}
+                    : v27
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "ssh", "tools", "environments"}
                     : v26
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "ssh", "tools", "environments"}
@@ -56,32 +60,36 @@ public final class FrameworkConfigLoader {
                     : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
                     : new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools"});
-            Map<String, Object> map = resolveEnvironment(rawMap, v27 || v26, v27, selectedEnvironment);
-            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, map); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
+            Map<String, Object> map = resolveEnvironment(rawMap, v28 || v27 || v26, v28 || v27, v28, selectedEnvironment);
+            if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+                    schema(projectRoot, "att-config-v2.8.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
-            Map<String, SshHelperConfig> sshHelpers = v27
+            Map<String, SshHelperConfig> sshHelpers = (v28 || v27)
                     ? new SshHelperConfigLoader().load(map.get("sshhelpers"), projectRoot)
                     : Collections.<String, SshHelperConfig>emptyMap();
+            Map<String, HttpHelperConfig> httpHelpers = v28
+                    ? new HttpHelperConfigLoader().load(map.get("httphelpers"), projectRoot)
+                    : Collections.<String, HttpHelperConfig>emptyMap();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
-                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "", "", "tools", path, v27 || v26, !(v27 || v26));
-                if (v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools, sshHelpers);
+                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "", "", "tools", path, v28 || v27 || v26, !(v28 || v27 || v26));
+                if (v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools, sshHelpers);
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
                         "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
-            Map<String, DbHelperConfig> dbHelpers = (v27 || v26 || v25)
+            Map<String, DbHelperConfig> dbHelpers = (v28 || v27 || v26 || v25)
                     ? new DbHelperConfigLoader().load(map.get("dbhelpers"), projectRoot)
                     : Collections.<String, DbHelperConfig>emptyMap();
-            Map<String, MqHelperConfig> mqHelpers = (v27 || v26)
+            Map<String, MqHelperConfig> mqHelpers = (v28 || v27 || v26)
                     ? new MqHelperConfigLoader().load(map.get("mqhelpers"), projectRoot)
                     : Collections.<String, MqHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
-                    templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, sshHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
+                    templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, sshHelpers, httpHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map));
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, path, e.field());
         } catch (Exception e) {
@@ -99,7 +107,8 @@ public final class FrameworkConfigLoader {
         }
     }
 
-    private static Map<String, Object> resolveEnvironment(Map<?, ?> raw, boolean profileSupported, boolean v27, String requested) {
+    private static Map<String, Object> resolveEnvironment(Map<?, ?> raw, boolean profileSupported, boolean sshSupported,
+                                                           boolean httpSupported, String requested) {
         Object configured = raw.get("environments");
         if (configured == null) {
             if (requested != null) throw new IllegalArgumentException("--env requires a profile config with an environments map");
@@ -121,11 +130,13 @@ public final class FrameworkConfigLoader {
             names.put(canonical, name);
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Environment profile must be a map: " + name);
             Map<?, ?> profile = (Map<?, ?>) entry.getValue();
-            if (v27) SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers", "sshhelpers");
+            if (httpSupported) SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers");
+            else if (sshSupported) SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers", "sshhelpers");
             else SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers");
             if (profile.containsKey("dbhelpers")) validateProfileList(profile.get("dbhelpers"), "config.environments." + name + ".dbhelpers");
             if (profile.containsKey("mqhelpers")) validateProfileList(profile.get("mqhelpers"), "config.environments." + name + ".mqhelpers");
             if (profile.containsKey("sshhelpers")) validateProfileList(profile.get("sshhelpers"), "config.environments." + name + ".sshhelpers");
+            if (profile.containsKey("httphelpers")) validateProfileList(profile.get("httphelpers"), "config.environments." + name + ".httphelpers");
         }
 
         String requestedName = requested;
@@ -146,6 +157,7 @@ public final class FrameworkConfigLoader {
         if (profile.containsKey("dbhelpers")) effective.put("dbhelpers", profile.get("dbhelpers"));
         if (profile.containsKey("mqhelpers")) effective.put("mqhelpers", profile.get("mqhelpers"));
         if (profile.containsKey("sshhelpers")) effective.put("sshhelpers", profile.get("sshhelpers"));
+        if (profile.containsKey("httphelpers")) effective.put("httphelpers", profile.get("httphelpers"));
         effective.put("environment", canonical);
         return effective;
     }
@@ -166,8 +178,9 @@ public final class FrameworkConfigLoader {
     }
 
     private static Path schema(Path projectRoot, String name) {
-        Path cwd = Paths.get("").toAbsolutePath().resolve("schemas").resolve(name);
-        return Files.isRegularFile(cwd) ? cwd : projectRoot.resolve("schemas").resolve(name);
+        Path packageSchema = att.validation.SchemaFiles.resolve(projectRoot, name);
+        return Files.isRegularFile(packageSchema) ? packageSchema
+                : att.validation.SchemaFiles.resolve(Paths.get("").toAbsolutePath(), name);
     }
 
     private static String xmlNamespaceMode(Map<?, ?> map) {
@@ -481,7 +494,8 @@ public final class FrameworkConfigLoader {
             boolean v26 = Version.PREVIOUS_TOOL_GROUP_SCHEMA.equals(version);
             if (!(v27 || v26 || Version.LEGACY_TOOL_GROUP_SCHEMA.equals(version))) throw new IllegalArgumentException("Unsupported tool group schemaVersion: " + version);
             Path schema = schema(projectRoot, v27 ? "att-tool-group-v2.7.schema.json" : (v26 ? "att-tool-group-v2.6.schema.json" : "att-tool-group-v2.2.schema.json"));
-            if (Files.isRegularFile(schema)) try { att.validation.JsonSchemaVerifier.verify(schema, group); } catch (Exception e) { throw new IllegalArgumentException(e.getMessage(), e); }
+            if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+                    schema(projectRoot, "att-tool-group-v2.7.schema.json"), group, version, Version.TOOL_GROUP_SCHEMA);
             SchemaSupport.rejectUnknown(group, "tool group", "schemaVersion", "id", "name", "description", "script", "ssh", "tools");
             String id = required(group, "id", "tool group");
             if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Tool group id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);

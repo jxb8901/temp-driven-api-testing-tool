@@ -528,8 +528,10 @@ public class StageTemplateRunner {
                 if (saved != null && !targets.contains(String.valueOf(saved))) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
+                if (invocation.get("HTTP") != null) node.put("HTTP", invocation.get("HTTP"));
                 if (!operation.executionSuccess()) {
-                    if ("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata()))
+                    if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
+                            || ("http".equals(kind) && httpTimeout(operation.outputMetadata())))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");
                         waitBeforeRetry(intervalMs);
@@ -589,6 +591,12 @@ public class StageTemplateRunner {
         if (!(error instanceof Map)) return null;
         Object type = ((Map<String, Object>) error).get("type");
         return type == null ? null : String.valueOf(type);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean httpTimeout(Map<String, Object> outputMetadata) {
+        String type = mqErrorType(outputMetadata);
+        return "HTTP_TIMEOUT".equals(type) || "HTTP_POOL_TIMEOUT".equals(type);
     }
 
     private void runEvidenceCollectors(TemplateAction action, int attempt, CaseRuntimeContext context,

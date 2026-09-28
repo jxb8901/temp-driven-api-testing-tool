@@ -67,7 +67,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-The current global configuration schema is `att-config/v2.7` (v2.6 remains readable). Tool groups with logical SSH bindings use `att-tool-group/v2.7` and `att-sshhelper/v1.0`. Templates/Flows, DBHelper, MQHelper, debug and load scenarios have their own versioned schemas under `schemas/`.
+The current global configuration schema is `att-config/v2.8` (older supported versions remain readable). HTTPHelper uses `att-httphelper/v1.0` and environment-bound `httphelpers`; Tool groups with logical SSH bindings use `att-tool-group/v2.7` and `att-sshhelper/v1.0`. Current schemas live under `schemas/`, with retained legacy schemas under `schemas/history/` for compatibility validation and migration guidance.
 
 ## Build and validation
 

@@ -2,11 +2,15 @@
 
 ### 先从校验开始
 
-在每次工作簿、侧车、模板或工具变更后执行：
+在每次工作簿、侧车、模板、helper 或工具变更后执行：
 
 ```sh
 ./att.sh validate --package
 ```
+
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如 `att-flow/v3.0` 的 `actions.fetch.result` 應升至 `att-flow/v3.1` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
+
+現行 schema 位於 [`schemas/`](../../schemas/)，保留的舊版僅位於 [`schemas/history/`](../../schemas/history/)。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
 
 然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。
 

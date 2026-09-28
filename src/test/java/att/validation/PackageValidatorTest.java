@@ -21,6 +21,37 @@ class PackageValidatorTest {
         return result;
     }
 
+    @Test void validatesHttpPrimaryCallsBeforeNetworkExecution() throws Exception {
+        att.config.HttpHelperConfig helper = new att.config.HttpHelperConfig("paymentApi",
+                new java.net.URI("https://sit.example.internal"), Collections.<String, String>emptyMap(),
+                5000, 30000, false, 10, 5, 1000, 30000, 60000,
+                "none", "", "", "", null, "");
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000,
+                tempDir, tempDir, Collections.<String, ToolConfig>emptyMap(),
+                Collections.<String, DbHelperConfig>emptyMap(), Collections.<String, MqHelperConfig>emptyMap(),
+                Collections.<String, SshHelperConfig>emptyMap(), Collections.singletonMap("paymentApi", helper),
+                null, null, null, "", "", null, null, 1, "ignore", "", false,
+                ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        TemplateAction valid = new TemplateAction("fetch", map("type", "tool",
+                "call", "#{http.paymentApi.get(path='/v1/orders', query={status:'OPEN'})}",
+                "result", map("format", "json")), "att-template/v3.1");
+        assertDoesNotThrow(() -> contract.invoke(validator,
+                new StageTemplate("HTTP", tempDir, Collections.singletonList(valid), "att-template/v3.1"), config));
+        for (String invalid : Arrays.asList(
+                "#{http.paymentApi.get(path='https://other.example/')}",
+                "#{http.paymentApi.get(path='/x', body='forbidden')}",
+                "#{http.missing.get(path='/x')}",
+                "#{http.paymentApi.request(path='/x')}",
+                "#{http.paymentApi.post(path='/x', body='x', file='payload.bin')}")) {
+            TemplateAction action = new TemplateAction("bad", map("type", "tool", "call", invalid), "att-template/v3.1");
+            assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                    new StageTemplate("HTTP", tempDir, Collections.singletonList(action), "att-template/v3.1"), config), invalid);
+        }
+    }
+
     @Test void validatesFirstClassDbActionsAndExpressionSourcesWithoutConnecting() throws Exception {
         Files.createDirectories(tempDir.resolve("sql"));
         Files.write(tempDir.resolve("sql/find.sql"), "select id from orders where id = ?".getBytes("UTF-8"));

@@ -8,6 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Draft 2020-12 validation backed by the NetworkNT production validator. */
 public final class JsonSchemaVerifier {
@@ -15,6 +17,7 @@ public final class JsonSchemaVerifier {
     private static final Map<SchemaKey, com.networknt.schema.JsonSchema> CACHE = new LinkedHashMap<SchemaKey, com.networknt.schema.JsonSchema>();
     private static final AtomicLong COMPILES = new AtomicLong();
     private static final AtomicLong HITS = new AtomicLong();
+    private static final Pattern UNKNOWN_PROPERTY = Pattern.compile("property '([A-Za-z_][A-Za-z0-9_-]*)' is not defined in the schema");
     private JsonSchemaVerifier() {}
     public static void verify(Path schemaFile, Object document) throws Exception { JsonNode value = document instanceof JsonNode ? (JsonNode) document : JSON.valueToTree(document); verify(compiled(schemaFile), value); }
     public static void verifyJson(Path schemaFile, Path documentFile) throws Exception { try (java.io.InputStream input = Files.newInputStream(documentFile)) { verify(compiled(schemaFile), JSON.readTree(input)); } }
@@ -29,6 +32,8 @@ public final class JsonSchemaVerifier {
             for (com.networknt.schema.ValidationMessage error : errors) {
                 String field = String.valueOf(error.getInstanceLocation());
                 if (field == null || "null".equals(field) || field.isEmpty()) field = "$";
+                Matcher unknownProperty = UNKNOWN_PROPERTY.matcher(error.getMessage());
+                if (unknownProperty.find()) field += "." + unknownProperty.group(1);
                 if (firstField == null || field.compareTo(firstField) < 0) firstField = field;
                 messages.add(field + ": " + error.getMessage() + " (keyword=" + error.getCode() + ")");
                 details.add(new SchemaViolation(field, error.getMessage(), error.getCode()));

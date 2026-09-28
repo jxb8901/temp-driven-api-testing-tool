@@ -108,6 +108,6 @@ class DebugEngineTest {
     }
 
     private void copySchema(String name, Path project) throws Exception {
-        Files.copy(Paths.get("schemas").resolve(name), project.resolve("schemas").resolve(name));
+        Files.copy(att.validation.SchemaFiles.resolve(Paths.get("").toAbsolutePath(), name), project.resolve("schemas").resolve(name));
     }
 }

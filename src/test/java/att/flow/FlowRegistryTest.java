@@ -25,7 +25,7 @@ class FlowRegistryTest {
         Files.createDirectories(schemaDirectory);
         for (String schema : new String[]{"att-flow-v3.0.schema.json", "att-flow-v3.1.schema.json",
                 "att-template-v3.0.schema.json", "att-template-v3.1.schema.json"}) {
-            Files.copy(java.nio.file.Paths.get("schemas", schema), schemaDirectory.resolve(schema));
+            Files.copy(att.validation.SchemaFiles.resolve(java.nio.file.Paths.get("").toAbsolutePath(), schema), schemaDirectory.resolve(schema));
         }
         String currentResult = "schemaVersion: att-flow/v3.1\nid: common.result.v1\nname: Result\ndescription: Result flow\nactions:\n"
                 + "  save: {type: tool, call: \"#{upper('ok')}\", result: {format: text, path: value.txt}}\n";

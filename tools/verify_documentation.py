@@ -253,7 +253,7 @@ def check_schema_references():
             tokens.update(re.findall(r"\batt-[a-z0-9-]+/v[0-9]+(?:\.[0-9]+)*\b",
                                      read(path), re.I))
 
-    schema_corpus = "\n".join(read(path) for path in SCHEMAS.iterdir()
+    schema_corpus = "\n".join(read(path) for path in SCHEMAS.rglob("*")
                                 if path.is_file() and path.suffix.lower() in
                                 (".json", ".xsd", ".yaml", ".yml"))
     for token in sorted(tokens):
@@ -264,7 +264,7 @@ def check_schema_references():
     if not catalog.is_file():
         fail("missing schemas/catalog.yaml")
     else:
-        for filename in re.findall(r":\s*([A-Za-z0-9._-]+\.(?:json|xsd))\s*$",
+        for filename in re.findall(r":\s*((?:history/)?[A-Za-z0-9._-]+\.(?:json|xsd))\s*$",
                                    read(catalog), re.M):
             if not (SCHEMAS / filename).is_file():
                 fail("schemas/catalog.yaml references missing schema file: %s" % filename)

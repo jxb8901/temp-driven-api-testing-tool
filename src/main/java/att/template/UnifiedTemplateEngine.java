@@ -12,6 +12,7 @@ import att.exec.DbHelperExecutor;
 import att.exec.DbInvocationResult;
 import att.exec.MqHelperExecutor;
 import att.exec.MqInvocationResult;
+import att.exec.HttpHelperExecutor;
 import att.config.ToolConfig;
 
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ public class UnifiedTemplateEngine {
     private final ToolInvoker toolInvoker;
     private final DbHelperExecutor dbHelperExecutor;
     private final MqHelperExecutor mqHelperExecutor;
+    private final HttpHelperExecutor httpHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
     private final ExpressionBlockEvaluator expressionBlocks = new ExpressionBlockEvaluator();
     private final BuiltInProvider builtIns;
@@ -62,9 +64,16 @@ public class UnifiedTemplateEngine {
 
     public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
                                  MqHelperExecutor mqHelperExecutor, BuiltInProvider builtIns) {
+        this(toolInvoker, dbHelperExecutor, mqHelperExecutor, null, builtIns);
+    }
+
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                 MqHelperExecutor mqHelperExecutor, HttpHelperExecutor httpHelperExecutor,
+                                 BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
         this.dbHelperExecutor = dbHelperExecutor;
         this.mqHelperExecutor = mqHelperExecutor;
+        this.httpHelperExecutor = httpHelperExecutor;
         this.builtIns = builtIns;
         if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
     }
@@ -80,6 +89,7 @@ public class UnifiedTemplateEngine {
         ToolCallParser.ParsedCall parsed = callParser.parse(call);
         if (parsed.name().startsWith("db.")) return "db";
         if (parsed.name().startsWith("mq.")) return "mq";
+        if (parsed.name().startsWith("http.")) return "http";
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return "builtin";
         ToolConfig tool = toolInvoker == null ? null : toolInvoker.tool(parsed.name());
         return tool != null && tool.callBacked() ? "call-tool" : "tool";
@@ -319,6 +329,14 @@ public class UnifiedTemplateEngine {
             context.setMqHelperMetadata(name.split("\\.", -1)[1]);
             if (!attempt) throw new IllegalArgumentException("An MQ operation must be the primary call of a type: tool Action");
             return executeMqResolvedCall(name, input, context, log, timeoutMs, invocationId, actionId, saveAs, saveFormat, overwrite);
+        }
+        if (name.startsWith("http.")) {
+            if (!attempt) throw new IllegalArgumentException("An HTTP operation must be the primary call of a type: tool Action");
+            if (httpHelperExecutor == null) throw new IllegalStateException("HTTP invocation is unavailable: " + name);
+            String[] parts = name.split("\\.", -1);
+            if (parts.length != 3) throw new IllegalArgumentException("HTTP call must be http.<helper>.<method>: " + name);
+            String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
+            return httpHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, saveFormat);
         }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             context.setToolMetadata(name);

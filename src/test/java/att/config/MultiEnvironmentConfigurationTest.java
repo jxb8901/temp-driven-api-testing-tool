@@ -24,8 +24,8 @@ class MultiEnvironmentConfigurationTest {
         Map<?, ?> sit = yaml(root.resolve("config/environments/sit.yaml"));
         Map<?, ?> uat = yaml(root.resolve("config/environments/uat.yaml"));
 
-        JsonSchemaVerifier.verify(root.resolve("schemas/att-config-v2.6.schema.json"), sit);
-        JsonSchemaVerifier.verify(root.resolve("schemas/att-config-v2.6.schema.json"), uat);
+        JsonSchemaVerifier.verify(root.resolve("schemas/history/att-config-v2.6.schema.json"), sit);
+        JsonSchemaVerifier.verify(root.resolve("schemas/history/att-config-v2.6.schema.json"), uat);
 
         assertEquals("SIT", sit.get("environment"));
         assertEquals("UAT", uat.get("environment"));
@@ -44,8 +44,8 @@ class MultiEnvironmentConfigurationTest {
 
         validateDescriptor(sit, "dbhelpers", "schemas/att-dbhelper-v2.5.schema.json");
         validateDescriptor(uat, "dbhelpers", "schemas/att-dbhelper-v2.5.schema.json");
-        validateDescriptor(sit, "mqhelpers", "schemas/att-mqhelper-v1.0.schema.json");
-        validateDescriptor(uat, "mqhelpers", "schemas/att-mqhelper-v1.0.schema.json");
+        validateDescriptor(sit, "mqhelpers", "schemas/history/att-mqhelper-v1.0.schema.json");
+        validateDescriptor(uat, "mqhelpers", "schemas/history/att-mqhelper-v1.0.schema.json");
 
         Map<?, ?> sitDb = yaml(root.resolve("config/dbhelpers/sit/orders.yaml"));
         Map<?, ?> uatDb = yaml(root.resolve("config/dbhelpers/uat/orders.yaml"));
