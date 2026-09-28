@@ -3,6 +3,7 @@ package att.template;
 
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
+import att.core.InternalExceptionLogger;
 import att.core.ResultStatus;
 import att.core.ValidationResult;
 import att.exec.ActionExecutionResult;
@@ -116,6 +117,11 @@ public class StageTemplateRunner {
                         reportExpected, assertionReport ? actual : "", assertionMessage(output), actionDiagnostic));
                 if (status != ResultStatus.PASS && stopOnFailure(action)) break;
             } catch (Exception e) {
+                String internalPhase = "tool".equalsIgnoreCase(action.type()) ? "tool.call"
+                        : "db".equalsIgnoreCase(action.type())
+                        ? (action.query().isEmpty() ? "db.update" : "db.query")
+                        : action.type().toLowerCase(java.util.Locale.ROOT) + "." + executionField;
+                InternalExceptionLogger.logIfInternal(log, internalPhase, e, java.util.Collections.<String>emptyList());
                 att.validation.DiagnosticException typed = detailed(e, template, action, executionField).withContext(context.diagnosticContext());
                 String message = typed.format();
                 output.put("status", "ERROR");
@@ -237,7 +243,9 @@ public class StageTemplateRunner {
                         att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
                         "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
             }
-            Object value = templateEngine.parseRendered(rendered, format);
+            // Render produces a typed String. result.format controls only the
+            // saved/logged representation and never reparses output.result.
+            Object value = rendered;
             if (resultConfig.configured()) {
                 if (console(configuredPath)) {
                     log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, value));
@@ -403,9 +411,6 @@ public class StageTemplateRunner {
 
             ActionExecutionResult operationResult = result.operationResult();
             publishOperationResult(output, operationResult);
-            if (action.resultConfig().specified() && "text".equalsIgnoreCase(action.resultConfig().format())) {
-                output.put("result", artifactWriter.renderDb("text", operationResult.result()));
-            }
             Map<String, Object> attempt = new LinkedHashMap<String, Object>();
             attempt.put("attempt", number);
             attempt.put("invocationId", invocationId);
@@ -489,27 +494,25 @@ public class StageTemplateRunner {
         String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
         boolean console = console(saveAs);
         String kind = templateEngine.callKind(action.call());
-        String format = save.specified() ? toolFormat(save, kind) : "";
+        String format = save.specified() ? toolFormat(save, kind, action.call()) : "";
         boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             try {
                 // Process capture files are bounded stream/log evidence, not the
                 // selected Action result. Persist raw output.result through the
                 // common writer so output.result and result.path cannot diverge.
-                String operationSaveAs = "mq".equals(kind) ? saveAs : "";
+                String operationSaveAs = "";
                 att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
-                        context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, format,
+                        context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, "",
                         save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
                 ActionExecutionResult operation = result.operationResult();
-                Object selectedResult = resultValue(action, kind, result, operation.result(), format);
-                if (save.configured() && !"mq".equals(kind)) {
+                Object selectedResult = resultValue(operation.result());
+                if (save.configured()) {
                     if (console) {
-                        if (!("tool".equals(kind) && "raw".equals(format))) {
-                            try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, selectedResult)); }
-                            catch (Exception error) { recordEvidenceError(output, error); }
-                        }
+                        try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, selectedResult)); }
+                        catch (Exception error) { recordEvidenceError(output, error); }
                     } else {
                         Path saved = artifactWriter.write(context, action.id(), saveAs, format, selectedResult,
                                 save.overwrite() || actionOwnedArtifact);
@@ -528,8 +531,10 @@ public class StageTemplateRunner {
                 if (saved != null && !targets.contains(String.valueOf(saved))) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
+                if (invocation.get("HTTP") != null) node.put("HTTP", invocation.get("HTTP"));
                 if (!operation.executionSuccess()) {
-                    if ("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata()))
+                    if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
+                            || ("http".equals(kind) && httpTimeout(operation.outputMetadata())))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");
                         waitBeforeRetry(intervalMs);
@@ -589,6 +594,12 @@ public class StageTemplateRunner {
         if (!(error instanceof Map)) return null;
         Object type = ((Map<String, Object>) error).get("type");
         return type == null ? null : String.valueOf(type);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean httpTimeout(Map<String, Object> outputMetadata) {
+        String type = mqErrorType(outputMetadata);
+        return "HTTP_TIMEOUT".equals(type) || "HTTP_POOL_TIMEOUT".equals(type);
     }
 
     private void runEvidenceCollectors(TemplateAction action, int attempt, CaseRuntimeContext context,
@@ -692,15 +703,12 @@ public class StageTemplateRunner {
         }
     }
 
-    private String toolFormat(ActionResultConfig save, String kind) {
-        String fallback = "builtin".equals(kind) ? "text" : ("call-tool".equals(kind) ? "" : "raw");
+    private String toolFormat(ActionResultConfig save, String kind, String call) {
+        String fallback = templateEngine.configuredToolResultFormat(call);
+        if (fallback == null || fallback.isEmpty()) fallback = "text";
         String format = requiredFormat(save, "Tool", fallback);
-        if (("builtin".equals(kind) || "call-tool".equals(kind)) && "raw".equals(format)) {
-            throw new IllegalArgumentException("Built-in and call-backed Tool result.format do not support raw; use text, json, yaml, or xml");
-        }
-        if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
-                || "yaml".equals(format) || "xml".equals(format))) {
-            throw new IllegalArgumentException("Tool result.format must be raw, text, json, yaml, or xml: " + format);
+        if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format))) {
+            throw new IllegalArgumentException("Tool result.format must be text, json, yaml, or xml: " + format);
         }
         return format;
     }
@@ -717,13 +725,7 @@ public class StageTemplateRunner {
 
     private boolean console(String path) { return "console".equalsIgnoreCase(path == null ? "" : path.trim()); }
 
-    private Object resultValue(TemplateAction action, String kind, att.exec.ToolInvocationResult invocation,
-                               Object nativeResult, String format) throws Exception {
-        if (!action.resultConfig().specified()) return nativeResult;
-        if ("raw".equalsIgnoreCase(format) && invocation.invocation().get("rawOutput") != null) return invocation.invocation().get("rawOutput");
-        if ("text".equalsIgnoreCase(format)) return nativeResult == null ? "" : String.valueOf(nativeResult);
-        if ("tool".equals(kind) && ("json".equalsIgnoreCase(format) || "yaml".equalsIgnoreCase(format) || "xml".equalsIgnoreCase(format))
-                && nativeResult instanceof String) return templateEngine.parseRendered((String) nativeResult, format);
+    private Object resultValue(Object nativeResult) {
         return nativeResult;
     }
 

@@ -136,7 +136,7 @@ ATT 会先将 `name` 作为全局唯一的符号名解析。只有在没有符�
 只有当目录直接包含 `template.yaml` 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。
 
 ```yaml
-schemaVersion: att-template/v3.1
+schemaVersion: att-template/v3.2
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -172,7 +172,7 @@ actions:
 | 类型 | 目的 | 必需字段 | 常见结果 |
 |---|---|---|---|
 | `render` | 渲染一个或多个 UTF-8 负载 | `type`、`payload`、`result.format`；`result.path` 可选 | 嵌套 `output.result` 与 `output.targetFiles` |
-| `tool` | 调用已配置的外部工具 | `type`、`call` | 嵌套类型化结果和进程证据 |
+| `tool` | 調用已配置或 framework-native Tool | `type`、`call` | 巢狀型別結果與 operation evidence |
 | `db` | 查询或更新已配置数据库 | `type`、`db`，以及恰好一个 `query`／`update` block | 稳定类型化 DB 结果与交易证据 |
 | `assert` | 计算布尔表达式 | `type`、`assert` | PASS/FAIL 或求值 ERROR；可选 Expected/Actual |
 | `log` | 写入渲染后的消息和/或 UTF-8 Case 输出文件 | `type`，至少包含 `message` 或 `file` | 合并内容、源路径和渲染字段 |
@@ -180,11 +180,11 @@ actions:
 
 动作按 YAML 顺序执行。动作 ID 在模板内唯一，且不能包含点号。每个动作都可以定义 `description` 和 `onFailure: stop|continue`。
 
-动作校验按类型进行。render 要求安全且非空的 payload glob，以及 `result.format: raw|text|json|yaml|xml`；可选 `result.path` 负责持久化。Tool、MQ receive/request 与 DB 共用同一个可选 `result` object。重试和 Action 级 timeout 仅对 Tool 动作有效。DB Action 必须指定已配置的 `db` ID，并在 `query` 与 `update` 中恰好选择一个；所选 block 又必须在 `sql` 与 `sqlFile` 中恰好选择一个。assert 动作要求 `assert`，并可包含 `expected` 和 `actual`；`expression`、`acture`、`actural` 都是非法字段。log 动作要求 `message`、`file` 或两者；并可使用 `level` 和 `fields`。assign 动作要求 `name` 和 `expression`。不支持的字段会报错，而不是被忽略。
+动作校验按类型进行。render 要求安全且非空的 payload glob，以及 `result.format: text|json|yaml|xml`；可选 `result.path` 负责持久化。Tool、MQ receive/request 与 DB 共用同一个可选 `result` object 和四种 presentation 格式。重试和 Action 级 timeout 仅对 Tool 动作有效。DB Action 必须指定已配置的 `db` ID，并在 `query` 与 `update` 中恰好选择一个；所选 block 又必须在 `sql` 与 `sqlFile` 中恰好选择一个。assert 动作要求 `assert`，并可包含 `expected` 和 `actual`；`expression`、`acture`、`actural` 都是非法字段。log 动作要求 `message`、`file` 或两者；并可使用 `level` 和 `fields`。assign 动作要求 `name` 和 `expression`。不支持的字段会报错，而不是被忽略。
 
-`result.format` 决定内存中的 `output.result` 表示；`result.path` 可选持久化同一个选定 typed value，不会改变该表示。省略 path 不会建立 artifact；`path: console` 只将选定表示写入 Case log。旧 `renderAs` 与 `saveAs` 会被拒绝，`att validate` 会提供迁移建议。
+Action `result.format` 只控制写入 `result.path` 或 `path: console` 的表示；不会重新解析或改变逻辑上的 `output.result`。`output.result` 始终保留操作本身产生的原生类型值。省略 path 不会建立 artifact。旧 `renderAs` 与 `saveAs` 会被拒绝，`att validate` 会提供迁移建议。
 
-对于已配置的 process Tool，`result.format: raw` 的 `output.result` 是经过 trim 的有限长度 stdout preview（`rawOutput`），而不是完整 capture file。指定真正的 `result.path` 时，会以 UTF-8 持久化完全相同的选定值，因此 Context 值与 artifact 的空白裁剪及 preview 截断行为一致。完整串流 stdout 仍作为独立的 process evidence/log capture 保存。
+对于 command-backed Tool，Tool descriptor 必需的 `result.format` 会把 stdout 解析为类型化主结果（`text`、`json`、`yaml` 或 `xml`）；有界／完整串流仍作为独立 process evidence 保存。Action 可选的 `result.format` 之后只影响 artifact/log 序列化，不改变已解析值。Call-backed Tool 与 HTTPHelper/MQHelper/DB 操作本身已返回原生类型值；Action 格式化不会改变它们。`raw` 不是共用 result 格式。
 
 每个动作都可以使用 `assert`，但 assert 动作本身把它作为必需主表达式。每个动作结果都嵌套在 `output` 下，包括 `status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及可选断言详情。操作错误保持 ERROR；否则显式断言决定 PASS/FAIL。一个已完成的工具进程即使返回非零退出码，也不会自动变成 ERROR：需要在 `assert` 中检查 `output.exitCode`。
 

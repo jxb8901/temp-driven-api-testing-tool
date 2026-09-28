@@ -136,7 +136,7 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
 
 ```yaml
-schemaVersion: att-template/v3.1
+schemaVersion: att-template/v3.2
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -155,7 +155,7 @@ actions:
     call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
     result:
       path: "${EXEC.INPUT.caseId}-response.json"
-      format: raw
+      format: json
       overwrite: false
     assert: "${output.result.status} == 'SUCCESS'"
   recordResult:
@@ -172,7 +172,7 @@ actions:
 | Type | Purpose | Required fields | Common result |
 |---|---|---|---|
 | `render` | Render one or more UTF-8 payloads | `type`, `payload`, `result.format`; optional `result.path` | nested `output.result` and `output.targetFiles` |
-| `tool` | Invoke a configured external tool | `type`, `call` | nested typed result and process evidence |
+| `tool` | Invoke a configured or framework-native Tool | `type`, `call` | nested typed result and operation evidence |
 | `db` | Query or update a configured database | `type`, `db`, exactly one `query`/`update` block | stable typed DB result and transaction evidence |
 | `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
 | `log` | Write a rendered message and/or UTF-8 Case-output file | `type`, at least one of `message` or `file` | combined content, source path, and rendered fields |
@@ -180,11 +180,11 @@ actions:
 
 Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
 
-Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: raw|text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
+Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object and the same four presentation formats. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
-`result.format` selects the in-memory `output.result` representation; `result.path` optionally persists that same selected, typed value without changing its representation. A pathless result creates no artifact; `path: console` writes the selected representation to the Case log only. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
+Action `result.format` controls only the representation written to `result.path` or `path: console`; it never reparses or changes the logical `output.result`. `output.result` remains the native typed value produced by the operation. A pathless result creates no artifact. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
 
-For a configured process Tool with `result.format: raw`, `output.result` is the trimmed, bounded stdout preview (`rawOutput`), not the complete capture file. A real `result.path` persists exactly that same selected value as UTF-8, so whitespace trimming and any preview truncation are consistent between the Context value and the artifact. Full streamed stdout remains separate process evidence/log capture.
+For a command-backed Tool, the Tool descriptor's required `result.format` parses stdout into the typed primary result (`text`, `json`, `yaml`, or `xml`); bounded/full stream capture remains separate process evidence. The Action's optional `result.format` then affects only artifact/log serialization and does not alter that parsed value. Call-backed Tools and HTTPHelper/MQHelper/DB operations already return native typed values; Action formatting never changes them. `raw` is not a supported common result format.
 
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 

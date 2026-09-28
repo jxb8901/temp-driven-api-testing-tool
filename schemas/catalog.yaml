@@ -2,29 +2,37 @@ schemaVersion: att-schema-catalog/v3.0
 schemas:
   att-debug/v1.0: att-debug-v1.0.schema.json
   att-load/v1.1: att-load-v1.1.schema.json
-  att-load/v1.0: att-load-v1.0.schema.json
+  att-load/v1.0: history/att-load-v1.0.schema.json
   att-load-summary/v1.0: att-load-summary-v1.0.schema.json
-  globalConfig: att-config-v2.7.schema.json
-  previousGlobalConfig: att-config-v2.6.schema.json
-  legacyGlobalConfigV25: att-config-v2.5.schema.json
-  legacyGlobalConfig: att-config-v2.2.schema.json
-  legacyGlobalConfigV21: att-config-v2.1.schema.json
+  globalConfig: att-config-v2.9.schema.json
+  previousGlobalConfig: history/att-config-v2.8.schema.json
+  previousGlobalConfigV27: history/att-config-v2.7.schema.json
+  legacyGlobalConfigV26: history/att-config-v2.6.schema.json
+  legacyGlobalConfigV25: history/att-config-v2.5.schema.json
+  legacyGlobalConfig: history/att-config-v2.2.schema.json
+  legacyGlobalConfigV21: history/att-config-v2.1.schema.json
   dbhelper: att-dbhelper-v2.5.schema.json
-  toolGroup: att-tool-group-v2.7.schema.json
-  previousToolGroup: att-tool-group-v2.6.schema.json
+  toolGroup: att-tool-group-v2.8.schema.json
+  previousToolGroup: history/att-tool-group-v2.7.schema.json
+  previousToolGroupV26: history/att-tool-group-v2.6.schema.json
   sshhelper: att-sshhelper-v1.0.schema.json
-  legacyToolGroup: att-tool-group-v2.2.schema.json
+  httphelper: att-httphelper-v1.0.schema.json
+  legacyToolGroup: history/att-tool-group-v2.2.schema.json
   sidecar: att-sidecar-v2.2.schema.json
-  legacySidecar: att-sidecar-v2.1.schema.json
+  legacySidecar: history/att-sidecar-v2.1.schema.json
   testcaseSnapshot: att-testcases-v2.4.xsd
-  template: att-template-v3.1.schema.json
-  flow: att-flow-v3.1.schema.json
-  mqhelper: att-mqhelper-v1.0.schema.json
-  mqhelperV11: att-mqhelper-v1.1.schema.json
-  legacyTemplateV26: att-template-v2.6.schema.json
-  legacyTemplateV25: att-template-v2.5.schema.json
-  legacyTemplateV23: att-template-v2.3.schema.json
-  legacyFlowV30: att-flow-v3.0.schema.json
+  template: att-template-v3.2.schema.json
+  previousTemplateV31: history/att-template-v3.1.schema.json
+  flow: att-flow-v3.2.schema.json
+  previousFlowV31: history/att-flow-v3.1.schema.json
+  mqhelper: att-mqhelper-v1.1.schema.json
+  legacyMqhelperV10: history/att-mqhelper-v1.0.schema.json
+  legacyTemplateV30: history/att-template-v3.0.schema.json
+  legacyTemplateV26: history/att-template-v2.6.schema.json
+  legacyTemplateV25: history/att-template-v2.5.schema.json
+  legacyTemplateV23: history/att-template-v2.3.schema.json
+  legacyTemplateV21: history/att-template-v2.1.schema.json
+  legacyFlowV30: history/att-flow-v3.0.schema.json
   runManifest: att-run-v2.1.schema.json
   validation: att-validation-v2.1.schema.json
   ciSummary: att-ci-summary-v2.1.schema.json

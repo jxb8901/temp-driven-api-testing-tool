@@ -35,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class FrameworkEngineTest {
     @TempDir Path projectRoot;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(projectRoot); }
+
     @Test
     void runsNestedV31FlowThroughFullCaseLifecycle() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),

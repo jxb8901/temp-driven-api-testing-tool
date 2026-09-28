@@ -107,7 +107,8 @@ public class FrameworkEngine {
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, suiteConfig);
             att.exec.MqHelperExecutor mqHelperExecutor = new att.exec.MqHelperExecutor(projectRoot, suiteConfig);
-            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor, runBuiltIns);
+            att.exec.HttpHelperExecutor httpHelperExecutor = new att.exec.HttpHelperExecutor(projectRoot, suiteConfig);
+            UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor, runBuiltIns);
             StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
@@ -124,7 +125,7 @@ public class FrameworkEngine {
                         break;
                     }
                 }
-            } finally { dbHelperExecutor.close(); }
+            } finally { dbHelperExecutor.close(); httpHelperExecutor.close(); }
             suiteReportResults.put(suitePlan, new ArrayList<TestResult>(suiteResults));
             if (stopRun) break;
         }

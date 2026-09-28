@@ -10,6 +10,7 @@
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
 | MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
+| HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -19,7 +20,7 @@ Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeou
 
 ### V3.5.2 多环境 Profile 选择
 
-`att-config/v2.7` 在 v2.6 profile 機制中新增 `sshhelpers`，profile 可整組替換 SSHHelper 清單。新的邏輯 SSH Tool group 使用 `att-tool-group/v2.7` 和 `att-sshhelper/v1.0`。完整 SIT/UAT 配置、選擇規則、evidence、遷移和安全警告見 [SSHHelper](../../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 例子仍適用於既有的 DB/MQ-only package。
+`att-config/v2.8` 在 v2.7 profile 機制中新增 `httphelpers`。DB/MQ/SSH/HTTP 各清單均按整組替換。詳見 [HTTPHelper](../../docs/reference.zh/05_resources/httphelper.md) 與 [SSHHelper](../../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 範例仍適用於既有 DB/MQ-only package。
 
 ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
@@ -122,7 +123,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.7`、`att-tool-group/v2.7`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`（仍可讀取舊版配置和 group）。舊 Template／Flow schema 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位須遷移至 v3.1。`att validate` 會提供遷移建議。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。現行主配置、Tool group、HTTPHelper、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.9`、`att-tool-group/v2.8`、`att-httphelper/v1.0`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.2` 與 `att-flow/v3.2`。現行 schema 位於 `schemas/`；歷史版本僅位於 [`schemas/history/`](../../schemas/history/)，仍用於驗證與遷移診斷。`validate --package` 會檢查 catalog 註冊的每一份現行及歷史 schema，即使 package 未使用該 schema。註冊資源若缺失、無法讀取、不安全或重複，會硬性回報 package error；不會略過 schema 驗證，也不會從 process working directory 載入替代檔。舊 `renderAs`／`saveAs` 欄位須遷移至 `result`；不會自動改寫檔案。
 
 ### 全局配置
 
@@ -156,7 +157,7 @@ environments:
 
 | 路径 | 必填/默认值 | 约束 |
 |---|---|---|
-| `schemaVersion` | 必填 | 当前为 `att-config/v2.6`；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool |
+| `schemaVersion` | 必填 | 現行為 `att-config/v2.9`；v2.1–v2.8 仍按宣告的舊版契約讀取。上面的 v2.6 範例為歷史用法。 |
 | `outputDirectory` | `output` | 非空包相对输出根 |
 | `environment` | `SIT` | 存在 `environments` 时是 default profile 名称；否则只是 exposed metadata |
 | `timeoutMs` | `10000` | 整数 1–3600000 毫秒 |
@@ -174,7 +175,8 @@ environments:
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
 | `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `sshhelpers` | `[]` | 唯一、安全、package-relative 的 `att-sshhelper/v1.0` YAML 路徑；僅 v2.7 |
-| `environments` | absent | 非空 profile 映射；v2.7 profile 可包含 `dbhelpers`、`mqhelpers` 和／或 `sshhelpers` typed list |
+| `httphelpers` | `[]` | 唯一、安全、package-relative 的 `att-httphelper/v1.0` YAML 路徑；僅 v2.8 |
+| `environments` | absent | 非空 profile 映射；v2.8 profile 亦可包含 `httphelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
@@ -231,7 +233,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | `result` | Render 必需；支援的 Tool/DB Action 可選；`format` 按 Action 类型限制；`path` 可选；`overwrite` 默认 false |
 | retry | 必填 `maxAttempts`、`intervalMs`、`retryOn`；category 仅 `ASSERTION`、`TIMEOUT` |
 
-模板 schema `att-template/v3.1` 以 `result` 取代 `renderAs`／`saveAs`；舊欄位會被拒絕並附遷移建議。`result.format` 決定 `output.result`；`result.path` 只控制可選持久化。省略 path 不會建立 artifact；`path: console` 只寫入 Case log。retry `maxAttempts` 為 2–10，`intervalMs` 為 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
+模板 schema `att-template/v3.2` 使用共用 `result` 合約；舊 `renderAs`／`saveAs` 會被拒絕並附遷移建議。Action `result.format` 只選擇檔案／Case log 序列化，不會重新解析或改變 `output.result`；省略 path 不會建立 artifact，`path: console` 只寫入 Case log。共用格式只有 `text|json|yaml|xml`，不支援 `raw`。retry `maxAttempts` 為 2–10，`intervalMs` 為 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
 
 #### Assign 变量唯一性与生命周期
 
@@ -251,19 +253,19 @@ receiveReply:
   result: {format: json}
 ```
 
-`result.format` 决定 `output.result`；`result.path` 可选持久化相同表示，不会改变内存结果。省略 path 不建立 artifact；`path: console` 只写入 Case log，不产生文件或 `output.targetFiles`。Render 支持 `raw|text|json|yaml|xml`；process Tool/MQ 支持相应格式；built-in/call-backed Tool 与 DB 支持 `text|json|yaml|xml`，DB 的 text 使用确定性 SQL*Plus 风格 formatter。真实路径必须安全且保持在 Case artifact 根目录。
+Action `result.format` 不会選擇或重新解析邏輯上的 `output.result`，只控制檔案／console 序列化。共用格式為 `text|json|yaml|xml`。Command-backed Tool config 另需 Tool-level `result.format`，用以將 stdout 解析成型別化值；call-backed Tool 與 HTTP/MQ/DB call 保留原生結果型別。HTTP response type 依媒體型別推斷，不由 Action 格式決定。DB `text` 使用穩定 SQL*Plus-style formatter。省略 `path` 不會建立 artifact；`path: console` 只寫入 Case log，不產生檔案或 `output.targetFiles`。真實路徑必須安全且保持在 Case artifact 根目錄。
 
-舊 `att-template/v2.6`、`v2.5`、`v2.3` descriptor 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位必須遷移至 `att-template/v3.1`，執行時不接受。schema 可辨識不代表這些欄位仍可直接執行。
+舊 `att-template/v2.6`、`v2.5`、`v2.3` descriptor 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位必須遷移至 `att-template/v3.2`，執行時不接受。schema 可辨識不代表這些欄位仍可直接執行。
 
 Render 會先求值 `result.path` 中一般 ATT `${...}`／`#{...}` expression，再展開來源集合路徑 token：`{filename}`、`{name}`、`{ext}`、`{index}`、`{relativePath}`。Token 替換值不會再次作 expression 求值。匹配按確定性順序處理，多來源展開路徑必須唯一，`overwrite: true` 也不能容許同一 Action 的目標衝突。`output.result` 單來源為類型化值，多來源為有序來源鍵 map；`output.targetFiles` 只包含實際落盤路徑。
 
-迁移至 `att-template/v3.1`：`renderAs` → `result.format`；`saveAs.format` → `result.format`；`saveAs.path` → `result.path`；`saveAs.overwrite` → `result.overwrite`。`renderAs: file` 混合了表示与持久化，必须由作者分别选择 format 和 path。`att validate` 会在 human/JSON diagnostics 中拒绝旧字段并展示具体替换建议；不会自动改写文件。
+迁移至 `att-template/v3.2`：`renderAs` → `result.format`；`saveAs.format` → `result.format`；`saveAs.path` → `result.path`；`saveAs.overwrite` → `result.overwrite`。`renderAs: file` 混合了表示与持久化，必须由作者分别选择 format 和 path。`att validate` 会在 human/JSON diagnostics 中拒绝旧字段并展示具体替换建议；不会自动改写文件。
 
 ### 工具契约
 
-每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`；可选 descriptor `timeoutMs` 提供 Tool 默认值。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode`。V2.6 不定义 `delimit`；多值直接在调用中传 typed array。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
+每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`；可选 descriptor `timeoutMs` 提供 Tool 默认值。Command 可以是非空标量或字符串列表，并必须设置 `result: {format: text|json|yaml|xml}` 将 stdout 解析为型别化主结果。Call 可以目标为 built-in 或原生 DB、MQHelper、HTTPHelper operation；其结果本身已有类型，可选 Tool-level `result.format` 只作为文件／日志序列化默认值。现行 schema 拒绝旧 Tool `output`，也不支持 `raw`。Call-backed Tool 可选 `cache` 只含 `scope: case|db`；update 不能缓存，`db` cache 只适用于 DB query/scalar。
 
-每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。
+每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。遷移 command-backed Tool 時，將舊 `output: txt` 換成 `result: {format: text}`（或按需要用 `yaml`、`json`、`xml`）；`txt` 改為 `text`。Config schema 升至 `att-config/v2.9`，Tool Group 升至 `att-tool-group/v2.8`。Command Tool 必須選定 parse format；Call-backed Tool 已有原生型別，可選 Tool-level `result.format` 只提供序列化預設。不支援 `raw`。
 
 ### 标识符和路径约束
 
@@ -278,7 +280,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.2",
+  "attVersion": "3.5.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

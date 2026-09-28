@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class SshHelperFeatureTest {
     @TempDir Path root;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(root); }
+
     private Path write(String path, String content) throws IOException {
         Path file = root.resolve(path);
         Files.createDirectories(file.getParent());

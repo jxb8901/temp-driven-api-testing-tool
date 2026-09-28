@@ -317,8 +317,8 @@ class DbHelperExecutorTest {
         Path textArtifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.queryText.output.targetFiles[0]")));
         assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
                 new String(java.nio.file.Files.readAllBytes(textArtifact), "UTF-8"));
-        assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
-                context.resolve("ACTIONS.printRows.output.result"));
+        assertEquals("A100", context.resolve("ACTIONS.queryText.output.result.rows[0].ID"));
+        assertEquals("READY", context.resolve("ACTIONS.queryText.output.result.rows[0].STATUS"));
         assertTrue(context.resolve("ACTIONS.assign.DB.orders") instanceof Map);
         assertEquals("orders", context.resolve("ACTIONS.assign.output.evidence.db.invocations[0].db"));
         assertTrue(executor.finishCase(context, log).isEmpty());

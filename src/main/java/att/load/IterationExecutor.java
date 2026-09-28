@@ -77,7 +77,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             db.beginCase();
             ToolInvoker tools = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = resources.mq();
-            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq,
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq, resources.http(),
                     new att.template.DefaultBuiltInProvider(resources.sequences()));
             results.addAll(new StageTemplateRunner(engine, flows).execute("LOAD", target.template(), context, log));
             if (Thread.currentThread().isInterrupted()) resources.db().abortCase();

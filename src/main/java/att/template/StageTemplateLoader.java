@@ -152,16 +152,19 @@ public final class StageTemplateLoader {
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
         boolean current = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean previousVersion = Version.PREVIOUS_TEMPLATE_SCHEMA.equals(schemaVersion);
+        boolean previous2Version = Version.PREVIOUS2_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean legacy = Version.LEGACY_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean older = Version.OLDER_TEMPLATE_SCHEMA.equals(schemaVersion);
         boolean oldest = Version.OLDEST_TEMPLATE_SCHEMA.equals(schemaVersion);
-        boolean modern = current || previousVersion || legacy || older;
+        boolean modern = current || previousVersion || previous2Version || legacy || older;
         if (!(modern || oldest)) throw new IllegalArgumentException("Unsupported template schemaVersion: " + schemaVersion);
-        Path schema = projectRoot.resolve(current ? "schemas/att-template-v3.1.schema.json"
-                : (previousVersion ? "schemas/att-template-v3.0.schema.json"
-                : (legacy ? "schemas/att-template-v2.6.schema.json"
-                : (older ? "schemas/att-template-v2.5.schema.json" : "schemas/att-template-v2.3.schema.json"))));
-        if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, current ? "att-template-v3.2.schema.json"
+                : (previousVersion ? "att-template-v3.1.schema.json"
+                : (previous2Version ? "att-template-v3.0.schema.json"
+                : (legacy ? "att-template-v2.6.schema.json"
+                : (older ? "att-template-v2.5.schema.json" : "att-template-v2.3.schema.json")))));
+        att.validation.SchemaMigrationGuidance.verify(schema,
+                att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.2.schema.json"), map, schemaVersion, Version.TEMPLATE_SCHEMA);
         SchemaSupport.requireVersion(map, schemaVersion, "template");
         SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
         SchemaSupport.string(map.get("description"), "template.description", true);
@@ -174,18 +177,16 @@ public final class StageTemplateLoader {
             if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
-                    current
+                    current || previousVersion
                             ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "result", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
-                            : previousVersion
-                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
                             : modern
-                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update"}
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
                             : new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs"});
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
             if (!modern && actionMap.get("overwrite") != null && !(actionMap.get("overwrite") instanceof Boolean)) throw new IllegalArgumentException("actions." + actionKey + ".overwrite must be a boolean");
             for (String mapping : current ? new String[]{"retry", "evidence", "fields", "result", "query", "update"}
-                    : previousVersion ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"}
+                    : previousVersion ? new String[]{"retry", "evidence", "fields", "result", "query", "update"}
                     : modern ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"} : new String[]{"retry", "fields"}) {
                 if (actionMap.get(mapping) != null && !(actionMap.get(mapping) instanceof Map)) throw new IllegalArgumentException("actions." + actionKey + "." + mapping + " must be a map");
             }

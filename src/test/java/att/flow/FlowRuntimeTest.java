@@ -30,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class FlowRuntimeTest {
     @TempDir Path tempDir;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
+
     @Test void nestedFailureRetainsInnerSourceAndCallChainAtTopLevel() throws Exception {
         writeFlow("inner-error", "schemaVersion: att-flow/v3.0\nid: common.inner-error.v1\nname: Inner\ndescription: Inner\nactions:\n  bad: {type: log, message: '${CASE.notPresent}'}\n");
         writeFlow("outer-error", "schemaVersion: att-flow/v3.0\nid: common.outer-error.v1\nname: Outer\ndescription: Outer\nactions:\n  nested: {type: flow, use: common.inner-error.v1}\n");
@@ -117,7 +119,7 @@ class FlowRuntimeTest {
     }
 
     @Test void keepsQualifiedArtifactsWhilePublishingInternalActionDirectly() throws Exception {
-        writeFlow("save", "schemaVersion: att-flow/v3.1\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n    result: {path: value.txt, format: text}\n");
+        writeFlow("save", "schemaVersion: att-flow/v3.2\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n    result: {path: value.txt, format: text}\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir,
                 Collections.singletonList(flowAction("saveFlow", "common.save.v1", "stop")), "att-template/v3.0");
@@ -174,7 +176,7 @@ class FlowRuntimeTest {
     @Test void movingRenderActionIntoFlowKeepsCaseExpressionsAndResultUnchanged() throws Exception {
         String payload = "case=${CASE.caseId}\nref=${CASE.SrcRefNo}\namount=${CASE.amount}\nchannel=${CASE.channel}\n";
         Files.write(tempDir.resolve("request.txt"), payload.getBytes(StandardCharsets.UTF_8));
-        writeFlow("render", "schemaVersion: att-flow/v3.1\nid: common.render.v1\nname: Render\ndescription: Render\nactions:\n"
+        writeFlow("render", "schemaVersion: att-flow/v3.2\nid: common.render.v1\nname: Render\ndescription: Render\nactions:\n"
                 + "  renderRequest: {type: render, payload: request.txt, result: {format: text}}\n");
         Files.write(tempDir.resolve("templates/flows/render/request.txt"), payload.getBytes(StandardCharsets.UTF_8));
 
@@ -182,9 +184,9 @@ class FlowRuntimeTest {
         render.put("type", "render"); render.put("payload", "request.txt");
         render.put("result", Collections.<String,Object>singletonMap("format", "text"));
         StageTemplate inlineTemplate = new StageTemplate("INLINE", tempDir,
-                Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.1")), "att-template/v3.1");
+                Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.2")), "att-template/v3.2");
         StageTemplate flowTemplate = new StageTemplate("FLOW", tempDir,
-                Collections.singletonList(flowAction("renderFlow", "common.render.v1", "stop")), "att-template/v3.1");
+                Collections.singletonList(flowAction("renderFlow", "common.render.v1", "stop")), "att-template/v3.2");
 
         Map<String,Object> data = new LinkedHashMap<String,Object>();
         data.put("SrcRefNo", "REF-001"); data.put("amount", "125.50"); data.put("channel", "FPS");

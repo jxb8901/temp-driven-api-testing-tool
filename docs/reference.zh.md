@@ -1,7 +1,7 @@
-# ATT V3.5.2 使用手冊與參考
+# ATT V3.5.3 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.2
+Version: 3.5.3
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -190,7 +190,7 @@ ATT 会先将 `name` 作为全局唯一的符号名解析。只有在没有符�
 只有当目录直接包含 `template.yaml` 时，它才是可调用模板。类别目录可以包含其他模板目录，但自身不是可调用模板。
 
 ```yaml
-schemaVersion: att-template/v3.1
+schemaVersion: att-template/v3.2
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -226,7 +226,7 @@ actions:
 | 类型 | 目的 | 必需字段 | 常见结果 |
 |---|---|---|---|
 | `render` | 渲染一个或多个 UTF-8 负载 | `type`、`payload`、`result.format`；`result.path` 可选 | 嵌套 `output.result` 与 `output.targetFiles` |
-| `tool` | 调用已配置的外部工具 | `type`、`call` | 嵌套类型化结果和进程证据 |
+| `tool` | 調用已配置或 framework-native Tool | `type`、`call` | 巢狀型別結果與 operation evidence |
 | `db` | 查询或更新已配置数据库 | `type`、`db`，以及恰好一个 `query`／`update` block | 稳定类型化 DB 结果与交易证据 |
 | `assert` | 计算布尔表达式 | `type`、`assert` | PASS/FAIL 或求值 ERROR；可选 Expected/Actual |
 | `log` | 写入渲染后的消息和/或 UTF-8 Case 输出文件 | `type`，至少包含 `message` 或 `file` | 合并内容、源路径和渲染字段 |
@@ -234,11 +234,11 @@ actions:
 
 动作按 YAML 顺序执行。动作 ID 在模板内唯一，且不能包含点号。每个动作都可以定义 `description` 和 `onFailure: stop|continue`。
 
-动作校验按类型进行。render 要求安全且非空的 payload glob，以及 `result.format: raw|text|json|yaml|xml`；可选 `result.path` 负责持久化。Tool、MQ receive/request 与 DB 共用同一个可选 `result` object。重试和 Action 级 timeout 仅对 Tool 动作有效。DB Action 必须指定已配置的 `db` ID，并在 `query` 与 `update` 中恰好选择一个；所选 block 又必须在 `sql` 与 `sqlFile` 中恰好选择一个。assert 动作要求 `assert`，并可包含 `expected` 和 `actual`；`expression`、`acture`、`actural` 都是非法字段。log 动作要求 `message`、`file` 或两者；并可使用 `level` 和 `fields`。assign 动作要求 `name` 和 `expression`。不支持的字段会报错，而不是被忽略。
+动作校验按类型进行。render 要求安全且非空的 payload glob，以及 `result.format: text|json|yaml|xml`；可选 `result.path` 负责持久化。Tool、MQ receive/request 与 DB 共用同一个可选 `result` object 和四种 presentation 格式。重试和 Action 级 timeout 仅对 Tool 动作有效。DB Action 必须指定已配置的 `db` ID，并在 `query` 与 `update` 中恰好选择一个；所选 block 又必须在 `sql` 与 `sqlFile` 中恰好选择一个。assert 动作要求 `assert`，并可包含 `expected` 和 `actual`；`expression`、`acture`、`actural` 都是非法字段。log 动作要求 `message`、`file` 或两者；并可使用 `level` 和 `fields`。assign 动作要求 `name` 和 `expression`。不支持的字段会报错，而不是被忽略。
 
-`result.format` 决定内存中的 `output.result` 表示；`result.path` 可选持久化同一个选定 typed value，不会改变该表示。省略 path 不会建立 artifact；`path: console` 只将选定表示写入 Case log。旧 `renderAs` 与 `saveAs` 会被拒绝，`att validate` 会提供迁移建议。
+Action `result.format` 只控制写入 `result.path` 或 `path: console` 的表示；不会重新解析或改变逻辑上的 `output.result`。`output.result` 始终保留操作本身产生的原生类型值。省略 path 不会建立 artifact。旧 `renderAs` 与 `saveAs` 会被拒绝，`att validate` 会提供迁移建议。
 
-对于已配置的 process Tool，`result.format: raw` 的 `output.result` 是经过 trim 的有限长度 stdout preview（`rawOutput`），而不是完整 capture file。指定真正的 `result.path` 时，会以 UTF-8 持久化完全相同的选定值，因此 Context 值与 artifact 的空白裁剪及 preview 截断行为一致。完整串流 stdout 仍作为独立的 process evidence/log capture 保存。
+对于 command-backed Tool，Tool descriptor 必需的 `result.format` 会把 stdout 解析为类型化主结果（`text`、`json`、`yaml` 或 `xml`）；有界／完整串流仍作为独立 process evidence 保存。Action 可选的 `result.format` 之后只影响 artifact/log 序列化，不改变已解析值。Call-backed Tool 与 HTTPHelper/MQHelper/DB 操作本身已返回原生类型值；Action 格式化不会改变它们。`raw` 不是共用 result 格式。
 
 每个动作都可以使用 `assert`，但 assert 动作本身把它作为必需主表达式。每个动作结果都嵌套在 `output` 下，包括 `status`、`success`、`durationMs`、`exception`、`targetFiles`、`result`，以及可选断言详情。操作错误保持 ERROR；否则显式断言决定 PASS/FAIL。一个已完成的工具进程即使返回非零退出码，也不会自动变成 ERROR：需要在 `assert` 中检查 `output.exitCode`。
 
@@ -623,34 +623,61 @@ Load execution identity 與 evidence-only scheduler diagnostics 的中央定義�
 
 ## 05 資源與整合
 
-Tool、DBHelper、MQHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由；它們最終收斂到 5.5 的 common operation-result/evidence contract。
+Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由；它們最終收斂到 common operation-result/evidence contract。
 
 ```text
 Tool      -> process/call operation --\
 DBHelper  -> JDBC operation ----------+--> Action output
 MQHelper  -> MQ operation ------------/
+HTTPHelper -> HTTP operation ---------/
 SSHHelper -> Tool SSH routing --------/
 ```
 
-Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
+Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/HTTP/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
 
 ### 5.1 Tool
 
-Tool 是具名的 external 或 framework-native capability。每個 Tool 必須二選一：**command-backed** 或 **call-backed**。
+Tool 是具名的 external 或 framework-native capability。每個 Tool 必須二選一：**command-backed** 或 **call-backed**。現行 config 與 Tool Group schema 使用 `result.format`；現行 schema 不再接受舊 Tool `output` 欄位。
 
 #### Command-backed Tool
 
 Command-backed Tool 依 configured argv contract 在本機或已配置 SSH transport 執行。Argv list 會保留每個 item 的 argument boundary；scalar command 只會被 tokenize 成相同 internal argv model。一般 process-backed Tool 不會隱式啟動 shell，也不會自動 wildcard expansion。Stdout/stderr、exit code、timeout 和 process diagnostic 屬 evidence；非零 process exit 本身不等於 assertion FAIL，除非 Action contract 明確這樣判定。
 
+Command-backed Tool 必須宣告 `result.format: text|json|yaml|xml`。此 Tool-level format 決定如何把 stdout 解析成型別化主結果 `output.result`（例如 JSON stdout 解析成 map），不提供 raw bytes 模式。有界 process preview 與完整串流 capture 仍是獨立 evidence。
+
+```yaml
+tools:
+  queryTool:
+    name: Query tool
+    description: Parse JSON stdout as a typed result
+    command: [./tools/query.sh]
+    result: {format: json}
+    arguments: {}
+```
+
 Script、CLI、SSH、third-party executable 適合 command-backed Tool。
 
 #### Call-backed Tool
 
-Call-backed Tool 執行 typed framework-native call，例如支援的 DB read/update facade 或 pure built-in，不需要把 typed value 轉成 process string。若 capability 本身就是 typed ATT call contract，優先使用 call-backed。
+Call-backed Tool 執行 typed framework-native call，不會把 typed value 轉成 process string。支援 built-in，以及 primary DB、MQHelper 或 HTTPHelper operation；call-backed MQ/HTTP 必須是 `type: tool` Action 的 primary call。呼叫原生返回型別會被保留。可選 Tool-level `result.format` 只是在 Action 將結果寫入檔案或 Case log 時採用的預設序列化格式，不會重新解析或改變原生值。若不需要序列化預設，call-backed Tool 可不宣告 `result.format`。
+
+```yaml
+tools:
+  requestPayment:
+    name: Request payment
+    description: Invoke the selected payment HTTP helper
+    call: "#{http.paymentApi.post(path='/v1/payments', body=${input.request})}"
+    result: {format: json}
+    arguments:
+      request:
+        name: Request
+        description: Typed request body
+        required: true
+```
 
 兩種 backend 都發布相同 public Action envelope。Active Action 使用 `${output.result}`，完成後使用 `${EXEC.ACTIONS.<id>.output.result}`。Final operation evidence 位於 `output.evidence`；retry 的 per-attempt evidence 保留在 `output.attempts[n].evidence`。
 
-Tool Action 在支援位置可以使用共同的 `result` object 和 post-operation evidence collector。`result.format` 決定內存表示，`result.path` 可選持久化。Collector 在 primary operation 後、該 attempt assertion 前執行；collector failure policy 不會取代 primary `result`。
+Action 可選的 `result.format` 僅支援 `text|json|yaml|xml`，控制檔案／console 序列化，不改變內存結果。`result.path` 可省略；省略時不建立 artifact。`path: console` 會把序列化值寫入 Case log。Post-operation evidence collector 在 primary operation 後、該次 assertion 前執行；collector failure policy 不會取代 primary `result`。
 
 ### 5.2 DBHelper
 
@@ -748,7 +775,7 @@ username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_P
 
 message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
 
-requestQueue/replyQueue 是 optional request defaults。Queue precedence 是 call argument > message default > validation error。send(queue=...) 和 receive(queue=...) 不會套用這些 defaults。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
+`message.requestQueue` 和 `message.replyQueue` 是各 matching operation 的 optional defaults：send/request 使用 `requestQueue`；receive/request 使用 `replyQueue`。v1.1 會先選擇或解析 physical instance，再 materialize 該 instance 繼承後的 `message` settings，最後套用 call argument。因此有效優先序為 explicit call argument > selected instance override > group default > runtime default（如有）> point-of-use validation error。ATT 不會借用其他 physical instance 的 queue default；若最後仍沒有有效 queue，會在 connect 前令呼叫失敗。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
 
 #### Common Action result
 
@@ -756,24 +783,24 @@ MQ receive/request 使用共同的 Action `result`，不增加 MQ-specific resul
 
 ~~~yaml
 result:
-  format: raw
-  path: response.bin
+  format: text
+  path: response.txt
   overwrite: false
 ~~~
 
-`format` 決定內存 `output.result` 表示；`path` 可省略且只控制持久化。raw 是原始 byte[]，text 是 String，json/yaml/xml 是現有 ATT typed value。pathless `result` 不建立 file。`path: console` 會把所選表示寫入 Case log，不加入 `output.targetFiles`，也不建立 file。沒有真正的 path 不會建立 .reply.bin。raw 加真正的 path 逐 byte 寫入，overwrite/path safety 沿用 common Action rules。
+MQ reply bytes 會按收到的 CCSID 解碼為原生 `String`；Action `result.format` 不會解析或替換該值。共用格式為 `text|json|yaml|xml`，只選擇如何將 typed value 序列化到檔案或 Case log。沒有 public `raw` Action result。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
 
 ~~~yaml
 - id: requestXml
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml}
-  assert: "${output.result.Response.Status} == 'SUCCESS'"
+  result: {format: text}
+  assert: "${output.replyReceived} == true"
 
 - id: requestXmlSaved
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml, path: responses/payment.xml, overwrite: false}
+  result: {format: text, path: responses/payment.txt, overwrite: false}
 
 - id: receiveReply
   type: tool
@@ -783,9 +810,189 @@ result:
 
 #### Output 與 validation
 
-output.result 是 business payload；MQ metadata 直接放在 output。每個 operation 都發布 `mqHelper`、選中的 physical `instance`、`queueManager` 與 `selectionStrategy`；v1.0 及單一 instance helper 的 `selectionStrategy` 為 `single`。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。`send` 不產生 business payload，因此拒絕 Action `result`；`receive` 與 `request` 支援它。receive/request 發布 received/replyReceived、queue names、effective waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ 提供時的 reply CCSID/encoding/format、completion/reason fields，parsed payload 只在 result。正常 request 滿足 output.messageId == output.replyCorrelationId。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033、MQRC_NO_MSG_AVAILABLE 及 effective waitMs。
+`output.result` 是 business payload（MQ reply 會以 CCSID 解碼成 String）；MQ metadata 直接放在 output。每個 operation 都發布 `mqHelper`、選中的 physical `instance`、`queueManager` 與 `selectionStrategy`；v1.0 及單一 instance helper 的 `selectionStrategy` 為 `single`。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。`send` 不產生 business payload，因此拒絕 Action `result`；`receive` 與 `request` 支援它。receive/request 發布 received/replyReceived、queue names、effective waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ 提供時的 reply CCSID/encoding/format、completion/reason fields；解碼 payload 只放在 `output.result`。正常 request 滿足 `output.messageId == output.replyCorrelationId`。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033、MQRC_NO_MSG_AVAILABLE 及 effective waitMs。
 
-Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Raw runtime value 保持 byte[]。Typed reply 會優先使用收到的 MQMessage.characterSet/CCSID，經 explicit IBM MQ CCSID-to-Java charset resolver 解碼；不支援的 CCSID 會清楚失敗，沒有 metadata 才 fallback 到 configured charset。Log/report 以 new String(rawBytes, Charset.defaultCharset()) 顯示 raw，不轉 hex，也不建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、缺少 effective request/reply queue、不支援 Action result format 及 unsafe result.path。
+Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Transport payload 會在 MQ client 內保持原 bytes；public typed reply value 是 `String`，有 MQMessage.characterSet/CCSID 時優先使用，透過 explicit IBM MQ CCSID-to-Java charset resolver 解碼；不支援的 CCSID 會清楚失敗，缺少 metadata 時才 fallback 到 configured charset。Log/report 序列化 typed result，不會建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、不支援的 result format 及 unsafe result.path；缺少 effective queue 會在 operation 使用點回報。
+
+#### API 選擇
+
+所有呼叫都使用穩定的 logical helper ID 與 named arguments。`file` 會從 Case output directory 或 package 以原 bytes 讀取。三個 API 的差異在於是否等待 reply，以及由誰負責 correlation：
+
+| API | 主要用途 | 預設 queue | Correlation |
+|---|---|---|---|
+| `send` | 單向 producer，不等待 reply | `message.requestQueue` | 無 |
+| `receive` | 獨立 consumer | `message.replyQueue` | 可選 caller-supplied `correlationId`；省略時不過濾 |
+| `request` | 單次操作完成 request/reply | `message.requestQueue` + `message.replyQueue` | 自動以 request `MsgId` 比對 reply `MQMD.CorrelId` |
+
+v1.1 會先選擇／解析 physical instance，再使用該 instance 繼承後的有效 queue。明確的 operation argument 會覆蓋選中 instance 的設定，不會借用其他 instance 的 queue。Action `timeoutMs` 是外層 deadline；call-level `waitMs` 覆蓋 `requestReply.waitMs`，但不能超出剩餘 Action deadline。三個 API 的 Tool Action retry 都需明確設定；ATT 不推斷 idempotency。
+
+#### `mq.<helper>.send(...)`
+
+當呼叫端只需要把 file-based message 放到 request／producer queue、不需要同步 reply 時使用 `send`。PUT 成功後呼叫即完成，不會開啟或等待 reply queue。
+
+| 參數 | 型別 | 必填？ | 預設／優先序 | 說明 |
+|---|---|---:|---|---|
+| `file` | string/path | 是 | 無 | Payload file，以原 bytes 從 Case output directory 或 package 讀取。 |
+| `queue` | string | 有設定時可省略 | call `queue` > 選中 instance 的 `message.requestQueue` > validation error | 目的 queue。 |
+| `instance` | string | 否 | v1.0／單一 instance 使用該 instance；多 instance 依設定 strategy 選擇 | v1.1 時將呼叫固定至指定 physical instance。 |
+
+省略 `queue` 時，helper 必須提供有效的 `message.requestQueue`。兩者都缺少時，ATT 會在連線前回報可行動的參數／設定錯誤。Result/evidence 記錄 `sent`、解析後的 `queue`、bytes、`messageId` 與 `correlationId`；send 沒有 business reply，`output.result` 為 null／不存在，也不接受 Action result persistence。`timeoutMs` 限制整個 Action；若明確啟用 retry，重複 PUT 可能產生重複訊息，重放安全由 package author 負責。
+
+使用 helper 預設 queue 的最簡 send：
+
+~~~yaml
+message: {requestQueue: PAYMENT.REQUEST}
+~~~
+
+~~~text
+mq.payment.send(file='request.xml')
+~~~
+
+明確 queue 會覆蓋設定預設：
+
+~~~text
+mq.payment.send(queue='PAYMENT.REQUEST.ALT', file='request.xml')
+~~~
+
+Payload 也可由前一個 Action 產生；`targetFiles[0]` 是 render 後的實際檔案路徑，不是寫死的 package filename：
+
+~~~yaml
+- id: renderRequest
+  type: render
+  payload: payload/request.xml
+  result: {format: text, path: generated/request.xml}
+- id: sendRendered
+  type: tool
+  call: "#{mq.payment.send(file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
+  assert: "${output.sent} == true"
+~~~
+
+v1.1 會先選 instance，再使用它的 queue fallback。以下 descriptor 片段中，明確指定 `payment-b` 時會使用它自己的 `PAYMENT.REQUEST.B`，而非 group default：
+
+~~~yaml
+defaults:
+  message: {requestQueue: PAYMENT.REQUEST}
+instances:
+  - id: payment-a
+  - id: payment-b
+    message: {requestQueue: PAYMENT.REQUEST.B}
+selection: {strategy: roundRobin}
+~~~
+
+此呼叫固定到 `payment-b`；若明確傳入 `queue`，則會覆蓋該 instance 設定：
+
+~~~text
+mq.payment.send(file='request.xml', instance='payment-b')
+~~~
+
+#### `mq.<helper>.receive(...)`
+
+將 `receive` 用作 standalone consumer，以讀取 reply 或獨立 producer 發出的訊息。它依有效 wait 執行一次 MQGET，並回報是否收到訊息。
+
+| 參數 | 型別 | 必填？ | 預設／優先序 | 說明 |
+|---|---|---:|---|---|
+| `queue` | string | 有設定時可省略 | call `queue` > 選中 instance 的 `message.replyQueue` > validation error | Input／reply queue。 |
+| `correlationId` | hex string | 否 | 無預設；省略時不以 `MQMD.CorrelId` 過濾 | 提供時，以此值比對收到訊息的 `MQMD.CorrelId`。 |
+| `waitMs` | integer | 否 | call value > `requestReply.waitMs`；並受 Action `timeoutMs` 限制 | MQGET 最長等待毫秒數。 |
+| `instance` | string | 否 | v1.0／單一 instance 使用該 instance；多 instance 依設定 strategy 選擇 | v1.1 時將呼叫固定至指定 physical instance。 |
+
+省略 `queue` 時，helper 必須提供 `message.replyQueue`。`output`／evidence 記錄解析後的 `queue`、有效 `waitMs`、`received`、message IDs 及安全的 MQ reason／completion metadata。收到訊息後，以訊息 CCSID 解碼成原生 `String` 放在 `output.result`。等待結束時收到 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`）是已完成的 no-message result，而非 ATT/runtime error：`received` 為 false、`output.result` 為 null。Action deadline 到期則回報 `MQ_TIMEOUT`。明確設定 Action retry 可能再取走另一則訊息，因此不會自動 retry。
+
+使用 helper 預設 reply queue 的最簡 receive；也可調整本次等待時間：
+
+~~~yaml
+message: {replyQueue: PAYMENT.REPLY}
+~~~
+
+~~~text
+mq.payment.receive()
+mq.payment.receive(waitMs=5000)
+~~~
+
+明確 input queue 會覆蓋預設：
+
+~~~text
+mq.payment.receive(queue='PAYMENT.REPLY.ALT', waitMs=5000)
+~~~
+
+v1.1 會先選擇 `instance`，省略 `queue` 時再使用該 instance 的有效 `message.replyQueue`：
+
+~~~text
+mq.payment.receive(waitMs=5000, instance='payment-b')
+~~~
+
+若要等待特定 request 的 reply，需提供 correlation ID：
+
+~~~text
+mq.payment.receive(correlationId='414d5120...', waitMs=5000)
+~~~
+
+~~~text
+提供 correlationId  -> 比對收到訊息的 MQMD.CorrelId
+省略 correlationId  -> receive 時不套用 correlation filter
+~~~
+
+若本來就不需要 correlation，可用於獨立 event、notification、batch-result queue，或刻意接收下一則訊息的簡單 consumer：
+
+~~~text
+mq.events.receive()                 # event queue
+mq.notifications.receive()          # notification queue
+mq.batchResults.receive(waitMs=1000) # 有限等待批次結果
+mq.validation.receive(queue='QA.CONSUMER')
+~~~
+
+注意：在多人共用的 reply queue 上直接呼叫 `receive()`，可能取走其他 caller 的 reply。Request/reply 流程通常應使用 `request(...)`；standalone consumer 若需鎖定某個 caller 的 reply，應使用 `receive(correlationId=...)`。
+
+#### `mq.<helper>.request(...)`
+
+當同一個操作需先送 request，再等待其 correlated reply 時使用 `request`。Correlation lifecycle 由 ATT 管理，caller 不傳 `correlationId`。
+
+| 參數 | 型別 | 必填？ | 預設／優先序 | 說明 |
+|---|---|---:|---|---|
+| `file` | string/path | 是 | 無 | Request payload file，以原 bytes 讀取。 |
+| `requestQueue` | string | 有設定時可省略 | call value > 選中 instance 的 `message.requestQueue` > validation error | Request output queue。 |
+| `replyQueue` | string | 有設定時可省略 | call value > 選中 instance 的 `message.replyQueue` > validation error | Reply input queue。 |
+| `waitMs` | integer | 否 | call value > `requestReply.waitMs`；並受 Action `timeoutMs` 限制 | 最長 reply 等待毫秒數。 |
+| `instance` | string | 否 | v1.0／單一 instance 使用該 instance；多 instance 依設定 strategy 選擇 | v1.1 時將 PUT 與 GET 固定在同一 physical instance。 |
+
+連線前必須有兩個有效 queue；明確參數會覆蓋選中 instance 的設定。正常流程如下：
+
+~~~text
+PUT request
+  -> 取得 request MsgId
+  -> 從有效 reply queue 執行 GET
+  -> 比對 reply MQMD.CorrelId 與 request MsgId
+~~~
+
+Result/evidence 記錄解析後的 queues、wait、request/reply IDs、`replyReceived` 及安全的 MQ completion/reason 資訊。收到 reply 時 `output.messageId == output.replyCorrelationId`；`output.result` 是按 CCSID 解碼的原生 String。若有效 wait 結束仍無 reply，MQRC 2033 代表 request 已完成但沒有 reply（`replyReceived: false`、null result、reason 2033／`MQRC_NO_MSG_AVAILABLE`），不是 ATT/runtime error。若 Action deadline 到期則回報 `MQ_TIMEOUT`。Action retry 是 opt-in；再次 PUT 會產生新 MsgId，也可能重做業務操作。
+
+最簡 request 使用 helper 的兩個預設 queue：
+
+~~~yaml
+message: {requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+~~~
+
+~~~text
+mq.payment.request(file='request.xml')
+~~~
+
+可同時明確覆蓋 request 與 reply queue：
+
+~~~text
+mq.payment.request(requestQueue='PAYMENT.REQUEST.ALT', replyQueue='PAYMENT.REPLY.ALT', file='request.xml')
+~~~
+
+Call-level wait 覆蓋 helper 的 `requestReply.waitMs`，但仍受 Action deadline 限制：
+
+~~~text
+mq.payment.request(file='request.xml', waitMs=10000)
+~~~
+
+要將整個 request/reply cycle 固定到 v1.1 instance：
+
+~~~text
+mq.payment.request(file='request.xml', instance='payment-b')
+~~~
 
 #### Issue #60 v1.1 logical group 與 physical instance
 
@@ -833,6 +1040,71 @@ Output 與 evidence 同時保留 logical helper id 並公開選中的 physical i
 
 `output.selectionStrategy` 表示已設定的 group policy（`single`、`random` 或 `roundRobin`），而非單次 invocation 的選擇來源。若呼叫明確提供 `instance`，此 policy 值仍維持不變；`output.instance` 則表示實際選中的 physical instance。
 
+### 5.5 HTTPHelper
+
+HTTPHelper 是依環境綁定的一級 HTTP 資源。Template／Flow 呼叫固定的 logical ID；選定的 `att-config/v2.9` profile 提供實體 endpoint。與 command-backed curl Tool 不同，HTTPHelper 自行管理有界、可重用的 client、原生回應解碼及 HTTP metadata。
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.9
+environment: SIT
+environments:
+  SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
+  UAT: {httphelpers: [config/httphelpers/uat/payment.yaml]}
+```
+
+兩份 descriptor 均使用 `id: paymentApi`，只有 `baseUrl`、憑證及信任材料等環境資訊不同。profile 未列出 `httphelpers` 時繼承 root 清單；列出時整組替換。ID 不分大小寫須唯一，路徑須安全且位於 package 內。執行前應逐一驗證所選環境。
+
+```yaml
+schemaVersion: att-httphelper/v1.0
+id: paymentApi
+name: Payment API
+description: Payment service
+baseUrl: https://sit-payments.example.internal
+defaults:
+  headers: {Accept: application/json, X-Channel: ATT}
+  connectTimeoutMs: 5000
+  readTimeoutMs: 30000
+  followRedirects: false
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 20
+  connectionRequestTimeoutMs: 5000
+  keepAliveMs: 30000
+  idleEvictMs: 60000
+auth:
+  type: bearer
+  token: ${ENV:PAYMENT_API_TOKEN}
+tls:
+  verifyHostname: true
+```
+
+[Schema](../schemas/att-httphelper-v1.0.schema.json) 拒絕未知欄位及不安全數值。`baseUrl` 必須是沒有內嵌憑證、query 或 fragment 的絕對 HTTP/HTTPS URL。路徑依標準 URI 規則解析：`/v1/orders` 從 origin root 開始，`v1/orders` 則依 base path 解析。每次呼叫不得使用絕對 URL、`//` path 或內含 query/fragment 的 path；請用 `query` map，由 client 編碼，並從記錄的 URL 移除 query 值。
+
+可使用 `#{http.<id>.request(method='POST', path='/v1/orders', ...)}`，或 `get`、`post`、`put`、`patch`、`delete`、`head`、`options`。HTTP 呼叫必須是 `type: tool` Action 的 primary call。具名參數為 `method`（僅 `request`）、`path`、`query`、`headers`、`body`、`file`、`contentType`、`connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs`、`followRedirects`。Header 名稱不分大小寫，call 值覆蓋 helper 預設。`file` 從安全的 Case output 或 package 路徑逐 byte 讀取；相對路徑從 Case output 開始。`body` 可為 bytes、文字或序列化為 UTF-8 JSON 的型別值。`body` 與 `file` 不可同時設定；GET/HEAD 均不接受 body。`contentType` 可逐次覆蓋。Case 之間不會隱式共享 cookie session。
+
+```yaml
+actions:
+  createPayment:
+    type: tool
+    call: >-
+      #{http.paymentApi.post(path='/v1/payments',
+        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        contentType='application/json')}
+    result: {format: json, path: responses/payment.json}
+    assert: "${output.statusCode} == 201"
+```
+
+HTTP response 解碼依原生媒體型別進行，與 Action `result.format` 無關：JSON media type 產生 ATT typed JSON 值；YAML media type 產生 typed YAML 值；XML media type 產生 ATT typed XML 值；其他文字媒體依宣告 charset 或 UTF-8 解碼。`application/octet-stream` 因任意 bytes 不是共用 Action 支援的結果而以 `HTTP_FORMAT` 失敗；結構化內容格式錯誤也會明確失敗。共用 Action 格式只有 `text`、`json`、`yaml`、`xml`；`result.format` 只控制寫入 `result.path` 或 `path: console` 的序列化，不會重新解析或改變 `output.result`。
+
+HTTP metadata 直接位於 `output`：`httpHelper`、`method`、不含 query 的安全 `url`、`statusCode`、`reasonPhrase`、`contentType`、`requestBytes`、`responseBytes` 與多值 `headers`。公開 response-header key 一律轉成小寫，令大小寫敏感的 Context path 穩定；重複值仍以 list 保留。只遮蔽敏感 response header，以及與設定憑證或敏感 request header 值相符的 response 值。一般 `Accept` 等非敏感 request header，即使值相同亦不會遮蔽。Request headers、query 值、認證 secret 與 payload 不會記入 HTTP evidence。
+
+收到 4xx/5xx 仍屬完成的 HTTP exchange，可斷言預期 404 或 500。transport/config/format 失敗使 Action 為 `ERROR`；斷言不符則為 `FAIL`。Evidence 含 helper ID、method、安全 URL、bytes、收到的 status、duration、錯誤／redirect 數。既有 Action attempt list 保留 retry；HTTPHelper 不會自動重試 status。`retry.retryOn: [TIMEOUT]` 可於 HTTP 或連線池等待 timeout 後重送，`ASSERTION` 可在斷言失敗後重送。作者須評估**每一種** method 的副作用，POST/PATCH/DELETE 尤其可能重複執行。
+
+Action `timeoutMs` 是總 deadline；pool borrow、connect、read 取 call override、helper 預設與剩餘 Action 時間的較小值。遲到的回應仍算 timeout。每個 helper 使用 thread-safe、有 `maxConnections`／`maxConnectionsPerRoute` 上限的連線池；pool wait 有專用 timeout，閒置連線在重用前清理，run/load owner 只關閉一次。TLS 憑證與 hostname 預設驗證且不能於 descriptor 關閉。可選的 `tls.trustStore` 是安全的 package-relative Java trust store 路徑，path/password 可使用 `${ENV:...}`；v1.0 不支援 mutual TLS。`auth.type` 為 `none`、`basic`（`username`、`password`）或 `bearer`（`token`）；`${ENV:NAME}` 解析後不記錄 secret 值。Redirect 預設關閉；開啟後最多跟隨五次，跨 origin redirect 會被拒絕以避免轉送憑證。
+
+既有 command-backed curl/script Tool 保持相容。遷移常見 curl 呼叫時，將 endpoint／認證移入所選 HTTPHelper descriptor，Template 保留固定 logical ID，以 `http.<id>.<method>(...)` 取代 curl argv，並以共用 Action `result` 選擇回應格式。
+
 ### 5.4 SSHHelper：邏輯 SSH 目標
 
 SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在 Tool group 中寫入實體主機。`att-sshhelper/v1.0` YAML descriptor 含 `id`、可選 `name`／`description`、可選 `defaults`（`user`、`port`、`identityFile`）、非空有序 `instances`、可選 `selection.strategy` 和 `fanout.maxConcurrency`（預設 4、範圍 1–256）。每個 instance 需有 `id`／`host`，`user` 必須由 instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設 22，必須在 1–65535。Helper 和 instance ID 符合 `[A-Za-z_][A-Za-z0-9_-]*`，忽略大小寫後不可重複。無效 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy 都會在 SSH 執行前失敗。
@@ -851,11 +1123,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.7` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一台，UAT 綁定兩台，Tool／Action 不必修改：
+在 `att-config/v2.9` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。邏輯 SSH binding 由 config/group v2.7 引入；目前 package 使用 config v2.9 與 Tool Group v2.8。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一台，UAT 綁定兩台，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.7
+schemaVersion: att-config/v2.9
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -879,7 +1151,7 @@ instances:
 
 ```yaml
 # config/tools/application.yaml
-schemaVersion: att-tool-group/v2.7
+schemaVersion: att-tool-group/v2.8
 id: app
 name: Application tools
 description: Remote application inspection
@@ -891,10 +1163,10 @@ tools:
     name: Status
     description: Print service status
     command: [systemctl, is-active, example.service]
-    output: txt
+    result: {format: text}
 ```
 
-Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 不支援 SSH。既有 inline global SSH 和 v2.6／v2.2 group 仍可讀；邏輯綁定需要 v2.7。Action／per-call 層沒有 strategy override。
+Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 不支援 SSH。既有 inline global SSH 和 v2.6／v2.2 group 仍可讀；邏輯綁定需要 v2.7 或更新版本。目前 Tool Group 使用 v2.8，command-backed Tool 必須設定 `result.format`（`text|json|yaml|xml`）；舊 `output: txt` 遷移為 `result: {format: text}`。Action／per-call 層沒有 strategy override。
 
 Strategy 優先序：group override，再到 helper 預設。單 instance 不需 strategy（`single`）；多 instance 必須指定。`random` 均勻選一台，`roundRobin` 以 thread-safe 循環計數器選一台，明確的 `all` 在並發上限內對每台各執行一次。**`all` 會在每台主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某台。每台依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
 
@@ -1176,7 +1448,7 @@ tools:
       - ./tools/invoke_payment_api.sh
       - "${input.requestFile}"
       - "${input.environment}"
-    output: json
+    result: {format: json}
     arguments:
       requestFile:
         name: Request File
@@ -1202,7 +1474,7 @@ tools:
     name: Write audit
     description: Write one audit message for one source file
     command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       message:
         name: Message
@@ -1387,6 +1659,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
 | MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
+| HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -1396,7 +1669,7 @@ Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeou
 
 ### V3.5.2 多环境 Profile 选择
 
-`att-config/v2.7` 在 v2.6 profile 機制中新增 `sshhelpers`，profile 可整組替換 SSHHelper 清單。新的邏輯 SSH Tool group 使用 `att-tool-group/v2.7` 和 `att-sshhelper/v1.0`。完整 SIT/UAT 配置、選擇規則、evidence、遷移和安全警告見 [SSHHelper](../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 例子仍適用於既有的 DB/MQ-only package。
+`att-config/v2.8` 在 v2.7 profile 機制中新增 `httphelpers`。DB/MQ/SSH/HTTP 各清單均按整組替換。詳見 [HTTPHelper](../docs/reference.zh/05_resources/httphelper.md) 與 [SSHHelper](../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 範例仍適用於既有 DB/MQ-only package。
 
 ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
@@ -1499,7 +1772,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.7`、`att-tool-group/v2.7`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`（仍可讀取舊版配置和 group）。舊 Template／Flow schema 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位須遷移至 v3.1。`att validate` 會提供遷移建議。
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。現行主配置、Tool group、HTTPHelper、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.9`、`att-tool-group/v2.8`、`att-httphelper/v1.0`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.2` 與 `att-flow/v3.2`。現行 schema 位於 `schemas/`；歷史版本僅位於 [`schemas/history/`](../schemas/history/)，仍用於驗證與遷移診斷。`validate --package` 會檢查 catalog 註冊的每一份現行及歷史 schema，即使 package 未使用該 schema。註冊資源若缺失、無法讀取、不安全或重複，會硬性回報 package error；不會略過 schema 驗證，也不會從 process working directory 載入替代檔。舊 `renderAs`／`saveAs` 欄位須遷移至 `result`；不會自動改寫檔案。
 
 ### 全局配置
 
@@ -1533,7 +1806,7 @@ environments:
 
 | 路径 | 必填/默认值 | 约束 |
 |---|---|---|
-| `schemaVersion` | 必填 | 当前为 `att-config/v2.6`；旧 V2.1/V2.2/V2.5 仍可读取，但不能声明 call-backed Tool |
+| `schemaVersion` | 必填 | 現行為 `att-config/v2.9`；v2.1–v2.8 仍按宣告的舊版契約讀取。上面的 v2.6 範例為歷史用法。 |
 | `outputDirectory` | `output` | 非空包相对输出根 |
 | `environment` | `SIT` | 存在 `environments` 时是 default profile 名称；否则只是 exposed metadata |
 | `timeoutMs` | `10000` | 整数 1–3600000 毫秒 |
@@ -1551,7 +1824,8 @@ environments:
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
 | `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
 | `sshhelpers` | `[]` | 唯一、安全、package-relative 的 `att-sshhelper/v1.0` YAML 路徑；僅 v2.7 |
-| `environments` | absent | 非空 profile 映射；v2.7 profile 可包含 `dbhelpers`、`mqhelpers` 和／或 `sshhelpers` typed list |
+| `httphelpers` | `[]` | 唯一、安全、package-relative 的 `att-httphelper/v1.0` YAML 路徑；僅 v2.8 |
+| `environments` | absent | 非空 profile 映射；v2.8 profile 亦可包含 `httphelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
@@ -1608,7 +1882,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | `result` | Render 必需；支援的 Tool/DB Action 可選；`format` 按 Action 类型限制；`path` 可选；`overwrite` 默认 false |
 | retry | 必填 `maxAttempts`、`intervalMs`、`retryOn`；category 仅 `ASSERTION`、`TIMEOUT` |
 
-模板 schema `att-template/v3.1` 以 `result` 取代 `renderAs`／`saveAs`；舊欄位會被拒絕並附遷移建議。`result.format` 決定 `output.result`；`result.path` 只控制可選持久化。省略 path 不會建立 artifact；`path: console` 只寫入 Case log。retry `maxAttempts` 為 2–10，`intervalMs` 為 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
+模板 schema `att-template/v3.2` 使用共用 `result` 合約；舊 `renderAs`／`saveAs` 會被拒絕並附遷移建議。Action `result.format` 只選擇檔案／Case log 序列化，不會重新解析或改變 `output.result`；省略 path 不會建立 artifact，`path: console` 只寫入 Case log。共用格式只有 `text|json|yaml|xml`，不支援 `raw`。retry `maxAttempts` 為 2–10，`intervalMs` 為 0–3600000；`ASSERTION` 要求 Tool Action 有非空 `assert`。日志级别为 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR`。模板根对象与动作都允许 `x-*`；`fields` 是无约束日志字段映射。`output` 是运行时证据，绝不是动作配置字段。
 
 #### Assign 变量唯一性与生命周期
 
@@ -1628,19 +1902,19 @@ receiveReply:
   result: {format: json}
 ```
 
-`result.format` 决定 `output.result`；`result.path` 可选持久化相同表示，不会改变内存结果。省略 path 不建立 artifact；`path: console` 只写入 Case log，不产生文件或 `output.targetFiles`。Render 支持 `raw|text|json|yaml|xml`；process Tool/MQ 支持相应格式；built-in/call-backed Tool 与 DB 支持 `text|json|yaml|xml`，DB 的 text 使用确定性 SQL*Plus 风格 formatter。真实路径必须安全且保持在 Case artifact 根目录。
+Action `result.format` 不会選擇或重新解析邏輯上的 `output.result`，只控制檔案／console 序列化。共用格式為 `text|json|yaml|xml`。Command-backed Tool config 另需 Tool-level `result.format`，用以將 stdout 解析成型別化值；call-backed Tool 與 HTTP/MQ/DB call 保留原生結果型別。HTTP response type 依媒體型別推斷，不由 Action 格式決定。DB `text` 使用穩定 SQL*Plus-style formatter。省略 `path` 不會建立 artifact；`path: console` 只寫入 Case log，不產生檔案或 `output.targetFiles`。真實路徑必須安全且保持在 Case artifact 根目錄。
 
-舊 `att-template/v2.6`、`v2.5`、`v2.3` descriptor 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位必須遷移至 `att-template/v3.1`，執行時不接受。schema 可辨識不代表這些欄位仍可直接執行。
+舊 `att-template/v2.6`、`v2.5`、`v2.3` descriptor 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位必須遷移至 `att-template/v3.2`，執行時不接受。schema 可辨識不代表這些欄位仍可直接執行。
 
 Render 會先求值 `result.path` 中一般 ATT `${...}`／`#{...}` expression，再展開來源集合路徑 token：`{filename}`、`{name}`、`{ext}`、`{index}`、`{relativePath}`。Token 替換值不會再次作 expression 求值。匹配按確定性順序處理，多來源展開路徑必須唯一，`overwrite: true` 也不能容許同一 Action 的目標衝突。`output.result` 單來源為類型化值，多來源為有序來源鍵 map；`output.targetFiles` 只包含實際落盤路徑。
 
-迁移至 `att-template/v3.1`：`renderAs` → `result.format`；`saveAs.format` → `result.format`；`saveAs.path` → `result.path`；`saveAs.overwrite` → `result.overwrite`。`renderAs: file` 混合了表示与持久化，必须由作者分别选择 format 和 path。`att validate` 会在 human/JSON diagnostics 中拒绝旧字段并展示具体替换建议；不会自动改写文件。
+迁移至 `att-template/v3.2`：`renderAs` → `result.format`；`saveAs.format` → `result.format`；`saveAs.path` → `result.path`；`saveAs.overwrite` → `result.overwrite`。`renderAs: file` 混合了表示与持久化，必须由作者分别选择 format 和 path。`att validate` 会在 human/JSON diagnostics 中拒绝旧字段并展示具体替换建议；不会自动改写文件。
 
 ### 工具契约
 
-每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`；可选 descriptor `timeoutMs` 提供 Tool 默认值。Command 可以是非空标量或字符串列表，`output` 默认为 `txt` 并支持 `txt|yaml|json|xml`。Call 必须是一个精确表达式，目标为 DB query/scalar/update 或 pure built-in；可选 `cache` 只含 `scope: case|db`。Call-backed Tool 禁止 process-only `output`、SSH/script 与参数 `argName|argNameMode`。V2.6 不定义 `delimit`；多值直接在调用中传 typed array。Update 不能缓存，`db` cache 只适用于 DB query/scalar。
+每个工具要求 `name`、`description`，以及恰好一个 `command` 或 `call`；可选 descriptor `timeoutMs` 提供 Tool 默认值。Command 可以是非空标量或字符串列表，并必须设置 `result: {format: text|json|yaml|xml}` 将 stdout 解析为型别化主结果。Call 可以目标为 built-in 或原生 DB、MQHelper、HTTPHelper operation；其结果本身已有类型，可选 Tool-level `result.format` 只作为文件／日志序列化默认值。现行 schema 拒绝旧 Tool `output`，也不支持 `raw`。Call-backed Tool 可选 `cache` 只含 `scope: case|db`；update 不能缓存，`db` cache 只适用于 DB query/scalar。
 
-每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。
+每个参数都要求 `name`、`description` 与 YAML boolean `required`。Command-backed 参数可使用 argv 属性；call-backed 参数只描述与校验 typed input。遷移 command-backed Tool 時，將舊 `output: txt` 換成 `result: {format: text}`（或按需要用 `yaml`、`json`、`xml`）；`txt` 改為 `text`。Config schema 升至 `att-config/v2.9`，Tool Group 升至 `att-tool-group/v2.8`。Command Tool 必須選定 parse format；Call-backed Tool 已有原生型別，可選 Tool-level `result.format` 只提供序列化預設。不支援 `raw`。
 
 ### 标识符和路径约束
 
@@ -1655,7 +1929,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.2",
+  "attVersion": "3.5.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1872,7 +2146,7 @@ case:
 | 2 | CLI/配置/校验/INVALID 失败 |
 | 3 | 至少一个 ERROR，或不可恢复运行时失败 |
 
-### 完整選項矩陣（3.5.2）
+### 完整選項矩陣（3.5.3）
 
 `--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.6` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
 
@@ -1950,11 +2224,15 @@ ATT 会复制源工作簿，并使用 `report.mode: append-to-copy` 追加配置
 
 ### 先从校验开始
 
-在每次工作簿、侧车、模板或工具变更后执行：
+在每次工作簿、侧车、模板、helper 或工具变更后执行：
 
 ```sh
 ./att.sh validate --package
 ```
+
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如含現行 `result` 欄位的 `att-flow/v3.0` 應升至 `att-flow/v3.2` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
+
+現行 schema 位於 [`schemas/`](../schemas/)，保留的舊版僅位於 [`schemas/history/`](../schemas/history/)。`validate --package` 會檢查 catalog 註冊的每一份 schema，即使 package 當下沒有使用。註冊資源缺失、無法讀取、不安全或重複，會硬性回報 `PACKAGE_INVALID`。描述檔宣告受支援 schema 時，若無法解析其註冊資源亦屬硬錯誤；ATT 不會略過 schema 驗證，也不會退回載入 process CWD 中的副本。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
 
 然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。
 
@@ -1965,7 +2243,7 @@ ATT 会复制源工作簿，并使用 `report.mode: append-to-copy` 追加配置
 | `ATT-STG` | 必需选择器为空白、选择器 YAML 无效、阶段键重复 | 检查选择器形式、`name`、别名和 required 标志 |
 | `ATT-TPL` | 未知/重复模板、动作或负载无效 | 检查符号名/完整路径、描述符、动作类型和本地文件 |
 | `ATT-CFG` | 未知字段、重复键、schema 类型/枚举错误 | 与第 6 章对照并移除不支持字段 |
-| `ATT-TOOL` | 未知/缺失参数、进程或解析失败 | 对比调用契约，检查退出码/stdout/stderr/raw output |
+| `ATT-TOOL` | 未知/缺失参数、进程或解析失败 | 对比调用契约，检查退出码和有界 stdout/stderr capture evidence |
 | `ATT-PATH` | 非法 ID 或路径逃逸 | 移除非法字符，并保持内容在配置根目录下 |
 | `ATT-RUN` | 超时、非零退出、渲染/运行时失败 | 检查 Case 日志和动作/工具证据 |
 
@@ -1990,6 +2268,10 @@ ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空
 #### 为什么 FAIL 变成 ERROR？
 
 假断言是 FAIL。无效表达式语法/导航、工具失败、超时、解析失败、I/O 失败或运行时异常，都是 ERROR。应查看动作证据，而不只看最终聚合状态。
+
+#### 哪些意外异常会附带 stack trace？
+
+意外内部故障（例如 `NullPointerException`、`ClassCastException`、反射查找／存取失败、其他非預期 runtime exception，或非 domain `IllegalStateException`，包括包在 wrapper cause 內的情況）會在 `case.log` 寫入有界的 `[ATT INTERNAL ERROR]` 區塊、執行 phase 及原始 cause chain。Validation `IllegalArgumentException`、已識別的 domain／transport failure、timeout／cancellation、assertion failure 與一般 MQ no-message outcome 仍保持精簡。同一 Throwable 即使同時被 resource executor 和 Action boundary 看見，每個 Case log 也只會寫一次。Resource-specific redaction（包括由 environment 提供的 SSH identity-file path）會註冊到該 Case log，並套用至後續 log write，避免外層 Action diagnostic 洩漏未出現在 sanitized stack 的內容。Stack 最多 180 行／16 KB；configured secrets 與敏感 key/value assignment 也會遮蔽。Public Action evidence 只保留簡短錯誤類型／phase，不加入 stack。Run、Debug 及 reusable Tool/HTTP/MQ/DB 共用這條 logging path。
 
 #### 为什么工具跑了不止一次？
 
@@ -2081,20 +2363,21 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.7`（仍可讀取 v2.6）|
+| Global configuration | `att-config/v2.9`（仍可讀取 v2.1–v2.8）|
 | DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
+| MQHelper | `att-mqhelper/v1.1`（仍可讀取 v1.0） |
+| HTTPHelper | `att-httphelper/v1.0` |
 | SSHHelper | `att-sshhelper/v1.0` |
-| Tool group | `att-tool-group/v2.7`（仍可讀取 v2.6）|
+| Tool group | `att-tool-group/v2.8`（仍可讀取 v2.2、v2.6、v2.7）|
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
-| Template | `att-template/v3.1`（舊 `renderAs`／`saveAs` 會被拒絕並提供遷移建議） |
-| Flow | `att-flow/v3.1`（相容讀取：`att-flow/v3.0`）|
+| Template | `att-template/v3.2`（舊 `renderAs`／`saveAs` 會被拒絕並提供遷移建議） |
+| Flow | `att-flow/v3.2`（相容讀取：`att-flow/v3.0`–`v3.1`）|
 | Debug input | `att-debug/v1.0` |
-| Load scenario | `att-load/v1.0` |
+| Load scenario | `att-load/v1.1`（仍可讀取 v1.0） |
 | Load summary | `att-load-summary/v1.0` |
 
-`schemas/catalog.yaml` 是 repository 的 authoritative catalog。Compatibility 是 reader contract；新 authoring 應使用相應 feature 的 current schema。
+`schemas/catalog.yaml` 是 repository 的 authoritative catalog。現行 schema 位於 `schemas/`，保留的舊版位於 `schemas/history/`。`validate --package` 會檢查所有已註冊的現行及歷史資源；缺少或不安全的註冊項目會硬性失敗，不會略過或從 process CWD 載入。Compatibility 是 reader contract；新 authoring 應使用相應 feature 的 current schema。
 
 ### 14.2 相容性與已棄用 Alias
 
@@ -2110,8 +2393,15 @@ Current Reference 依產品概念描述 ATT，不再按 release chronology 組�
 
 - 新 authoring 優先使用 `EXEC` / `META`，而非 legacy Context alias；
 - 使用 `output.result` / `EXEC.ACTIONS.<id>.output.result` 及 common evidence/attempt contract；
-- 把 Tool、DBHelper、MQHelper 視為 peer resource；
-- 若只改 DB/MQ/SSHHelper binding，使用 environment profile；
+- 把 Tool、DBHelper、MQHelper、HTTPHelper 視為 peer resource；
+- 若只改 DB/MQ/SSH/HTTPHelper binding，使用 environment profile；
+- 需要連線池與型別化 HTTP metadata 時，以固定的 `http.<id>.<method>` Action 取代常見 curl 呼叫；既有 curl Tool 仍然有效；
+- 舊版 descriptor 使用新欄位時，依驗證診斷更新 `schemaVersion` 與必要欄位後再驗證；歷史 schema 位於 `schemas/history/`；
+- command Tool 將 `output: txt|json|yaml|xml` 遷移為必需的 Tool-level `result: {format: text|json|yaml|xml}`；Action-level `result.format` 現在只控制序列化，`raw` 不是共用結果格式；
+- 使用 `att-config/v2.9`、`att-tool-group/v2.8`、`att-template/v3.2`／`att-flow/v3.2`；舊版已登記 schema 保留於 `schemas/history/`，package catalog 驗證會檢查所有資源；
+- HTTPHelper 按 response `Content-Type` 解析原生結果；公開 header key 統一小寫，Action 序列化不會改變型別化結果；
+- MQ 可在 `message.requestQueue` 設 send/request 預設，在 `message.replyQueue` 設 receive/request 預設；明確 call argument 優先於所選 instance 繼承設定；
+- 非預期 internal exception 會在 Case log 記錄有界且遮蔽 secret 的 stack detail；預期 transport／validation error 維持精簡；
 - 需要邏輯多實例路由時，以 `att-tool-group/v2.7` 的 `ssh: {helper: <id>}` 取代實體 group SSH；
 - 把 Run、Debug、Load 視為 peer execution mode。
 

@@ -16,11 +16,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.7` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一台，UAT 綁定兩台，Tool／Action 不必修改：
+在 `att-config/v2.9` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。邏輯 SSH binding 由 config/group v2.7 引入；目前 package 使用 config v2.9 與 Tool Group v2.8。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一台，UAT 綁定兩台，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.7
+schemaVersion: att-config/v2.9
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -44,7 +44,7 @@ instances:
 
 ```yaml
 # config/tools/application.yaml
-schemaVersion: att-tool-group/v2.7
+schemaVersion: att-tool-group/v2.8
 id: app
 name: Application tools
 description: Remote application inspection
@@ -56,10 +56,10 @@ tools:
     name: Status
     description: Print service status
     command: [systemctl, is-active, example.service]
-    output: txt
+    result: {format: text}
 ```
 
-Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 不支援 SSH。既有 inline global SSH 和 v2.6／v2.2 group 仍可讀；邏輯綁定需要 v2.7。Action／per-call 層沒有 strategy override。
+Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 不支援 SSH。既有 inline global SSH 和 v2.6／v2.2 group 仍可讀；邏輯綁定需要 v2.7 或更新版本。目前 Tool Group 使用 v2.8，command-backed Tool 必須設定 `result.format`（`text|json|yaml|xml`）；舊 `output: txt` 遷移為 `result: {format: text}`。Action／per-call 層沒有 strategy override。
 
 Strategy 優先序：group override，再到 helper 預設。單 instance 不需 strategy（`single`）；多 instance 必須指定。`random` 均勻選一台，`roundRobin` 以 thread-safe 循環計數器選一台，明確的 `all` 在並發上限內對每台各執行一次。**`all` 會在每台主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某台。每台依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
 

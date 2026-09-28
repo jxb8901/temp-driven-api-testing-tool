@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class FlowRegistryTest {
     @TempDir Path root;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(root); }
+
     @Test void indexesReusableActionGroupsUsingOrdinaryContext() throws Exception {
         flow("one", valid("common.one.v1", "copy", "${CASE.value}"));
         FlowRegistry registry = new FlowRegistry(root, root.resolve("templates"));
@@ -21,19 +23,13 @@ class FlowRegistryTest {
     }
 
     @Test void resultContractRequiresNewFlowSchemaVersionWhileV30RemainsReadable() throws Exception {
-        Path schemaDirectory = root.resolve("schemas");
-        Files.createDirectories(schemaDirectory);
-        for (String schema : new String[]{"att-flow-v3.0.schema.json", "att-flow-v3.1.schema.json",
-                "att-template-v3.0.schema.json", "att-template-v3.1.schema.json"}) {
-            Files.copy(java.nio.file.Paths.get("schemas", schema), schemaDirectory.resolve(schema));
-        }
-        String currentResult = "schemaVersion: att-flow/v3.1\nid: common.result.v1\nname: Result\ndescription: Result flow\nactions:\n"
+        String currentResult = "schemaVersion: att-flow/v3.2\nid: common.result.v1\nname: Result\ndescription: Result flow\nactions:\n"
                 + "  save: {type: tool, call: \"#{upper('ok')}\", result: {format: text, path: value.txt}}\n";
         flow("current-result", currentResult);
         assertDoesNotThrow(() -> new FlowRegistry(root, root.resolve("templates")));
 
         deleteFlows();
-        String silentlyChangedOldVersion = currentResult.replace("att-flow/v3.1", "att-flow/v3.0");
+        String silentlyChangedOldVersion = currentResult.replace("att-flow/v3.2", "att-flow/v3.0");
         flow("v30-result", silentlyChangedOldVersion);
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> new FlowRegistry(root, root.resolve("templates")));

@@ -30,8 +30,8 @@ public final class SshHelperConfigLoader {
             Object loaded = YamlSupport.load(file);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("SSH helper must be a YAML map: " + file);
             Map<?, ?> map = (Map<?, ?>) loaded;
-            Path schema = projectRoot.resolve("schemas/att-sshhelper-v1.0.schema.json");
-            if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+            Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-sshhelper-v1.0.schema.json");
+            JsonSchemaVerifier.verify(schema, map);
             SshHelperConfig helper = parse(map);
             if (!ids.add(helper.id().toLowerCase(Locale.ROOT))) throw new IllegalArgumentException("Duplicate SSH helper id ignoring case: " + helper.id());
             result.put(helper.id(), helper);

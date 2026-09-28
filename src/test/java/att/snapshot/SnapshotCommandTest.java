@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SnapshotCommandTest {
     @TempDir Path projectRoot;
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(projectRoot); }
 
     @Test void generatesAllRecursivelyAndOneExplicitSuite() throws Exception {
         writeSuite("one", "ONE"); writeSuite("nested/two", "TWO");

@@ -50,7 +50,7 @@ username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_P
 
 message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
 
-requestQueue/replyQueue 是 optional request defaults。Queue precedence 是 call argument > message default > validation error。send(queue=...) 和 receive(queue=...) 不會套用這些 defaults。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
+`message.requestQueue` 和 `message.replyQueue` 是各 matching operation 的 optional defaults：send/request 使用 `requestQueue`；receive/request 使用 `replyQueue`。v1.1 會先選擇或解析 physical instance，再 materialize 該 instance 繼承後的 `message` settings，最後套用 call argument。因此有效優先序為 explicit call argument > selected instance override > group default > runtime default（如有）> point-of-use validation error。ATT 不會借用其他 physical instance 的 queue default；若最後仍沒有有效 queue，會在 connect 前令呼叫失敗。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
 
 #### Common Action result
 
@@ -58,24 +58,24 @@ MQ receive/request 使用共同的 Action `result`，不增加 MQ-specific resul
 
 ~~~yaml
 result:
-  format: raw
-  path: response.bin
+  format: text
+  path: response.txt
   overwrite: false
 ~~~
 
-`format` 決定內存 `output.result` 表示；`path` 可省略且只控制持久化。raw 是原始 byte[]，text 是 String，json/yaml/xml 是現有 ATT typed value。pathless `result` 不建立 file。`path: console` 會把所選表示寫入 Case log，不加入 `output.targetFiles`，也不建立 file。沒有真正的 path 不會建立 .reply.bin。raw 加真正的 path 逐 byte 寫入，overwrite/path safety 沿用 common Action rules。
+MQ reply bytes 會按收到的 CCSID 解碼為原生 `String`；Action `result.format` 不會解析或替換該值。共用格式為 `text|json|yaml|xml`，只選擇如何將 typed value 序列化到檔案或 Case log。沒有 public `raw` Action result。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
 
 ~~~yaml
 - id: requestXml
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml}
-  assert: "${output.result.Response.Status} == 'SUCCESS'"
+  result: {format: text}
+  assert: "${output.replyReceived} == true"
 
 - id: requestXmlSaved
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml, path: responses/payment.xml, overwrite: false}
+  result: {format: text, path: responses/payment.txt, overwrite: false}
 
 - id: receiveReply
   type: tool
@@ -85,9 +85,189 @@ result:
 
 #### Output 與 validation
 
-output.result 是 business payload；MQ metadata 直接放在 output。每個 operation 都發布 `mqHelper`、選中的 physical `instance`、`queueManager` 與 `selectionStrategy`；v1.0 及單一 instance helper 的 `selectionStrategy` 為 `single`。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。`send` 不產生 business payload，因此拒絕 Action `result`；`receive` 與 `request` 支援它。receive/request 發布 received/replyReceived、queue names、effective waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ 提供時的 reply CCSID/encoding/format、completion/reason fields，parsed payload 只在 result。正常 request 滿足 output.messageId == output.replyCorrelationId。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033、MQRC_NO_MSG_AVAILABLE 及 effective waitMs。
+`output.result` 是 business payload（MQ reply 會以 CCSID 解碼成 String）；MQ metadata 直接放在 output。每個 operation 都發布 `mqHelper`、選中的 physical `instance`、`queueManager` 與 `selectionStrategy`；v1.0 及單一 instance helper 的 `selectionStrategy` 為 `single`。send 發布 sent、queue、bytes、messageId、correlationId，result 為 null/absent。`send` 不產生 business payload，因此拒絕 Action `result`；`receive` 與 `request` 支援它。receive/request 發布 received/replyReceived、queue names、effective waitMs、messageId、replyMessageId、replyCorrelationId、byte counts、MQ 提供時的 reply CCSID/encoding/format、completion/reason fields；解碼 payload 只放在 `output.result`。正常 request 滿足 `output.messageId == output.replyCorrelationId`。MQRC 2033 時 result 為 null，received/replyReceived 為 false，並發布 reasonCode 2033、MQRC_NO_MSG_AVAILABLE 及 effective waitMs。
 
-Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Raw runtime value 保持 byte[]。Typed reply 會優先使用收到的 MQMessage.characterSet/CCSID，經 explicit IBM MQ CCSID-to-Java charset resolver 解碼；不支援的 CCSID 會清楚失敗，沒有 metadata 才 fallback 到 configured charset。Log/report 以 new String(rawBytes, Charset.defaultCharset()) 顯示 raw，不轉 hex，也不建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、缺少 effective request/reply queue、不支援 Action result format 及 unsafe result.path。
+Public MsgId/CorrelId 是 lowercase hex，每 byte 兩字元、沒有 separators、保留 leading zero；24-byte ID 是 48 字元。Transport payload 會在 MQ client 內保持原 bytes；public typed reply value 是 `String`，有 MQMessage.characterSet/CCSID 時優先使用，透過 explicit IBM MQ CCSID-to-Java charset resolver 解碼；不支援的 CCSID 會清楚失敗，缺少 metadata 時才 fallback 到 configured charset。Log/report 序列化 typed result，不會建立 implicit file。Validation 拒絕 unknown fields、衝突 charset/ccsid、非法 encoding/expiry/queue、不支援的 result format 及 unsafe result.path；缺少 effective queue 會在 operation 使用點回報。
+
+#### API 選擇
+
+所有呼叫都使用穩定的 logical helper ID 與 named arguments。`file` 會從 Case output directory 或 package 以原 bytes 讀取。三個 API 的差異在於是否等待 reply，以及由誰負責 correlation：
+
+| API | 主要用途 | 預設 queue | Correlation |
+|---|---|---|---|
+| `send` | 單向 producer，不等待 reply | `message.requestQueue` | 無 |
+| `receive` | 獨立 consumer | `message.replyQueue` | 可選 caller-supplied `correlationId`；省略時不過濾 |
+| `request` | 單次操作完成 request/reply | `message.requestQueue` + `message.replyQueue` | 自動以 request `MsgId` 比對 reply `MQMD.CorrelId` |
+
+v1.1 會先選擇／解析 physical instance，再使用該 instance 繼承後的有效 queue。明確的 operation argument 會覆蓋選中 instance 的設定，不會借用其他 instance 的 queue。Action `timeoutMs` 是外層 deadline；call-level `waitMs` 覆蓋 `requestReply.waitMs`，但不能超出剩餘 Action deadline。三個 API 的 Tool Action retry 都需明確設定；ATT 不推斷 idempotency。
+
+#### `mq.<helper>.send(...)`
+
+當呼叫端只需要把 file-based message 放到 request／producer queue、不需要同步 reply 時使用 `send`。PUT 成功後呼叫即完成，不會開啟或等待 reply queue。
+
+| 參數 | 型別 | 必填？ | 預設／優先序 | 說明 |
+|---|---|---:|---|---|
+| `file` | string/path | 是 | 無 | Payload file，以原 bytes 從 Case output directory 或 package 讀取。 |
+| `queue` | string | 有設定時可省略 | call `queue` > 選中 instance 的 `message.requestQueue` > validation error | 目的 queue。 |
+| `instance` | string | 否 | v1.0／單一 instance 使用該 instance；多 instance 依設定 strategy 選擇 | v1.1 時將呼叫固定至指定 physical instance。 |
+
+省略 `queue` 時，helper 必須提供有效的 `message.requestQueue`。兩者都缺少時，ATT 會在連線前回報可行動的參數／設定錯誤。Result/evidence 記錄 `sent`、解析後的 `queue`、bytes、`messageId` 與 `correlationId`；send 沒有 business reply，`output.result` 為 null／不存在，也不接受 Action result persistence。`timeoutMs` 限制整個 Action；若明確啟用 retry，重複 PUT 可能產生重複訊息，重放安全由 package author 負責。
+
+使用 helper 預設 queue 的最簡 send：
+
+~~~yaml
+message: {requestQueue: PAYMENT.REQUEST}
+~~~
+
+~~~text
+mq.payment.send(file='request.xml')
+~~~
+
+明確 queue 會覆蓋設定預設：
+
+~~~text
+mq.payment.send(queue='PAYMENT.REQUEST.ALT', file='request.xml')
+~~~
+
+Payload 也可由前一個 Action 產生；`targetFiles[0]` 是 render 後的實際檔案路徑，不是寫死的 package filename：
+
+~~~yaml
+- id: renderRequest
+  type: render
+  payload: payload/request.xml
+  result: {format: text, path: generated/request.xml}
+- id: sendRendered
+  type: tool
+  call: "#{mq.payment.send(file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
+  assert: "${output.sent} == true"
+~~~
+
+v1.1 會先選 instance，再使用它的 queue fallback。以下 descriptor 片段中，明確指定 `payment-b` 時會使用它自己的 `PAYMENT.REQUEST.B`，而非 group default：
+
+~~~yaml
+defaults:
+  message: {requestQueue: PAYMENT.REQUEST}
+instances:
+  - id: payment-a
+  - id: payment-b
+    message: {requestQueue: PAYMENT.REQUEST.B}
+selection: {strategy: roundRobin}
+~~~
+
+此呼叫固定到 `payment-b`；若明確傳入 `queue`，則會覆蓋該 instance 設定：
+
+~~~text
+mq.payment.send(file='request.xml', instance='payment-b')
+~~~
+
+#### `mq.<helper>.receive(...)`
+
+將 `receive` 用作 standalone consumer，以讀取 reply 或獨立 producer 發出的訊息。它依有效 wait 執行一次 MQGET，並回報是否收到訊息。
+
+| 參數 | 型別 | 必填？ | 預設／優先序 | 說明 |
+|---|---|---:|---|---|
+| `queue` | string | 有設定時可省略 | call `queue` > 選中 instance 的 `message.replyQueue` > validation error | Input／reply queue。 |
+| `correlationId` | hex string | 否 | 無預設；省略時不以 `MQMD.CorrelId` 過濾 | 提供時，以此值比對收到訊息的 `MQMD.CorrelId`。 |
+| `waitMs` | integer | 否 | call value > `requestReply.waitMs`；並受 Action `timeoutMs` 限制 | MQGET 最長等待毫秒數。 |
+| `instance` | string | 否 | v1.0／單一 instance 使用該 instance；多 instance 依設定 strategy 選擇 | v1.1 時將呼叫固定至指定 physical instance。 |
+
+省略 `queue` 時，helper 必須提供 `message.replyQueue`。`output`／evidence 記錄解析後的 `queue`、有效 `waitMs`、`received`、message IDs 及安全的 MQ reason／completion metadata。收到訊息後，以訊息 CCSID 解碼成原生 `String` 放在 `output.result`。等待結束時收到 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`）是已完成的 no-message result，而非 ATT/runtime error：`received` 為 false、`output.result` 為 null。Action deadline 到期則回報 `MQ_TIMEOUT`。明確設定 Action retry 可能再取走另一則訊息，因此不會自動 retry。
+
+使用 helper 預設 reply queue 的最簡 receive；也可調整本次等待時間：
+
+~~~yaml
+message: {replyQueue: PAYMENT.REPLY}
+~~~
+
+~~~text
+mq.payment.receive()
+mq.payment.receive(waitMs=5000)
+~~~
+
+明確 input queue 會覆蓋預設：
+
+~~~text
+mq.payment.receive(queue='PAYMENT.REPLY.ALT', waitMs=5000)
+~~~
+
+v1.1 會先選擇 `instance`，省略 `queue` 時再使用該 instance 的有效 `message.replyQueue`：
+
+~~~text
+mq.payment.receive(waitMs=5000, instance='payment-b')
+~~~
+
+若要等待特定 request 的 reply，需提供 correlation ID：
+
+~~~text
+mq.payment.receive(correlationId='414d5120...', waitMs=5000)
+~~~
+
+~~~text
+提供 correlationId  -> 比對收到訊息的 MQMD.CorrelId
+省略 correlationId  -> receive 時不套用 correlation filter
+~~~
+
+若本來就不需要 correlation，可用於獨立 event、notification、batch-result queue，或刻意接收下一則訊息的簡單 consumer：
+
+~~~text
+mq.events.receive()                 # event queue
+mq.notifications.receive()          # notification queue
+mq.batchResults.receive(waitMs=1000) # 有限等待批次結果
+mq.validation.receive(queue='QA.CONSUMER')
+~~~
+
+注意：在多人共用的 reply queue 上直接呼叫 `receive()`，可能取走其他 caller 的 reply。Request/reply 流程通常應使用 `request(...)`；standalone consumer 若需鎖定某個 caller 的 reply，應使用 `receive(correlationId=...)`。
+
+#### `mq.<helper>.request(...)`
+
+當同一個操作需先送 request，再等待其 correlated reply 時使用 `request`。Correlation lifecycle 由 ATT 管理，caller 不傳 `correlationId`。
+
+| 參數 | 型別 | 必填？ | 預設／優先序 | 說明 |
+|---|---|---:|---|---|
+| `file` | string/path | 是 | 無 | Request payload file，以原 bytes 讀取。 |
+| `requestQueue` | string | 有設定時可省略 | call value > 選中 instance 的 `message.requestQueue` > validation error | Request output queue。 |
+| `replyQueue` | string | 有設定時可省略 | call value > 選中 instance 的 `message.replyQueue` > validation error | Reply input queue。 |
+| `waitMs` | integer | 否 | call value > `requestReply.waitMs`；並受 Action `timeoutMs` 限制 | 最長 reply 等待毫秒數。 |
+| `instance` | string | 否 | v1.0／單一 instance 使用該 instance；多 instance 依設定 strategy 選擇 | v1.1 時將 PUT 與 GET 固定在同一 physical instance。 |
+
+連線前必須有兩個有效 queue；明確參數會覆蓋選中 instance 的設定。正常流程如下：
+
+~~~text
+PUT request
+  -> 取得 request MsgId
+  -> 從有效 reply queue 執行 GET
+  -> 比對 reply MQMD.CorrelId 與 request MsgId
+~~~
+
+Result/evidence 記錄解析後的 queues、wait、request/reply IDs、`replyReceived` 及安全的 MQ completion/reason 資訊。收到 reply 時 `output.messageId == output.replyCorrelationId`；`output.result` 是按 CCSID 解碼的原生 String。若有效 wait 結束仍無 reply，MQRC 2033 代表 request 已完成但沒有 reply（`replyReceived: false`、null result、reason 2033／`MQRC_NO_MSG_AVAILABLE`），不是 ATT/runtime error。若 Action deadline 到期則回報 `MQ_TIMEOUT`。Action retry 是 opt-in；再次 PUT 會產生新 MsgId，也可能重做業務操作。
+
+最簡 request 使用 helper 的兩個預設 queue：
+
+~~~yaml
+message: {requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+~~~
+
+~~~text
+mq.payment.request(file='request.xml')
+~~~
+
+可同時明確覆蓋 request 與 reply queue：
+
+~~~text
+mq.payment.request(requestQueue='PAYMENT.REQUEST.ALT', replyQueue='PAYMENT.REPLY.ALT', file='request.xml')
+~~~
+
+Call-level wait 覆蓋 helper 的 `requestReply.waitMs`，但仍受 Action deadline 限制：
+
+~~~text
+mq.payment.request(file='request.xml', waitMs=10000)
+~~~
+
+要將整個 request/reply cycle 固定到 v1.1 instance：
+
+~~~text
+mq.payment.request(file='request.xml', instance='payment-b')
+~~~
 
 #### Issue #60 v1.1 logical group 與 physical instance
 

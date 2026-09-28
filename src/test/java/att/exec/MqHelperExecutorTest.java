@@ -61,7 +61,7 @@ class MqHelperExecutorTest {
         Path caseDir = tempDir.resolve("request-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
         FakeFactory factory = new FakeFactory();
-        factory.reply = new MqTransport.Message(new byte[]{3, 4}, new byte[]{1, 2}, new byte[]{4, 5, 6});
+        factory.reply = new MqTransport.Message(new byte[]{3, 4}, new byte[]{1, 2}, "reply".getBytes("UTF-8"));
         MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
                 map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString(), "waitMs", 321),
                 context(caseDir), null, "request-1");
@@ -74,11 +74,44 @@ class MqHelperExecutorTest {
         assertArrayEquals(new byte[]{1, 2}, factory.getRequest.correlationId());
         assertEquals(321, factory.getRequest.waitMs());
         assertNull(result.result().get("replyFile"));
-        assertArrayEquals(new byte[]{4, 5, 6}, (byte[]) result.result().get("result"));
-        assertEquals(3, result.result().get("replyBytes"));
+        assertEquals("reply", result.result().get("result"));
+        assertEquals(5, result.result().get("replyBytes"));
         assertEquals("REPLY.Q", result.evidence().get("replyQueue"));
         assertEquals(2, factory.queueCloses);
         assertEquals(1, factory.disconnects);
+    }
+
+    @Test void queueDefaultsAreOperationSpecificAndExplicitArgumentsWin() throws Exception {
+        Path caseDir = tempDir.resolve("queue-defaults"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1, 2});
+        FrameworkConfig defaults = configWithQueues("REQUEST.DEFAULT", "REPLY.DEFAULT");
+
+        FakeFactory sendFactory = new FakeFactory();
+        MqInvocationResult send = new MqHelperExecutor(tempDir, defaults, sendFactory).execute("broker", "send",
+                map("file", payload.toString()), context(caseDir), null, "send-default-queue");
+        assertTrue(send.success());
+        assertEquals("REQUEST.DEFAULT", send.result().get("queue"));
+
+        FakeFactory receiveFactory = new FakeFactory();
+        MqInvocationResult receive = new MqHelperExecutor(tempDir, defaults, receiveFactory).execute("broker", "receive",
+                Collections.<String, Object>emptyMap(), context(caseDir), null, "receive-default-queue");
+        assertTrue(receive.success());
+        assertEquals("REPLY.DEFAULT", receive.result().get("queue"));
+
+        FakeFactory requestFactory = new FakeFactory();
+        MqInvocationResult request = new MqHelperExecutor(tempDir, defaults, requestFactory).execute("broker", "request",
+                map("file", payload.toString()), context(caseDir), null, "request-default-queues");
+        assertTrue(request.success());
+        assertEquals("REQUEST.DEFAULT", request.result().get("queue"));
+        assertEquals("REPLY.DEFAULT", requestFactory.putRequest.replyQueue());
+        assertEquals("REPLY.DEFAULT", request.result().get("replyQueue"));
+
+        FakeFactory overrideFactory = new FakeFactory();
+        MqInvocationResult override = new MqHelperExecutor(tempDir, defaults, overrideFactory).execute("broker", "send",
+                map("queue", "REQUEST.EXPLICIT", "file", payload.toString()), context(caseDir), null,
+                "send-explicit-queue");
+        assertTrue(override.success());
+        assertEquals("REQUEST.EXPLICIT", override.result().get("queue"));
     }
 
     @Test void timedOutSendReceiveAndRequestAttemptsAreRetriedAsTimeouts() throws Exception {
@@ -125,19 +158,15 @@ class MqHelperExecutorTest {
         assertTrue(factory.getRequest.waitMs() < 900, "GET wait must be recomputed after the delayed open");
     }
 
-    @Test void explicitRawSaveAsWritesExactReplyBytesAndPublishesArtifactOnlyThen() throws Exception {
+    @Test void rawActionResultFormatIsRejectedBeforeConnecting() throws Exception {
         Path caseDir = tempDir.resolve("saved-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
         FakeFactory factory = new FakeFactory();
-        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1, 2}, new byte[]{0, 1, (byte) 0xff});
-        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1, 2}, "reply".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
                 map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
-                context(caseDir), null, "request-2", "request", "responses/reply.bin", "raw", false);
-
-        assertTrue(result.success());
-        Path output = Paths.get(String.valueOf(result.result().get("outputFile")));
-        assertArrayEquals(new byte[]{0, 1, (byte) 0xff}, Files.readAllBytes(output));
-        assertEquals(output.toString(), result.result().get("outputFile"));
+                context(caseDir), null, "request-2", "request", "responses/reply.txt", "raw", false));
+        assertTrue(factory.connectedInstances.isEmpty());
     }
 
     @Test void typedReplyUsesReplyCcsidAndPathConsoleWritesPresentationOnly() throws Exception {
@@ -202,16 +231,16 @@ class MqHelperExecutorTest {
     @Test void savedMqArtifactUsesCommonFlowActionRoot() throws Exception {
         Path caseDir = tempDir.resolve("flow-save-case"); Files.createDirectories(caseDir);
         FakeFactory factory = new FakeFactory();
-        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1}, new byte[]{4, 5, 6});
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1}, "reply".getBytes("UTF-8"));
         CaseRuntimeContext context = context(caseDir);
         context.beginFlow("common.save.v1", "saveFlow");
         try {
             MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
-                    map("queue", "REPLY.Q"), context, null, "receive-flow", "reply", "responses/reply.bin", "raw", false);
+                    map("queue", "REPLY.Q"), context, null, "receive-flow", "reply", "responses/reply.txt", "text", false);
             assertTrue(result.success());
-            Path expected = caseDir.resolve("flows/saveFlow/actions/reply/responses/reply.bin");
+            Path expected = caseDir.resolve("flows/saveFlow/actions/reply/responses/reply.txt");
             assertEquals(expected.toString(), result.result().get("outputFile"));
-            assertArrayEquals(new byte[]{4, 5, 6}, Files.readAllBytes(expected));
+            assertEquals("reply", new String(Files.readAllBytes(expected), "UTF-8"));
         } finally {
             context.finishFlow();
         }
@@ -234,14 +263,47 @@ class MqHelperExecutorTest {
     @Test void noMessageAvailableIsSuccessfulReceiveWithoutResendSemantics() throws Exception {
         Path caseDir = tempDir.resolve("empty-case"); Files.createDirectories(caseDir);
         FakeFactory factory = new FakeFactory(); factory.noMessage = true;
-        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
-                map("queue", "REPLY.Q", "waitMs", 0), context(caseDir), null, "receive-1");
+        Path logPath = caseDir.resolve("case.log");
+        MqInvocationResult result;
+        try (CaseExecutionLog log = new CaseExecutionLog(logPath)) {
+            result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                    map("queue", "REPLY.Q", "waitMs", 0), context(caseDir), null, "receive-1",
+                    "receive", null, "text", false, log);
+        }
 
         assertTrue(result.success());
         assertEquals(Boolean.FALSE, result.result().get("received"));
         assertEquals(2033, result.result().get("reasonCode"));
         assertFalse(result.result().containsKey("replyFile"));
         assertEquals("PASS", result.evidence().get("status"));
+        assertFalse(new String(Files.readAllBytes(logPath), "UTF-8").contains("ATT INTERNAL ERROR"));
+    }
+
+    @Test void unexpectedWrappedAdapterFailureLogsPhaseCauseAndSanitizedStackOnly() throws Exception {
+        Path caseDir = tempDir.resolve("internal-mq-case"); Files.createDirectories(caseDir);
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        FakeFactory factory = new FakeFactory();
+        factory.connectFailure = new NullPointerException("password=secret");
+        Path logPath = caseDir.resolve("case.log");
+        MqInvocationResult result;
+        try (CaseExecutionLog log = new CaseExecutionLog(logPath)) {
+            result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
+                    map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "internal-1",
+                    "send", null, "text", false, log);
+        }
+
+        String caseLog = new String(Files.readAllBytes(logPath), "UTF-8");
+        assertFalse(result.success());
+        assertTrue(caseLog.contains("[ATT INTERNAL ERROR]"), caseLog);
+        assertTrue(caseLog.contains("phase: mq.connect"), caseLog);
+        assertTrue(caseLog.contains("java.lang.NullPointerException"), caseLog);
+        assertTrue(caseLog.contains("att.exec.MqHelperExecutor.execute"), caseLog);
+        assertTrue(caseLog.contains("password=[REDACTED_SECRET]"), caseLog);
+        assertFalse(caseLog.contains("password=secret"), caseLog);
+        Map<?, ?> error = (Map<?, ?>) result.result().get("error");
+        assertEquals(Boolean.TRUE, error.get("internal"));
+        assertEquals("mq.connect", error.get("phase"));
+        assertFalse(result.operationResult().evidence().toString().contains("stackTrace"));
     }
 
     @Test void explicitPhysicalInstanceIsSelectedBeforeOpeningTheConnection() throws Exception {
@@ -363,6 +425,17 @@ class MqHelperExecutorTest {
                 null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
     }
 
+    private FrameworkConfig configWithQueues(String requestQueue, String replyQueue) {
+        MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
+                "DEV.APP.SVRCONN", "user", "secret", 1208, null, null, "MQSTR", "asQueue",
+                requestQueue, replyQueue, 10000, "metadata", 20, 0, 2000L, tempDir.resolve("mq.yaml"));
+        Map<String, MqHelperConfig> helpers = new LinkedHashMap<String, MqHelperConfig>();
+        helpers.put("broker", helper);
+        return new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+                Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
+                null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
+    }
+
     private CaseRuntimeContext context(Path caseDir) {
         return new CaseRuntimeContext(new TestCase(2, "g", "sheet", "TC1", Collections.<String>emptyList(),
                 Collections.<String,Object>emptyMap(), Collections.emptyMap(), null), caseDir, "R", tempDir,
@@ -395,13 +468,18 @@ class MqHelperExecutorTest {
         int putCalls;
         int getCalls;
         int openCalls;
+        Throwable connectFailure;
         int queueCloses;
         String connectedInstance;
         final List<String> connectedInstances = new CopyOnWriteArrayList<String>();
         final List<String> putInstances = new CopyOnWriteArrayList<String>();
         final List<String> getInstances = new CopyOnWriteArrayList<String>();
 
-        @Override public MqTransport.Connection connect(att.config.MqHelperConfig config) {
+        @Override public MqTransport.Connection connect(att.config.MqHelperConfig config) throws Exception {
+            if (connectFailure instanceof NullPointerException) throw new MqTransport.Exception("MQ adapter failed",
+                    null, null, null, new NullPointerException(connectFailure.getMessage()));
+            if (connectFailure instanceof Exception) throw (Exception) connectFailure;
+            if (connectFailure instanceof Error) throw (Error) connectFailure;
             connectedInstance = config.instanceId();
             connectedInstances.add(config.instanceId());
             final String connectionInstance = config.instanceId();

@@ -10,6 +10,13 @@ import java.util.Map;
 /** Encodes typed Java Tool/DB output without changing the object exposed to expressions. */
 public final class ObjectOutputCodec {
     public String encode(Object value, String format) {
+        if ("text".equalsIgnoreCase(format)) {
+            if (value instanceof String || value == null || value instanceof Number || value instanceof Boolean) return value == null ? "" : String.valueOf(value);
+            DumperOptions options = new DumperOptions();
+            options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+            options.setPrettyFlow(true);
+            return new Yaml(options).dump(value);
+        }
         if ("json".equalsIgnoreCase(format)) return JsonSupport.write(value) + "\n";
         if ("yaml".equalsIgnoreCase(format)) {
             DumperOptions options = new DumperOptions();

@@ -77,8 +77,9 @@ final class ActionResultArtifactWriter {
 
 
     private String render(String format, Object value, boolean dbResult) throws Exception {
-        if ("raw".equalsIgnoreCase(format) || "text".equalsIgnoreCase(format)) {
-            return dbResult ? dbText.format(value) : (value == null ? "" : String.valueOf(value));
+        if ("text".equalsIgnoreCase(format)) {
+            if (value instanceof byte[]) return java.util.Base64.getEncoder().encodeToString((byte[]) value);
+            return dbResult ? dbText.format(value) : codec.encode(value, "text");
         }
         return codec.encode(value, format);
     }

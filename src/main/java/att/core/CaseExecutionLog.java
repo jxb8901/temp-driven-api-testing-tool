@@ -30,6 +30,9 @@ public class CaseExecutionLog implements AutoCloseable {
     private final BufferedWriter writer;
     private final Yaml yaml;
     private final StringBuilder deferred;
+    private final List<String> secretRedactions = new ArrayList<String>();
+    private final java.util.Set<Throwable> loggedInternalErrors =
+            java.util.Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
 
     public CaseExecutionLog(Path path) throws IOException {
         this(path, false);
@@ -73,6 +76,27 @@ public class CaseExecutionLog implements AutoCloseable {
 
     public Path path() {
         return path;
+    }
+
+    /** Registers resource-specific secret spellings for all subsequent log writes. */
+    public synchronized void registerSecretRedactions(List<String> values) {
+        if (values == null) return;
+        for (String value : values) {
+            if (value != null && !value.isEmpty() && !secretRedactions.contains(value)) secretRedactions.add(value);
+        }
+        secretRedactions.sort((left, right) -> Integer.compare(right.length(), left.length()));
+    }
+
+    /** Appends at most one internal stack trace for the same Throwable in this Case log. */
+    public synchronized boolean appendInternalErrorOnce(Throwable error, String content) throws IOException {
+        if (error == null || !loggedInternalErrors.add(error)) return false;
+        try {
+            appendRaw("ATT INTERNAL ERROR", content);
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            loggedInternalErrors.remove(error);
+            throw failure;
+        }
     }
 
     public synchronized void append(String section, Object data) throws IOException {
@@ -185,14 +209,16 @@ public class CaseExecutionLog implements AutoCloseable {
         pending.delete(0, cursor);
     }
 
-    private void write(String text) throws IOException {
+    private synchronized void write(String text) throws IOException {
+        String safeText = text;
+        for (String secret : secretRedactions) safeText = safeText.replace(secret, "[REDACTED_SECRET]");
         if (writer != null) {
-            writer.write(text);
+            writer.write(safeText);
             writer.flush();
         } else {
-            deferred.append(text);
+            deferred.append(safeText);
         }
-        if (mirror != null) mirror.accept(text);
+        if (mirror != null) mirror.accept(safeText);
     }
 
     /** Materializes an in-memory log into a caller-selected retained location. */

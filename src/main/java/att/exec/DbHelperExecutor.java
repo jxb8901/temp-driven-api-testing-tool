@@ -5,6 +5,7 @@ import att.config.DbHelperConfig;
 import att.config.FrameworkConfig;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
+import att.core.InternalExceptionLogger;
 import att.core.ResultStatus;
 import att.core.ValidationResult;
 
@@ -131,21 +132,27 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, String invocationId) {
-        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, null);
+        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, null, null);
     }
 
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, String invocationId, Long timeoutMs) {
-        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, timeoutMs);
+        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, timeoutMs, null);
+    }
+
+    public DbInvocationResult execute(String instance, String operation, String sql, String source,
+                                      List<?> params, String invocationId, Long timeoutMs, CaseExecutionLog log) {
+        return execute(instance, operation, sql, source, params, Collections.<String>emptyList(), invocationId, timeoutMs, log);
     }
 
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, List<String> parameterNames, String invocationId) {
-        return execute(instance, operation, sql, source, params, parameterNames, invocationId, null);
+        return execute(instance, operation, sql, source, params, parameterNames, invocationId, null, null);
     }
 
     private DbInvocationResult execute(String instance, String operation, String sql, String source,
-                                      List<?> params, List<String> parameterNames, String invocationId, Long timeoutMs) {
+                                      List<?> params, List<String> parameterNames, String invocationId, Long timeoutMs,
+                                      CaseExecutionLog log) {
         DbHelperConfig config = helper(instance);
         if (config == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + instance);
         if (!("query".equals(operation) || "update".equals(operation))) {
@@ -175,16 +182,36 @@ public final class DbHelperExecutor implements AutoCloseable {
                 managed.failed();
                 result = failure(operation, failure.type, failure.detail == null ? safeMessage(failure.cause, config) : failure.detail,
                         failure.cause instanceof SQLException ? (SQLException) failure.cause : null, managed);
+                recordInternalFailure(result, failure.cause, "db." + operation, config, log);
             } catch (Exception error) {
                 managed.failed();
                 result = failure(operation, "SQL_ERROR", safeMessage(error, config),
                         error instanceof SQLException ? (SQLException) error : null, managed);
+                recordInternalFailure(result, error, "db." + operation, config, log);
             }
         }
         Map<String, Object> evidence = evidence(config, invocationId, operation, source, sql, values,
                 parameterNames == null ? Collections.<String>emptyList() : parameterNames,
                 result, Duration.between(started, Instant.now()).toMillis(), timeoutMs);
         return new DbInvocationResult(result, evidence);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void recordInternalFailure(Map<String, Object> result, Throwable error, String phase,
+                                       DbHelperConfig config, CaseExecutionLog log) {
+        if (!InternalExceptionLogger.isInternal(error)) return;
+        List<String> secrets = new ArrayList<String>();
+        if (config.password() != null && !config.password().isEmpty()) secrets.add(config.password());
+        for (Map.Entry<String, String> property : config.properties().entrySet())
+            if (property.getKey().matches("(?i).*password|.*secret|.*token|.*api[-_]?key.*")
+                    && property.getValue() != null && !property.getValue().isEmpty()) secrets.add(property.getValue());
+        InternalExceptionLogger.logIfInternal(log, phase, error, secrets);
+        Object rawError = result.get("error");
+        if (rawError instanceof Map) {
+            Map<String, Object> detail = (Map<String, Object>) rawError;
+            detail.put("internal", Boolean.TRUE); detail.put("phase", phase);
+            detail.put("message", InternalExceptionLogger.sanitize(String.valueOf(detail.get("message")), secrets));
+        }
     }
 
     public List<ValidationResult> finishCase(CaseRuntimeContext context, CaseExecutionLog log) {

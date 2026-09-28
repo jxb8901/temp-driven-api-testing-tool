@@ -45,7 +45,12 @@ public final class MqHelperConfigLoader {
             try {
                 Map<?, ?> map = yaml(file);
                 Path schema = schema(projectRoot, map);
-                if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+                String declared = String.valueOf(map.get("schemaVersion"));
+                if (Version.MQHELPER_SCHEMA.equals(declared) || Version.MQHELPER_SCHEMA_V1_1.equals(declared))
+                    att.validation.SchemaMigrationGuidance.verify(schema,
+                            att.validation.SchemaFiles.resolve(projectRoot, "att-mqhelper-v1.1.schema.json"),
+                            map, declared, Version.MQHELPER_SCHEMA_V1_1);
+                else JsonSchemaVerifier.verify(schema, map);
                 helper = parse(map, file);
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
@@ -71,9 +76,8 @@ public final class MqHelperConfigLoader {
     }
 
     private Path schema(Path projectRoot, Map<?, ?> map) {
-        return Version.MQHELPER_SCHEMA_V1_1.equals(map.get("schemaVersion"))
-                ? projectRoot.resolve("schemas/att-mqhelper-v1.1.schema.json")
-                : projectRoot.resolve("schemas/att-mqhelper-v1.0.schema.json");
+        return att.validation.SchemaFiles.resolve(projectRoot, Version.MQHELPER_SCHEMA_V1_1.equals(map.get("schemaVersion"))
+                ? "att-mqhelper-v1.1.schema.json" : "att-mqhelper-v1.0.schema.json");
     }
 
     private MqHelperConfig parse(Map<?, ?> map, Path file) {

@@ -526,6 +526,8 @@ public final class PackageValidator {
             Path path = projectRoot.resolve(required);
             if (!Files.exists(path)) diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, new IllegalArgumentException("Missing required package path: " + required), path));
         }
+        try { att.validation.SchemaFiles.validateCatalog(projectRoot); }
+        catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, projectRoot.resolve("schemas/catalog.yaml"))); }
         Path catalog = projectRoot.resolve("schemas/catalog.yaml");
         if (Files.isRegularFile(catalog)) try {
             Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
@@ -810,7 +812,7 @@ public final class PackageValidator {
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
                 require(action.resultFormat(), "result.format is required for render action " + action.id());
-                if (!java.util.Arrays.asList("raw", "text", "json", "yaml", "xml").contains(action.resultFormat().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Invalid render result.format: " + action.resultFormat());
+                if (!java.util.Arrays.asList("text", "json", "yaml", "xml").contains(action.resultFormat().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Render result.format must be text, json, yaml, or xml: " + action.id());
                 forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 validateRenderResultPath(action);
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
@@ -820,7 +822,6 @@ public final class PackageValidator {
                         String content = att.template.PayloadCache.readUtf8(payload);
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false, action.id());
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
-                        if (!content.contains("${") && !content.contains("#{")) new att.exec.ToolInvoker(projectRoot, config).parseOutput(content, action.resultFormat());
                     } catch (Exception e) {
                         throw att.config.YamlSupport.locateText(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
                                 "Invalid render payload", e, null, null, "Check the payload expression and output format."),
@@ -1006,27 +1007,24 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("MQ send does not produce a business payload and does not support result: " + action.id());
             }
             String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
-            if (format.isEmpty()) format = "raw";
-            if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
+            if (!format.isEmpty() && !("text".equals(format) || "json".equals(format)
                     || "yaml".equals(format) || "xml".equals(format))) {
-                throw new IllegalArgumentException("MQ result.format must be raw, text, json, yaml, or xml: " + action.id());
+                throw new IllegalArgumentException("MQ result.format must be text, json, yaml, or xml: " + action.id());
             }
             return;
         }
-        boolean builtIn = BUILT_INS.contains(parsed.name().toLowerCase(java.util.Locale.ROOT));
-        ToolConfig configured = config.tool(parsed.name());
-        boolean callBacked = configured != null && configured.callBacked();
+        if (parsed.name().startsWith("http.")) {
+            String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!format.isEmpty() && !("text".equals(format) || "json".equals(format)
+                    || "yaml".equals(format) || "xml".equals(format)))
+                throw new IllegalArgumentException("HTTP result.format must be text, json, yaml, or xml: " + action.id());
+            return;
+        }
         String format = action.resultConfig().format().trim().toLowerCase(java.util.Locale.ROOT);
-        if (format.isEmpty()) {
-            if (callBacked) throw new IllegalArgumentException("call-backed Tool result.format is required: " + action.id());
-            return; // Runtime default is text for built-ins and raw for configured process Tools.
-        }
-        if (!("raw".equals(format) || "text".equals(format) || "json".equals(format)
+        if (format.isEmpty()) return;
+        if (!("text".equals(format) || "json".equals(format)
                 || "yaml".equals(format) || "xml".equals(format))) {
-            throw new IllegalArgumentException("Tool result.format must be raw, text, json, yaml, or xml: " + action.id());
-        }
-        if ((builtIn || callBacked) && "raw".equals(format)) {
-            throw new IllegalArgumentException("Built-in and call-backed Tool result.format do not support raw: " + action.id());
+            throw new IllegalArgumentException("Tool result.format must be text, json, yaml, or xml: " + action.id());
         }
     }
 
@@ -1419,7 +1417,6 @@ public final class PackageValidator {
                         validateContextStructure(content, engine, context, testCase, completedActions, action.id());
                         String partial = engine.renderValidationValues(content, context);
                         validateCallArgumentsIn(content, context, engine);
-                        if (!partial.contains("${") && !partial.contains("#{")) engine.parseRendered(partial, action.resultFormat());
                     }
                 }
 
@@ -1694,6 +1691,11 @@ public final class PackageValidator {
             validateMqCall(parsed, config);
             return;
         }
+        if (toolName.startsWith("http.")) {
+            if (!allowWriteFacade) throw new IllegalArgumentException("HTTP operations may only be the primary call of a type: tool Action");
+            validateHttpCall(parsed, config);
+            return;
+        }
         if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
@@ -1742,6 +1744,57 @@ public final class PackageValidator {
                 "Add " + argument.key() + "=<value> to the call.");
     }
 
+    private void validateHttpCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length != 3 || parts[1].isEmpty() || !("request".equals(parts[2])
+                || "get".equals(parts[2]) || "post".equals(parts[2]) || "put".equals(parts[2])
+                || "patch".equals(parts[2]) || "delete".equals(parts[2]) || "head".equals(parts[2])
+                || "options".equals(parts[2])))
+            throw new IllegalArgumentException("HTTP call must be http.<helper>.request|get|post|put|patch|delete|head|options");
+        if (config.httpHelper(parts[1]) == null) throw new IllegalArgumentException("Unknown HTTP helper: " + parts[1]);
+        Set<String> supplied = new LinkedHashSet<String>();
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            String key = argument.key();
+            if (argument.positional()) throw new IllegalArgumentException("HTTP call requires named arguments");
+            if (!("method".equals(key) || "path".equals(key) || "query".equals(key) || "headers".equals(key)
+                    || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
+                    || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
+                    || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)))
+                throw new IllegalArgumentException("Unknown HTTP argument: " + key);
+            if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate HTTP argument: " + key);
+            String expression = argument.expression();
+            if (expression.contains("${") || expression.contains("#{")) continue;
+            Object value = callParser.literal(expression);
+            if ("method".equals(key)) {
+                if (!(value instanceof String) || !String.valueOf(value).toUpperCase(java.util.Locale.ROOT)
+                        .matches("GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"))
+                    throw new IllegalArgumentException("Unsupported HTTP method");
+            } else if ("path".equals(key)) {
+                if (!(value instanceof String)) throw new IllegalArgumentException("HTTP path must be a string");
+                String path = (String) value;
+                if (path.startsWith("//") || path.contains("?") || path.contains("#"))
+                    throw new IllegalArgumentException("HTTP path must be relative and query/fragment-free");
+                try { if (new java.net.URI(path).isAbsolute()) throw new IllegalArgumentException("Absolute per-call HTTP URL is forbidden"); }
+                catch (java.net.URISyntaxException invalid) { throw new IllegalArgumentException("Invalid HTTP path"); }
+            } else if ("connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
+                    || "connectionRequestTimeoutMs".equals(key)) {
+                if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).longValue()
+                        || ((Number) value).longValue() < 1 || ((Number) value).longValue() > 3600000)
+                    throw new IllegalArgumentException("HTTP timeout must be 1..3600000 ms: " + key);
+            } else if ("followRedirects".equals(key) && !(value instanceof Boolean))
+                throw new IllegalArgumentException("HTTP followRedirects must be boolean");
+        }
+        if ("request".equals(parts[2]) && !supplied.contains("method"))
+            throw new IllegalArgumentException("http.<helper>.request requires method");
+        if (!"request".equals(parts[2]) && supplied.contains("method"))
+            throw new IllegalArgumentException("HTTP method argument is only valid with request()");
+        if (supplied.contains("file") && supplied.contains("body"))
+            throw new IllegalArgumentException("HTTP file and body are mutually exclusive");
+        if (("get".equals(parts[2]) || "head".equals(parts[2]))
+                && (supplied.contains("file") || supplied.contains("body")))
+            throw new IllegalArgumentException("HTTP GET/HEAD do not accept a request body");
+    }
+
     private void validateMqCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"mq".equals(parts[0]) || parts[1].isEmpty()) {
@@ -1755,9 +1808,9 @@ public final class PackageValidator {
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();
         if ("send".equals(operation)) {
-            allowed.add("queue"); allowed.add("file"); allowed.add("instance"); required.add("queue"); required.add("file");
+            allowed.add("queue"); allowed.add("file"); allowed.add("instance"); required.add("file");
         } else if ("receive".equals(operation)) {
-            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance"); required.add("queue");
+            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance");
         } else if ("request".equals(operation)) {
             allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs"); allowed.add("instance");
             required.add("file");
@@ -1794,6 +1847,14 @@ public final class PackageValidator {
                 }
             }
         }
+        if ("send".equals(operation) && !supplied.contains("queue")) {
+            boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
+            if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");
+        }
+        if ("receive".equals(operation) && !supplied.contains("queue")) {
+            boolean hasDefault = selected != null ? !selected.replyQueue().isEmpty() : allInstancesHaveRequestQueue(helper, false);
+            if (!hasDefault) throw new IllegalArgumentException("Missing effective receive queue: provide queue or configure message.replyQueue on every selectable instance");
+        }
         for (String name : required) if (!supplied.contains(name)) throw new IllegalArgumentException("Missing required MQ argument '" + name + "' for " + parsed.name());
         if ("request".equals(operation)) {
             boolean hasRequestDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
@@ -1815,13 +1876,32 @@ public final class PackageValidator {
     }
 
     private boolean isWriteFacade(ToolConfig tool) {
-        return tool != null && tool.callBacked()
-                && callParser.parse(tool.call()).name().matches("db\\.[^.]+\\.update");
+        if (tool == null || !tool.callBacked()) return false;
+        String target = callParser.parse(tool.call()).name();
+        return target.matches("db\\.[^.]+\\.update") || target.startsWith("mq.") || target.startsWith("http.");
     }
 
     private void validateCallBackedDefinition(ToolConfig tool, FrameworkConfig config) {
         ToolCallParser.ParsedCall target = callParser.parse(tool.call());
-        if (!target.name().startsWith("db.")) return;
+        if (target.name().startsWith("mq.")) {
+            validateMqCall(target, config);
+            return;
+        }
+        if (target.name().startsWith("http.")) {
+            validateHttpCall(target, config);
+            return;
+        }
+        if (BUILT_INS.contains(target.name().toLowerCase(java.util.Locale.ROOT))) {
+            Map<String, Object> shape = new LinkedHashMap<String, Object>();
+            for (ToolCallParser.Argument argument : target.arguments()) {
+                if (argument.positional()) continue;
+                if (shape.containsKey(argument.key())) throw new IllegalArgumentException("Duplicate built-in call argument '" + argument.key() + "' in Tool " + tool.key());
+                shape.put(argument.key(), "<validation-value>");
+            }
+            builtIns.validateInvocation(target.name(), shape);
+            return;
+        }
+        if (!target.name().startsWith("db.")) throw new IllegalArgumentException("Unknown framework-native call target for Tool " + tool.key() + ": " + target.name());
         String[] parts = target.name().split("\\.", -1);
         if (parts.length != 3 || config.dbHelper(parts[1]) == null
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {

@@ -171,18 +171,22 @@ public final class FlowRegistry {
         String flowVersion = configuredVersion == null ? "" : String.valueOf(configuredVersion);
         boolean currentVersion = Version.FLOW_SCHEMA.equals(flowVersion);
         boolean previousVersion = Version.PREVIOUS_FLOW_SCHEMA.equals(flowVersion);
-        if (!currentVersion && !previousVersion) throw new IllegalArgumentException("Unsupported Flow schemaVersion: " + flowVersion);
-        String suffix = currentVersion ? "v3.1" : "v3.0";
-        Path schema = projectRoot.resolve("schemas/att-flow-" + suffix + ".schema.json");
-        if (Files.isRegularFile(schema)) att.validation.JsonSchemaVerifier.verify(schema, map);
+        boolean olderVersion = Version.OLDER_FLOW_SCHEMA.equals(flowVersion);
+        if (!currentVersion && !previousVersion && !olderVersion) throw new IllegalArgumentException("Unsupported Flow schemaVersion: " + flowVersion);
+        String suffix = currentVersion ? "v3.2" : (previousVersion ? "v3.1" : "v3.0");
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-" + suffix + ".schema.json");
+        att.validation.SchemaMigrationGuidance.verify(schema,
+                att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.2.schema.json"), map, flowVersion, Version.FLOW_SCHEMA);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
-        String templateVersion = currentVersion ? Version.TEMPLATE_SCHEMA : Version.PREVIOUS_TEMPLATE_SCHEMA;
+        String templateVersion = currentVersion ? Version.TEMPLATE_SCHEMA
+                : (previousVersion ? Version.PREVIOUS_TEMPLATE_SCHEMA : Version.PREVIOUS2_TEMPLATE_SCHEMA);
         actionContract.put("schemaVersion", templateVersion);
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
-        Path templateSchema = projectRoot.resolve("schemas/att-template-" + (currentVersion ? "v3.1" : "v3.0") + ".schema.json");
-        if (Files.isRegularFile(templateSchema)) att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
+        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot,
+                "att-template-" + (currentVersion ? "v3.2" : (previousVersion ? "v3.1" : "v3.0")) + ".schema.json");
+        att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
         SchemaSupport.requireVersion(map, flowVersion, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");
         String id = text(map.get("id"));

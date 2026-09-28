@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PackageDocumentationGeneratorTest {
     @TempDir Path tempDir;
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
     @Test void generatesModernSinglePageAndUniqueUnicodeIds() throws Exception {
         Files.createDirectories(tempDir.resolve("testcase")); Files.createDirectories(tempDir.resolve("templates"));
         Files.createDirectories(tempDir.resolve("templates/flows/sample"));

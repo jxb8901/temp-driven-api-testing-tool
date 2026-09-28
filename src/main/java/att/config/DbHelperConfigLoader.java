@@ -43,7 +43,7 @@ public final class DbHelperConfigLoader {
             DbHelperConfig helper;
             try {
                 Map<?, ?> map = yaml(file);
-                if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+                JsonSchemaVerifier.verify(schema, map);
                 helper = parse(map, file);
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
