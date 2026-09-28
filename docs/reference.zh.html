@@ -1840,10 +1840,13 @@ code、輸出及錯誤。<code>all</code> 時 <code>output.result</code> 包含
 descriptor 順序以 ID 為 key 的 <code>instances</code>；每筆有
 <code>instance</code>、<code>host</code>、<code>port</code>、<code>transport</code>、<code>startedAt</code>、<code>endedAt</code>、<code>durationMs</code>、<code>status</code>，在適用時另有
 <code>exitCode</code>、<code>stdout</code>、<code>stderr</code>、<code>rawOutput</code>、解析後
-<code>output</code> 或 <code>error</code>。全部 PASS
-才成功；單台失敗仍保留其他主機證據，timeout 會明確標記。Assertion 可查
-<code>${output.result.instances.app1.status}</code> 或
-<code>${output.result.instances.app1.output}</code>。Evidence
+<code>output</code> 或 <code>error</code>。命令正常完成時即使
+<code>exitCode</code> 非零，仍是 <code>status: PASS</code>；exit code
+是供 Action assertion
+判斷的證據，不屬操作失敗。只有執行、輸出解析、取消或 timeout 錯誤才令
+operation 失敗，其他主機證據仍會保留。Assertion 可查
+<code>${output.result.instances.app1.exitCode}</code>、<code>${output.result.instances.app1.status}</code>
+或 <code>${output.result.instances.app1.output}</code>。Evidence
 不記錄認證內容或環境提供的私鑰路徑；私鑰應放在 package
 外，命令中亦不要放秘密。</p>
 <p>遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把

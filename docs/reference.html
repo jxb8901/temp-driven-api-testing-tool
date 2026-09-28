@@ -1981,10 +1981,13 @@ start/end/duration, exit code, output and errors. For <code>all</code>,
 <code>durationMs</code>, <code>status</code>, and when available
 <code>exitCode</code>, <code>stdout</code>, <code>stderr</code>,
 <code>rawOutput</code>, parsed <code>output</code>, or
-<code>error</code>. The operation succeeds only if every host passes;
-one failure retains other hosts' evidence, and timeout is explicit.
-Assertions may inspect
-<code>${output.result.instances.app1.status}</code> or
+<code>error</code>. A completed command has <code>status: PASS</code>
+even with a non-zero <code>exitCode</code>; that code is evidence for
+the Action assertion, not an operational failure. The operation fails
+only on an execution, output-parse, cancellation, or timeout error;
+other hosts' evidence is retained. Assertions may inspect
+<code>${output.result.instances.app1.exitCode}</code>,
+<code>${output.result.instances.app1.status}</code>, or
 <code>${output.result.instances.app1.output}</code>. Credential contents
 and environment-supplied key paths are not recorded; keep private keys
 outside the package and do not put secrets in commands.</p>

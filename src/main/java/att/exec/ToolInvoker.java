@@ -352,8 +352,9 @@ public class ToolInvoker {
                                         && !command.stdoutArtifactTruncated()
                                         ? parseOutput(command.stdoutArtifact(), tool.output())
                                         : parseOutput(command.stdout().trim(), tool.output()));
-                                result.put("status", command.exitCode() == 0 ? "PASS" : "ERROR");
-                                if (command.exitCode() != 0) result.put("error", "SSH command exited with code " + command.exitCode());
+                                // A completed process supplies evidence for the Action assertion;
+                                // only execution or output-parsing failures fail fan-out.
+                                result.put("status", "PASS");
                             } catch (Exception error) {
                                 result.put("status", "ERROR"); result.put("error", "Output parse failed: " + error.getMessage());
                             }

@@ -13,7 +13,7 @@ CLI --env -> 有效 config -> SSHHelper registry -> Tool group binding
 
 ## 選擇與執行
 
-Tool group strategy 覆蓋 helper 預設。`single` 選唯一 instance；`random` 均勻選一台；`roundRobin` 對每個 helper 使用 atomic 循環計數器，並行呼叫不會重用同一計數位置。`all` 按 descriptor 次序為每個 instance 建立一個 task，透過最多 `fanout.maxConcurrency` 個 worker 的固定 pool 執行。每個 task 使用已展開的命令 argv 和有效 Action／Tool／全域 timeout；不會改到另一台重試。Outcome 按 descriptor 次序而非完成先後組裝。單台 I/O／parse／exit／timeout 錯誤保留在該筆，不清除其他主機 outcome；只有全部 PASS 才成功。父執行緒中斷會取消 pool task；`CommandRunner` 強制銷毀已中斷的 OpenSSH process，`JschSshClient` 在 `finally` 斷開 channel/session。
+Tool group strategy 覆蓋 helper 預設。`single` 選唯一 instance；`random` 均勻選一台；`roundRobin` 對每個 helper 使用 atomic 循環計數器，並行呼叫不會重用同一計數位置。`all` 按 descriptor 次序為每個 instance 建立一個 task，透過最多 `fanout.maxConcurrency` 個 worker 的固定 pool 執行。每個 task 使用已展開的命令 argv 和有效 Action／Tool／全域 timeout；不會改到另一台重試。Outcome 按 descriptor 次序而非完成先後組裝。單台 I/O／parse／timeout 錯誤保留在該筆，不清除其他主機 outcome；命令正常完成但 exit code 非零時，仍屬執行成功，`exitCode` 留給 Action assertion 判定，本身不會令 fan-out 失敗。所有 instance 均無操作失敗時 aggregate 才成功。父執行緒中斷會取消 pool task；`CommandRunner` 強制銷毀已中斷的 OpenSSH process，`JschSshClient` 在 `finally` 斷開 channel/session。
 
 OpenSSH 與 Java SSH 使用同一個有效 `SshConfig` 及安全引號處理的 logical argv。完整 `${ENV:NAME}` identityFile 路徑在載入 descriptor 時解析；變數缺失時不顯示 secret。Transport 選擇屬基礎設施選擇，不是 routing strategy。兩者均嚴格驗證 host key。`identityFile` 內容、環境提供的 key 路徑、resolved credential 和 session handle 不會進入 Context 或 evidence。
 

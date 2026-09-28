@@ -8,6 +8,12 @@ import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
 import att.core.StageCaseData;
 import att.core.TestCase;
+import att.core.ResultStatus;
+import att.core.ValidationResult;
+import att.template.StageTemplate;
+import att.template.StageTemplateRunner;
+import att.template.TemplateAction;
+import att.template.UnifiedTemplateEngine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -138,18 +145,64 @@ class SshHelperFeatureTest {
                         return new CommandResult(target.host().startsWith("second") ? 9 : 0, target.host(), "diagnostic", false);
                     } finally { active.decrementAndGet(); }
                 }, System.err);
-        ToolExecutionException error = assertThrows(ToolExecutionException.class,
-                () -> new ToolInvoker(root, effective, new CommandRunner(), remote).invokeAttempt("all", "remote.echo",
-                        Collections.<String, Object>emptyMap(), context(), new CaseExecutionLog(root.resolve("all.log")), 1000L));
-        assertEquals("SSH_FANOUT", error.category());
-        Map<?, ?> output = (Map<?, ?>) error.evidence().get("output");
+        ToolInvocationResult invocation = new ToolInvoker(root, effective, new CommandRunner(), remote)
+                .invokeAttempt("all", "remote.echo", Collections.<String, Object>emptyMap(),
+                        context(), new CaseExecutionLog(root.resolve("all.log")), 1000L);
+        assertEquals("PASS", invocation.invocation().get("status"));
+        Map<?, ?> output = (Map<?, ?>) invocation.output();
         Map<?, ?> results = (Map<?, ?>) output.get("instances");
         assertEquals(Arrays.asList("first", "second", "third"), new ArrayList<Object>(results.keySet()));
         assertEquals("PASS", ((Map<?, ?>) results.get("first")).get("status"));
-        assertEquals("ERROR", ((Map<?, ?>) results.get("second")).get("status"));
+        assertEquals("PASS", ((Map<?, ?>) results.get("second")).get("status"));
+        assertEquals(9, ((Map<?, ?>) results.get("second")).get("exitCode"));
+        assertFalse(((Map<?, ?>) results.get("second")).containsKey("error"));
         assertEquals("PASS", ((Map<?, ?>) results.get("third")).get("status"));
         assertEquals(3, visited.size());
         assertTrue(peak.get() <= 2);
+    }
+
+    @Test void allFanoutNonzeroExitReachesActionAssertion() throws Exception {
+        group("all"); Path config = profileConfig();
+        write("config/ssh/sit.yaml", descriptor("  - {id: first, host: first.example}\n  - {id: second, host: second.example}\n", "all"));
+        write("config/ssh/uat.yaml", descriptor("  - {id: one, host: uat.example}\n", "roundRobin"));
+        FrameworkConfig effective = new FrameworkConfigLoader().load(config, root, "SIT");
+        SshCommandRunner remote = new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> target.host().startsWith("second")
+                        ? new CommandResult(9, "expected", "diagnostic", false)
+                        : new CommandResult(0, "ready", "", false), System.err);
+        CaseRuntimeContext runtime = context();
+        Map<String, Object> fields = new LinkedHashMap<String, Object>();
+        fields.put("type", "tool"); fields.put("call", "#{remote.echo()}");
+        fields.put("assert", "${output.result.instances.second.exitCode} == 9");
+        TemplateAction accepted = new TemplateAction("accepted", fields);
+        List<ValidationResult> outcomes = new StageTemplateRunner(new UnifiedTemplateEngine(
+                new ToolInvoker(root, effective, new CommandRunner(), remote))).execute("invoke",
+                new StageTemplate("T", root, Collections.singletonList(accepted)), runtime,
+                new CaseExecutionLog(root.resolve("assertion.log")));
+        assertEquals(ResultStatus.PASS, outcomes.get(0).status(), outcomes.get(0).message());
+        assertEquals(9, runtime.resolve("ACTIONS.accepted.output.result.instances.second.exitCode"));
+        assertEquals(Boolean.TRUE, runtime.resolve("ACTIONS.accepted.output.assertion.passed"));
+    }
+
+    @Test void allFanoutTransportErrorStillRetainsPeerEvidence() throws Exception {
+        group("all"); Path config = profileConfig();
+        write("config/ssh/sit.yaml", descriptor("  - {id: first, host: first.example}\n  - {id: second, host: second.example}\n", "all"));
+        write("config/ssh/uat.yaml", descriptor("  - {id: one, host: uat.example}\n", "roundRobin"));
+        FrameworkConfig effective = new FrameworkConfigLoader().load(config, root, "SIT");
+        SshCommandRunner remote = new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> {
+                    if (target.host().startsWith("second")) throw new IOException("connection refused");
+                    return new CommandResult(0, "ready", "", false);
+                }, System.err);
+        ToolExecutionException failure = assertThrows(ToolExecutionException.class,
+                () -> new ToolInvoker(root, effective, new CommandRunner(), remote).invokeAttempt("error", "remote.echo",
+                        Collections.<String, Object>emptyMap(), context(), new CaseExecutionLog(root.resolve("error.log")), 1000L));
+        assertEquals("SSH_FANOUT", failure.category());
+        Map<?, ?> results = (Map<?, ?>) ((Map<?, ?>) failure.evidence().get("output")).get("instances");
+        assertEquals("PASS", ((Map<?, ?>) results.get("first")).get("status"));
+        assertEquals("ready", ((Map<?, ?>) results.get("first")).get("output"));
+        assertEquals("ERROR", ((Map<?, ?>) results.get("second")).get("status"));
+        assertTrue(String.valueOf(((Map<?, ?>) results.get("second")).get("error")).contains("connection refused"));
     }
 
     @Test void rejectsDuplicateInstancesAndUnknownBindingsBeforeExecution() throws Exception {
