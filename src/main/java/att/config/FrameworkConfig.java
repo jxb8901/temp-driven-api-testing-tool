@@ -21,6 +21,7 @@ public final class FrameworkConfig {
     private final Map<String, ToolConfig> tools;
     private final Map<String, DbHelperConfig> dbHelpers;
     private final Map<String, MqHelperConfig> mqHelpers;
+    private final Map<String, SshHelperConfig> sshHelpers;
     private final ReportConfig report;
     private final RunConfig run;
     private final List<SheetGroupConfig> sheetGroups;
@@ -129,6 +130,20 @@ public final class FrameworkConfig {
                            String caseIdColumn, String tagsColumn, List<DataColumnConfig> dataColumns,
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId,
                            boolean caseLogYamlAnchors, ProcessOutputConfig processOutput) {
+        this(outputDirectory, reportDirectory, logDirectory, environment, timeoutMs, templatesRoot, testcasesRoot,
+                tools, dbHelpers, mqHelpers, Collections.<String, SshHelperConfig>emptyMap(), report, run,
+                sheetGroups, caseIdColumn, tagsColumn, dataColumns, stages, headerRows, xmlNamespaceMode,
+                workbookId, caseLogYamlAnchors, processOutput);
+    }
+
+    public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
+                           int timeoutMs, Path templatesRoot, Path testcasesRoot, Map<String, ToolConfig> tools,
+                           Map<String, DbHelperConfig> dbHelpers, Map<String, MqHelperConfig> mqHelpers,
+                           Map<String, SshHelperConfig> sshHelpers, ReportConfig report, RunConfig run,
+                           List<SheetGroupConfig> sheetGroups, String caseIdColumn, String tagsColumn,
+                           List<DataColumnConfig> dataColumns, List<StageConfig> stages, int headerRows,
+                           String xmlNamespaceMode, String workbookId, boolean caseLogYamlAnchors,
+                           ProcessOutputConfig processOutput) {
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
@@ -139,6 +154,7 @@ public final class FrameworkConfig {
         this.tools = tools == null ? Collections.<String, ToolConfig>emptyMap() : new LinkedHashMap<String, ToolConfig>(tools);
         this.dbHelpers = dbHelpers == null ? Collections.<String, DbHelperConfig>emptyMap() : new LinkedHashMap<String, DbHelperConfig>(dbHelpers);
         this.mqHelpers = mqHelpers == null ? Collections.<String, MqHelperConfig>emptyMap() : new LinkedHashMap<String, MqHelperConfig>(mqHelpers);
+        this.sshHelpers = sshHelpers == null ? Collections.<String, SshHelperConfig>emptyMap() : new LinkedHashMap<String, SshHelperConfig>(sshHelpers);
         this.report = report == null ? defaultReport() : report;
         this.run = run == null ? new RunConfig("timestamp", "yyyyMMdd-HHmmss") : run;
         this.sheetGroups = sheetGroups == null ? Collections.<SheetGroupConfig>emptyList() : new ArrayList<SheetGroupConfig>(sheetGroups);
@@ -173,6 +189,13 @@ public final class FrameworkConfig {
         return null;
     }
     public Map<String, MqHelperConfig> mqHelpers() { return Collections.unmodifiableMap(mqHelpers); }
+    public Map<String, SshHelperConfig> sshHelpers() { return Collections.unmodifiableMap(sshHelpers); }
+    public SshHelperConfig sshHelper(String id) {
+        if (id == null) return null;
+        for (Map.Entry<String, SshHelperConfig> entry : sshHelpers.entrySet())
+            if (entry.getKey().equalsIgnoreCase(id)) return entry.getValue();
+        return null;
+    }
     public MqHelperConfig mqHelper(String id) {
         if (id == null) return null;
         for (Map.Entry<String, MqHelperConfig> entry : mqHelpers.entrySet()) {

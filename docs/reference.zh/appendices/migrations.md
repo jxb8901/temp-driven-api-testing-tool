@@ -7,7 +7,8 @@ Current Reference 依產品概念描述 ATT，不再按 release chronology 組�
 - 新 authoring 優先使用 `EXEC` / `META`，而非 legacy Context alias；
 - 使用 `output.result` / `EXEC.ACTIONS.<id>.output.result` 及 common evidence/attempt contract；
 - 把 Tool、DBHelper、MQHelper 視為 peer resource；
-- 若只改 typed DB/MQ binding，使用 environment profile；
+- 若只改 DB/MQ/SSHHelper binding，使用 environment profile；
+- 需要邏輯多實例路由時，以 `att-tool-group/v2.7` 的 `ssh: {helper: <id>}` 取代實體 group SSH；
 - 把 Run、Debug、Load 視為 peer execution mode。
 
 Pre-#42 monolithic manual 的可審核 disposition 記錄在 `docs/reference-migration-map.md`。

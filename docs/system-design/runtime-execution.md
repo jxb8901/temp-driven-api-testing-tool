@@ -26,6 +26,8 @@ CLI parsing selects a base config and optional `--env`. Environment selection is
 
 Secrets are resolved only where supported by the relevant descriptor. Curated `META` data and diagnostics must not publish resolved credentials.
 
+SSHHelper design details, including environment binding, selection concurrency, fan-out cancellation, transport parity and evidence, are maintained in [English](sshhelper.md) and [中文](sshhelper.zh.md).
+
 ## Validation pipeline
 
 ATT applies schema validation before semantic/dependency validation. The semantic phase resolves configured roots, testcase mappings, snapshots, Template/Flow dependencies, payloads, expressions and resource contracts before external execution.

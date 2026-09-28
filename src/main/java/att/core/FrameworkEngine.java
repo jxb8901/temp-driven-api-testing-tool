@@ -487,7 +487,7 @@ public class FrameworkEngine {
             }
             java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
             String first = command.isEmpty() ? "" : command.get(0);
-            if (tool.ssh() == null && (first.startsWith("./") || first.startsWith("../"))) addInput(inputs, "tool-executable", projectRoot.resolve(first).normalize());
+            if (tool.ssh() == null && tool.sshHelper().isEmpty() && (first.startsWith("./") || first.startsWith("../"))) addInput(inputs, "tool-executable", projectRoot.resolve(first).normalize());
         }
         java.util.Set<Path> dbHelperFiles = new java.util.LinkedHashSet<Path>();
         for (att.config.DbHelperConfig helper : config.dbHelpers().values()) {

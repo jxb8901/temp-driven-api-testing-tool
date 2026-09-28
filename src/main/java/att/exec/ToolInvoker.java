@@ -7,6 +7,8 @@ package att.exec;
 import att.config.FrameworkConfig;
 import att.config.ToolConfig;
 import att.config.ToolArgumentConfig;
+import att.config.SshConfig;
+import att.config.SshHelperConfig;
 import att.config.YamlSupport;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
@@ -33,6 +35,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -124,21 +131,28 @@ public class ToolInvoker {
         Map<String, Object> resolvedInput = prepareInput(toolName, input);
 
         List<String> logicalArgv = expandCommand(tool, resolvedInput);
-        List<String> argv = tool.ssh() == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;
-        String sshTransport = tool.ssh() == null ? "" : sshCommandRunner.transportName();
-        CommandResult commandResult;
+        SshHelperConfig helper = tool.sshHelper().isEmpty() ? null : config.sshHelper(tool.sshHelper());
+        if (!tool.sshHelper().isEmpty() && helper == null) throw new IllegalStateException("Missing SSH helper: " + tool.sshHelper());
+        String strategy = helper == null ? "" : (tool.sshSelectionStrategy().isEmpty() ? helper.strategy() : tool.sshSelectionStrategy());
         long timeoutMs = effectiveTimeoutMs(toolName, actionTimeoutMs);
+        if (helper != null && "all".equals(strategy))
+            return invokeAll(id, toolName, tool, helper, strategy, resolvedInput, logicalArgv, timeoutMs, saveAs, overwrite, context, log, recordAction, started);
+        String instance = helper == null ? "" : helper.select(strategy);
+        SshConfig target = helper == null ? tool.ssh() : helper.instances().get(instance);
+        List<String> argv = target == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;
+        String sshTransport = target == null ? "" : sshCommandRunner.transportName();
+        CommandResult commandResult;
         CommandRunner.CapturePolicy capture = capturePolicy(context, id);
         Map<String, Object> invocation = null;
         try {
-            if (tool.ssh() == null) {
+            if (target == null) {
                 Files.createDirectories(context.caseOutputDirectory());
                 commandResult = commandRunner.runWithCapture(argv, Duration.ofMillis(timeoutMs), context.caseOutputDirectory(),
                         localToolEnvironment(context), capture);
             }
             else {
-                SshCommandRunner.Execution execution = sshCommandRunner.run(tool.ssh(), logicalArgv, Duration.ofMillis(timeoutMs), projectRoot, capture);
-                commandResult = execution.result(); argv = execution.argv(); sshTransport = execution.transport();
+                SshCommandRunner.Execution execution = sshCommandRunner.run(target, logicalArgv, Duration.ofMillis(timeoutMs), projectRoot, capture);
+                commandResult = execution.result(); argv = safeSshArgv(execution.argv(), target); sshTransport = execution.transport();
             }
         }
         catch (java.io.IOException e) {
@@ -146,11 +160,12 @@ public class ToolInvoker {
             String cleanupWarning = cleanupCapture(capture);
             if (cleanupWarning != null) evidence.put("cleanupWarning", cleanupWarning);
             evidence.put("id", id); evidence.put("type", "tool"); evidence.put("name", toolName);
-            evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", e.getMessage());
+            evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", redactSsh(e.getMessage(), target));
             evidence.put("logicalArgv", logicalArgv); evidence.put("argv", argv);
             if (tool.grouped()) { evidence.put("groupId", tool.groupId()); evidence.put("toolKey", tool.localKey()); }
-            if (tool.ssh() != null) { evidence.put("sshDestination", tool.ssh().destination()); evidence.put("sshPort", tool.ssh().port()); evidence.put("sshTransport", sshTransport); }
-            throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + e.getMessage(), evidence, null, e);
+            if (target != null) { evidence.put("sshDestination", target.destination()); evidence.put("sshPort", target.port()); evidence.put("sshTransport", sshTransport); }
+            if (helper != null) { evidence.put("sshHelper", helper.id()); evidence.put("instance", instance); evidence.put("host", target.host()); evidence.put("selectionStrategy", strategy); evidence.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup"); evidence.put("startedAt", started.toString()); evidence.put("endedAt", Instant.now().toString()); evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis()); }
+            throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + redactSsh(e.getMessage(), target), evidence, null, e);
         }
         try {
         String command = printableCommand(argv);
@@ -179,13 +194,19 @@ public class ToolInvoker {
             toolInvocation.put("groupId", tool.groupId());
             toolInvocation.put("toolKey", tool.localKey());
         }
-        if (tool.ssh() != null) {
+        if (target != null) {
             Map<String, Object> ssh = new LinkedHashMap<String, Object>();
-            ssh.put("destination", tool.ssh().destination());
-            ssh.put("port", tool.ssh().port());
-            ssh.put("identityFileConfigured", !tool.ssh().identityFile().isEmpty());
+            ssh.put("destination", target.destination());
+            ssh.put("port", target.port());
+            ssh.put("identityFileConfigured", !target.identityFile().isEmpty());
             ssh.put("transport", sshTransport);
             toolInvocation.put("ssh", ssh);
+        }
+        if (helper != null) {
+            toolInvocation.put("sshHelper", helper.id()); toolInvocation.put("instance", instance);
+            toolInvocation.put("host", target.host()); toolInvocation.put("selectionStrategy", strategy);
+            toolInvocation.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup");
+            toolInvocation.put("startedAt", started.toString()); toolInvocation.put("endedAt", Instant.now().toString());
         }
         toolInvocation.put("timeoutMs", timeoutMs);
         toolInvocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 && parseFailure == null ? "PASS" : "ERROR"));
@@ -208,6 +229,12 @@ public class ToolInvoker {
         invocation.put("command", command);
         invocation.put("logicalArgv", logicalArgv);
         invocation.put("argv", argv);
+        if (helper != null) {
+            invocation.put("sshHelper", helper.id()); invocation.put("instance", instance);
+            invocation.put("host", target.host()); invocation.put("selectionStrategy", strategy);
+            invocation.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup");
+            invocation.put("startedAt", started.toString()); invocation.put("endedAt", Instant.now().toString());
+        }
         if (saveAs != null && !saveAs.trim().isEmpty()) {
             Path directory = context.caseLogDirectory();
             Files.createDirectories(directory);
@@ -288,6 +315,167 @@ public class ToolInvoker {
                 }
             }
         }
+    }
+
+    private ToolInvocationResult invokeAll(String id, String toolName, ToolConfig tool, SshHelperConfig helper,
+                                            String strategy, Map<String, Object> input, List<String> logicalArgv,
+                                            long timeoutMs, String saveAs, boolean overwrite,
+                                            CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction,
+                                            Instant started) throws Exception {
+        final List<String> keys = new ArrayList<String>(helper.instances().keySet());
+        List<Callable<Map<String, Object>>> tasks = new ArrayList<Callable<Map<String, Object>>>();
+        for (final String key : keys) {
+            final SshConfig target = helper.instances().get(key);
+            tasks.add(new Callable<Map<String, Object>>() {
+                @Override public Map<String, Object> call() {
+                    long began = System.nanoTime();
+                    Map<String, Object> result = new LinkedHashMap<String, Object>();
+                    result.put("instance", key); result.put("host", target.host()); result.put("port", target.port());
+                    result.put("startedAt", Instant.now().toString());
+                    result.put("transport", sshCommandRunner.transportName());
+                    result.put("exitCode", -1); result.put("stdout", ""); result.put("stderr", "");
+                    CommandRunner.CapturePolicy capture = null;
+                    try {
+                        capture = capturePolicy(context, id + "-" + key);
+                        SshCommandRunner.Execution execution = sshCommandRunner.run(target, logicalArgv,
+                                Duration.ofMillis(timeoutMs), projectRoot, capture);
+                        CommandResult command = execution.result();
+                        result.put("transport", execution.transport());
+                        result.put("exitCode", command.exitCode());
+                        result.put("stdout", command.stdout()); result.put("stderr", command.stderr());
+                        result.put("rawOutput", command.stdout().trim());
+                        addCaptureEvidence(result, command);
+                        if (command.timedOut()) { result.put("status", "TIMEOUT"); result.put("error", "SSH command timed out"); }
+                        else {
+                            try {
+                                result.put("output", structured(tool.output()) && command.stdoutArtifact() != null
+                                        && !command.stdoutArtifactTruncated()
+                                        ? parseOutput(command.stdoutArtifact(), tool.output())
+                                        : parseOutput(command.stdout().trim(), tool.output()));
+                                result.put("status", command.exitCode() == 0 ? "PASS" : "ERROR");
+                                if (command.exitCode() != 0) result.put("error", "SSH command exited with code " + command.exitCode());
+                            } catch (Exception error) {
+                                result.put("status", "ERROR"); result.put("error", "Output parse failed: " + error.getMessage());
+                            }
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        result.put("status", "TIMEOUT"); result.put("error", "SSH execution cancelled");
+                    } catch (Exception error) {
+                        result.put("status", "ERROR"); result.put("error", redactSsh(error.getMessage(), target));
+                    } finally {
+                        String warning = cleanupCapture(capture);
+                        if (warning != null) result.put("cleanupWarning", warning);
+                        result.put("durationMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began));
+                        result.put("endedAt", Instant.now().toString());
+                    }
+                    return result;
+                }
+            });
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(helper.maxConcurrency(), keys.size()));
+        List<Future<Map<String, Object>>> futures;
+        try {
+            // Each host receives the full per-attempt budget, including queued hosts.
+            // An interrupted parent still cancels every active process/session.
+            futures = pool.invokeAll(tasks);
+        } finally {
+            pool.shutdownNow();
+        }
+        Map<String, Object> instances = new LinkedHashMap<String, Object>();
+        boolean passed = true;
+        boolean timedOut = false;
+        for (int index = 0; index < keys.size(); index++) {
+            String key = keys.get(index);
+            Map<String, Object> outcome;
+            Future<Map<String, Object>> future = futures.get(index);
+            if (future.isCancelled()) {
+                outcome = new LinkedHashMap<String, Object>();
+                outcome.put("instance", key); outcome.put("host", helper.instances().get(key).host());
+                outcome.put("port", helper.instances().get(key).port());
+                outcome.put("transport", sshCommandRunner.transportName());
+                outcome.put("exitCode", -1); outcome.put("stdout", ""); outcome.put("stderr", "");
+                outcome.put("status", "TIMEOUT"); outcome.put("error", "SSH fan-out deadline exceeded");
+                outcome.put("durationMs", timeoutMs);
+                outcome.put("startedAt", started.toString()); outcome.put("endedAt", Instant.now().toString());
+            } else {
+                try { outcome = future.get(); }
+                catch (java.util.concurrent.ExecutionException error) {
+                    outcome = new LinkedHashMap<String, Object>();
+                    outcome.put("instance", key); outcome.put("host", helper.instances().get(key).host());
+                    outcome.put("port", helper.instances().get(key).port()); outcome.put("transport", sshCommandRunner.transportName());
+                    outcome.put("exitCode", -1); outcome.put("stdout", ""); outcome.put("stderr", "");
+                    outcome.put("durationMs", 0L);
+                    outcome.put("startedAt", started.toString()); outcome.put("endedAt", Instant.now().toString());
+                    outcome.put("status", "ERROR"); outcome.put("error", redactSsh(error.getCause() == null ? error.getMessage() : error.getCause().getMessage(), helper.instances().get(key)));
+                }
+            }
+            if (!"PASS".equals(outcome.get("status"))) passed = false;
+            if ("TIMEOUT".equals(outcome.get("status"))) timedOut = true;
+            instances.put(key, outcome);
+        }
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("sshHelper", helper.id()); output.put("selectionStrategy", strategy);
+        output.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup");
+        output.put("instances", instances);
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        evidence.put("id", id); evidence.put("type", "tool"); evidence.put("name", toolName);
+        evidence.put("input", input); evidence.put("output", output);
+        evidence.put("sshHelper", helper.id()); evidence.put("selectionStrategy", strategy);
+        evidence.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup");
+        evidence.put("instances", instances); evidence.put("logicalArgv", logicalArgv);
+        evidence.put("timeoutMs", timeoutMs); evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
+        evidence.put("status", passed ? "PASS" : timedOut ? "TIMEOUT" : "ERROR");
+        if (tool.grouped()) { evidence.put("groupId", tool.groupId()); evidence.put("toolKey", tool.localKey()); }
+        Map<String, Object> invocation = new LinkedHashMap<String, Object>(evidence);
+        if (saveAs != null && !saveAs.trim().isEmpty()) {
+            Path directory = context.caseLogDirectory();
+            Path path = directory.resolve(att.core.IdentifierValidator.relativePath(saveAs, "tool result.path")).normalize();
+            if (!path.startsWith(directory.normalize())) throw new IllegalArgumentException("Tool result.path escapes case directory");
+            PathSafety.ensureContained(directory, path, "Tool result.path");
+            Files.createDirectories(path.getParent());
+            PathSafety.ensureContained(directory, path, "Tool result.path");
+            if (Files.exists(path) && !overwrite) throw new IllegalArgumentException("result file already exists and overwrite is false: " + saveAs);
+            byte[] bytes = new ObjectMapper().writeValueAsBytes(output);
+            if (overwrite) Files.write(path, bytes);
+            else Files.write(path, bytes, java.nio.file.StandardOpenOption.CREATE_NEW);
+            invocation.put("outputFile", path.toString()); evidence.put("outputFile", path.toString());
+        }
+        Map<String, Object> toolNode = new LinkedHashMap<String, Object>();
+        if (tool.grouped()) {
+            Map<String, Object> group = new LinkedHashMap<String, Object>();
+            group.put(tool.localKey(), evidence); toolNode.put(tool.groupId(), group);
+        } else toolNode.put(toolName, evidence);
+        invocation.put("TOOL", toolNode);
+        if (recordAction) {
+            context.addAction(id, invocation);
+            try { if (log != null) log.appendToolInvocation("ACTION " + id, invocation); }
+            catch (Exception error) { invocation.put("evidenceError", "tool action log append failed: " + error.getMessage()); }
+        }
+        if (!passed) throw new ToolExecutionException(timedOut ? "TIMEOUT" : "SSH_FANOUT",
+                "SSH helper fan-out failed: " + toolName, invocation, null, null);
+        return new ToolInvocationResult(toolName, id, output, invocation, true,
+                ActionExecutionResult.evidence("tool", evidence));
+    }
+
+    private String redactSsh(String message, SshConfig target) {
+        if (message == null) return "";
+        if (target == null || !target.identityFileFromEnvironment() || target.identityFile().isEmpty()) return message;
+        String redacted = message.replace(target.identityFile(), "[REDACTED_SECRET]");
+        try {
+            java.nio.file.Path path = java.nio.file.Paths.get(target.identityFile());
+            if (!path.isAbsolute()) path = projectRoot.resolve(path).normalize();
+            return redacted.replace(path.toString(), "[REDACTED_SECRET]");
+        } catch (RuntimeException invalidPath) {
+            return redacted;
+        }
+    }
+
+    private List<String> safeSshArgv(List<String> argv, SshConfig target) {
+        if (target == null || !target.identityFileFromEnvironment() || target.identityFile().isEmpty()) return argv;
+        List<String> safe = new ArrayList<String>(argv.size());
+        for (String argument : argv) safe.add(redactSsh(argument, target));
+        return safe;
     }
 
     private CommandRunner.CapturePolicy capturePolicy(CaseRuntimeContext context, String invocationId) throws Exception {

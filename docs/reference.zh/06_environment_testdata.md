@@ -4,9 +4,9 @@ Environment selection 改變 resource binding，不改變 Action logic。
 
 ### Environment profiles
 
-`att-config/v2.6` 可以定義 `environment` default 與 `environments` map。`--config` 選擇 base configuration file；`--env` 在該 configuration 內選擇 named binding。明確 `--env` 優先於 configured default；未知 environment 在任何 external execution 前失敗。
+`att-config/v2.7` 可以定義 `environment` default 與 `environments` map。`--config` 選擇 base configuration file；`--env` 在該 configuration 內選擇 named binding。明確 `--env` 優先於 configured default；未知 environment 在任何 external execution 前失敗。既有 v2.6 profile 仍可用於 DB/MQ-only package。
 
-Profile 是 typed shallow binding，不是 generic recursive YAML inheritance。目前 profile 可擁有 `dbhelpers`、`mqhelpers` list：profile 明確提供某 list 時會取代 root 的該 resource list；沒有提供的 list 則繼承 common root list。
+Profile 是 typed shallow binding，不是 generic recursive YAML inheritance。目前 profile 可擁有 `dbhelpers`、`mqhelpers`、`sshhelpers` list：profile 明確提供某 list 時會取代 root 的該 resource list；沒有提供的 list 則繼承 common root list。
 
 ```yaml
 environment: SIT
@@ -14,12 +14,14 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    sshhelpers: [config/sshhelpers/sit/application.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    sshhelpers: [config/sshhelpers/uat/application.yaml]
 ```
 
-不同 environment 的 descriptor 應暴露相同 stable logical ID（例如 `orders`、`payment`），因此 Template/Flow/Action 在 SIT/UAT/PREPROD 之間不需要修改。
+不同 environment 的 descriptor 應暴露相同 stable logical ID（例如 `orders`、`payment`、`application`），因此 Template/Flow/Action 和 Tool-group helper binding 在 SIT/UAT/PREPROD 之間不需要修改。完整範例與 fan-out 安全說明見 [SSHHelper 章](../../docs/reference.zh/05_resources/sshhelper.md)。
 
 ### Topology 與 secrets
 
@@ -31,7 +33,7 @@ Run、Validate、Debug、Load 在 mode-specific 工作前都經過相同 effecti
 
 ### 從獨立 config 遷移
 
-原有 `--config config/environments/sit.yaml` / `uat.yaml` 工作方式仍可使用。若 package contract 相同、只改 typed DB/MQ binding，profile 更簡潔；若整體 policy、root、Tool topology 或 configuration ownership 有重大差異，仍應使用 separate config。
+原有 `--config config/environments/sit.yaml` / `uat.yaml` 工作方式仍可使用。若 package contract 相同、只改 typed DB/MQ/SSH binding，profile 更簡潔；若整體 policy、root、Tool topology 或 configuration ownership 有重大差異，仍應使用 separate config。
 
 ### Test data 擴展位置
 

@@ -548,7 +548,7 @@ public final class PackageValidator {
 
     private void validatePackageTools(List<Diagnostic> diagnostics) {
         boolean hasSshTool = false;
-        for (ToolConfig tool : global.tools().values()) if (tool.ssh() != null) { hasSshTool = true; break; }
+        for (ToolConfig tool : global.tools().values()) if (tool.ssh() != null || !tool.sshHelper().isEmpty()) { hasSshTool = true; break; }
         if (hasSshTool && !att.exec.SshCommandRunner.localSshAvailable()) {
             diagnostics.add(new Diagnostic(DiagnosticCodes.TOOL_INVALID, Diagnostic.Severity.WARNING,
                     att.exec.SshCommandRunner.FALLBACK_WARNING, null, null, null, null, null, null, null, null));
@@ -669,16 +669,14 @@ public final class PackageValidator {
     private void validateToolExecutable(ToolConfig tool) {
         try {
             if (tool.callBacked()) return;
-            if (tool.ssh() != null) {
-                String configured = tool.ssh().identityFile();
-                if (!configured.isEmpty()) {
-                    Path identity = java.nio.file.Paths.get(configured);
-                    if (!identity.isAbsolute()) identity = projectRoot.resolve(identity).normalize();
-                    Path canonicalIdentity = identity.toRealPath();
-                    if (Files.isSymbolicLink(identity) || !Files.isRegularFile(canonicalIdentity) || !Files.isReadable(canonicalIdentity)) {
-                        throw new IllegalArgumentException("Missing/unsafe SSH identity file for " + tool.key() + ": " + configured);
-                    }
+            if (tool.ssh() != null || !tool.sshHelper().isEmpty()) {
+                if (!tool.sshHelper().isEmpty()) {
+                    att.config.SshHelperConfig helper = global.sshHelper(tool.sshHelper());
+                    if (helper == null) throw new IllegalArgumentException("Unknown SSH helper: " + tool.sshHelper());
+                    for (att.config.SshConfig target : helper.instances().values()) validateSshIdentity(tool, target);
+                    return;
                 }
+                validateSshIdentity(tool, tool.ssh());
                 return;
             }
             java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
@@ -699,6 +697,21 @@ public final class PackageValidator {
             }
             if (!Files.isExecutable(canonicalExecutable)) throw new IllegalArgumentException("Tool is not executable: " + first);
         } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing/unsafe tool executable for " + tool.key() + ": " + e.getMessage(), e); }
+    }
+
+    private void validateSshIdentity(ToolConfig tool, att.config.SshConfig target) throws java.io.IOException {
+        String configured = target.identityFile();
+        if (configured.isEmpty()) return;
+        try {
+            Path identity = java.nio.file.Paths.get(configured);
+            if (!identity.isAbsolute()) identity = projectRoot.resolve(identity).normalize();
+            Path canonicalIdentity = identity.toRealPath();
+            if (Files.isSymbolicLink(identity) || !Files.isRegularFile(canonicalIdentity) || !Files.isReadable(canonicalIdentity))
+                throw new IllegalArgumentException("Missing/unsafe SSH identity file");
+        } catch (Exception error) {
+            if (target.identityFileFromEnvironment()) throw new IllegalArgumentException("Missing/unsafe SSH identity file for " + tool.key() + " (environment-supplied path)");
+            throw new IllegalArgumentException("Missing/unsafe SSH identity file for " + tool.key() + ": " + configured, error);
+        }
     }
     private Path findOnPath(String executable, boolean requireExecutable) throws java.io.IOException {
         String path = System.getenv("PATH");

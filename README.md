@@ -6,7 +6,8 @@ ATT is an offline, template-driven API and integration test runner for SIT/UAT. 
 Testcase -> Stage -> Template -> Action -> Resource
                                   |         |-- Tool
                                   |         |-- DBHelper
-                                  |         `-- MQHelper
+                                  |         |-- MQHelper
+                                  |         `-- SSHHelper (Tool routing)
                                   `-- Flow
 ```
 
@@ -16,7 +17,7 @@ ATT has three peer execution modes over the same runtime model:
 - **Debug** — standalone Template, Flow or Tool execution;
 - **Load** — closed-VU or fixed-arrival-rate execution against a Template, Flow or Tool.
 
-All modes use canonical `EXEC` / `META` Context roots and Action-local `output`. Tool, DB and MQ operations converge on the same Action result/evidence model. Environment profiles select DB/MQ bindings through stable logical IDs without changing Actions.
+All modes use canonical `EXEC` / `META` Context roots and Action-local `output`. Tool, DB and MQ operations converge on the same Action result/evidence model. Environment profiles select DB/MQ/SSHHelper bindings through stable logical IDs without changing Actions.
 
 ## Start here
 
@@ -51,14 +52,14 @@ Windows uses the same commands through `att.bat`.
 - Historical and superseded documentation: [`docs/history/`](docs/history/)
 - Release chronology: [`CHANGELOG.md`](CHANGELOG.md)
 
-The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
+The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper/SSHHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
 
 Direct DB Actions support Action-level `timeoutMs`. Read-only `query` Actions may also use bounded retry for `ASSERTION` and `TIMEOUT`; mutating `update` Actions deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md).
 
 ## Core package layout
 
 ```text
-config/       global config, Tool groups, DBHelper/MQHelper descriptors
+config/       global config, Tool groups, DBHelper/MQHelper/SSHHelper descriptors
 testcase/     xlsx + yaml sidecar + generated xml snapshot
 templates/    Template directories and reusable Flows
 tools/        process-backed integration scripts/programs
@@ -66,7 +67,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-The current global configuration schema is `att-config/v2.6`. Templates/Flows, DBHelper, MQHelper, debug and load scenarios have their own versioned schemas under `schemas/`.
+The current global configuration schema is `att-config/v2.7` (v2.6 remains readable). Tool groups with logical SSH bindings use `att-tool-group/v2.7` and `att-sshhelper/v1.0`. Templates/Flows, DBHelper, MQHelper, debug and load scenarios have their own versioned schemas under `schemas/`.
 
 ## Build and validation
 

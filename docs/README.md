@@ -29,6 +29,7 @@ Minimal offline workflow:
 | Call an external script or program | [Tool](reference/05_resources/tools.md) |
 | Query or update a database | [DBHelper](reference/05_resources/dbhelper.md) |
 | Send, receive, or request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
+| Route SSH Tools across SIT/UAT or clustered hosts | [SSHHelper](reference/05_resources/sshhelper.md) · [中文](reference.zh/05_resources/sshhelper.md) |
 | Debug one Template, Flow, or Tool | [Debug](reference/04_execution_modes/debug.md) |
 | Run a load test | [Load](reference/04_execution_modes/load.md) |
 | Switch SIT/UAT resources | [Environment and Test Data](reference/06_environment_testdata.md) |
@@ -40,7 +41,7 @@ Minimal offline workflow:
 
 - **Quick Start** is the tutorial for a first successful run.
 - **Reference** is the supported public contract. Use the generated [English](reference.html) or [繁體中文](reference.zh.html) manual, or the matching [English](reference/) and [繁體中文](reference.zh/) source modules.
-- **System Design** explains maintainer-facing implementation architecture: [runtime execution](system-design/runtime-execution.md).
+- **System Design** explains maintainer-facing implementation architecture: [runtime execution](system-design/runtime-execution.md) and SSHHelper [English](system-design/sshhelper.md) / [中文](system-design/sshhelper.zh.md).
 - **CHANGELOG** records release chronology: [CHANGELOG.md](../CHANGELOG.md).
 - **History** preserves superseded, version-specific, migration, compatibility, and issue-specific material: [history/README.md](history/README.md).
 

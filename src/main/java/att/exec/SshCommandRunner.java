@@ -21,6 +21,10 @@ public final class SshCommandRunner {
     interface JavaClient {
         CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot)
                 throws IOException, InterruptedException;
+        default CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot,
+                                  CommandRunner.CapturePolicy capture) throws IOException, InterruptedException {
+            return run(ssh, remoteCommand, timeout, projectRoot);
+        }
     }
 
     static final class Execution {
@@ -71,7 +75,7 @@ public final class SshCommandRunner {
             return new Execution(result, argv, "openssh");
         }
         if (warned.compareAndSet(false, true)) warningOutput.println(FALLBACK_WARNING);
-        return new Execution(javaClient.run(ssh, remoteCommand, timeout, projectRoot),
+        return new Execution(javaClient.run(ssh, remoteCommand, timeout, projectRoot, capture),
                 new ArrayList<String>(logicalArgv), "mwiede/jsch");
     }
 

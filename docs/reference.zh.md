@@ -623,15 +623,16 @@ Load execution identity 與 evidence-only scheduler diagnostics 的中央定義�
 
 ## 05 資源與整合
 
-Tool、DBHelper、MQHelper 是同級 integration/resource 類型。它們的 descriptor 與 lifecycle rule 不同，但最後都收斂到 5.4 的 common operation-result/evidence contract。
+Tool、DBHelper、MQHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由；它們最終收斂到 5.5 的 common operation-result/evidence contract。
 
 ```text
 Tool      -> process/call operation --\
 DBHelper  -> JDBC operation ----------+--> Action output
 MQHelper  -> MQ operation ------------/
+SSHHelper -> Tool SSH routing --------/
 ```
 
-Resource ID 是 Template/expression 所引用的 logical contract。Environment profile 可以把相同 DB/MQ logical ID 綁定到不同 descriptor，而不需要修改 Action YAML。
+Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
 
 ### 5.1 Tool
 
@@ -832,7 +833,76 @@ Output 與 evidence 同時保留 logical helper id 並公開選中的 physical i
 
 `output.selectionStrategy` 表示已設定的 group policy（`single`、`random` 或 `roundRobin`），而非單次 invocation 的選擇來源。若呼叫明確提供 `instance`，此 policy 值仍維持不變；`output.instance` 則表示實際選中的 physical instance。
 
-### 5.4 Common Operation Result 與 Evidence
+### 5.4 SSHHelper：邏輯 SSH 目標
+
+SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在 Tool group 中寫入實體主機。`att-sshhelper/v1.0` YAML descriptor 含 `id`、可選 `name`／`description`、可選 `defaults`（`user`、`port`、`identityFile`）、非空有序 `instances`、可選 `selection.strategy` 和 `fanout.maxConcurrency`（預設 4、範圍 1–256）。每個 instance 需有 `id`／`host`，`user` 必須由 instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設 22，必須在 1–65535。Helper 和 instance ID 符合 `[A-Za-z_][A-Za-z0-9_-]*`，忽略大小寫後不可重複。無效 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy 都會在 SSH 執行前失敗。
+
+```yaml
+# config/sshhelpers/sit/application.yaml
+schemaVersion: att-sshhelper/v1.0
+id: application
+name: Application servers
+description: SIT application tier
+defaults: {user: deploy, port: 22, identityFile: '${ENV:APP_SSH_KEY}'}
+selection: {strategy: roundRobin}
+fanout: {maxConcurrency: 2}
+instances:
+  - {id: app1, host: sit-app1.example}
+  - {id: app2, host: sit-app2.example, port: 2222}
+```
+
+在 `att-config/v2.7` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一台，UAT 綁定兩台，Tool／Action 不必修改：
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.7
+environment: SIT
+toolGroups: [config/tools/application.yaml]
+environments:
+  SIT:
+    sshhelpers: [config/sshhelpers/sit/application.yaml]
+  UAT:
+    sshhelpers: [config/sshhelpers/uat/application.yaml]
+```
+
+```yaml
+# config/sshhelpers/uat/application.yaml
+schemaVersion: att-sshhelper/v1.0
+id: application
+defaults: {user: deploy, identityFile: '${ENV:APP_SSH_KEY}'}
+selection: {strategy: all}
+fanout: {maxConcurrency: 2}
+instances:
+  - {id: app1, host: uat-app1.example}
+  - {id: app2, host: uat-app2.example}
+```
+
+```yaml
+# config/tools/application.yaml
+schemaVersion: att-tool-group/v2.7
+id: app
+name: Application tools
+description: Remote application inspection
+ssh:
+  helper: application
+  selection: {strategy: all} # 可選 group override
+tools:
+  status:
+    name: Status
+    description: Print service status
+    command: [systemctl, is-active, example.service]
+    output: txt
+```
+
+Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 不支援 SSH。既有 inline global SSH 和 v2.6／v2.2 group 仍可讀；邏輯綁定需要 v2.7。Action／per-call 層沒有 strategy override。
+
+Strategy 優先序：group override，再到 helper 預設。單 instance 不需 strategy（`single`）；多 instance 必須指定。`random` 均勻選一台，`roundRobin` 以 thread-safe 循環計數器選一台，明確的 `all` 在並發上限內對每台各執行一次。**`all` 會在每台主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某台。每台依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
+
+單主機時解析後的 `output.result` 仍是舊有 scalar／object。Evidence 新增 `sshHelper`、`instance`、`host`、`selectionStrategy`、`selectionSource`（`helper` 或 `toolGroup`）、transport、起訖／持續時間、exit code、輸出及錯誤。`all` 時 `output.result` 包含 `sshHelper`、有效 `selectionStrategy`、`selectionSource`，以及依 descriptor 順序以 ID 為 key 的 `instances`；每筆有 `instance`、`host`、`port`、`transport`、`startedAt`、`endedAt`、`durationMs`、`status`，在適用時另有 `exitCode`、`stdout`、`stderr`、`rawOutput`、解析後 `output` 或 `error`。全部 PASS 才成功；單台失敗仍保留其他主機證據，timeout 會明確標記。Assertion 可查 `${output.result.instances.app1.status}` 或 `${output.result.instances.app1.output}`。Evidence 不記錄認證內容或環境提供的私鑰路徑；私鑰應放在 package 外，命令中亦不要放秘密。
+
+遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把 host/user/port/key 搬到 helper descriptor，在每個環境綁定，將 group 升到 v2.7，以 `ssh: {helper: application}` 取代實體 `ssh`，逐一驗證環境。Action 不需重寫。Inventory discovery、Action 層指定主機、分散式交易、跨主機 failover 與 orchestration 均不在此 schema 範圍。
+
+### 5.5 Common Operation Result 與 Evidence
 
 Tool、DB、MQ executor 先收斂到同一 operation boundary，之後 Template runner 才套用 Action lifecycle、assertion、retry policy。
 
@@ -864,9 +934,9 @@ Environment selection 改變 resource binding，不改變 Action logic。
 
 ### Environment profiles
 
-`att-config/v2.6` 可以定義 `environment` default 與 `environments` map。`--config` 選擇 base configuration file；`--env` 在該 configuration 內選擇 named binding。明確 `--env` 優先於 configured default；未知 environment 在任何 external execution 前失敗。
+`att-config/v2.7` 可以定義 `environment` default 與 `environments` map。`--config` 選擇 base configuration file；`--env` 在該 configuration 內選擇 named binding。明確 `--env` 優先於 configured default；未知 environment 在任何 external execution 前失敗。既有 v2.6 profile 仍可用於 DB/MQ-only package。
 
-Profile 是 typed shallow binding，不是 generic recursive YAML inheritance。目前 profile 可擁有 `dbhelpers`、`mqhelpers` list：profile 明確提供某 list 時會取代 root 的該 resource list；沒有提供的 list 則繼承 common root list。
+Profile 是 typed shallow binding，不是 generic recursive YAML inheritance。目前 profile 可擁有 `dbhelpers`、`mqhelpers`、`sshhelpers` list：profile 明確提供某 list 時會取代 root 的該 resource list；沒有提供的 list 則繼承 common root list。
 
 ```yaml
 environment: SIT
@@ -874,12 +944,14 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    sshhelpers: [config/sshhelpers/sit/application.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    sshhelpers: [config/sshhelpers/uat/application.yaml]
 ```
 
-不同 environment 的 descriptor 應暴露相同 stable logical ID（例如 `orders`、`payment`），因此 Template/Flow/Action 在 SIT/UAT/PREPROD 之間不需要修改。
+不同 environment 的 descriptor 應暴露相同 stable logical ID（例如 `orders`、`payment`、`application`），因此 Template/Flow/Action 和 Tool-group helper binding 在 SIT/UAT/PREPROD 之間不需要修改。完整範例與 fan-out 安全說明見 [SSHHelper 章](../docs/reference.zh/05_resources/sshhelper.md)。
 
 ### Topology 與 secrets
 
@@ -891,7 +963,7 @@ Run、Validate、Debug、Load 在 mode-specific 工作前都經過相同 effecti
 
 ### 從獨立 config 遷移
 
-原有 `--config config/environments/sit.yaml` / `uat.yaml` 工作方式仍可使用。若 package contract 相同、只改 typed DB/MQ binding，profile 更簡潔；若整體 policy、root、Tool topology 或 configuration ownership 有重大差異，仍應使用 separate config。
+原有 `--config config/environments/sit.yaml` / `uat.yaml` 工作方式仍可使用。若 package contract 相同、只改 typed DB/MQ/SSH binding，profile 更簡潔；若整體 policy、root、Tool topology 或 configuration ownership 有重大差異，仍應使用 separate config。
 
 ### Test data 擴展位置
 
@@ -1312,6 +1384,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 | 全局 | `config/config.yaml` | 输出目录/环境/运行时默认值、模板根、报告、XML 模式、全局工具、组路径、可选全局 SSH |
 | DB helper | `dbhelpers` 引用的独立 YAML | 一个 JDBC 实例的连接、statement timeout、交易、result limit 与 evidence policy |
 | MQ helper | `mqhelpers` 引用的独立 YAML | 一个 v1.0 IBM MQ TCP client 实例，或一个 v1.1 logical group 的 defaults、physical instances、selection 与 request/reply 默认值 |
+| SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
 | 工具组 | 配置的 YAML 路径 | 组身份、可选 script/SSH、分组工具 |
 | 工作簿 | `<workbook>.yaml` | Excel 映射、阶段、工作簿标签 |
 | 模板 | `template.yaml` | 模板身份和有序动作 |
@@ -1320,6 +1393,8 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
 ### V3.5.2 多环境 Profile 选择
+
+`att-config/v2.7` 在 v2.6 profile 機制中新增 `sshhelpers`，profile 可整組替換 SSHHelper 清單。新的邏輯 SSH Tool group 使用 `att-tool-group/v2.7` 和 `att-sshhelper/v1.0`。完整 SIT/UAT 配置、選擇規則、evidence、遷移和安全警告見 [SSHHelper](../docs/reference.zh/05_resources/sshhelper.md)。以下 v2.6 例子仍適用於既有的 DB/MQ-only package。
 
 ATT V3.5.2 使用一份 common `att-config/v2.6` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
@@ -1422,7 +1497,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。当前主配置、Tool group、sidecar、Template 与 Flow 分别为 `att-config/v2.6`、`att-tool-group/v2.6`、`att-sidecar/v2.2`、`att-template/v3.1` 与 `att-flow/v3.1`（相容讀取 `att-flow/v3.0`）。舊 Template／Flow schema 可供 validation 與 migration 辨識；其中舊 `renderAs`／`saveAs` result 欄位必須遷移至 v3.1，不能視為可直接執行。`att validate` 會提供遷移建議。
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) 使用 `att-schema-catalog/v3.0`。目前主配置、Tool group、SSHHelper、sidecar、Template 與 Flow 分別為 `att-config/v2.7`、`att-tool-group/v2.7`、`att-sshhelper/v1.0`、`att-sidecar/v2.2`、`att-template/v3.1` 與 `att-flow/v3.1`（仍可讀取舊版配置和 group）。舊 Template／Flow schema 可供 validation 與 migration 辨識；舊 `renderAs`／`saveAs` result 欄位須遷移至 v3.1。`att validate` 會提供遷移建議。
 
 ### 全局配置
 
@@ -1473,7 +1548,8 @@ environments:
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |
 | `dbhelpers` | `[]` | 唯一、安全、包相对的 `.yaml`／`.yml` 路径；每个文件声明一个实例 |
 | `mqhelpers` | `[]` | 唯一、安全、包相对的 `att-mqhelper/v1.0` 或 `att-mqhelper/v1.1` YAML 路径；normalized duplicate 会被拒绝 |
-| `environments` | absent | 非空 profile 映射；每个 profile 只可包含 `dbhelpers` 和/或 `mqhelpers` typed list |
+| `sshhelpers` | `[]` | 唯一、安全、package-relative 的 `att-sshhelper/v1.0` YAML 路徑；僅 v2.7 |
+| `environments` | absent | 非空 profile 映射；v2.7 profile 可包含 `dbhelpers`、`mqhelpers` 和／或 `sshhelpers` typed list |
 | `ssh` | absent | 内联全局工具的可选 SSH 目标 |
 | `tools` | `{}` | 可复用工具契约映射 |
 
@@ -2003,10 +2079,11 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.6` |
+| Global configuration | `att-config/v2.7`（仍可讀取 v2.6）|
 | DBHelper | `att-dbhelper/v2.5` |
 | MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
-| Tool group | `att-tool-group/v2.6` |
+| SSHHelper | `att-sshhelper/v1.0` |
+| Tool group | `att-tool-group/v2.7`（仍可讀取 v2.6）|
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
 | Template | `att-template/v3.1`（舊 `renderAs`／`saveAs` 會被拒絕並提供遷移建議） |
@@ -2032,7 +2109,8 @@ Current Reference 依產品概念描述 ATT，不再按 release chronology 組�
 - 新 authoring 優先使用 `EXEC` / `META`，而非 legacy Context alias；
 - 使用 `output.result` / `EXEC.ACTIONS.<id>.output.result` 及 common evidence/attempt contract；
 - 把 Tool、DBHelper、MQHelper 視為 peer resource；
-- 若只改 typed DB/MQ binding，使用 environment profile；
+- 若只改 DB/MQ/SSHHelper binding，使用 environment profile；
+- 需要邏輯多實例路由時，以 `att-tool-group/v2.7` 的 `ssh: {helper: <id>}` 取代實體 group SSH；
 - 把 Run、Debug、Load 視為 peer execution mode。
 
 Pre-#42 monolithic manual 的可審核 disposition 記錄在 `docs/reference-migration-map.md`。

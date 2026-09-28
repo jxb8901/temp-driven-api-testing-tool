@@ -2,10 +2,11 @@
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.6` |
+| Global configuration | `att-config/v2.7` (v2.6 remains readable) |
 | DBHelper | `att-dbhelper/v2.5` |
 | MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
-| Tool group | `att-tool-group/v2.6` |
+| SSHHelper | `att-sshhelper/v1.0` |
+| Tool group | `att-tool-group/v2.7` (v2.6 remains readable) |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
 | Template | `att-template/v3.1` (`renderAs`/`saveAs` are rejected with migration suggestions) |
