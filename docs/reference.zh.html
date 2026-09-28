@@ -1849,6 +1849,10 @@ operation 失敗，其他主機證據仍會保留。Assertion 可查
 或 <code>${output.result.instances.app1.output}</code>。Evidence
 不記錄認證內容或環境提供的私鑰路徑；私鑰應放在 package
 外，命令中亦不要放秘密。</p>
+<p>單主機及 <code>all</code> 執行都會在 argv、transport
+stderr（包括串流寫入的 Case log 診斷）及 exception evidence
+遮蔽環境提供的私鑰路徑。上述不記錄保證適用於 ATT metadata 和 transport
+診斷；解析後的業務 stdout 不變，因此命令不可輸出私鑰路徑。</p>
 <p>遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把
 host/user/port/key 搬到 helper descriptor，在每個環境綁定，將 group 升到
 v2.7，以 <code>ssh: {helper: application}</code> 取代實體

@@ -17,6 +17,8 @@ The Tool group strategy overrides the helper default. `single` selects the sole 
 
 OpenSSH and Java SSH receive the same effective `SshConfig` and safely quoted logical argv. An exact `${ENV:NAME}` identity-file path is resolved at descriptor load; a missing value fails without showing the secret. Transport selection is infrastructure-dependent, not a selection strategy. Both retain strict host-key checking. No `identityFile` contents, environment-supplied key paths, resolved credentials or session handles are copied into Context or evidence.
 
+The evidence boundary redacts environment-supplied identity paths from transport stderr previews and streamed Case-log diagnostics as well as argv and exception messages. This applies in both single-target and fan-out execution; parsed business stdout remains unchanged, so remote commands must not print secrets.
+
 ## Result and evidence boundary
 
 Single-target invocation preserves the existing parsed Tool result and adds logical ID, selected instance/host, strategy/source and transport metadata. For `all`, the operation value is `{instances: {<id>: <per-host result>}}`; each host records status, endpoint, transport, start/end/duration, exit code, bounded stdout/stderr, parsed output or error. The Tool operation evidence is subsequently wrapped by the common Action lifecycle. Assertions and later Action references may inspect the ordered per-instance map. On mixed outcome the aggregate failure is categorized while preserving that complete map in exception evidence. The result is not a distributed transaction or a failover result.

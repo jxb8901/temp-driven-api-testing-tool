@@ -272,7 +272,9 @@ class SshHelperFeatureTest {
         assertEquals(System.getenv("HOME"), target.identityFile());
         CommandRunner process = new CommandRunner() {
             @Override public CommandResult run(List<String> argv, Duration timeout, Path workingDirectory,
-                                               Map<String, String> environment) { return new CommandResult(0, "ok", "", false); }
+                                               Map<String, String> environment) {
+                return new CommandResult(0, "ok", "Identity file: " + System.getenv("HOME"), false);
+            }
         };
         SshCommandRunner remote = new SshCommandRunner(process, () -> true,
                 (physical, command, timeout, project) -> { throw new AssertionError(); }, System.err);
@@ -280,10 +282,61 @@ class SshHelperFeatureTest {
                 Collections.<String, Object>emptyMap(), context(), new CaseExecutionLog(root.resolve("key.log")), 1000L);
         assertFalse(result.invocation().toString().contains(System.getenv("HOME")));
         assertTrue(result.invocation().toString().contains("[REDACTED_SECRET]"));
+        assertFalse(new String(Files.readAllBytes(root.resolve("key.log")), StandardCharsets.UTF_8)
+                .contains(System.getenv("HOME")));
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: sit.example}\n", "roundRobin")
                 .replace("defaults: {user: deploy, port: 2222}", "defaults: {user: deploy, port: 2222, identityFile: '${ENV:ATT_SSH_HELPER_MISSING_TEST_VARIABLE}'}"));
         Exception missing = assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root, "SIT"));
         assertTrue(missing.getMessage().contains("ATT_SSH_HELPER_MISSING_TEST_VARIABLE"));
+    }
+
+    @Test void environmentKeyPathIsRedactedFromSingleAndFanoutDiagnosticsAndCaseLog() throws Exception {
+        group("roundRobin"); Path config = profileConfig();
+        write("config/ssh/sit.yaml", descriptor("  - {id: first, host: first.example}\n  - {id: second, host: second.example}\n", "roundRobin")
+                .replace("defaults: {user: deploy, port: 2222}",
+                        "defaults: {user: deploy, port: 2222, identityFile: '${ENV:HOME}'}"));
+        write("config/ssh/uat.yaml", descriptor("  - {id: one, host: uat.example}\n", "roundRobin"));
+        FrameworkConfig effective = new FrameworkConfigLoader().load(config, root, "SIT");
+        String identityPath = effective.sshHelper("application").instances().get("first").identityFile();
+        StringBuilder diagnostic = new StringBuilder();
+        for (int index = 0; index < 8170; index++) diagnostic.append('x');
+        diagnostic.append("Identity file: ").append(identityPath).append(" could not be loaded\n");
+        String warning = diagnostic.toString();
+        CommandRunner process = new CommandRunner() {
+            @Override public CommandResult runWithCapture(List<String> argv, Duration timeout, Path workingDirectory,
+                                                           Map<String, String> environment, CapturePolicy capture) throws IOException {
+                byte[] stderr = warning.getBytes(StandardCharsets.UTF_8);
+                Files.write(capture.stderrArtifact(), stderr);
+                return new CommandResult(255, "ok", warning, false, 2, stderr.length,
+                        false, false, false, false, null, capture.stderrArtifact());
+            }
+        };
+        SshCommandRunner remote = new SshCommandRunner(process, () -> true,
+                (target, command, timeout, project) -> { throw new AssertionError("OpenSSH should be selected"); }, System.err);
+        ToolInvocationResult single;
+        Path singleLog = root.resolve("single-diagnostic.log");
+        try (CaseExecutionLog log = new CaseExecutionLog(singleLog)) {
+            single = new ToolInvoker(root, effective, process, remote).invoke("single", "remote.echo",
+                    Collections.<String, Object>emptyMap(), context(), log);
+        }
+        assertEquals("ok", single.output());
+        assertFalse(single.invocation().toString().contains(identityPath));
+        assertFalse(new String(Files.readAllBytes(singleLog), StandardCharsets.UTF_8).contains(identityPath));
+        assertTrue(new String(Files.readAllBytes(singleLog), StandardCharsets.UTF_8).contains("[REDACTED_SECRET]"));
+
+        group("all");
+        FrameworkConfig fanoutConfig = new FrameworkConfigLoader().load(config, root, "SIT");
+        ToolInvocationResult fanout;
+        Path fanoutLog = root.resolve("fanout-diagnostic.log");
+        try (CaseExecutionLog log = new CaseExecutionLog(fanoutLog)) {
+            fanout = new ToolInvoker(root, fanoutConfig, process, remote).invoke("fanout", "remote.echo",
+                    Collections.<String, Object>emptyMap(), context(), log);
+        }
+        assertFalse(fanout.invocation().toString().contains(identityPath));
+        Map<?, ?> instances = (Map<?, ?>) ((Map<?, ?>) fanout.output()).get("instances");
+        assertEquals(255, ((Map<?, ?>) instances.get("first")).get("exitCode"));
+        assertTrue(String.valueOf(((Map<?, ?>) instances.get("first")).get("stderr")).contains("[REDACTED_SECRET]"));
+        assertFalse(new String(Files.readAllBytes(fanoutLog), StandardCharsets.UTF_8).contains(identityPath));
     }
 
     @Test void randomOverrideChoosesOnlyConfiguredMembersAndReachesBoth() throws Exception {

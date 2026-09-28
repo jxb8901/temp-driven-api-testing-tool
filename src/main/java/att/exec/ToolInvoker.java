@@ -185,8 +185,8 @@ public class ToolInvoker {
         toolInvocation.put("output", parsed);
         toolInvocation.put("rawOutput", rawOutput);
         toolInvocation.put("stdout", commandResult.stdout());
-        toolInvocation.put("stderr", commandResult.stderr());
-        addCaptureEvidence(toolInvocation, commandResult);
+        toolInvocation.put("stderr", redactSsh(commandResult.stderr(), target));
+        addCaptureEvidence(toolInvocation, commandResult, target);
         toolInvocation.put("command", command);
         toolInvocation.put("logicalArgv", logicalArgv);
         toolInvocation.put("argv", argv);
@@ -210,7 +210,7 @@ public class ToolInvoker {
         }
         toolInvocation.put("timeoutMs", timeoutMs);
         toolInvocation.put("status", commandResult.timedOut() ? "TIMEOUT" : (commandResult.exitCode() == 0 && parseFailure == null ? "PASS" : "ERROR"));
-        if (parseFailure != null) toolInvocation.put("parserDiagnostic", parseFailure.getMessage());
+        if (parseFailure != null) toolInvocation.put("parserDiagnostic", redactSsh(parseFailure.getMessage(), target));
         toolInvocation.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         toolInvocation.put("exitCode", commandResult.exitCode());
         invocation = new LinkedHashMap<String, Object>();
@@ -222,8 +222,8 @@ public class ToolInvoker {
         invocation.put("output", parsed);
         invocation.put("rawOutput", rawOutput);
         invocation.put("stdout", commandResult.stdout());
-        invocation.put("stderr", commandResult.stderr());
-        addCaptureEvidence(invocation, commandResult);
+        invocation.put("stderr", redactSsh(commandResult.stderr(), target));
+        addCaptureEvidence(invocation, commandResult, target);
         invocation.put("exitCode", commandResult.exitCode());
         invocation.put("timeoutMs", timeoutMs);
         invocation.put("command", command);
@@ -285,7 +285,7 @@ public class ToolInvoker {
             toolNode.put(tool.groupId(), groupNode);
         } else toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
-        appendProcessOutput(log, id, commandResult, invocation);
+        appendProcessOutput(log, id, commandResult, invocation, target);
         if (recordAction) {
             context.addAction(id, invocation);
             try { if (log != null) log.appendToolInvocation("ACTION " + id, invocation); }
@@ -295,7 +295,7 @@ public class ToolInvoker {
         if (commandResult.timedOut()) {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
-        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + parseFailure.getMessage(), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
+        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation, true,
                 ActionExecutionResult.evidence("tool", toolInvocation));
         } finally {
@@ -342,9 +342,9 @@ public class ToolInvoker {
                         CommandResult command = execution.result();
                         result.put("transport", execution.transport());
                         result.put("exitCode", command.exitCode());
-                        result.put("stdout", command.stdout()); result.put("stderr", command.stderr());
+                        result.put("stdout", command.stdout()); result.put("stderr", redactSsh(command.stderr(), target));
                         result.put("rawOutput", command.stdout().trim());
-                        addCaptureEvidence(result, command);
+                        addCaptureEvidence(result, command, target);
                         if (command.timedOut()) { result.put("status", "TIMEOUT"); result.put("error", "SSH command timed out"); }
                         else {
                             try {
@@ -356,7 +356,7 @@ public class ToolInvoker {
                                 // only execution or output-parsing failures fail fan-out.
                                 result.put("status", "PASS");
                             } catch (Exception error) {
-                                result.put("status", "ERROR"); result.put("error", "Output parse failed: " + error.getMessage());
+                                result.put("status", "ERROR"); result.put("error", "Output parse failed: " + redactSsh(error.getMessage(), target));
                             }
                         }
                     } catch (InterruptedException interrupted) {
@@ -461,15 +461,24 @@ public class ToolInvoker {
 
     private String redactSsh(String message, SshConfig target) {
         if (message == null) return "";
-        if (target == null || !target.identityFileFromEnvironment() || target.identityFile().isEmpty()) return message;
-        String redacted = message.replace(target.identityFile(), "[REDACTED_SECRET]");
+        String redacted = message;
+        for (String path : sshIdentityPaths(target)) redacted = redacted.replace(path, "[REDACTED_SECRET]");
+        return redacted;
+    }
+
+    private List<String> sshIdentityPaths(SshConfig target) {
+        List<String> paths = new ArrayList<String>();
+        if (target == null || !target.identityFileFromEnvironment() || target.identityFile().isEmpty()) return paths;
+        paths.add(target.identityFile());
         try {
             java.nio.file.Path path = java.nio.file.Paths.get(target.identityFile());
             if (!path.isAbsolute()) path = projectRoot.resolve(path).normalize();
-            return redacted.replace(path.toString(), "[REDACTED_SECRET]");
+            if (!paths.contains(path.toString())) paths.add(path.toString());
         } catch (RuntimeException invalidPath) {
-            return redacted;
+            // The original configured spelling still gets redacted.
         }
+        paths.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        return paths;
     }
 
     private List<String> safeSshArgv(List<String> argv, SshConfig target) {
@@ -493,15 +502,16 @@ public class ToolInvoker {
         return candidate;
     }
 
-    private void addCaptureEvidence(Map<String, Object> evidence, CommandResult result) {
+    private void addCaptureEvidence(Map<String, Object> evidence, CommandResult result, SshConfig target) {
         evidence.put("stdoutBytes", result.stdoutBytes()); evidence.put("stderrBytes", result.stderrBytes());
         evidence.put("stdoutTruncated", result.stdoutTruncated()); evidence.put("stderrTruncated", result.stderrTruncated());
         evidence.put("stdoutArtifactTruncated", result.stdoutArtifactTruncated()); evidence.put("stderrArtifactTruncated", result.stderrArtifactTruncated());
-        if (result.stdoutCaptureError() != null) evidence.put("stdoutCaptureError", result.stdoutCaptureError());
-        if (result.stderrCaptureError() != null) evidence.put("stderrCaptureError", result.stderrCaptureError());
+        if (result.stdoutCaptureError() != null) evidence.put("stdoutCaptureError", redactSsh(result.stdoutCaptureError(), target));
+        if (result.stderrCaptureError() != null) evidence.put("stderrCaptureError", redactSsh(result.stderrCaptureError(), target));
     }
 
-    private void appendProcessOutput(CaseExecutionLog log, String invocationId, CommandResult result, Map<String, Object> evidence) {
+    private void appendProcessOutput(CaseExecutionLog log, String invocationId, CommandResult result,
+                                     Map<String, Object> evidence, SshConfig target) {
         if (log == null || result == null) return;
         if (result.stdoutBytes() > 0) {
             try {
@@ -513,8 +523,8 @@ public class ToolInvoker {
         if (result.stderrBytes() > 0) {
             try {
                 if (result.stderrArtifact() != null) log.appendRawFile("TOOL " + invocationId + " STDERR",
-                        result.stderrArtifact(), result.stderrArtifactTruncated(), result.stderrBytes());
-                else log.appendRaw("TOOL " + invocationId + " STDERR", result.stderr());
+                        result.stderrArtifact(), result.stderrArtifactTruncated(), result.stderrBytes(), sshIdentityPaths(target));
+                else log.appendRaw("TOOL " + invocationId + " STDERR", redactSsh(result.stderr(), target));
             } catch (Exception error) { appendEvidenceError(evidence, "stderr log append failed: " + error.getMessage()); }
         }
     }

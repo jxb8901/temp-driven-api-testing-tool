@@ -17,6 +17,7 @@ import java.nio.charset.CodingErrorAction;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -102,10 +103,20 @@ public class CaseExecutionLog implements AutoCloseable {
 
     /** Streams a bounded temporary process spool into the Case log, then leaves cleanup to the caller. */
     public synchronized void appendRawFile(String section, Path source, boolean truncated, long totalBytes) throws IOException {
+        appendRawFile(section, source, truncated, totalBytes, java.util.Collections.<String>emptyList());
+    }
+
+    /** Redacts sensitive tokens even when they span reader-buffer boundaries. */
+    public synchronized void appendRawFile(String section, Path source, boolean truncated, long totalBytes,
+                                           List<String> redactions) throws IOException {
         if (source == null || !Files.isRegularFile(source)) return;
         write("[" + section + "]\n");
         boolean previousCarriageReturn = false;
         boolean endedWithNewline = false;
+        int longestRedaction = 0;
+        if (redactions != null) for (String token : redactions)
+            if (token != null) longestRedaction = Math.max(longestRedaction, token.length());
+        StringBuilder pending = longestRedaction == 0 ? null : new StringBuilder();
         char[] buffer = new char[8192];
         try (Reader reader = new InputStreamReader(Files.newInputStream(source), StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE))) {
@@ -122,15 +133,56 @@ public class CaseExecutionLog implements AutoCloseable {
                     else chunk.append(value);
                 }
                 if (chunk.length() > 0) {
-                    write(chunk.toString());
+                    writeRedactedChunk(chunk.toString(), pending, redactions, longestRedaction);
                     endedWithNewline = chunk.charAt(chunk.length() - 1) == '\n';
                 }
             }
         }
-        if (previousCarriageReturn) { write("\n"); endedWithNewline = true; }
+        if (previousCarriageReturn) {
+            writeRedactedChunk("\n", pending, redactions, longestRedaction);
+            endedWithNewline = true;
+        }
+        if (pending != null && pending.length() > 0) {
+            String tail = pending.toString();
+            List<String> ordered = new ArrayList<String>(redactions);
+            ordered.sort((left, right) -> Integer.compare(right == null ? 0 : right.length(), left == null ? 0 : left.length()));
+            for (String token : ordered) if (token != null && !token.isEmpty()) tail = tail.replace(token, "[REDACTED_SECRET]");
+            write(tail);
+        }
         if (!endedWithNewline) write("\n");
         if (truncated) write("... ATT process output truncated; totalBytes=" + totalBytes + " ...\n");
         write("\n");
+    }
+
+    private void writeRedactedChunk(String chunk, StringBuilder pending, List<String> redactions,
+                                    int longestRedaction) throws IOException {
+        if (pending == null) { write(chunk); return; }
+        pending.append(chunk);
+        int safeEnd = pending.length() - longestRedaction + 1;
+        if (safeEnd <= 0) return;
+        String content = pending.toString();
+        StringBuilder emitted = new StringBuilder();
+        int cursor = 0;
+        while (cursor < safeEnd) {
+            int match = -1;
+            String matchedToken = null;
+            for (String token : redactions) {
+                if (token == null || token.isEmpty()) continue;
+                int candidate = content.indexOf(token, cursor);
+                if (candidate >= 0 && candidate < safeEnd &&
+                        (match < 0 || candidate < match || (candidate == match && token.length() > matchedToken.length()))) {
+                    match = candidate;
+                    matchedToken = token;
+                }
+            }
+            if (match < 0) { emitted.append(content, cursor, safeEnd); cursor = safeEnd; }
+            else {
+                emitted.append(content, cursor, match).append("[REDACTED_SECRET]");
+                cursor = match + matchedToken.length();
+            }
+        }
+        if (emitted.length() > 0) write(emitted.toString());
+        pending.delete(0, cursor);
     }
 
     private void write(String text) throws IOException {

@@ -17,6 +17,8 @@ Tool group strategy 覆蓋 helper 預設。`single` 選唯一 instance；`random
 
 OpenSSH 與 Java SSH 使用同一個有效 `SshConfig` 及安全引號處理的 logical argv。完整 `${ENV:NAME}` identityFile 路徑在載入 descriptor 時解析；變數缺失時不顯示 secret。Transport 選擇屬基礎設施選擇，不是 routing strategy。兩者均嚴格驗證 host key。`identityFile` 內容、環境提供的 key 路徑、resolved credential 和 session handle 不會進入 Context 或 evidence。
 
+Evidence 邊界會在 transport stderr preview、串流 Case log 診斷、argv 及 exception message 中遮蔽環境提供的 identity path。單目標和 fan-out 路徑都適用；解析後的業務 stdout 不變，因此遠端命令不可輸出秘密。
+
 ## Result 與 evidence 邊界
 
 單目標呼叫保留既有已解析 Tool result，另加 logical ID、所選 instance／host、strategy／source、transport metadata。`all` 的 operation value 為 `{instances: {<id>: <per-host result>}}`；每台記錄 status、endpoint、transport、起訖／持續時間、exit code、受限的 stdout/stderr、解析後 output 或 error。Tool operation evidence 隨後由共同 Action lifecycle 包裝。Assertion 與之後的 Action reference 可讀取有序的 per-instance map。混合 outcome 時，aggregate failure 有分類，同時在 exception evidence 保留完整 map。這不是分散式交易，也不是 failover 結果。
