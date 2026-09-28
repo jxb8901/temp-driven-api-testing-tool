@@ -207,6 +207,38 @@ class StageTemplateRunnerTest {
         assertTrue(caseLog.contains("status: PASS"));
     }
 
+    @Test void actionBoundaryDoesNotRelogInternalSshFailureOrExposeEnvironmentIdentityPath() throws Exception {
+        Path caseDir = tempDir.resolve("internal-secret-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        String privateKeyPath = tempDir.resolve("environment-private-key").toString();
+        RuntimeException adapterFailure = new RuntimeException("SSH adapter could not read " + privateKeyPath);
+        CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
+        BuiltInProvider resourceBoundary = new BuiltInProvider() {
+            @Override public Set<String> names() { return Collections.singleton("fail"); }
+            @Override public Object invoke(String name, Map<String, Object> arguments) {
+                InternalExceptionLogger.logIfInternal(log, "ssh.execute", adapterFailure,
+                        Collections.singletonList(privateKeyPath));
+                throw adapterFailure;
+            }
+        };
+        TemplateAction action = new TemplateAction("invokeFail", map("type", "tool", "call", "#{fail()}"));
+
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, resourceBoundary))
+                .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+        log.close();
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+        assertFalse(caseLog.contains(privateKeyPath));
+        assertTrue(caseLog.contains("[REDACTED_SECRET]"));
+        assertEquals(1, occurrences(caseLog, "[ATT INTERNAL ERROR]"));
+        assertTrue(caseLog.contains("phase: ssh.execute"));
+    }
+
     @Test void toolEvidenceRepeatsForEachPrimaryAssertionRetry() throws Exception {
         Path caseDir = tempDir.resolve("evidence-retry");
         Files.createDirectories(caseDir);

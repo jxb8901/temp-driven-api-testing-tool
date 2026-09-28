@@ -49,7 +49,7 @@ ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空
 
 #### 哪些意外异常会附带 stack trace？
 
-意外内部故障（例如 `NullPointerException`、`ClassCastException`，或非 domain `IllegalStateException`，包括包装异常的 cause）会在 `case.log` 写入有界的 `[ATT INTERNAL ERROR]` 区块和执行 phase。Stack 最多 180 行／16 KB；configured secrets 与敏感 key/value assignment 会遮蔽。Public Action evidence 只保留简短错误类型／phase，不加入 stack。预期 transport、config、timeout、assertion 与一般 MQ no-message outcome 仍保持简洁。Run、Debug 及 reusable Tool/HTTP/MQ/DB 共用这条 logging path。
+意外内部故障（例如 `NullPointerException`、`ClassCastException`、反射查找／存取失败、其他非預期 runtime exception，或非 domain `IllegalStateException`，包括包在 wrapper cause 內的情況）會在 `case.log` 寫入有界的 `[ATT INTERNAL ERROR]` 區塊、執行 phase 及原始 cause chain。Validation `IllegalArgumentException`、已識別的 domain／transport failure、timeout／cancellation、assertion failure 與一般 MQ no-message outcome 仍保持精簡。同一 Throwable 即使同時被 resource executor 和 Action boundary 看見，每個 Case log 也只會寫一次。Resource-specific redaction（包括由 environment 提供的 SSH identity-file path）會註冊到該 Case log，並套用至後續 log write，避免外層 Action diagnostic 洩漏未出現在 sanitized stack 的內容。Stack 最多 180 行／16 KB；configured secrets 與敏感 key/value assignment 也會遮蔽。Public Action evidence 只保留簡短錯誤類型／phase，不加入 stack。Run、Debug 及 reusable Tool/HTTP/MQ/DB 共用這條 logging path。
 
 #### 为什么工具跑了不止一次？
 

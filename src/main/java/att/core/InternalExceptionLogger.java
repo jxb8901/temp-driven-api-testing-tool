@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,11 +24,18 @@ public final class InternalExceptionLogger {
     public static boolean isInternal(Throwable error) {
         for (Throwable current = error; current != null; current = current.getCause()) {
             if (current instanceof NullPointerException || current instanceof ClassCastException
-                    || (current instanceof IllegalStateException && !expectedStateFailure(current.getMessage()))
                     || current instanceof UnsupportedOperationException
                     || current instanceof ExceptionInInitializerError || current instanceof LinkageError) return true;
+            if (current instanceof ReflectiveOperationException
+                    && (!(current instanceof InvocationTargetException) || current.getCause() == null)) return true;
+            if (current instanceof RuntimeException && !expectedRuntimeFailure((RuntimeException) current)) return true;
         }
         return false;
+    }
+
+    private static boolean expectedRuntimeFailure(RuntimeException error) {
+        if (error instanceof IllegalArgumentException || error instanceof CancellationException) return true;
+        return error instanceof IllegalStateException && expectedStateFailure(error.getMessage());
     }
 
     private static boolean expectedStateFailure(String message) {
@@ -55,7 +64,9 @@ public final class InternalExceptionLogger {
 
     /** Expected transport/validation errors remain concise and do not get stack dumps. */
     public static boolean logIfInternal(CaseExecutionLog log, String phase, Throwable error, List<String> secrets) {
-        if (log == null || error == null || !isInternal(error)) return false;
+        if (log == null || error == null) return false;
+        log.registerSecretRedactions(secrets);
+        if (!isInternal(error)) return false;
         StringWriter buffer = new StringWriter();
         error.printStackTrace(new PrintWriter(buffer));
         String stack = sanitize(buffer.toString(), secrets);
@@ -73,8 +84,7 @@ public final class InternalExceptionLogger {
                 + "phase: " + safePhase(phase) + "\n"
                 + "stackTrace:\n" + bounded;
         try {
-            log.appendRaw("ATT INTERNAL ERROR", content);
-            return true;
+            return log.appendInternalErrorOnce(error, content);
         } catch (Exception ignored) {
             return false;
         }

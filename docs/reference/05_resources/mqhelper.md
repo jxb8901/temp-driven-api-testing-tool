@@ -91,40 +91,185 @@ MQ reply bytes are decoded to a native `String` using the received CCSID when av
 
 Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Transport payloads remain byte-preserving through the MQ client; the public typed reply value is a `String` decoded using the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and configured charset as fallback. Unsupported CCSIDs fail clearly. Logs/reports serialize the typed result and never create an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, unsupported result formats, and unsafe paths; a missing effective queue is rejected at the operation's point of use.
 
-#### Send, receive, and request APIs
+#### Choosing an API
 
-All calls use the stable logical helper ID and named arguments. For a v1.1 group, an optional `instance` selects a physical ID; otherwise ATT applies the configured `random` or `roundRobin` strategy before resolving queue defaults.
+All calls use the stable logical helper ID and named arguments. `file` is read as exact bytes from the Case output directory or package. The APIs differ in whether they wait for a reply and who owns correlation:
 
-| Operation | Required arguments | Optional arguments | Queue source when omitted |
+| API | Primary use | Default queue(s) | Correlation |
 |---|---|---|---|
-| `send` | `file` | `queue`, `instance` | `message.requestQueue` |
-| `receive` | none | `queue`, `correlationId`, `waitMs`, `instance` | `message.replyQueue` |
-| `request` | `file` | `requestQueue`, `replyQueue`, `waitMs`, `instance` | `message.requestQueue` and `message.replyQueue` |
+| `send` | One-way producer; does not wait for a reply | `message.requestQueue` | None |
+| `receive` | Standalone consumer | `message.replyQueue` | Optional caller-supplied `correlationId`; omitted means no filter |
+| `request` | Request/reply in one operation | `message.requestQueue` + `message.replyQueue` | Automatic: reply `MQMD.CorrelId` matches request `MsgId` |
 
-`file` is read as exact bytes from the Case output directory or package. `queue` is the send/receive argument; request deliberately uses the distinct `requestQueue` and `replyQueue` names. Explicit non-null call arguments override the selected instance's effective message defaults. If a queue has neither a call argument nor a configured effective default, ATT returns a concise argument/configuration error before opening a connection. The default is evaluated only after the physical instance has been selected, so a request PUT and its correlated GET always use the same broker and that instance's queue settings.
+For v1.1, ATT first selects or resolves the physical instance, then uses that instance's inherited effective queues. An explicit operation argument overrides that selected instance's setting. No other instance's queue is borrowed. An Action `timeoutMs` is the outer execution deadline; call-level `waitMs` overrides `requestReply.waitMs` but is capped by the remaining Action deadline. Tool Action retry is explicit for each API; ATT does not infer idempotency.
 
-```yaml
-sendPayment:
+#### `mq.<helper>.send(...)`
+
+Use `send` to put a file-backed message on a request/producer queue when the caller does not need a synchronous reply. The call completes after the PUT succeeds; it does not open or wait on a reply queue.
+
+| Argument | Type | Required? | Default / precedence | Description |
+|---|---|---:|---|---|
+| `file` | string/path | Yes | None | Payload file, read byte-for-byte from the Case output directory or package. |
+| `queue` | string | No when configured | Call `queue` > selected instance's `message.requestQueue` > validation error | Destination queue. |
+| `instance` | string | No | v1.0/single instance uses that instance; multi-instance uses configured selection strategy | Pin a v1.1 call to one physical instance. |
+
+The helper must provide an effective `message.requestQueue` if `queue` is omitted. Missing both is an actionable argument/configuration error before connecting. Result/evidence records `sent`, the resolved `queue`, byte count, `messageId`, and `correlationId`; send has no business reply, leaves `output.result` null/absent, and does not accept Action result persistence. `timeoutMs` bounds the Action; if retry is explicitly enabled, a repeated PUT may enqueue a duplicate, so the package author owns replay safety.
+
+Minimal send uses the helper default:
+
+~~~yaml
+message: {requestQueue: PAYMENT.REQUEST}
+~~~
+
+~~~text
+mq.payment.send(file='request.xml')
+~~~
+
+An explicit queue overrides the configured default:
+
+~~~text
+mq.payment.send(queue='PAYMENT.REQUEST.ALT', file='request.xml')
+~~~
+
+The payload may be generated earlier in the same Action sequence; `targetFiles[0]` is the rendered file path, not a hard-coded package filename:
+
+~~~yaml
+- id: renderRequest
+  type: render
+  payload: payload/request.xml
+  result: {format: text, path: generated/request.xml}
+- id: sendRendered
   type: tool
-  call: "#{mq.payment.send(file='request.bin')}"
+  call: "#{mq.payment.send(file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
   assert: "${output.sent} == true"
+~~~
 
-waitForPayment:
-  type: tool
-  call: "#{mq.payment.receive(correlationId=${EXEC.ACTIONS.sendPayment.output.messageId}, waitMs=30000)}"
-  result: {format: text, path: replies/payment.txt}
-  assert: "${output.received} == true"
+For a v1.1 group, selecting an instance happens before that instance's queue fallback. In this descriptor fragment, the explicit `payment-b` call uses its own `PAYMENT.REQUEST.B`, not the group default:
 
-requestPayment:
-  type: tool
-  call: "#{mq.payment.request(file='request.xml', waitMs=40000)}"
-  result: {format: text}
-  assert: "${output.replyReceived} == true"
-```
+~~~yaml
+defaults:
+  message: {requestQueue: PAYMENT.REQUEST}
+instances:
+  - id: payment-a
+  - id: payment-b
+    message: {requestQueue: PAYMENT.REQUEST.B}
+selection: {strategy: roundRobin}
+~~~
 
-For `receive` and `request`, call-level `waitMs` overrides `requestReply.waitMs`. An Action `timeoutMs` is the outer deadline and caps the effective wait to the remaining time; the receive wait is recalculated immediately before MQGET. `MQRC_NO_MSG_AVAILABLE` (2033) at the end of the permitted wait is a completed no-message outcome: the operation remains successful, `received`/`replyReceived` is false, and `output.result` is null. If the Action deadline has expired, the outcome is instead `MQ_TIMEOUT`.
+This call pins to `payment-b`; an explicit `queue` would override that instance value:
 
-Tool Action retry is explicit and applies to send, receive, and request. ATT does not infer idempotency: a retried send may enqueue duplicates, while retried request issues a new PUT/MsgId and can repeat the business operation. Each attempt keeps its own IDs and evidence. For request/reply, ATT sets the reply queue metadata, waits with `MQMO_MATCH_CORREL_ID` for the generated request MsgId, and publishes `output.messageId == output.replyCorrelationId`; do not manually substitute a different correlation value. For a standalone receive, use `correlationId` when a particular reply is required. In multi-instance mode, an explicit instance is pinned for that call; no retry or no-message path silently changes brokers.
+~~~text
+mq.payment.send(file='request.xml', instance='payment-b')
+~~~
+
+#### `mq.<helper>.receive(...)`
+
+Use `receive` as a standalone consumer for a reply or independently produced message. It performs one MQGET using the effective wait and returns whether a message arrived.
+
+| Argument | Type | Required? | Default / precedence | Description |
+|---|---|---:|---|---|
+| `queue` | string | No when configured | Call `queue` > selected instance's `message.replyQueue` > validation error | Input/reply queue. |
+| `correlationId` | hex string | No | No default; omitted means no `MQMD.CorrelId` filter | When supplied, match this value against the incoming message's `MQMD.CorrelId`. |
+| `waitMs` | integer | No | Call value > `requestReply.waitMs`; capped by Action `timeoutMs` | Maximum MQGET wait in milliseconds. |
+| `instance` | string | No | v1.0/single instance uses that instance; multi-instance uses configured selection strategy | Pin a v1.1 call to one physical instance. |
+
+The helper must provide `message.replyQueue` when `queue` is omitted. `output`/evidence records the resolved `queue`, effective `waitMs`, `received`, message identifiers and safe MQ reason/completion metadata. A received reply is decoded using its CCSID into the native `String` at `output.result`. At the end of the wait, MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) is a completed no-message result—not an ATT/runtime error: `received` is false and `output.result` is null. An expired Action deadline instead reports `MQ_TIMEOUT`. Explicit Action retries may consume a later message, so retry is not automatic.
+
+Minimal receive uses the helper's reply queue; the wait can be tuned per call:
+
+~~~yaml
+message: {replyQueue: PAYMENT.REPLY}
+~~~
+
+~~~text
+mq.payment.receive()
+mq.payment.receive(waitMs=5000)
+~~~
+
+An explicit input queue overrides that default:
+
+~~~text
+mq.payment.receive(queue='PAYMENT.REPLY.ALT', waitMs=5000)
+~~~
+
+For v1.1, `instance` selects first and the selected instance's effective `message.replyQueue` is then used when `queue` is omitted:
+
+~~~text
+mq.payment.receive(waitMs=5000, instance='payment-b')
+~~~
+
+To wait for a particular request's reply, supply its correlation ID:
+
+~~~text
+mq.payment.receive(correlationId='414d5120...', waitMs=5000)
+~~~
+
+~~~text
+correlationId supplied  -> match incoming MQMD.CorrelId
+correlationId omitted   -> receive without correlation filtering
+~~~
+
+Uncorrelated receives are appropriate for independently addressed event, notification, or batch-result queues, and for a simple consumer that intentionally accepts the next message:
+
+~~~text
+mq.events.receive()                 # event queue
+mq.notifications.receive()          # notification queue
+mq.batchResults.receive(waitMs=1000) # bounded batch-result poll
+mq.validation.receive(queue='QA.CONSUMER')
+~~~
+
+Warning: a bare `receive()` on a shared reply queue can consume another caller's reply. Prefer `request(...)` for request/reply, or use `receive(correlationId=...)` when a standalone consumer must select one caller's reply.
+
+#### `mq.<helper>.request(...)`
+
+Use `request` when one operation must send a request and wait for its correlated reply. ATT owns the request/reply correlation lifecycle; callers do not pass `correlationId`.
+
+| Argument | Type | Required? | Default / precedence | Description |
+|---|---|---:|---|---|
+| `file` | string/path | Yes | None | Request payload file, read byte-for-byte. |
+| `requestQueue` | string | No when configured | Call value > selected instance's `message.requestQueue` > validation error | Request output queue. |
+| `replyQueue` | string | No when configured | Call value > selected instance's `message.replyQueue` > validation error | Reply input queue. |
+| `waitMs` | integer | No | Call value > `requestReply.waitMs`; capped by Action `timeoutMs` | Maximum reply wait in milliseconds. |
+| `instance` | string | No | v1.0/single instance uses that instance; multi-instance uses configured selection strategy | Pin both PUT and GET to one v1.1 physical instance. |
+
+Both effective queues must exist before connecting. Explicit queue arguments override the selected instance's settings. The normal lifecycle is:
+
+~~~text
+PUT request
+  -> obtain request MsgId
+  -> GET from the effective reply queue
+  -> match reply MQMD.CorrelId against that request MsgId
+~~~
+
+Result/evidence records the resolved queues, wait, request/reply identifiers, `replyReceived`, and safe MQ completion/reason information. For a received reply, `output.messageId == output.replyCorrelationId`; `output.result` is the CCSID-decoded native String. If no reply arrives before the effective wait, MQRC 2033 is a completed request with no reply (`replyReceived: false`, null result and reason 2033 / `MQRC_NO_MSG_AVAILABLE`), not an ATT/runtime error. If the Action deadline expires, ATT reports `MQ_TIMEOUT` instead. Action retry is opt-in; a retry sends another PUT with a new MsgId and can repeat the business operation.
+
+Minimal request uses both helper defaults:
+
+~~~yaml
+message: {requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
+~~~
+
+~~~text
+mq.payment.request(file='request.xml')
+~~~
+
+Both queues can be overridden together:
+
+~~~text
+mq.payment.request(requestQueue='PAYMENT.REQUEST.ALT', replyQueue='PAYMENT.REPLY.ALT', file='request.xml')
+~~~
+
+A call-level wait overrides the helper's `requestReply.waitMs` (but not the Action deadline):
+
+~~~text
+mq.payment.request(file='request.xml', waitMs=10000)
+~~~
+
+To pin the full request/reply cycle to a v1.1 instance:
+
+~~~text
+mq.payment.request(file='request.xml', instance='payment-b')
+~~~
 
 #### Issue #60 v1.1 logical groups and physical instances
 
