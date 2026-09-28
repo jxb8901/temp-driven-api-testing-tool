@@ -1,10 +1,10 @@
 ### 5.5 HTTPHelper
 
-HTTPHelper is a first-class, environment-bound HTTP resource. A Template or Flow calls a stable logical ID; the selected `att-config/v2.8` profile supplies the physical endpoint. Unlike a command-backed curl Tool, HTTPHelper owns a bounded, reusable client, typed response conversion and HTTP metadata.
+HTTPHelper is a first-class, environment-bound HTTP resource. A Template or Flow calls a stable logical ID; the selected `att-config/v2.9` profile supplies the physical endpoint. Unlike a command-backed curl Tool, HTTPHelper owns a bounded, reusable client, native response decoding and HTTP metadata.
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.8
+schemaVersion: att-config/v2.9
 environment: SIT
 environments:
   SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
@@ -53,7 +53,9 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-`result.format` is `raw`, `text`, `json`, `yaml`, or `xml`; without `result`, the response is text. `raw` keeps exact `byte[]` in `output.result` and writes those bytes unchanged to `result.path`; raw console display is Base64. `text` decodes the response `Content-Type` charset or UTF-8 fallback. Structured formats use ATT's existing parsers and fail explicitly on malformed content. `result.path` is optional and affects persistence only; `path: console` writes to the Case log. HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Header-name lookup follows HTTP case-insensitive semantics. `Authorization`, cookies, API-key/token/password-like response headers are redacted in output/evidence. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
+HTTP response decoding is native and independent of Action `result.format`: JSON media types produce ATT typed JSON values; YAML media types produce typed YAML values; XML media types produce ATT's typed XML value; other textual media types decode using the declared charset or UTF-8. An `application/octet-stream` response fails as `HTTP_FORMAT` because arbitrary bytes are not a supported common Action result. Malformed structured bodies also fail explicitly. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
+
+HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Public response-header keys are normalized to lowercase so case-sensitive Context paths are stable; repeated values remain lists. Only secret-bearing response headers and values matching configured credentials or values from secret-bearing request headers are redacted. Ordinary values that happen to match `Accept` or another non-secret request header remain visible. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
 
 A received 4xx/5xx is a completed exchange, so assertions may deliberately expect 404 or 500. Transport/configuration/format failures make the Action `ERROR` with an HTTP-specific error type; an assertion mismatch is `FAIL`. Evidence contains helper ID, method, safe URL, byte counts, status when received, duration and any error/redirect count. The existing Action attempt list retains retries. HTTPHelper never retries statuses automatically. `retry.retryOn: [TIMEOUT]` can replay a request after an HTTP or pool-borrow timeout; `ASSERTION` can replay after a failed assertion. Authors must assess side effects for **every** method, including GET/PUT—POST/PATCH/DELETE may create duplicate work.
 

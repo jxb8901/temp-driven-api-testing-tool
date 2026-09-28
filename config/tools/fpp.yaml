@@ -1,4 +1,4 @@
-schemaVersion: att-tool-group/v2.6
+schemaVersion: att-tool-group/v2.8
 id: fpp
 name: FPP reference tools
 description: Reference command contracts for FPP API, SQLPlus, controlled command execution, file, and transaction-log integrations
@@ -7,7 +7,7 @@ tools:
     name: Invoke FPP API
     description: Reference API invocation skeleton returning an XML result envelope
     command: [./tools/fpp_invoke_api.sh, "${input.requestId}", "${input.requestType}", "${input.requestFile}", "${input.apiLogPath}"]
-    output: xml
+    result: {format: xml}
     arguments:
       requestId:
         name: Request ID
@@ -29,7 +29,7 @@ tools:
     name: Convert SQLPlus output to XML
     description: Convert pipe-delimited SQLPlus rows into XML using safe column names as element names
     command: [./tools/fpp_sqlplus_to_xml.sh, "${input.inputFile}"]
-    output: xml
+    result: {format: xml}
     arguments:
       inputFile:
         name: SQLPlus Output File
@@ -39,7 +39,7 @@ tools:
     name: Execute command and capture streams
     description: Execute one command with optional atomic argument arrays, expanding pathname wildcards per argument, optionally persist streams, and return a YAML outcome
     command: [./tools/exehelper.sh, "${input.stdoutPath}", "${input.stderrPath}", --, "${input.command}", "${input.arguments}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       command:
         name: Command
@@ -63,7 +63,7 @@ tools:
     name: Move matching files
     description: Move regular files matching one filename glob between directories after collision preflight
     command: [./tools/fpp_move_files.sh, "${input.sourceDirectory}", "${input.pattern}", "${input.targetDirectory}", "${input.overwrite}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       sourceDirectory:
         name: Source Directory
@@ -85,7 +85,7 @@ tools:
     name: Inspect matching files
     description: Return matching regular files, count, line counts, and an optional all-files line-count comparison
     command: [./tools/fpp_inspect_files.sh, "${input.directory}", "${input.pattern}", "${input.expectedLineCount}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       directory:
         name: Directory
@@ -103,7 +103,7 @@ tools:
     name: Search fixed text
     description: Count lines containing one literal keyword in a regular text file
     command: [./tools/fpp_search_text.sh, "${input.file}", "${input.keyword}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       file:
         name: File
@@ -117,7 +117,7 @@ tools:
     name: Search transaction logs
     description: Search recent local transaction logs for TIDs containing every keyword, with optional SSH fallback
     command: [./tools/loghelper.sh, "${input.maxTidFiles}", "${input.minTidFiles}", "${input.outputPrefix}", "${input.logFiles}", "${input.keywords}", "${input.recentLogCount}", "${input.sshOption}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       maxTidFiles:
         name: Maximum TID Files
@@ -157,7 +157,7 @@ tools:
     name: Query SQLPlus and return XML
     description: Execute one SQL file through SQLPlus, save raw streams, and convert pipe-delimited stdout to XML
     command: [./tools/fpp_query_sqlplus.sh, "${input.sqlFile}", "${input.outputFile}", "${input.stderrPath}"]
-    output: xml
+    result: {format: xml}
     arguments:
       sqlFile:
         name: SQL File

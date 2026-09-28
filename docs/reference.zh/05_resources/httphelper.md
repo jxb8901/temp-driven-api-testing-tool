@@ -1,10 +1,10 @@
 ### 5.5 HTTPHelper
 
-HTTPHelper 是依環境綁定的一級 HTTP 資源。Template／Flow 呼叫固定的 logical ID；選定的 `att-config/v2.8` profile 提供實體 endpoint。與 command-backed curl Tool 不同，HTTPHelper 自行管理有界、可重用的 client、型別化回應及 HTTP metadata。
+HTTPHelper 是依環境綁定的一級 HTTP 資源。Template／Flow 呼叫固定的 logical ID；選定的 `att-config/v2.9` profile 提供實體 endpoint。與 command-backed curl Tool 不同，HTTPHelper 自行管理有界、可重用的 client、原生回應解碼及 HTTP metadata。
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.8
+schemaVersion: att-config/v2.9
 environment: SIT
 environments:
   SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
@@ -53,7 +53,9 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-`result.format` 支援 `raw`、`text`、`json`、`yaml`、`xml`；省略 `result` 時回應為 text。`raw` 在 `output.result` 保留精確 `byte[]`，`result.path` 也逐 byte 寫入；raw console 以 Base64 顯示。`text` 按 `Content-Type` charset 解碼，缺省為 UTF-8。結構化格式使用 ATT 既有 parser，格式錯誤會明確失敗。`result.path` 可省略，只控制持久化；`path: console` 寫入 Case log。`output` 直接提供 `httpHelper`、`method`、不含 query 的安全 `url`、`statusCode`、`reasonPhrase`、`contentType`、`requestBytes`、`responseBytes`、多值 `headers`。Header 名稱依 HTTP 規則不分大小寫。`Authorization`、cookie、API-key/token/password 類 response header 在 output/evidence 中遮蔽；request header、query 值、認證 secret 與 payload 不進入 HTTP evidence。
+HTTP response 解碼依原生媒體型別進行，與 Action `result.format` 無關：JSON media type 產生 ATT typed JSON 值；YAML media type 產生 typed YAML 值；XML media type 產生 ATT typed XML 值；其他文字媒體依宣告 charset 或 UTF-8 解碼。`application/octet-stream` 因任意 bytes 不是共用 Action 支援的結果而以 `HTTP_FORMAT` 失敗；結構化內容格式錯誤也會明確失敗。共用 Action 格式只有 `text`、`json`、`yaml`、`xml`；`result.format` 只控制寫入 `result.path` 或 `path: console` 的序列化，不會重新解析或改變 `output.result`。
+
+HTTP metadata 直接位於 `output`：`httpHelper`、`method`、不含 query 的安全 `url`、`statusCode`、`reasonPhrase`、`contentType`、`requestBytes`、`responseBytes` 與多值 `headers`。公開 response-header key 一律轉成小寫，令大小寫敏感的 Context path 穩定；重複值仍以 list 保留。只遮蔽敏感 response header，以及與設定憑證或敏感 request header 值相符的 response 值。一般 `Accept` 等非敏感 request header，即使值相同亦不會遮蔽。Request headers、query 值、認證 secret 與 payload 不會記入 HTTP evidence。
 
 收到 4xx/5xx 仍屬完成的 HTTP exchange，可斷言預期 404 或 500。transport/config/format 失敗使 Action 為 `ERROR`；斷言不符則為 `FAIL`。Evidence 含 helper ID、method、安全 URL、bytes、收到的 status、duration、錯誤／redirect 數。既有 Action attempt list 保留 retry；HTTPHelper 不會自動重試 status。`retry.retryOn: [TIMEOUT]` 可於 HTTP 或連線池等待 timeout 後重送，`ASSERTION` 可在斷言失敗後重送。作者須評估**每一種** method 的副作用，POST/PATCH/DELETE 尤其可能重複執行。
 

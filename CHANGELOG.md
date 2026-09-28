@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.3 - 2026-09-29
+
+- Complete Issues #70–#74: harden HTTPHelper result/header contracts and schema-catalog enforcement; unify typed Action and Tool results; add bounded, secret-redacted internal exception stacks to Case logs; and allow MQ send/receive/request queue defaults with explicit argument precedence.
+- Advance current configuration, Tool Group, Template, and Flow schemas to `att-config/v2.9`, `att-tool-group/v2.8`, `att-template/v3.2`, and `att-flow/v3.2`, retaining every previous schema at its catalog-registered `schemas/history/` path.
+- Expand English and Traditional Chinese HTTPHelper, MQHelper, Tool/result, validation, and migration guidance; update runnable SIT/UAT examples to the current `result.format` contract.
+
 ## 3.5.2 - 2026-09-25
 
 - Implement issue #70: introduce `att-httphelper/v1.0` with environment-bound logical HTTP services, bounded pooled transport, secure auth/TLS defaults, typed Action results, HTTP metadata/evidence, and EN/ZH documentation.

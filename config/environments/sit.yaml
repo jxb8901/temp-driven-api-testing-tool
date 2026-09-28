@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.6
+schemaVersion: att-config/v2.9
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -48,7 +48,7 @@ tools:
     name: Invoke Payment API
     description: Invoke the payment API with a rendered request file
     command: [./tools/invoke_payment_api.sh, "${input.requestFile}", "${input.environment}"]
-    output: xml
+    result: {format: xml}
     arguments:
       requestFile:
         name: Request File
@@ -62,7 +62,7 @@ tools:
     name: Select CT records
     description: Query transaction records
     command: [./tools/select_ct_txn.sh, "${input.caseId}", "${input.txnRef}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       caseId:
         name: Case ID
@@ -76,7 +76,7 @@ tools:
     name: Grep application logs
     description: Find one or more keywords in application logs
     command: [./tools/grep_from_app_logs.sh, "${input.logText}", "${input.keywords}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       logText:
         name: Log Text
@@ -90,7 +90,7 @@ tools:
     name: Get application logs
     description: Collect application logs for a case
     command: [./tools/get_app_logs.sh, "${input.caseId}"]
-    output: txt
+    result: {format: text}
     arguments:
       caseId:
         name: Case ID
@@ -100,7 +100,7 @@ tools:
     name: Generate end-to-end ID
     description: Generate a unique end-to-end identifier
     command: [./tools/gen_e2e_id.sh, "${input.caseId}"]
-    output: txt
+    result: {format: text}
     arguments:
       caseId:
         name: Case ID
@@ -110,13 +110,13 @@ tools:
     name: Get account date
     description: Return the current account date
     command: [./tools/get_ac_date.sh]
-    output: txt
+    result: {format: text}
     arguments: {}
   getSeq:
     name: Get sequence
     description: Generate a new sequence value
     command: [./tools/get_seq.sh, "${input.caseId}"]
-    output: txt
+    result: {format: text}
     arguments:
       caseId:
         name: Case ID

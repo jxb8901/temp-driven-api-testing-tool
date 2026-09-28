@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class FrameworkConfigLoaderTest {
     @TempDir Path tempDir;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
+
     @Test void rejectsCaseInsensitiveDbHelperIdsAndInvalidTimeouts() throws Exception {
         Path helpers = tempDir.resolve("config/dbhelpers");
         Files.createDirectories(helpers);

@@ -16,11 +16,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.7`. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.9`. The logical SSH binding was introduced in config/group v2.7; current packages use config v2.9 and Tool Group v2.8. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.7
+schemaVersion: att-config/v2.9
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -44,7 +44,7 @@ instances:
 
 ```yaml
 # config/tools/application.yaml
-schemaVersion: att-tool-group/v2.7
+schemaVersion: att-tool-group/v2.8
 id: app
 name: Application tools
 description: Remote application inspection
@@ -56,10 +56,10 @@ tools:
     name: Status
     description: Print service status
     command: [systemctl, is-active, example.service]
-    output: txt
+    result: {format: text}
 ```
 
-The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. Existing inline global SSH and v2.6/v2.2 group files remain readable; the logical form requires v2.7. There is no Action- or per-call strategy override.
+The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. Existing inline global SSH and v2.6/v2.2 group files remain readable; the logical form requires v2.7 or later. Current Tool Groups use v2.8 and command-backed Tools require `result.format` (`text|json|yaml|xml`); legacy `output: txt` migrates to `result: {format: text}`. There is no Action- or per-call strategy override.
 
 Strategy precedence is group override then helper default. One instance works without a strategy (`single`); multiple instances require one. `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **`all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in the SSH diagnostics chapter.
 

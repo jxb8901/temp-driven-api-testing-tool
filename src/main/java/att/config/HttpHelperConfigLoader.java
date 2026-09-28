@@ -39,10 +39,8 @@ public final class HttpHelperConfigLoader {
                 Object loaded = YamlSupport.load(file);
                 if (!(loaded instanceof Map)) throw new IllegalArgumentException("HTTP helper must be a YAML map");
                 Map<?, ?> map = (Map<?, ?>) loaded;
-                Path localSchema = java.nio.file.Paths.get("schemas/att-httphelper-v1.0.schema.json").toAbsolutePath();
-                Path schema = Files.isRegularFile(localSchema) ? localSchema
-                        : projectRoot.resolve("schemas/att-httphelper-v1.0.schema.json");
-                if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+                Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-httphelper-v1.0.schema.json");
+                JsonSchemaVerifier.verify(schema, map);
                 helper = parse(map, projectRoot);
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);

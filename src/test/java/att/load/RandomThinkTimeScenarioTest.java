@@ -127,8 +127,7 @@ class RandomThinkTimeScenarioTest {
 
     private Path project() throws Exception {
         Path project = temp.resolve("project-" + System.nanoTime());
-        Files.createDirectories(project.resolve("schemas/history"));
-        Files.copy(Paths.get("schemas/history/att-load-v1.0.schema.json"), project.resolve("schemas/history/att-load-v1.0.schema.json"));
+        att.TestSchemas.install(project);
         return project;
     }
 

@@ -203,7 +203,7 @@ tools:
       - ./tools/invoke_payment_api.sh
       - "${input.requestFile}"
       - "${input.environment}"
-    output: json
+    result: {format: json}
     arguments:
       requestFile:
         name: Request File
@@ -229,7 +229,7 @@ tools:
     name: Write audit
     description: Write one audit message for one source file
     command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       message:
         name: Message

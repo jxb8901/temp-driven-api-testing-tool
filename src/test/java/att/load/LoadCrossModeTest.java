@@ -104,21 +104,17 @@ class LoadCrossModeTest {
         Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
                 new ToolArgumentConfig("value", "Value", "Value", true, ""));
         Map<String, ToolConfig> tools = Collections.singletonMap("echo",
-                new ToolConfig("echo", "Echo", "Echo", "/bin/echo ${value}", "txt", arguments));
+                new ToolConfig("echo", "Echo", "Echo", "/bin/echo ${value}", "text", arguments));
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), tools, null, null);
     }
 
     private Path fixture() throws Exception {
         Path project = temp.resolve("project-" + System.nanoTime());
+        att.TestSchemas.install(project);
         Files.createDirectories(project.resolve("templates/SHARED"));
         Files.createDirectories(project.resolve("templates/flows/shared/echo"));
-        Files.createDirectories(project.resolve("schemas"));
-        copySchema(project, "att-template-v3.0.schema.json");
-        copySchema(project, "att-flow-v3.0.schema.json");
-        copySchema(project, "att-debug-v1.0.schema.json");
-        copySchema(project, "att-load-v1.0.schema.json");
-        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.2\n"
                 + "name: SHARED\ndescription: cross-mode fixture\nactions:\n"
                 + "  direct:\n    type: log\n    message: \"value=${EXEC.INPUT.value}\"\n"
                 + "  invoke:\n    type: tool\n    call: \"#{echo(value=${EXEC.INPUT.value})}\"\n"
@@ -128,10 +124,6 @@ class LoadCrossModeTest {
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.0\ninputs:\n  value: shared-value\n");
         return project;
-    }
-
-    private void copySchema(Path project, String name) throws Exception {
-        Files.copy(att.validation.SchemaFiles.resolve(Paths.get("").toAbsolutePath(), name), project.resolve("schemas").resolve(name));
     }
 
     private Path write(Path project, String relative, String content) throws Exception {

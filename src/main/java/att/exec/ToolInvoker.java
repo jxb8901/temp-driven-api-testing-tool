@@ -12,6 +12,7 @@ import att.config.SshHelperConfig;
 import att.config.YamlSupport;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
+import att.core.InternalExceptionLogger;
 import att.core.PathSafety;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
@@ -156,6 +157,8 @@ public class ToolInvoker {
             }
         }
         catch (java.io.IOException e) {
+            InternalExceptionLogger.logIfInternal(log, target == null ? "tool.processStart" : "ssh.execute", e,
+                    sshIdentityPaths(target));
             Map<String, Object> evidence = new LinkedHashMap<String, Object>();
             String cleanupWarning = cleanupCapture(capture);
             if (cleanupWarning != null) evidence.put("cleanupWarning", cleanupWarning);
@@ -166,6 +169,10 @@ public class ToolInvoker {
             if (target != null) { evidence.put("sshDestination", target.destination()); evidence.put("sshPort", target.port()); evidence.put("sshTransport", sshTransport); }
             if (helper != null) { evidence.put("sshHelper", helper.id()); evidence.put("instance", instance); evidence.put("host", target.host()); evidence.put("selectionStrategy", strategy); evidence.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup"); evidence.put("startedAt", started.toString()); evidence.put("endedAt", Instant.now().toString()); evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis()); }
             throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + redactSsh(e.getMessage(), target), evidence, null, e);
+        } catch (RuntimeException e) {
+            InternalExceptionLogger.logIfInternal(log, target == null ? "tool.processStart" : "ssh.execute", e,
+                    sshIdentityPaths(target));
+            throw e;
         }
         try {
         String command = printableCommand(argv);
@@ -173,9 +180,12 @@ public class ToolInvoker {
         Object parsed = rawOutput;
         Exception parseFailure = null;
         if (!commandResult.timedOut()) try {
-            parsed = structured(tool.output()) && commandResult.stdoutArtifact() != null && !commandResult.stdoutArtifactTruncated()
-                    ? parseOutput(commandResult.stdoutArtifact(), tool.output()) : parseOutput(rawOutput, tool.output());
-        } catch (Exception e) { parseFailure = e; }
+            parsed = structured(tool.resultFormat()) && commandResult.stdoutArtifact() != null && !commandResult.stdoutArtifactTruncated()
+                    ? parseOutput(commandResult.stdoutArtifact(), tool.resultFormat()) : parseOutput(rawOutput, tool.resultFormat());
+        } catch (Exception e) {
+            parseFailure = e;
+            InternalExceptionLogger.logIfInternal(log, "tool.outputParse", e, sshIdentityPaths(target));
+        }
 
         Map<String, Object> toolInvocation = new LinkedHashMap<String, Object>();
         toolInvocation.put("id", id);
@@ -295,7 +305,7 @@ public class ToolInvoker {
         if (commandResult.timedOut()) {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
-        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse " + tool.output() + " output for tool " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
+        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse Tool result.format " + tool.resultFormat() + " for " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation, true,
                 ActionExecutionResult.evidence("tool", toolInvocation));
         } finally {
@@ -348,14 +358,16 @@ public class ToolInvoker {
                         if (command.timedOut()) { result.put("status", "TIMEOUT"); result.put("error", "SSH command timed out"); }
                         else {
                             try {
-                                result.put("output", structured(tool.output()) && command.stdoutArtifact() != null
+                                result.put("output", structured(tool.resultFormat()) && command.stdoutArtifact() != null
                                         && !command.stdoutArtifactTruncated()
-                                        ? parseOutput(command.stdoutArtifact(), tool.output())
-                                        : parseOutput(command.stdout().trim(), tool.output()));
+                                        ? parseOutput(command.stdoutArtifact(), tool.resultFormat())
+                                        : parseOutput(command.stdout().trim(), tool.resultFormat()));
                                 // A completed process supplies evidence for the Action assertion;
                                 // only execution or output-parsing failures fail fan-out.
                                 result.put("status", "PASS");
                             } catch (Exception error) {
+                                InternalExceptionLogger.logIfInternal(log, "ssh.outputParse", error,
+                                        sshIdentityPaths(target));
                                 result.put("status", "ERROR"); result.put("error", "Output parse failed: " + redactSsh(error.getMessage(), target));
                             }
                         }
@@ -363,6 +375,8 @@ public class ToolInvoker {
                         Thread.currentThread().interrupt();
                         result.put("status", "TIMEOUT"); result.put("error", "SSH execution cancelled");
                     } catch (Exception error) {
+                        InternalExceptionLogger.logIfInternal(log, "ssh.execute", error,
+                                sshIdentityPaths(target));
                         result.put("status", "ERROR"); result.put("error", redactSsh(error.getMessage(), target));
                     } finally {
                         String warning = cleanupCapture(capture);
@@ -402,6 +416,8 @@ public class ToolInvoker {
             } else {
                 try { outcome = future.get(); }
                 catch (java.util.concurrent.ExecutionException error) {
+                    InternalExceptionLogger.logIfInternal(log, "ssh.execute", error.getCause() == null ? error : error.getCause(),
+                            sshIdentityPaths(helper.instances().get(key)));
                     outcome = new LinkedHashMap<String, Object>();
                     outcome.put("instance", key); outcome.put("host", helper.instances().get(key).host());
                     outcome.put("port", helper.instances().get(key).port()); outcome.put("transport", sshCommandRunner.transportName());

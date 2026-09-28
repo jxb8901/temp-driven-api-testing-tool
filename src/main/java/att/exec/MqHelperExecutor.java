@@ -5,6 +5,7 @@ import att.config.FrameworkConfig;
 import att.config.MqHelperConfig;
 import att.core.CaseRuntimeContext;
 import att.core.CaseExecutionLog;
+import att.core.InternalExceptionLogger;
 import att.core.IdentifierValidator;
 import att.core.PathSafety;
 
@@ -50,7 +51,7 @@ public final class MqHelperExecutor {
 
     public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
                                       CaseRuntimeContext context, Long timeoutMs, String invocationId) {
-        return execute(instance, operation, arguments, context, timeoutMs, invocationId, null, null, "raw", false);
+        return execute(instance, operation, arguments, context, timeoutMs, invocationId, null, null, "text", false);
     }
 
     /** Executes an MQ call with the common Action result contract. */
@@ -77,6 +78,7 @@ public final class MqHelperExecutor {
                 throw new IllegalArgumentException("MQ send does not produce a business payload and does not support result persistence");
             }
         } catch (Exception error) {
+            InternalExceptionLogger.logIfInternal(log, "mq.resolveArguments", error, Collections.<String>emptyList());
             return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
         }
         Instant started = Instant.now();
@@ -104,22 +106,27 @@ public final class MqHelperExecutor {
         MqTransport.Connection connection = null;
         MqTransport.Queue requestQueue = null;
         MqTransport.Queue replyQueue = null;
+        String phase = "mq.resolve";
         try {
             if ("send".equals(operation) || "request".equals(operation)) {
                 String file = string(args.get("file"), "file");
                 Path payloadFile = payloadFile(file, context);
                 byte[] payload = Files.readAllBytes(payloadFile);
                 String queue = "send".equals(operation)
-                        ? string(args.get("queue"), "queue")
+                        ? effectiveQueue(args.get("queue"), helper.requestQueue(),
+                                "mq." + logical.logicalId() + ".send queue (or message.requestQueue)")
                         : effectiveQueue(args.get("requestQueue"), helper.requestQueue(), "requestQueue");
                 result.put("queue", queue); result.put("payloadFile", payloadFile.toString()); result.put("bytes", payload.length);
                 evidence.put("queue", queue); evidence.put("payloadFile", portable(payloadFile)); evidence.put("bytes", payload.length);
+                phase = "mq.connect";
                 connection = factory.connect(helper);
                 ensureWithinDeadline(deadlineNanos, "connect");
+                phase = "request".equals(operation) ? "mq.openRequestQueue" : "mq.openQueue";
                 requestQueue = connection.open(queue, false, true, "request".equals(operation));
                 ensureWithinDeadline(deadlineNanos, "open request queue");
                 String replyName = "request".equals(operation)
                         ? effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue") : "";
+                phase = "mq.put";
                 MqTransport.Message sent = requestQueue.put(payload, new MqTransport.PutRequest(
                         "request".equals(operation) ? helper.queueManager() : "", replyName,
                         helper.charset(), helper.encoding(), helper.format(), helper.persistence(), helper.expiry()));
@@ -131,17 +138,19 @@ public final class MqHelperExecutor {
                 if ("send".equals(operation)) {
                     success = true;
                 } else {
-                    closeQueue(requestQueue); requestQueue = null;
+                    closeQueue(requestQueue, helper, log, "mq.closeRequestQueue"); requestQueue = null;
                     String reply = effectiveQueue(args.get("replyQueue"), helper.replyQueue(), "replyQueue");
                     int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                     result.put("replyQueue", reply); result.put("waitMs", waitMs);
                     evidence.put("replyQueue", reply); evidence.put("waitMs", waitMs);
+                    phase = "mq.openReplyQueue";
                     replyQueue = connection.open(reply, true, false);
                     ensureWithinDeadline(deadlineNanos, "open reply queue");
                     waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                     result.put("waitMs", waitMs); evidence.put("waitMs", waitMs);
                     MqTransport.Message received;
                     try {
+                        phase = "mq.get";
                         received = replyQueue.get(new MqTransport.GetRequest(sent == null ? null : sent.messageId(), waitMs));
                         ensureWithinDeadline(deadlineNanos, "get reply");
                     } catch (MqTransport.Exception noReply) {
@@ -170,18 +179,22 @@ public final class MqHelperExecutor {
                     }
                 }
             } else if ("receive".equals(operation)) {
-                String queue = string(args.get("queue"), "queue");
+                String queue = effectiveQueue(args.get("queue"), helper.replyQueue(),
+                        "mq." + logical.logicalId() + ".receive queue (or message.replyQueue)");
                 byte[] correlation = args.get("correlationId") == null ? null : messageId(String.valueOf(args.get("correlationId")));
                 int waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                 result.put("queue", queue); result.put("correlationId", id(correlation)); result.put("waitMs", waitMs);
                 evidence.put("queue", queue); evidence.put("correlationId", id(correlation)); evidence.put("waitMs", waitMs);
+                phase = "mq.connect";
                 connection = factory.connect(helper);
                 ensureWithinDeadline(deadlineNanos, "connect");
+                phase = "mq.openReceiveQueue";
                 replyQueue = connection.open(queue, true, false);
                 ensureWithinDeadline(deadlineNanos, "open queue");
                 waitMs = effectiveWait(args.get("waitMs"), helper.requestReplyWaitMs(), deadlineNanos);
                 result.put("waitMs", waitMs); evidence.put("waitMs", waitMs);
                 try {
+                    phase = "mq.get";
                     MqTransport.Message received = replyQueue.get(new MqTransport.GetRequest(correlation, waitMs));
                     ensureWithinDeadline(deadlineNanos, "get message");
                     result.put("received", true);
@@ -207,16 +220,21 @@ public final class MqHelperExecutor {
             } else throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         } catch (MqTransport.Exception error) {
             success = false; addError(result, evidence, error, helper);
+            markInternalFailure(result, evidence, error, phase, helper, log);
         } catch (MqActionDeadlineException error) {
             success = false; addDeadlineError(result, evidence, error.getMessage());
         } catch (Exception error) {
             success = false; addError(result, evidence, error, helper);
+            markInternalFailure(result, evidence, error, phase, helper, log);
         } finally {
-            String cleanup = closeQueue(requestQueue);
-            if (cleanup == null) cleanup = closeQueue(replyQueue);
-            else { String next = closeQueue(replyQueue); if (next != null) cleanup += "; " + next; }
+            String cleanup = closeQueue(requestQueue, helper, log, "mq.closeRequestQueue");
+            if (cleanup == null) cleanup = closeQueue(replyQueue, helper, log, "mq.closeReplyQueue");
+            else { String next = closeQueue(replyQueue, helper, log, "mq.closeReplyQueue"); if (next != null) cleanup += "; " + next; }
             if (connection != null) {
-                try { connection.disconnect(); } catch (Exception error) { cleanup = append(cleanup, "disconnect=" + safe(error, helper)); }
+                try { connection.disconnect(); } catch (Exception error) {
+                    InternalExceptionLogger.logIfInternal(log, "mq.disconnect", error, secrets(helper));
+                    cleanup = append(cleanup, "disconnect=" + safe(error, helper));
+                }
             }
             if (cleanup != null) { evidence.put("cleanupWarning", cleanup); if (success) success = false; }
         }
@@ -260,9 +278,10 @@ public final class MqHelperExecutor {
         if (!("send".equals(operation) || "receive".equals(operation) || "request".equals(operation))) throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         for (String key : args.keySet()) if (!allowed(operation, key)) throw new IllegalArgumentException("Unknown MQ " + operation + " argument '" + key + "' for mq." + instance);
         if (("send".equals(operation) || "request".equals(operation)) && args.get("file") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires file");
-        if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or mqhelper.message.requestQueue");
-        if ("request".equals(operation) && args.get("replyQueue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires replyQueue or mqhelper.message.replyQueue");
-        if (("send".equals(operation) || "receive".equals(operation)) && args.get("queue") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires queue");
+        if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or configured message.requestQueue on the selected instance");
+        if ("request".equals(operation) && args.get("replyQueue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires replyQueue or configured message.replyQueue on the selected instance");
+        if ("send".equals(operation) && args.get("queue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".send requires queue or configured message.requestQueue on the selected instance");
+        if ("receive".equals(operation) && args.get("queue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".receive requires queue or configured message.replyQueue on the selected instance");
         for (String key : new String[]{"queue", "requestQueue", "replyQueue"}) if (args.containsKey(key)) validQueue(string(args.get(key), key));
         if (args.containsKey("waitMs")) integer(args.get("waitMs"), "waitMs", 0, 3600000);
         if ("receive".equals(operation) && args.containsKey("correlationId") && String.valueOf(args.get("correlationId")).trim().isEmpty()) throw new IllegalArgumentException("correlationId must not be blank");
@@ -292,22 +311,20 @@ public final class MqHelperExecutor {
     }
 
     private String normalizeFormat(String value) {
-        String result = value == null || value.trim().isEmpty() ? "raw" : value.trim().toLowerCase(Locale.ROOT);
-        if (!("raw".equals(result) || "text".equals(result) || "json".equals(result)
+        String result = value == null || value.trim().isEmpty() ? "text" : value.trim().toLowerCase(Locale.ROOT);
+        if (!("text".equals(result) || "json".equals(result)
                 || "yaml".equals(result) || "xml".equals(result))) {
-            throw new IllegalArgumentException("MQ result.format must be raw, text, json, yaml, or xml");
+            throw new IllegalArgumentException("MQ result.format must be text, json, yaml, or xml");
         }
         return result;
     }
 
     private Object represent(MqTransport.Message message, String format, MqHelperConfig helper) throws Exception {
         byte[] payload = message == null ? null : message.payload();
-        if ("raw".equals(format)) return payload == null ? null : Arrays.copyOf(payload, payload.length);
         int ccsid = message == null || message.ccsid() == null || message.ccsid().intValue() <= 0
                 ? helper.charset() : message.ccsid().intValue();
         String text = new String(payload == null ? new byte[0] : payload, mqCharset(ccsid));
-        if ("text".equals(format)) return text;
-        return new ToolInvoker(projectRoot, config).parseOutput(text, format);
+        return text;
     }
 
     private void saveIfRequested(Map<String, Object> result, CaseRuntimeContext context, CaseExecutionLog log, String actionId,
@@ -328,22 +345,14 @@ public final class MqHelperExecutor {
         Files.createDirectories(target.getParent());
         PathSafety.ensureContained(root, target, "MQ result.path");
         if (Files.exists(target) && !overwrite) throw new IOException("result file already exists and overwrite is false: " + savePath);
-        if ("raw".equals(format)) {
-            Files.write(target, raw == null ? new byte[0] : raw,
-                    overwrite ? new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
-                            : new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE});
-        } else {
-            String encoded = "text".equals(format) ? String.valueOf(value) : new ObjectOutputCodec().encode(value, format);
-            Files.write(target, encoded.getBytes(StandardCharsets.UTF_8),
-                    overwrite ? new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
-                            : new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE});
-        }
+        String encoded = new ObjectOutputCodec().encode(value, format);
+        Files.write(target, encoded.getBytes(StandardCharsets.UTF_8),
+                overwrite ? new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING}
+                        : new java.nio.file.StandardOpenOption[]{StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE});
         result.put("outputFile", target.toString());
     }
 
     private String consoleValue(String format, byte[] raw, Object value) throws Exception {
-        if ("raw".equals(format)) return new String(raw == null ? new byte[0] : raw, Charset.defaultCharset());
-        if ("text".equals(format)) return value == null ? "" : String.valueOf(value);
         return new ObjectOutputCodec().encode(value, format);
     }
 
@@ -445,15 +454,39 @@ public final class MqHelperExecutor {
         result.put("error", detail); evidence.put("error", detail);
     }
 
-    private String closeQueue(MqTransport.Queue queue) {
+    @SuppressWarnings("unchecked")
+    private void markInternalFailure(Map<String, Object> result, Map<String, Object> evidence, Throwable error,
+                                     String phase, MqHelperConfig helper, CaseExecutionLog log) {
+        if (!InternalExceptionLogger.isInternal(error)) return;
+        List<String> secretValues = secrets(helper);
+        InternalExceptionLogger.logIfInternal(log, phase, error, secretValues);
+        for (Map<String, Object> target : new Map[]{result, evidence}) {
+            Object raw = target.get("error");
+            if (raw instanceof Map) {
+                Map<String, Object> detail = (Map<String, Object>) raw;
+                detail.put("internal", Boolean.TRUE);
+                detail.put("phase", phase);
+                detail.put("message", InternalExceptionLogger.sanitize(String.valueOf(detail.get("message")), secretValues));
+            }
+        }
+    }
+
+    private List<String> secrets(MqHelperConfig helper) {
+        return helper == null || helper.password().isEmpty()
+                ? Collections.<String>emptyList() : Collections.singletonList(helper.password());
+    }
+
+    private String closeQueue(MqTransport.Queue queue, MqHelperConfig helper, CaseExecutionLog log, String phase) {
         if (queue == null) return null;
-        try { queue.close(); return null; } catch (Exception error) { return "queueClose=" + safe(error, null); }
+        try { queue.close(); return null; } catch (Exception error) {
+            InternalExceptionLogger.logIfInternal(log, phase, error, secrets(helper));
+            return "queueClose=" + safe(error, helper);
+        }
     }
     private String append(String first, String second) { return first == null ? second : first + "; " + second; }
     private String safe(Exception error, MqHelperConfig helper) {
         String message = error.getMessage() == null || error.getMessage().trim().isEmpty() ? error.getClass().getSimpleName() : error.getMessage();
-        if (helper != null && !helper.password().isEmpty()) message = message.replace(helper.password(), "<redacted>");
-        return message;
+        return InternalExceptionLogger.sanitize(message, secrets(helper));
     }
     private String portable(Path path) { try { return projectRoot.relativize(path.toAbsolutePath().normalize()).toString().replace('\\', '/'); } catch (Exception error) { return path.toString(); } }
 }

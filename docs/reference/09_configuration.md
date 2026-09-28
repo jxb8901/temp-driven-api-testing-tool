@@ -122,23 +122,25 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 added `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy; `att-template/v3.1` is the current template schema and introduces the common Action `result` contract. The dbhelper schema remains V2.5.
+V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V3.5.3 advances the unified Tool result and Action contracts; the dbhelper schema remains V2.5.
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.8` | [att-config-v2.8.schema.json](../../schemas/att-config-v2.8.schema.json) |
-| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.7` | [v2.7](../../schemas/history/att-config-v2.7.schema.json), [v2.5](../../schemas/history/att-config-v2.5.schema.json) |
+| Global configuration | `att-config/v2.9` | [att-config-v2.9.schema.json](../../schemas/att-config-v2.9.schema.json) |
+| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.8` | [v2.8](../../schemas/history/att-config-v2.8.schema.json), [v2.7](../../schemas/history/att-config-v2.7.schema.json), [v2.5](../../schemas/history/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../../schemas/att-dbhelper-v2.5.schema.json) |
 | MQ helper descriptor | `att-mqhelper/v1.1` (current), `v1.0` (legacy) | [v1.1](../../schemas/att-mqhelper-v1.1.schema.json), [v1.0](../../schemas/history/att-mqhelper-v1.0.schema.json) |
 | HTTP helper descriptor | `att-httphelper/v1.0` | [att-httphelper-v1.0.schema.json](../../schemas/att-httphelper-v1.0.schema.json) |
 | SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../../schemas/att-sshhelper-v1.0.schema.json) |
-| Tool group | `att-tool-group/v2.7` | [att-tool-group-v2.7.schema.json](../../schemas/att-tool-group-v2.7.schema.json) |
-| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6` | [v2.2](../../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../../schemas/history/att-tool-group-v2.6.schema.json) |
+| Tool group | `att-tool-group/v2.8` | [att-tool-group-v2.8.schema.json](../../schemas/att-tool-group-v2.8.schema.json) |
+| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6`, `v2.7` | [v2.2](../../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../../schemas/history/att-tool-group-v2.6.schema.json), [v2.7](../../schemas/history/att-tool-group-v2.7.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../../schemas/att-sidecar-v2.2.schema.json) |
 | Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../../schemas/history/att-sidecar-v2.1.schema.json) |
-| Template descriptor | `att-template/v3.1` | [att-template-v3.1.schema.json](../../schemas/att-template-v3.1.schema.json) |
-| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../../schemas/history/att-template-v3.0.schema.json) |
+| Template descriptor | `att-template/v3.2` | [att-template-v3.2.schema.json](../../schemas/att-template-v3.2.schema.json) |
+| Previous template descriptors | `att-template/v3.0`–`v3.1` | [v3.1](../../schemas/history/att-template-v3.1.schema.json), [v3.0](../../schemas/history/att-template-v3.0.schema.json) |
+| Flow descriptor | `att-flow/v3.2` | [att-flow-v3.2.schema.json](../../schemas/att-flow-v3.2.schema.json) |
+| Previous Flow descriptors | `att-flow/v3.0`–`v3.1` | [v3.1](../../schemas/history/att-flow-v3.1.schema.json), [v3.0](../../schemas/history/att-flow-v3.0.schema.json) |
 | Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [v2.6](../../schemas/history/att-template-v2.6.schema.json), [v2.5](../../schemas/history/att-template-v2.5.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../../schemas/att-validation-v2.1.schema.json) |
@@ -146,7 +148,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | JUnit XML | XSD | [att-junit-v2.1.xsd](../../schemas/att-junit-v2.1.xsd) |
 | Diagnostic codes | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../../schemas/diagnostic-codes.yaml) |
 
-Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
+Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. `validate --package` checks every current and historical resource registered in the catalog, including schemas unused by package files. A registered resource that is missing, unreadable, unsafe, or duplicated is a hard package error; supported-schema validation is never silently skipped and schemas are never loaded from the process working directory. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
 
 ### Global configuration
 
@@ -183,7 +185,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.8`; v2.1–v2.7 remain readable under their declared contracts. The example above intentionally shows v2.6. |
+| `schemaVersion` | required | Current: `att-config/v2.9`; v2.1–v2.8 remain readable under their declared contracts. The example above intentionally shows v2.6. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -293,7 +295,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 | `result` | required for Render; optional for supported Tool/DB Actions; `format` is Action-specific; `path` is optional; `overwrite` defaults false |
 | retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
 
-Template schema `att-template/v3.1` replaces `renderAs` and `saveAs` with `result`; legacy fields are rejected with migration suggestions. `result.format` selects `output.result`; `result.path` only controls optional persistence. A pathless result creates no artifact and `path: console` logs without creating a file. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
+Template schema `att-template/v3.2` uses the common `result` contract; legacy `renderAs` and `saveAs` fields are rejected with migration suggestions. Action `result.format` selects only the file/Case-log serialization and never reparses or changes `output.result`; a pathless result creates no artifact and `path: console` logs without creating a file. The four common formats are `text|json|yaml|xml`; `raw` is not supported. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
 
 #### Assign variable uniqueness and lifetime
 
@@ -348,23 +350,25 @@ callApi:
   result: {format: json, path: responses/payment.json}
 ```
 
-`result.format` selects `output.result`; `result.path` optionally persists that same representation. Supported formats remain Action-specific: Render accepts `raw|text|json|yaml|xml`; process Tools and MQ accept `raw|text|json|yaml|xml`; built-in/call-backed Tools accept `text|json|yaml|xml`; DB accepts `text|json|yaml|xml`. DB `text` uses its stable SQL*Plus-style formatter. Omitting `path` never creates an artifact. `path: console` writes the representation to the Case log without creating a file or `output.targetFiles` entry. All real paths remain safe, relative to the Case artifact directory, and are containment-checked.
+Action `result.format` never selects or reparses the logical `output.result`; it only selects file/console serialization. The common formats are `text|json|yaml|xml`. Command-backed Tool configuration separately requires Tool-level `result.format` to parse stdout into a typed value; call-backed Tools and HTTP/MQ/DB calls preserve their native result type. HTTP response type is inferred from its media type, not the Action format. DB `text` uses its stable SQL*Plus-style formatter. Omitting `path` never creates an artifact. `path: console` writes the representation to the Case log without creating a file or `output.targetFiles` entry. All real paths remain safe, relative to the Case artifact directory, and are containment-checked.
 
-Legacy `att-template/v2.6`, `v2.5`, and `v2.3` descriptors are recognized for validation and migration; legacy `renderAs`/`saveAs` result fields must be migrated to `att-template/v3.1` and are not accepted for execution. Do not interpret schema recognition as runtime compatibility for those fields.
+Legacy `att-template/v2.6`, `v2.5`, and `v2.3` descriptors are recognized for validation and migration; legacy `renderAs`/`saveAs` result fields must be migrated to `att-template/v3.2` and are not accepted for execution. Do not interpret schema recognition as runtime compatibility for those fields.
 
 Render evaluates ordinary ATT `${...}` / `#{...}` expressions in `result.path` first, then expands these source-set path tokens: `{filename}` (including extension), `{name}` (without final extension), `{ext}` (without dot), `{index}` (one-based deterministic order), and `{relativePath}` (relative to the matched source root). Token values are not recursively expression-evaluated. Multi-source paths must expand uniquely even when `overwrite: true`; every expanded path is safety-checked before writing. `output.result` remains a typed value for one source and an ordered source-keyed map for multiple sources; `output.targetFiles` lists only persisted paths.
 
-Migration for `att-template/v3.1`: `renderAs` becomes `result.format`; `saveAs.format` becomes `result.format`; `saveAs.path` becomes `result.path`; `saveAs.overwrite` becomes `result.overwrite`. `renderAs: file` is ambiguous because it mixed output representation and persistence: choose a real format and a path explicitly. `att validate` rejects legacy fields and emits a concrete replacement suggestion (including the required representation choice for `file`) in human and JSON diagnostics; it never rewrites files.
+Migration for `att-template/v3.2`: `renderAs` becomes `result.format`; `saveAs.format` becomes `result.format`; `saveAs.path` becomes `result.path`; `saveAs.overwrite` becomes `result.overwrite`. `renderAs: file` is ambiguous because it mixed output representation and persistence: choose a real format and a path explicitly. `att validate` rejects legacy fields and emits a concrete replacement suggestion (including the required representation choice for `file`) in human and JSON diagnostics; it never rewrites files.
 
 ### Tool contract
 
-Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
+Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list and requires `result: {format: text|json|yaml|xml}` to parse stdout into the typed primary result. A call may target a built-in or native DB, MQHelper, or HTTPHelper operation; its result is already typed, and optional Tool-level `result.format` is only a file/log serialization default. Current schemas reject legacy Tool `output` and do not support `raw`. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
 
 Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`; it controls a typed List supplied at the call site. These two argv properties are invalid for call-backed arguments. V2.6 does not define `delimit`.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
-A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7, `ssh` may be direct or a logical `{helper, selection?}` binding. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
+A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7 and later, `ssh` may be direct or a logical `{helper, selection?}` binding. The current v2.8 schema also requires `result.format` on command-backed Tools. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
+
+Migration for command-backed Tools: replace legacy `output: txt` with `result: {format: text}` (or `yaml`, `json`, `xml` as appropriate); `txt` becomes `text`. Set the config schema to `att-config/v2.9` and Tool Group schema to `att-tool-group/v2.8`. A command Tool must choose a parse format. Call-backed Tool results are already typed; optional Tool-level `result.format` only supplies a serialization default. Do not use `raw`.
 
 ### Identifier and path constraints
 
@@ -379,7 +383,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.2",
+  "attVersion": "3.5.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

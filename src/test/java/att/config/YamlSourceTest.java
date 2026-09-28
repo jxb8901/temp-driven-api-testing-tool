@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class YamlSourceTest {
     @TempDir Path root;
+
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(root); }
     private Path write(String name, String text) throws Exception {
         Path path = root.resolve(name);
         Files.createDirectories(path.getParent());

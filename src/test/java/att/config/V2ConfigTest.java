@@ -15,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class V2ConfigTest {
     @TempDir Path tempDir;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
+
     @Test
     void parsesQuotedSheetsAndYamlDataColumns() {
         List<SheetGroupConfig> sheets = ColumnSpecParser.sheets("payment=\"支付,本地=案例\", batch=批量案例");

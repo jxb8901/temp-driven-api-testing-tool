@@ -45,7 +45,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("prepare", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
-        tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "txt",
+        tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "json",
                 Collections.<String, ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
         TemplateAction action = new TemplateAction("typed", map("type", "tool", "call", "#{sample()}",
@@ -63,7 +63,7 @@ class StageTemplateRunnerTest {
         assertEquals(Boolean.TRUE, saved.get("ok"));
     }
 
-    @Test void rawProcessResultPathPersistsTheSelectedValueForWhitespaceAndStreamedCapture() throws Exception {
+    @Test void textProcessResultPathPersistsTheSelectedValueForWhitespaceAndStreamedCapture() throws Exception {
         Path caseDir = tempDir.resolve("raw-result-capture");
         Files.createDirectories(caseDir);
         Path whitespaceScript = tempDir.resolve("whitespace-output.sh");
@@ -74,9 +74,9 @@ class StageTemplateRunnerTest {
         largeScript.toFile().setExecutable(true);
 
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
-        tools.put("whitespace", new ToolConfig("whitespace", "Whitespace", "test", "./whitespace-output.sh", "txt",
+        tools.put("whitespace", new ToolConfig("whitespace", "Whitespace", "test", "./whitespace-output.sh", "text",
                 Collections.<String, ToolArgumentConfig>emptyMap()));
-        tools.put("large", new ToolConfig("large", "Large", "test", "./large-output.sh", "txt",
+        tools.put("large", new ToolConfig("large", "Large", "test", "./large-output.sh", "text",
                 Collections.<String, ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
                 tools, null, null, null, "", "", null, null, 1, "ignore", "", false,
@@ -87,9 +87,9 @@ class StageTemplateRunnerTest {
         context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
         List<TemplateAction> actions = Arrays.asList(
                 new TemplateAction("whitespace", map("type", "tool", "call", "#{whitespace()}",
-                        "result", map("format", "raw", "path", "whitespace.txt"))),
+                        "result", map("format", "text", "path", "whitespace.txt"))),
                 new TemplateAction("large", map("type", "tool", "call", "#{large()}",
-                        "result", map("format", "raw", "path", "large.txt"))));
+                        "result", map("format", "text", "path", "large.txt"))));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config)))
                 .execute("invoke", new StageTemplate("T", tempDir, actions), context,
@@ -138,7 +138,7 @@ class StageTemplateRunnerTest {
         context.beginStage(new StageCaseData("prepare", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
         tools.put("sample", new ToolConfig("sample", "sample", "", "Sample", "Sample",
-                Arrays.asList("fake", "#{seq.next()}"), Collections.<String>emptyList(), "txt",
+                Arrays.asList("fake", "#{seq.next()}"), Collections.<String>emptyList(), "text",
                 Collections.<String, ToolArgumentConfig>emptyMap(), null));
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
                 tools, null, null);
@@ -183,7 +183,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         TemplateAction action = new TemplateAction("call", map("type","tool", "call","#{sample()}",
                 "assert","${output.result} == 'ok'", "evidence", map("snapshot", map("call","#{capture(value=${output.result})}"))));
@@ -214,7 +214,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         Map<String,Object> retry = map("maxAttempts",3,"intervalMs",0,"retryOn",Arrays.asList("ASSERTION"));
         TemplateAction action = new TemplateAction("call", map("type","tool", "call","#{sample()}",
@@ -239,7 +239,7 @@ class StageTemplateRunnerTest {
         Files.createDirectories(caseDir);
         TestCase test = new TestCase(2,"g","s","TC1",Collections.<String>emptyList(),Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         for (String mode : Arrays.asList("continue", "stop")) {
             Path directory = caseDir.resolve(mode); Files.createDirectories(directory);
@@ -310,11 +310,11 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         List<TemplateAction> actions = Arrays.asList(
                 new TemplateAction("builtin", map("type","tool","call","#{upper('abc')}","result",map("path","console","format","text"))),
-                new TemplateAction("process", map("type","tool","call","#{sample()}","result",map("path","console","format","raw"))));
+                new TemplateAction("process", map("type","tool","call","#{sample()}","result",map("path","console","format","text"))));
         CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,new FixedRunner(0,"line1\nline2\n"))))
                 .execute("invoke",new StageTemplate("T",tempDir,actions),context,log);
@@ -333,11 +333,11 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("case1"),"R",tempDir,tempDir.resolve("case1.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         SequencedRunner runner = new SequencedRunner(false);
         Map<String,Object> retry = map("maxAttempts",3,"intervalMs",0,"retryOn",Arrays.asList("ASSERTION"));
-        TemplateAction action = new TemplateAction("call",map("type","tool","call","#{sample()}","result",map("path","${CASE.caseId}-response.txt","format","raw"),"assert","${output.result} == 'ok'","retry",retry));
+        TemplateAction action = new TemplateAction("call",map("type","tool","call","#{sample()}","result",map("path","${CASE.caseId}-response.txt","format","text"),"assert","${output.result} == 'ok'","retry",retry));
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,config,runner))).execute("invoke",new StageTemplate("T",tempDir,Collections.singletonList(action)),context,new CaseExecutionLog(tempDir.resolve("case1.log")));
         assertEquals(ResultStatus.PASS, results.get(0).status()); assertEquals(2, runner.calls);
         assertEquals(2, ((List<?>) context.resolve("ACTIONS.call.output.attempts")).size());
@@ -394,7 +394,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,tempDir.resolve("output"),"R",tempDir,logDirectory.resolve("case.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         List<TemplateAction> actions = Arrays.asList(
             new TemplateAction("render", map("type","render","payload","payload.txt","result",map("format","text","path","payload.txt"),"assert","${output.targetFiles[0]} != null")),
@@ -437,16 +437,17 @@ class StageTemplateRunnerTest {
                 new TemplateAction("yaml", map("type","render","payload","value.yaml","result",map("format","yaml"))),
                 new TemplateAction("xml", map("type","render","payload","value.xml","result",map("format","xml"))),
                 new TemplateAction("text", map("type","render","payload","value.txt","result",map("format","text"))),
-                new TemplateAction("check", map("type","assert","description","Check ${CASE.caseId}","assert","${ACTIONS.json.output.result['data/a.json'].value} == 1","expected","want ${CASE.caseId}\r\nline2","actual","${output.success}"))
+                new TemplateAction("check", map("type","assert","description","Check ${CASE.caseId}","assert","${ACTIONS.text.output.result} == 'hello g.TC1'","expected","want ${CASE.caseId}\r\nline2","actual","${output.success}"))
         );
         FrameworkConfig parseConfig = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,template,Collections.<String,ToolConfig>emptyMap(),null,null);
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,parseConfig))).execute("render",new StageTemplate("T",template,actions),context,new CaseExecutionLog(caseDir.resolve("case.log")));
         assertEquals(5, results.size());
         assertEquals(Arrays.asList("data/a.json","data/b.json"), new ArrayList<Object>(((Map<?,?>)context.resolve("ACTIONS.json.output.result")).keySet()));
+        assertEquals("{\"value\":1}", context.resolve("ACTIONS.json.output.result['data/a.json']"));
         assertEquals("json", context.resolve("ACTIONS.json.output.format"));
         assertEquals("Render g.TC1; status=PASS", context.resolve("ACTIONS.json.description"));
-        assertEquals("g.TC1", context.resolve("ACTIONS.yaml.output.result.name"));
-        assertEquals("OK", context.resolve("ACTIONS.xml.output.result.Status"));
+        assertEquals("name: g.TC1\n", context.resolve("ACTIONS.yaml.output.result"));
+        assertEquals("<Result><Status>OK</Status></Result>", context.resolve("ACTIONS.xml.output.result"));
         assertEquals("hello g.TC1", context.resolve("ACTIONS.text.output.result"));
         assertEquals("Check g.TC1", results.get(4).description());
         assertEquals("Check g.TC1\nwant g.TC1\nline2", results.get(4).expected());
@@ -525,7 +526,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("invoke","T",Collections.<String,Object>emptyMap()),"T",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("sample", new ToolConfig("sample","Sample","test","sample","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         List<TemplateAction> actions = Arrays.asList(
                 new TemplateAction("unasserted",map("type","tool","call","#{sample()}")),
@@ -558,7 +559,7 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("prepare","PREPARE",Collections.<String,Object>emptyMap()),"PREPARE",tempDir);
         Map<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
-        tools.put("seq", new ToolConfig("seq","Sequence","test","seq","txt",Collections.<String,ToolArgumentConfig>emptyMap()));
+        tools.put("seq", new ToolConfig("seq","Sequence","test","seq","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         TemplateAction assign = new TemplateAction("build", map("type","assign","name","txnSeq",
                 "expression","ATT#{upper('x')}#{seq()}","assert","${output.result} == 'wrong'","onFailure","continue"));

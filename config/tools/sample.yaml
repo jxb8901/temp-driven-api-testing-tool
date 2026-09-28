@@ -1,4 +1,4 @@
-schemaVersion: att-tool-group/v2.2
+schemaVersion: att-tool-group/v2.8
 id: sample
 name: Sample grouped tools
 description: Demonstrates qualified tool calls and a shared group dispatcher
@@ -8,7 +8,7 @@ tools:
     name: Get account date through a group
     description: Return the current account date through the sample dispatcher
     command: [./tools/get_ac_date.sh]
-    output: txt
+    result: {format: text}
     arguments: {}
 
 
@@ -16,7 +16,7 @@ tools:
     name: Get sequence
     description: Generate a new sequence value
     command: [./tools/get_seq.sh, "${input.seqLen}"]
-    output: txt
+    result: {format: text}
     arguments:
       seqLen:
         name: Sequence Length

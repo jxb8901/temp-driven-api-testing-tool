@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class StageTemplateLoaderTest {
     @TempDir Path tempDir;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
+
     @Test void loadsCurrentResultConfigAndRejectsLegacyFieldsWithMigrationGuidance() throws Exception {
         StageTemplateLoader.clearForTests();
         Path current = tempDir.resolve("templates/current");
@@ -21,9 +23,7 @@ class StageTemplateLoaderTest {
         Files.createDirectories(legacySave);
         Files.createDirectories(legacySaveNoFormat);
         Files.createDirectories(legacyFile);
-        Files.createDirectories(tempDir.resolve("schemas"));
-        Files.copy(Paths.get("schemas/att-template-v3.1.schema.json"), tempDir.resolve("schemas/att-template-v3.1.schema.json"));
-        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.1\n" +
+        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.2\n" +
                 "name: current\ndescription: DB template\nactions:\n" +
                 "  query:\n    type: db\n    db: orders\n    query: {sql: 'select 1'}\n" +
                 "    result: {path: result.json, format: json, overwrite: true}\n").getBytes("UTF-8"));
@@ -149,7 +149,8 @@ class StageTemplateLoaderTest {
         StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
 
         IllegalArgumentException invalidUse = assertThrows(IllegalArgumentException.class, () -> loader.load("dynamic"));
-        assertTrue(invalidUse.getMessage().contains("static canonical Flow ID"), invalidUse.getMessage());
+        assertTrue(invalidUse.getMessage().contains("actions.call.use"), invalidUse.getMessage());
+        assertTrue(invalidUse.getMessage().contains("does not match the regex pattern"), invalidUse.getMessage());
         IllegalArgumentException invalidWith = assertThrows(IllegalArgumentException.class, () -> loader.load("array"));
         assertTrue(invalidWith.getMessage().contains("Unknown field") || invalidWith.getMessage().contains("with"), invalidWith.getMessage());
     }

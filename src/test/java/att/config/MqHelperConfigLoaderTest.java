@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class MqHelperConfigLoaderTest {
     @TempDir Path tempDir;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
+
     @Test void loadsV26MqHelperWithoutExposingPasswordInMetadata() throws Exception {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
@@ -142,13 +144,6 @@ class MqHelperConfigLoaderTest {
     }
 
     @Test void olderMqSchemaFailureIncludesCurrentSchemaMigrationContext() throws Exception {
-        Path currentSchemas = tempDir.resolve("schemas");
-        Path historicalSchemas = currentSchemas.resolve("history");
-        Files.createDirectories(historicalSchemas);
-        Files.copy(java.nio.file.Paths.get("schemas/att-mqhelper-v1.1.schema.json"),
-                currentSchemas.resolve("att-mqhelper-v1.1.schema.json"));
-        Files.copy(java.nio.file.Paths.get("schemas/history/att-mqhelper-v1.0.schema.json"),
-                historicalSchemas.resolve("att-mqhelper-v1.0.schema.json"));
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
         Path config = tempDir.resolve("config/config.yaml");

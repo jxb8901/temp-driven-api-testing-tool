@@ -3,6 +3,8 @@ package att.exec;
 import att.config.FrameworkConfig;
 import att.config.HttpHelperConfig;
 import att.core.CaseRuntimeContext;
+import att.core.CaseExecutionLog;
+import att.core.InternalExceptionLogger;
 import att.validation.JsonSupport;
 import java.io.IOException;
 import java.net.URI;
@@ -66,6 +68,19 @@ public final class HttpHelperExecutor implements AutoCloseable {
     public ToolInvocationResult execute(String logicalId, String operation, Map<String, Object> arguments,
                                         CaseRuntimeContext context, Long actionTimeoutMs, String invocationId,
                                         String format) {
+        // The common Action result.format is presentation-only. The HTTP
+        // response's native type is inferred from its media type below.
+        return execute(logicalId, operation, arguments, context, actionTimeoutMs, invocationId, format, null);
+    }
+
+    public ToolInvocationResult execute(String logicalId, String operation, Map<String, Object> arguments,
+                                        CaseRuntimeContext context, Long actionTimeoutMs, String invocationId) {
+        return execute(logicalId, operation, arguments, context, actionTimeoutMs, invocationId, null, null);
+    }
+
+    public ToolInvocationResult execute(String logicalId, String operation, Map<String, Object> arguments,
+                                        CaseRuntimeContext context, Long actionTimeoutMs, String invocationId,
+                                        String format, CaseExecutionLog log) {
         String name = "http." + logicalId + "." + operation;
         long started = System.nanoTime();
         long deadline = actionTimeoutMs == null ? Long.MAX_VALUE
@@ -75,16 +90,21 @@ public final class HttpHelperExecutor implements AutoCloseable {
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         evidence.put("id", invocationId); evidence.put("httpHelper", logicalId);
         AtomicBoolean deadlineExpired = new AtomicBoolean(false);
+        HttpHelperConfig helperForDiagnostics = null;
+        String phase = "http.resolve";
         try {
             if (closed.get()) throw new HttpFailure("HTTP_CLOSED", "HTTP resources are closed");
             HttpHelperConfig helper = config.httpHelper(logicalId);
             if (helper == null) throw new HttpFailure("HTTP_CONFIG", "Unknown HTTP helper: " + logicalId);
+            helperForDiagnostics = helper;
             Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
-            Request request = request(helper, operation, args, context, format);
+            phase = "http.request";
+            Request request = request(helper, operation, args, context);
             metadata.put("method", request.method);
             metadata.put("url", safeUrl(request.url, helper));
             evidence.put("method", request.method); evidence.put("url", safeUrl(request.url, helper));
             evidence.put("requestBytes", request.body == null ? 0 : request.body.length);
+            phase = "http.client";
             Client client = client(helper);
             URI url = request.url;
             String method = request.method;
@@ -110,6 +130,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
                         call.abort();
                     }, remaining, TimeUnit.NANOSECONDS);
                 }
+                phase = "http.execute";
                 try (CloseableHttpResponse response = client.http.execute(call)) {
                     ensureDeadline(deadline, "response");
                     int status = response.getStatusLine().getStatusCode();
@@ -128,7 +149,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     byte[] bytes = entity == null ? new byte[0] : EntityUtils.toByteArray(entity);
                     ensureDeadline(deadline, "read");
                     String contentType = response.getFirstHeader("Content-Type") == null ? "" : response.getFirstHeader("Content-Type").getValue();
-                    Object result = decode(bytes, request.format, contentType);
+                    phase = "http.decode";
+                    Object result = decode(bytes, contentType);
                     metadata.put("method", method); metadata.put("url", safeUrl(url, helper));
                     metadata.put("statusCode", status);
                     metadata.put("reasonPhrase", response.getStatusLine().getReasonPhrase());
@@ -159,10 +181,36 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     ? safeMessage(error, type) : "HTTP request failed (" + error.getClass().getSimpleName() + ")";
             Map<String, Object> diagnostic = new LinkedHashMap<String, Object>();
             diagnostic.put("type", type); diagnostic.put("message", message);
+            List<String> secrets = diagnosticSecrets(helperForDiagnostics, arguments);
+            if (InternalExceptionLogger.isInternal(error)) {
+                InternalExceptionLogger.logIfInternal(log, phase, error, secrets);
+                diagnostic.put("internal", Boolean.TRUE);
+                diagnostic.put("phase", phase);
+                diagnostic.put("message", InternalExceptionLogger.sanitize(message, secrets));
+            }
             metadata.put("error", diagnostic);
             evidence.put("error", diagnostic); evidence.put("durationMs", elapsed(started));
             return result(name, invocationId, null, false, metadata, evidence, diagnostic);
         }
+    }
+
+    private List<String> diagnosticSecrets(HttpHelperConfig helper, Map<String, Object> arguments) {
+        List<String> values = new ArrayList<String>();
+        if (helper != null) {
+            addSecret(values, helper.password()); addSecret(values, helper.token());
+            addSecret(values, helper.trustStorePassword());
+            for (Map.Entry<String, String> header : helper.headers().entrySet())
+                if (secretHeader(header.getKey())) addSecret(values, header.getValue());
+        }
+        if (arguments != null && arguments.get("headers") instanceof Map) {
+            for (Map.Entry<?, ?> header : ((Map<?, ?>) arguments.get("headers")).entrySet())
+                if (secretHeader(String.valueOf(header.getKey()))) addSecret(values, String.valueOf(header.getValue()));
+        }
+        return values;
+    }
+
+    private void addSecret(List<String> values, String value) {
+        if (value != null && !value.isEmpty()) values.add(value);
     }
 
     private ToolInvocationResult result(String name, String id, Object body, boolean success,
@@ -182,7 +230,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
     }
 
     private Request request(HttpHelperConfig helper, String operation, Map<String, Object> args,
-                            CaseRuntimeContext context, String format) throws Exception {
+                            CaseRuntimeContext context) throws Exception {
         for (String key : args.keySet()) if (!("method".equals(key) || "path".equals(key) || "query".equals(key)
                 || "headers".equals(key) || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
                 || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
@@ -245,12 +293,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
             if (!(suppliedBody instanceof String) && !(suppliedBody instanceof byte[]) && !containsHeader(headers, "Content-Type"))
                 putHeader(headers, "Content-Type", "application/json; charset=UTF-8");
         }
-        String selected = format == null || format.trim().isEmpty() ? "text" : format.toLowerCase(Locale.ROOT);
-        if (!("raw".equals(selected) || "text".equals(selected) || "json".equals(selected)
-                || "yaml".equals(selected) || "xml".equals(selected)))
-            throw new HttpFailure("HTTP_ARGUMENT", "Unsupported HTTP result format");
         boolean redirects = args.get("followRedirects") == null ? helper.followRedirects() : bool(args.get("followRedirects"), "followRedirects");
-        return new Request(method, url, headers, body, selected, redirects,
+        return new Request(method, url, headers, body, redirects,
                 timeout(args.get("connectionRequestTimeoutMs")), timeout(args.get("connectTimeoutMs")), timeout(args.get("readTimeoutMs")));
     }
 
@@ -277,8 +321,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         if (!real.startsWith(caseRoot) && !real.startsWith(project)) throw new IOException("HTTP request file escapes ATT package");
         return real;
     }
-    private Object decode(byte[] bytes, String format, String contentType) throws Exception {
-        if ("raw".equals(format)) return bytes;
+    private Object decode(byte[] bytes, String contentType) throws Exception {
         Charset charset = StandardCharsets.UTF_8;
         if (!contentType.isEmpty()) {
             try {
@@ -287,9 +330,18 @@ public final class HttpHelperExecutor implements AutoCloseable {
             } catch (Exception invalidCharset) { throw new HttpFailure("HTTP_FORMAT", "Invalid HTTP response charset"); }
         }
         String text = new String(bytes, charset);
-        if ("text".equals(format)) return text;
+        String mediaType = contentType == null ? "" : contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        if ("application/octet-stream".equals(mediaType)) {
+            throw new HttpFailure("HTTP_FORMAT", "Binary HTTP response cannot be published as a common typed Action result");
+        }
+        String format = null;
+        if ("application/json".equals(mediaType) || mediaType.endsWith("+json")) format = "json";
+        else if ("application/yaml".equals(mediaType) || "text/yaml".equals(mediaType)
+                || "application/x-yaml".equals(mediaType) || "text/x-yaml".equals(mediaType)) format = "yaml";
+        else if ("application/xml".equals(mediaType) || "text/xml".equals(mediaType) || mediaType.endsWith("+xml")) format = "xml";
+        if (format == null) return text;
         try { return new ToolInvoker(projectRoot, config).parseOutput(text, format); }
-        catch (Exception invalidBody) { throw new HttpFailure("HTTP_FORMAT", "HTTP response is not valid " + format); }
+        catch (Exception invalidBody) { throw new HttpFailure("HTTP_FORMAT", "HTTP response is not valid " + format, invalidBody); }
     }
     private static Map<String, List<String>> responseHeaders(HttpResponse response,
                                                               Map<String, String> requestHeaders,
@@ -297,9 +349,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         Map<String, List<String>> headers = new LinkedHashMap<String, List<String>>();
         for (Header header : response.getAllHeaders()) {
             String name = header.getName();
-            String canonical = null;
-            for (String key : headers.keySet()) if (key.equalsIgnoreCase(name)) { canonical = key; break; }
-            if (canonical == null) { canonical = name; headers.put(name, new ArrayList<String>()); }
+            String normalized = name.toLowerCase(Locale.ROOT);
             boolean secret = name.equalsIgnoreCase("Set-Cookie") || name.equalsIgnoreCase("Authorization")
                     || name.equalsIgnoreCase("Proxy-Authorization") || name.toLowerCase(Locale.ROOT).contains("token")
                     || name.toLowerCase(Locale.ROOT).contains("secret") || name.toLowerCase(Locale.ROOT).contains("api-key")
@@ -308,11 +358,19 @@ public final class HttpHelperExecutor implements AutoCloseable {
             if (!helper.password().isEmpty() && value.contains(helper.password())) secret = true;
             if (!helper.token().isEmpty() && value.contains(helper.token())) secret = true;
             for (Map.Entry<String, String> sent : requestHeaders.entrySet()) {
-                if (!sent.getValue().isEmpty() && value.contains(sent.getValue())) secret = true;
+                if (secretHeader(sent.getKey()) && !sent.getValue().isEmpty() && value.contains(sent.getValue())) secret = true;
             }
-            headers.get(canonical).add(secret ? "<redacted>" : value);
+            headers.computeIfAbsent(normalized, ignored -> new ArrayList<String>())
+                    .add(secret ? "<redacted>" : value);
         }
         return headers;
+    }
+    private static boolean secretHeader(String name) {
+        String normalized = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        return normalized.equals("authorization") || normalized.equals("proxy-authorization")
+                || normalized.contains("token") || normalized.contains("secret")
+                || normalized.contains("api-key") || normalized.contains("apikey")
+                || normalized.contains("password") || normalized.contains("cookie");
     }
     private Client client(HttpHelperConfig helper) throws Exception {
         Client existing = clients.get(helper.id().toLowerCase(Locale.ROOT));
@@ -372,16 +430,16 @@ public final class HttpHelperExecutor implements AutoCloseable {
         clients.clear();
     }
     private static final class Request {
-        private final String method, format;
+        private final String method;
         private final URI url;
         private final Map<String, String> headers;
         private final byte[] body;
         private final boolean followRedirects;
         private final Integer poolTimeoutMs, connectTimeoutMs, readTimeoutMs;
-        private Request(String method, URI url, Map<String, String> headers, byte[] body, String format,
+        private Request(String method, URI url, Map<String, String> headers, byte[] body,
                         boolean followRedirects, Integer pool, Integer connect, Integer read) {
             this.method = method; this.url = url; this.headers = headers; this.body = body;
-            this.format = format; this.followRedirects = followRedirects;
+            this.followRedirects = followRedirects;
             this.poolTimeoutMs = pool; this.connectTimeoutMs = connect; this.readTimeoutMs = read;
         }
     }
@@ -415,5 +473,6 @@ public final class HttpHelperExecutor implements AutoCloseable {
     private static final class HttpFailure extends IllegalArgumentException {
         private final String type;
         private HttpFailure(String type, String message) { super(message); this.type = type; }
+        private HttpFailure(String type, String message, Throwable cause) { super(message, cause); this.type = type; }
     }
 }

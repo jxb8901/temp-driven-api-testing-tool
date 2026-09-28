@@ -51,7 +51,7 @@ public final class LoadScenarioLoader {
                 throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; expected "
                         + Version.LOAD_SCHEMA + " or " + Version.LOAD_SCHEMA_V1_1);
             }
-            if (Files.isRegularFile(schema)) att.validation.SchemaMigrationGuidance.verify(schema,
+            att.validation.SchemaMigrationGuidance.verify(schema,
                     att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.1.schema.json"), map,
                     version, Version.LOAD_SCHEMA_CURRENT);
             if (Version.LOAD_SCHEMA.equals(version)) {
@@ -66,6 +66,14 @@ public final class LoadScenarioLoader {
                     "Invalid load scenario", e.getMessage(), source.toString(), e.field(), null, null, null,
                     null, null, "Correct the referenced load scenario field and rerun att load.", e);
             throw YamlSupport.locate(diagnostic, source, e.field());
+        } catch (att.validation.SchemaMigrationGuidance.MigrationException e) {
+            String field = normalizeField(e.field());
+            DiagnosticException diagnostic = new DiagnosticException(DiagnosticCodes.LOAD_INVALID,
+                    "Invalid load scenario", e.getMessage(), source.toString(), field, null, null, null,
+                    null, null, "Review the schema migration guidance and correct the reported scenario field.", e);
+            JsonSchemaVerifier.SchemaValidationException schemaError = JsonSchemaVerifier.SchemaValidationException.find(e);
+            if (schemaError != null) throw YamlSupport.locateSchema(diagnostic, source, schemaError.structuredViolations());
+            throw YamlSupport.locate(diagnostic, source, field);
         } catch (JsonSchemaVerifier.SchemaValidationException e) {
             String field = normalizeField(e.field());
             DiagnosticException diagnostic = new DiagnosticException(DiagnosticCodes.LOAD_INVALID,

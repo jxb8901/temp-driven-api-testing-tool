@@ -91,13 +91,10 @@ class DebugEngineTest {
 
     private Path fixtureWithoutSidecars() throws Exception {
         Path project = temp.resolve("project-" + System.nanoTime());
+        att.TestSchemas.install(project);
         Files.createDirectories(project.resolve("templates/SIMPLE"));
         Files.createDirectories(project.resolve("templates/BROKEN"));
         Files.createDirectories(project.resolve("templates/flows/debug/echo"));
-        Files.createDirectories(project.resolve("schemas"));
-        copySchema("att-template-v2.3.schema.json", project);
-        copySchema("att-flow-v3.0.schema.json", project);
-        copySchema("att-debug-v1.0.schema.json", project);
         Files.write(project.resolve("templates/SIMPLE/template.yaml"), (
                 "schemaVersion: att-template/v2.3\nname: SIMPLE\ndescription: Simple debug template\nactions:\n  log:\n    type: log\n    message: 'value=${EXEC.INPUT.value}'\n" ).getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/BROKEN/template.yaml"), "not: [valid\n".getBytes(StandardCharsets.UTF_8));
@@ -107,7 +104,4 @@ class DebugEngineTest {
         return project;
     }
 
-    private void copySchema(String name, Path project) throws Exception {
-        Files.copy(att.validation.SchemaFiles.resolve(Paths.get("").toAbsolutePath(), name), project.resolve("schemas").resolve(name));
-    }
 }

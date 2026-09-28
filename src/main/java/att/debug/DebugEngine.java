@@ -224,8 +224,8 @@ public final class DebugEngine {
             Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw debugError("Debug input must be a YAML map: " + path, "Use schemaVersion: " + Version.DEBUG_SCHEMA + ".");
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
-            Path schema = projectRoot.resolve("schemas/att-debug-v1.0.schema.json");
-            if (Files.isRegularFile(schema)) JsonSchemaVerifier.verify(schema, map);
+            Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-debug-v1.0.schema.json");
+            JsonSchemaVerifier.verify(schema, map);
             SchemaSupport.requireVersion(map, Version.DEBUG_SCHEMA, "debug input");
             return new DebugInput(path, map, type, id, config);
         } catch (DiagnosticException e) {

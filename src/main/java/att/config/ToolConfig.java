@@ -23,7 +23,7 @@ public final class ToolConfig {
     private final String sshHelper;
     private final String sshSelectionStrategy;
     private final Path sourceFile;
-    private final String output;
+    private final String resultFormat;
     private final Long timeoutMs;
     private final Map<String, ToolArgumentConfig> arguments;
 
@@ -79,7 +79,7 @@ public final class ToolConfig {
         this.call = call == null ? "" : call.trim();
         this.cache = cache == null ? "" : cache.trim();
         this.groupScriptArgv = immutable(groupScriptArgv);
-        this.output = output;
+        this.resultFormat = normalizeResultFormat(output);
         this.timeoutMs = timeoutMs;
         this.arguments = arguments == null ? Collections.<String, ToolArgumentConfig>emptyMap()
                 : new LinkedHashMap<String, ToolArgumentConfig>(arguments);
@@ -108,13 +108,21 @@ public final class ToolConfig {
     public String sshHelper() { return sshHelper; }
     public String sshSelectionStrategy() { return sshSelectionStrategy; }
     public Path sourceFile() { return sourceFile; }
-    public String output() { return output; }
+    public String resultFormat() { return resultFormat; }
+    /** @deprecated Use {@link #resultFormat()}; retained for source compatibility. */
+    @Deprecated public String output() { return resultFormat; }
     public Long timeoutMs() { return timeoutMs; }
     public Map<String, ToolArgumentConfig> arguments() { return Collections.unmodifiableMap(arguments); }
 
     private static List<String> parse(String command) {
         try { return att.exec.CommandRunner.parseCommand(command == null ? "" : command); }
         catch (java.io.IOException e) { throw new IllegalArgumentException("Invalid tool command: " + e.getMessage(), e); }
+    }
+
+    private static String normalizeResultFormat(String value) {
+        if (value == null || value.trim().isEmpty()) return "";
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return "txt".equals(normalized) ? "text" : normalized;
     }
 
     private static List<String> immutable(List<String> values) {

@@ -52,7 +52,7 @@ username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY 
 
 message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
 
-requestQueue and replyQueue are optional request defaults. Queue precedence is call argument > message default > validation error. send(queue=...) and receive(queue=...) do not use these defaults. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
+`message.requestQueue` and `message.replyQueue` are optional defaults for all matching operations: send/request use `requestQueue`; receive/request use `replyQueue`. For v1.1, ATT selects or resolves the requested physical instance first, materializes that instance's inherited `message` settings, then applies the call argument as the final override. Thus the effective order is explicit call argument > selected instance override > group default > runtime default (if defined) > point-of-use validation error. ATT never borrows a queue default from a different physical instance. If the effective queue is still absent, the call fails before connecting. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
 
 #### Common Action result
 
@@ -60,24 +60,24 @@ MQ receive/request use the common Action `result` object; no MQ-specific resultT
 
 ~~~yaml
 result:
-  format: raw
-  path: response.bin
+  format: text
+  path: response.txt
   overwrite: false
 ~~~
 
-`format` selects the in-memory `output.result` representation; `path` is optional and affects persistence only. `raw` gives the original byte[], `text` gives String, and json/yaml/xml give existing ATT typed values. A pathless `result` keeps the value in memory without creating a file. `path: console` writes the selected representation to the Case log and creates no `output.targetFiles` entry or file. No .reply.bin is created unless a real path is explicit. `raw` plus a real path writes exact bytes; overwrite/path safety follow the common Action rules.
+MQ reply bytes are decoded to a native `String` using the received CCSID when available; Action `result.format` does not parse or replace that value. The common formats are `text|json|yaml|xml` and only choose how the typed value is serialized to a file or Case log. There is no public `raw` Action result. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
 
 ~~~yaml
 - id: requestXml
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml}
-  assert: "${output.result.Response.Status} == 'SUCCESS'"
+  result: {format: text}
+  assert: "${output.replyReceived} == true"
 
 - id: requestXmlSaved
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml, path: responses/payment.xml, overwrite: false}
+  result: {format: text, path: responses/payment.txt, overwrite: false}
 
 - id: receiveReply
   type: tool
@@ -87,9 +87,44 @@ result:
 
 #### Output and validation
 
-output.result is the business payload; MQ metadata is directly under output. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects Action `result`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
+`output.result` is the business payload (a charset-decoded String for MQ replies); MQ metadata is directly under `output`. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects Action `result`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and place the decoded payload only in `output.result`. A normal request satisfies `output.messageId == output.replyCorrelationId`. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
 
-Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Typed reply decoding uses the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and the configured charset as fallback; unsupported CCSIDs fail clearly. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported result formats, and unsafe paths.
+Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Transport payloads remain byte-preserving through the MQ client; the public typed reply value is a `String` decoded using the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and configured charset as fallback. Unsupported CCSIDs fail clearly. Logs/reports serialize the typed result and never create an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, unsupported result formats, and unsafe paths; a missing effective queue is rejected at the operation's point of use.
+
+#### Send, receive, and request APIs
+
+All calls use the stable logical helper ID and named arguments. For a v1.1 group, an optional `instance` selects a physical ID; otherwise ATT applies the configured `random` or `roundRobin` strategy before resolving queue defaults.
+
+| Operation | Required arguments | Optional arguments | Queue source when omitted |
+|---|---|---|---|
+| `send` | `file` | `queue`, `instance` | `message.requestQueue` |
+| `receive` | none | `queue`, `correlationId`, `waitMs`, `instance` | `message.replyQueue` |
+| `request` | `file` | `requestQueue`, `replyQueue`, `waitMs`, `instance` | `message.requestQueue` and `message.replyQueue` |
+
+`file` is read as exact bytes from the Case output directory or package. `queue` is the send/receive argument; request deliberately uses the distinct `requestQueue` and `replyQueue` names. Explicit non-null call arguments override the selected instance's effective message defaults. If a queue has neither a call argument nor a configured effective default, ATT returns a concise argument/configuration error before opening a connection. The default is evaluated only after the physical instance has been selected, so a request PUT and its correlated GET always use the same broker and that instance's queue settings.
+
+```yaml
+sendPayment:
+  type: tool
+  call: "#{mq.payment.send(file='request.bin')}"
+  assert: "${output.sent} == true"
+
+waitForPayment:
+  type: tool
+  call: "#{mq.payment.receive(correlationId=${EXEC.ACTIONS.sendPayment.output.messageId}, waitMs=30000)}"
+  result: {format: text, path: replies/payment.txt}
+  assert: "${output.received} == true"
+
+requestPayment:
+  type: tool
+  call: "#{mq.payment.request(file='request.xml', waitMs=40000)}"
+  result: {format: text}
+  assert: "${output.replyReceived} == true"
+```
+
+For `receive` and `request`, call-level `waitMs` overrides `requestReply.waitMs`. An Action `timeoutMs` is the outer deadline and caps the effective wait to the remaining time; the receive wait is recalculated immediately before MQGET. `MQRC_NO_MSG_AVAILABLE` (2033) at the end of the permitted wait is a completed no-message outcome: the operation remains successful, `received`/`replyReceived` is false, and `output.result` is null. If the Action deadline has expired, the outcome is instead `MQ_TIMEOUT`.
+
+Tool Action retry is explicit and applies to send, receive, and request. ATT does not infer idempotency: a retried send may enqueue duplicates, while retried request issues a new PUT/MsgId and can repeat the business operation. Each attempt keeps its own IDs and evidence. For request/reply, ATT sets the reply queue metadata, waits with `MQMO_MATCH_CORREL_ID` for the generated request MsgId, and publishes `output.messageId == output.replyCorrelationId`; do not manually substitute a different correlation value. For a standalone receive, use `correlationId` when a particular reply is required. In multi-instance mode, an explicit instance is pinned for that call; no retry or no-message path silently changes brokers.
 
 #### Issue #60 v1.1 logical groups and physical instances
 

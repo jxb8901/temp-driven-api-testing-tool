@@ -8,9 +8,9 @@
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如 `att-flow/v3.0` 的 `actions.fetch.result` 應升至 `att-flow/v3.1` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如含現行 `result` 欄位的 `att-flow/v3.0` 應升至 `att-flow/v3.2` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
 
-現行 schema 位於 [`schemas/`](../../schemas/)，保留的舊版僅位於 [`schemas/history/`](../../schemas/history/)。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
+現行 schema 位於 [`schemas/`](../../schemas/)，保留的舊版僅位於 [`schemas/history/`](../../schemas/history/)。`validate --package` 會檢查 catalog 註冊的每一份 schema，即使 package 當下沒有使用。註冊資源缺失、無法讀取、不安全或重複，會硬性回報 `PACKAGE_INVALID`。描述檔宣告受支援 schema 時，若無法解析其註冊資源亦屬硬錯誤；ATT 不會略過 schema 驗證，也不會退回載入 process CWD 中的副本。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
 
 然后根据诊断代码和结构化位置排查。不要针对人类可读消息做自动化判断。
 
@@ -21,7 +21,7 @@
 | `ATT-STG` | 必需选择器为空白、选择器 YAML 无效、阶段键重复 | 检查选择器形式、`name`、别名和 required 标志 |
 | `ATT-TPL` | 未知/重复模板、动作或负载无效 | 检查符号名/完整路径、描述符、动作类型和本地文件 |
 | `ATT-CFG` | 未知字段、重复键、schema 类型/枚举错误 | 与第 6 章对照并移除不支持字段 |
-| `ATT-TOOL` | 未知/缺失参数、进程或解析失败 | 对比调用契约，检查退出码/stdout/stderr/raw output |
+| `ATT-TOOL` | 未知/缺失参数、进程或解析失败 | 对比调用契约，检查退出码和有界 stdout/stderr capture evidence |
 | `ATT-PATH` | 非法 ID 或路径逃逸 | 移除非法字符，并保持内容在配置根目录下 |
 | `ATT-RUN` | 超时、非零退出、渲染/运行时失败 | 检查 Case 日志和动作/工具证据 |
 
@@ -46,6 +46,10 @@ ATT 会把缺失路径视作作者/运行时错误，而不是静默渲染成空
 #### 为什么 FAIL 变成 ERROR？
 
 假断言是 FAIL。无效表达式语法/导航、工具失败、超时、解析失败、I/O 失败或运行时异常，都是 ERROR。应查看动作证据，而不只看最终聚合状态。
+
+#### 哪些意外异常会附带 stack trace？
+
+意外内部故障（例如 `NullPointerException`、`ClassCastException`，或非 domain `IllegalStateException`，包括包装异常的 cause）会在 `case.log` 写入有界的 `[ATT INTERNAL ERROR]` 区块和执行 phase。Stack 最多 180 行／16 KB；configured secrets 与敏感 key/value assignment 会遮蔽。Public Action evidence 只保留简短错误类型／phase，不加入 stack。预期 transport、config、timeout、assertion 与一般 MQ no-message outcome 仍保持简洁。Run、Debug 及 reusable Tool/HTTP/MQ/DB 共用这条 logging path。
 
 #### 为什么工具跑了不止一次？
 

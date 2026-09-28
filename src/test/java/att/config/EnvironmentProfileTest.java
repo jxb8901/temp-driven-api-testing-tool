@@ -26,6 +26,8 @@ class EnvironmentProfileTest {
     @TempDir Path temp;
     private int processCounter;
 
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(temp); }
+
     @Test
     void cliEnvironmentSelectorIsSharedByTheFourProfileAwareModes() {
         assertEquals("UAT", ExecutionOptions.parse(new String[]{"run", "--all", "--env", "UAT"}).environment());

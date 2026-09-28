@@ -11,10 +11,12 @@ public final class SchemaMigrationGuidance {
 
     public static void verify(Path declaredSchema, Path currentSchema, Map<?, ?> document,
                               String declaredVersion, String currentVersion) throws Exception {
+        requireSchema(declaredSchema, declaredVersion);
+        requireSchema(currentSchema, currentVersion);
         try {
             JsonSchemaVerifier.verify(declaredSchema, document);
         } catch (JsonSchemaVerifier.SchemaValidationException original) {
-            if (!declaredVersion.equals(currentVersion) && Files.isRegularFile(currentSchema)) {
+            if (!declaredVersion.equals(currentVersion)) {
                 Map<String, Object> candidate = new LinkedHashMap<String, Object>();
                 for (Map.Entry<?, ?> entry : document.entrySet()) candidate.put(String.valueOf(entry.getKey()), entry.getValue());
                 candidate.put("schemaVersion", currentVersion);
@@ -26,6 +28,16 @@ public final class SchemaMigrationGuidance {
                 throw new MigrationException(declaredVersion, currentVersion, original, true);
             }
             throw original;
+        }
+    }
+
+    private static void requireSchema(Path schema, String version) {
+        if (schema == null || !Files.isRegularFile(schema, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(schema) || !Files.isReadable(schema)) {
+            throw DiagnosticException.of(DiagnosticCodes.PACKAGE_INVALID,
+                    "Required schema resource is unavailable",
+                    "schemaVersion=" + version + ", expectedSchema=" + schema,
+                    "Restore the catalog-registered current and historical schema files; ATT will not skip validation or fall back.");
         }
     }
 

@@ -1,7 +1,7 @@
-# ATT V3.5.2 Reference Manual
+# ATT V3.5.3 Reference Manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.2
+Version: 3.5.3
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -190,7 +190,7 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
 
 ```yaml
-schemaVersion: att-template/v3.1
+schemaVersion: att-template/v3.2
 name: PAYMENT_INVOKE
 description: Render and invoke a payment request
 actions:
@@ -209,7 +209,7 @@ actions:
     call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
     result:
       path: "${EXEC.INPUT.caseId}-response.json"
-      format: raw
+      format: json
       overwrite: false
     assert: "${output.result.status} == 'SUCCESS'"
   recordResult:
@@ -226,7 +226,7 @@ actions:
 | Type | Purpose | Required fields | Common result |
 |---|---|---|---|
 | `render` | Render one or more UTF-8 payloads | `type`, `payload`, `result.format`; optional `result.path` | nested `output.result` and `output.targetFiles` |
-| `tool` | Invoke a configured external tool | `type`, `call` | nested typed result and process evidence |
+| `tool` | Invoke a configured or framework-native Tool | `type`, `call` | nested typed result and operation evidence |
 | `db` | Query or update a configured database | `type`, `db`, exactly one `query`/`update` block | stable typed DB result and transaction evidence |
 | `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
 | `log` | Write a rendered message and/or UTF-8 Case-output file | `type`, at least one of `message` or `file` | combined content, source path, and rendered fields |
@@ -234,11 +234,11 @@ actions:
 
 Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
 
-Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: raw|text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
+Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object and the same four presentation formats. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
 
-`result.format` selects the in-memory `output.result` representation; `result.path` optionally persists that same selected, typed value without changing its representation. A pathless result creates no artifact; `path: console` writes the selected representation to the Case log only. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
+Action `result.format` controls only the representation written to `result.path` or `path: console`; it never reparses or changes the logical `output.result`. `output.result` remains the native typed value produced by the operation. A pathless result creates no artifact. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
 
-For a configured process Tool with `result.format: raw`, `output.result` is the trimmed, bounded stdout preview (`rawOutput`), not the complete capture file. A real `result.path` persists exactly that same selected value as UTF-8, so whitespace trimming and any preview truncation are consistent between the Context value and the artifact. Full streamed stdout remains separate process evidence/log capture.
+For a command-backed Tool, the Tool descriptor's required `result.format` parses stdout into the typed primary result (`text`, `json`, `yaml`, or `xml`); bounded/full stream capture remains separate process evidence. The Action's optional `result.format` then affects only artifact/log serialization and does not alter that parsed value. Call-backed Tools and HTTPHelper/MQHelper/DB operations already return native typed values; Action formatting never changes them. `raw` is not a supported common result format.
 
 Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
 
@@ -637,21 +637,47 @@ Resource IDs are logical contracts referenced by Templates/expressions or Tool g
 
 ### 5.1 Tool
 
-A Tool is a named external or framework-native capability. A Tool declares exactly one backend: **command-backed** or **call-backed**.
+A Tool is a named external or framework-native capability. A Tool declares exactly one backend: **command-backed** or **call-backed**. Current config and Tool Group schemas use `result.format`; the legacy Tool `output` field is rejected by the current schema.
 
 #### Command-backed Tool
 
 Command-backed Tools execute a configured argv contract locally or through configured SSH transport. Argv-list definitions preserve item boundaries; scalar command definitions are tokenized into the same internal argv model. ATT does not implicitly invoke a shell or expand wildcards for ordinary process-backed Tools. Stdout/stderr, exit code, timeout and process diagnostics are evidence; a non-zero process exit does not by itself define assertion PASS/FAIL unless the Action contract says so.
 
+A command-backed Tool must declare `result.format: text|json|yaml|xml`. This Tool-level format selects how stdout is parsed into the typed primary `output.result` (for example, JSON stdout becomes a map); it is not a raw-byte mode. Bounded process preview and full streamed capture remain separate evidence.
+
+```yaml
+tools:
+  queryTool:
+    name: Query tool
+    description: Parse JSON stdout as a typed result
+    command: [./tools/query.sh]
+    result: {format: json}
+    arguments: {}
+```
+
 Use command-backed Tools for scripts, CLIs, SSH and third-party executables.
 
 #### Call-backed Tool
 
-Call-backed Tools execute typed framework-native calls, such as supported DB read/update façades or pure built-ins, without converting typed values into process strings. Use them when the capability is naturally represented by a typed ATT call contract rather than an external process.
+Call-backed Tools execute typed framework-native calls without converting typed values into process strings. Supported calls include built-ins and primary DB, MQHelper, or HTTPHelper operations; call-backed MQ/HTTP operations must run as a `type: tool` Action's primary call. The call's native return type is preserved. Optional Tool-level `result.format` is only a preferred serialization format when Action output is written to a file or Case log; it never reparses or changes the native value. A call-backed Tool does not need `result.format` when no serialization default is needed.
+
+```yaml
+tools:
+  requestPayment:
+    name: Request payment
+    description: Invoke the selected payment HTTP helper
+    call: "#{http.paymentApi.post(path='/v1/payments', body=${input.request})}"
+    result: {format: json}
+    arguments:
+      request:
+        name: Request
+        description: Typed request body
+        required: true
+```
 
 Both backends publish the same public Action envelope. The primary value is `${output.result}` while active and `${EXEC.ACTIONS.<id>.output.result}` after publication. Final operation evidence is under `output.evidence`; retries preserve per-attempt evidence under `output.attempts[n].evidence`.
 
-A Tool Action may use the common `result` object and post-operation evidence collectors where permitted. `result.format` selects the in-memory representation, while optional `result.path` persists it. Collectors execute after the primary operation and before that attempt's assertion; collector failure policy does not replace the primary `result`.
+The Action's optional `result.format` supports only `text|json|yaml|xml` and controls file/console serialization, not the in-memory result. `result.path` is optional; omitting it creates no artifact. `path: console` writes the serialized value to the Case log. Post-operation evidence collectors execute after the primary operation and before that attempt's assertion; collector failure policy does not replace the primary `result`.
 
 ### 5.2 DBHelper
 
@@ -751,7 +777,7 @@ username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY 
 
 message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
 
-requestQueue and replyQueue are optional request defaults. Queue precedence is call argument > message default > validation error. send(queue=...) and receive(queue=...) do not use these defaults. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
+`message.requestQueue` and `message.replyQueue` are optional defaults for all matching operations: send/request use `requestQueue`; receive/request use `replyQueue`. For v1.1, ATT selects or resolves the requested physical instance first, materializes that instance's inherited `message` settings, then applies the call argument as the final override. Thus the effective order is explicit call argument > selected instance override > group default > runtime default (if defined) > point-of-use validation error. ATT never borrows a queue default from a different physical instance. If the effective queue is still absent, the call fails before connecting. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
 
 #### Common Action result
 
@@ -759,24 +785,24 @@ MQ receive/request use the common Action `result` object; no MQ-specific resultT
 
 ~~~yaml
 result:
-  format: raw
-  path: response.bin
+  format: text
+  path: response.txt
   overwrite: false
 ~~~
 
-`format` selects the in-memory `output.result` representation; `path` is optional and affects persistence only. `raw` gives the original byte[], `text` gives String, and json/yaml/xml give existing ATT typed values. A pathless `result` keeps the value in memory without creating a file. `path: console` writes the selected representation to the Case log and creates no `output.targetFiles` entry or file. No .reply.bin is created unless a real path is explicit. `raw` plus a real path writes exact bytes; overwrite/path safety follow the common Action rules.
+MQ reply bytes are decoded to a native `String` using the received CCSID when available; Action `result.format` does not parse or replace that value. The common formats are `text|json|yaml|xml` and only choose how the typed value is serialized to a file or Case log. There is no public `raw` Action result. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
 
 ~~~yaml
 - id: requestXml
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml}
-  assert: "${output.result.Response.Status} == 'SUCCESS'"
+  result: {format: text}
+  assert: "${output.replyReceived} == true"
 
 - id: requestXmlSaved
   type: tool
   call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: xml, path: responses/payment.xml, overwrite: false}
+  result: {format: text, path: responses/payment.txt, overwrite: false}
 
 - id: receiveReply
   type: tool
@@ -786,9 +812,44 @@ result:
 
 #### Output and validation
 
-output.result is the business payload; MQ metadata is directly under output. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects Action `result`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and put the parsed payload only in result. A normal request satisfies output.messageId == output.replyCorrelationId. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
+`output.result` is the business payload (a charset-decoded String for MQ replies); MQ metadata is directly under `output`. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects Action `result`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and place the decoded payload only in `output.result`. A normal request satisfies `output.messageId == output.replyCorrelationId`. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
 
-Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Raw runtime values remain byte[]. Typed reply decoding uses the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and the configured charset as fallback; unsupported CCSIDs fail clearly. Logs/reports display raw bytes using new String(rawBytes, Charset.defaultCharset()) semantics, not hex and not an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, missing effective request/reply queues, unsupported result formats, and unsafe paths.
+Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Transport payloads remain byte-preserving through the MQ client; the public typed reply value is a `String` decoded using the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and configured charset as fallback. Unsupported CCSIDs fail clearly. Logs/reports serialize the typed result and never create an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, unsupported result formats, and unsafe paths; a missing effective queue is rejected at the operation's point of use.
+
+#### Send, receive, and request APIs
+
+All calls use the stable logical helper ID and named arguments. For a v1.1 group, an optional `instance` selects a physical ID; otherwise ATT applies the configured `random` or `roundRobin` strategy before resolving queue defaults.
+
+| Operation | Required arguments | Optional arguments | Queue source when omitted |
+|---|---|---|---|
+| `send` | `file` | `queue`, `instance` | `message.requestQueue` |
+| `receive` | none | `queue`, `correlationId`, `waitMs`, `instance` | `message.replyQueue` |
+| `request` | `file` | `requestQueue`, `replyQueue`, `waitMs`, `instance` | `message.requestQueue` and `message.replyQueue` |
+
+`file` is read as exact bytes from the Case output directory or package. `queue` is the send/receive argument; request deliberately uses the distinct `requestQueue` and `replyQueue` names. Explicit non-null call arguments override the selected instance's effective message defaults. If a queue has neither a call argument nor a configured effective default, ATT returns a concise argument/configuration error before opening a connection. The default is evaluated only after the physical instance has been selected, so a request PUT and its correlated GET always use the same broker and that instance's queue settings.
+
+```yaml
+sendPayment:
+  type: tool
+  call: "#{mq.payment.send(file='request.bin')}"
+  assert: "${output.sent} == true"
+
+waitForPayment:
+  type: tool
+  call: "#{mq.payment.receive(correlationId=${EXEC.ACTIONS.sendPayment.output.messageId}, waitMs=30000)}"
+  result: {format: text, path: replies/payment.txt}
+  assert: "${output.received} == true"
+
+requestPayment:
+  type: tool
+  call: "#{mq.payment.request(file='request.xml', waitMs=40000)}"
+  result: {format: text}
+  assert: "${output.replyReceived} == true"
+```
+
+For `receive` and `request`, call-level `waitMs` overrides `requestReply.waitMs`. An Action `timeoutMs` is the outer deadline and caps the effective wait to the remaining time; the receive wait is recalculated immediately before MQGET. `MQRC_NO_MSG_AVAILABLE` (2033) at the end of the permitted wait is a completed no-message outcome: the operation remains successful, `received`/`replyReceived` is false, and `output.result` is null. If the Action deadline has expired, the outcome is instead `MQ_TIMEOUT`.
+
+Tool Action retry is explicit and applies to send, receive, and request. ATT does not infer idempotency: a retried send may enqueue duplicates, while retried request issues a new PUT/MsgId and can repeat the business operation. Each attempt keeps its own IDs and evidence. For request/reply, ATT sets the reply queue metadata, waits with `MQMO_MATCH_CORREL_ID` for the generated request MsgId, and publishes `output.messageId == output.replyCorrelationId`; do not manually substitute a different correlation value. For a standalone receive, use `correlationId` when a particular reply is required. In multi-instance mode, an explicit instance is pinned for that call; no retry or no-message path silently changes brokers.
 
 #### Issue #60 v1.1 logical groups and physical instances
 
@@ -838,11 +899,11 @@ Output and evidence retain the logical helper id and expose the selected physica
 
 ### 5.5 HTTPHelper
 
-HTTPHelper is a first-class, environment-bound HTTP resource. A Template or Flow calls a stable logical ID; the selected `att-config/v2.8` profile supplies the physical endpoint. Unlike a command-backed curl Tool, HTTPHelper owns a bounded, reusable client, typed response conversion and HTTP metadata.
+HTTPHelper is a first-class, environment-bound HTTP resource. A Template or Flow calls a stable logical ID; the selected `att-config/v2.9` profile supplies the physical endpoint. Unlike a command-backed curl Tool, HTTPHelper owns a bounded, reusable client, native response decoding and HTTP metadata.
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.8
+schemaVersion: att-config/v2.9
 environment: SIT
 environments:
   SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
@@ -891,7 +952,9 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-`result.format` is `raw`, `text`, `json`, `yaml`, or `xml`; without `result`, the response is text. `raw` keeps exact `byte[]` in `output.result` and writes those bytes unchanged to `result.path`; raw console display is Base64. `text` decodes the response `Content-Type` charset or UTF-8 fallback. Structured formats use ATT's existing parsers and fail explicitly on malformed content. `result.path` is optional and affects persistence only; `path: console` writes to the Case log. HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Header-name lookup follows HTTP case-insensitive semantics. `Authorization`, cookies, API-key/token/password-like response headers are redacted in output/evidence. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
+HTTP response decoding is native and independent of Action `result.format`: JSON media types produce ATT typed JSON values; YAML media types produce typed YAML values; XML media types produce ATT's typed XML value; other textual media types decode using the declared charset or UTF-8. An `application/octet-stream` response fails as `HTTP_FORMAT` because arbitrary bytes are not a supported common Action result. Malformed structured bodies also fail explicitly. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
+
+HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Public response-header keys are normalized to lowercase so case-sensitive Context paths are stable; repeated values remain lists. Only secret-bearing response headers and values matching configured credentials or values from secret-bearing request headers are redacted. Ordinary values that happen to match `Accept` or another non-secret request header remain visible. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
 
 A received 4xx/5xx is a completed exchange, so assertions may deliberately expect 404 or 500. Transport/configuration/format failures make the Action `ERROR` with an HTTP-specific error type; an assertion mismatch is `FAIL`. Evidence contains helper ID, method, safe URL, byte counts, status when received, duration and any error/redirect count. The existing Action attempt list retains retries. HTTPHelper never retries statuses automatically. `retry.retryOn: [TIMEOUT]` can replay a request after an HTTP or pool-borrow timeout; `ASSERTION` can replay after a failed assertion. Authors must assess side effects for **every** method, including GET/PUT—POST/PATCH/DELETE may create duplicate work.
 
@@ -917,11 +980,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.7`. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.9`. The logical SSH binding was introduced in config/group v2.7; current packages use config v2.9 and Tool Group v2.8. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.7
+schemaVersion: att-config/v2.9
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -945,7 +1008,7 @@ instances:
 
 ```yaml
 # config/tools/application.yaml
-schemaVersion: att-tool-group/v2.7
+schemaVersion: att-tool-group/v2.8
 id: app
 name: Application tools
 description: Remote application inspection
@@ -957,10 +1020,10 @@ tools:
     name: Status
     description: Print service status
     command: [systemctl, is-active, example.service]
-    output: txt
+    result: {format: text}
 ```
 
-The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. Existing inline global SSH and v2.6/v2.2 group files remain readable; the logical form requires v2.7. There is no Action- or per-call strategy override.
+The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. Existing inline global SSH and v2.6/v2.2 group files remain readable; the logical form requires v2.7 or later. Current Tool Groups use v2.8 and command-backed Tools require `result.format` (`text|json|yaml|xml`); legacy `output: txt` migrates to `result: {format: text}`. There is no Action- or per-call strategy override.
 
 Strategy precedence is group override then helper default. One instance works without a strategy (`single`); multiple instances require one. `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **`all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in the SSH diagnostics chapter.
 
@@ -1343,7 +1406,7 @@ tools:
       - ./tools/invoke_payment_api.sh
       - "${input.requestFile}"
       - "${input.environment}"
-    output: json
+    result: {format: json}
     arguments:
       requestFile:
         name: Request File
@@ -1399,7 +1462,7 @@ tools:
     name: Write audit
     description: Write one audit message for one source file
     command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
-    output: yaml
+    result: {format: yaml}
     arguments:
       message:
         name: Message
@@ -1751,23 +1814,25 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2.6.2 added `att-template/v2.6` and `att-sidecar/v2.2` for the unified Tool Action policy; `att-template/v3.1` is the current template schema and introduces the common Action `result` contract. The dbhelper schema remains V2.5.
+V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V3.5.3 advances the unified Tool result and Action contracts; the dbhelper schema remains V2.5.
 
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.8` | [att-config-v2.8.schema.json](../schemas/att-config-v2.8.schema.json) |
-| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.7` | [v2.7](../schemas/history/att-config-v2.7.schema.json), [v2.5](../schemas/history/att-config-v2.5.schema.json) |
+| Global configuration | `att-config/v2.9` | [att-config-v2.9.schema.json](../schemas/att-config-v2.9.schema.json) |
+| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.8` | [v2.8](../schemas/history/att-config-v2.8.schema.json), [v2.7](../schemas/history/att-config-v2.7.schema.json), [v2.5](../schemas/history/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
 | MQ helper descriptor | `att-mqhelper/v1.1` (current), `v1.0` (legacy) | [v1.1](../schemas/att-mqhelper-v1.1.schema.json), [v1.0](../schemas/history/att-mqhelper-v1.0.schema.json) |
 | HTTP helper descriptor | `att-httphelper/v1.0` | [att-httphelper-v1.0.schema.json](../schemas/att-httphelper-v1.0.schema.json) |
 | SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../schemas/att-sshhelper-v1.0.schema.json) |
-| Tool group | `att-tool-group/v2.7` | [att-tool-group-v2.7.schema.json](../schemas/att-tool-group-v2.7.schema.json) |
-| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6` | [v2.2](../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../schemas/history/att-tool-group-v2.6.schema.json) |
+| Tool group | `att-tool-group/v2.8` | [att-tool-group-v2.8.schema.json](../schemas/att-tool-group-v2.8.schema.json) |
+| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6`, `v2.7` | [v2.2](../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../schemas/history/att-tool-group-v2.6.schema.json), [v2.7](../schemas/history/att-tool-group-v2.7.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
 | Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/history/att-sidecar-v2.1.schema.json) |
-| Template descriptor | `att-template/v3.1` | [att-template-v3.1.schema.json](../schemas/att-template-v3.1.schema.json) |
-| Previous template descriptor (legacy result fields rejected) | `att-template/v3.0` | [att-template-v3.0.schema.json](../schemas/history/att-template-v3.0.schema.json) |
+| Template descriptor | `att-template/v3.2` | [att-template-v3.2.schema.json](../schemas/att-template-v3.2.schema.json) |
+| Previous template descriptors | `att-template/v3.0`–`v3.1` | [v3.1](../schemas/history/att-template-v3.1.schema.json), [v3.0](../schemas/history/att-template-v3.0.schema.json) |
+| Flow descriptor | `att-flow/v3.2` | [att-flow-v3.2.schema.json](../schemas/att-flow-v3.2.schema.json) |
+| Previous Flow descriptors | `att-flow/v3.0`–`v3.1` | [v3.1](../schemas/history/att-flow-v3.1.schema.json), [v3.0](../schemas/history/att-flow-v3.0.schema.json) |
 | Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [v2.6](../schemas/history/att-template-v2.6.schema.json), [v2.5](../schemas/history/att-template-v2.5.schema.json) |
 | Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) |
 | Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) |
@@ -1775,7 +1840,7 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | JUnit XML | XSD | [att-junit-v2.1.xsd](../schemas/att-junit-v2.1.xsd) |
 | Diagnostic codes | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../schemas/diagnostic-codes.yaml) |
 
-Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
+Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. `validate --package` checks every current and historical resource registered in the catalog, including schemas unused by package files. A registered resource that is missing, unreadable, unsafe, or duplicated is a hard package error; supported-schema validation is never silently skipped and schemas are never loaded from the process working directory. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
 
 ### Global configuration
 
@@ -1812,7 +1877,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.8`; v2.1–v2.7 remain readable under their declared contracts. The example above intentionally shows v2.6. |
+| `schemaVersion` | required | Current: `att-config/v2.9`; v2.1–v2.8 remain readable under their declared contracts. The example above intentionally shows v2.6. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -1922,7 +1987,7 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 | `result` | required for Render; optional for supported Tool/DB Actions; `format` is Action-specific; `path` is optional; `overwrite` defaults false |
 | retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
 
-Template schema `att-template/v3.1` replaces `renderAs` and `saveAs` with `result`; legacy fields are rejected with migration suggestions. `result.format` selects `output.result`; `result.path` only controls optional persistence. A pathless result creates no artifact and `path: console` logs without creating a file. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
+Template schema `att-template/v3.2` uses the common `result` contract; legacy `renderAs` and `saveAs` fields are rejected with migration suggestions. Action `result.format` selects only the file/Case-log serialization and never reparses or changes `output.result`; a pathless result creates no artifact and `path: console` logs without creating a file. The four common formats are `text|json|yaml|xml`; `raw` is not supported. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
 
 #### Assign variable uniqueness and lifetime
 
@@ -1977,23 +2042,25 @@ callApi:
   result: {format: json, path: responses/payment.json}
 ```
 
-`result.format` selects `output.result`; `result.path` optionally persists that same representation. Supported formats remain Action-specific: Render accepts `raw|text|json|yaml|xml`; process Tools and MQ accept `raw|text|json|yaml|xml`; built-in/call-backed Tools accept `text|json|yaml|xml`; DB accepts `text|json|yaml|xml`. DB `text` uses its stable SQL*Plus-style formatter. Omitting `path` never creates an artifact. `path: console` writes the representation to the Case log without creating a file or `output.targetFiles` entry. All real paths remain safe, relative to the Case artifact directory, and are containment-checked.
+Action `result.format` never selects or reparses the logical `output.result`; it only selects file/console serialization. The common formats are `text|json|yaml|xml`. Command-backed Tool configuration separately requires Tool-level `result.format` to parse stdout into a typed value; call-backed Tools and HTTP/MQ/DB calls preserve their native result type. HTTP response type is inferred from its media type, not the Action format. DB `text` uses its stable SQL*Plus-style formatter. Omitting `path` never creates an artifact. `path: console` writes the representation to the Case log without creating a file or `output.targetFiles` entry. All real paths remain safe, relative to the Case artifact directory, and are containment-checked.
 
-Legacy `att-template/v2.6`, `v2.5`, and `v2.3` descriptors are recognized for validation and migration; legacy `renderAs`/`saveAs` result fields must be migrated to `att-template/v3.1` and are not accepted for execution. Do not interpret schema recognition as runtime compatibility for those fields.
+Legacy `att-template/v2.6`, `v2.5`, and `v2.3` descriptors are recognized for validation and migration; legacy `renderAs`/`saveAs` result fields must be migrated to `att-template/v3.2` and are not accepted for execution. Do not interpret schema recognition as runtime compatibility for those fields.
 
 Render evaluates ordinary ATT `${...}` / `#{...}` expressions in `result.path` first, then expands these source-set path tokens: `{filename}` (including extension), `{name}` (without final extension), `{ext}` (without dot), `{index}` (one-based deterministic order), and `{relativePath}` (relative to the matched source root). Token values are not recursively expression-evaluated. Multi-source paths must expand uniquely even when `overwrite: true`; every expanded path is safety-checked before writing. `output.result` remains a typed value for one source and an ordered source-keyed map for multiple sources; `output.targetFiles` lists only persisted paths.
 
-Migration for `att-template/v3.1`: `renderAs` becomes `result.format`; `saveAs.format` becomes `result.format`; `saveAs.path` becomes `result.path`; `saveAs.overwrite` becomes `result.overwrite`. `renderAs: file` is ambiguous because it mixed output representation and persistence: choose a real format and a path explicitly. `att validate` rejects legacy fields and emits a concrete replacement suggestion (including the required representation choice for `file`) in human and JSON diagnostics; it never rewrites files.
+Migration for `att-template/v3.2`: `renderAs` becomes `result.format`; `saveAs.format` becomes `result.format`; `saveAs.path` becomes `result.path`; `saveAs.overwrite` becomes `result.overwrite`. `renderAs: file` is ambiguous because it mixed output representation and persistence: choose a real format and a path explicitly. `att validate` rejects legacy fields and emits a concrete replacement suggestion (including the required representation choice for `file`) in human and JSON diagnostics; it never rewrites files.
 
 ### Tool contract
 
-Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list; its `output` defaults to `txt` and accepts `txt|yaml|json|xml`. A call is one exact expression targeting DB query/scalar/update or a pure built-in; it forbids process-only `output`, SSH/script, and argument argv fields. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
+Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list and requires `result: {format: text|json|yaml|xml}` to parse stdout into the typed primary result. A call may target a built-in or native DB, MQHelper, or HTTPHelper operation; its result is already typed, and optional Tool-level `result.format` is only a file/log serialization default. Current schemas reject legacy Tool `output` and do not support `raw`. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
 
 Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`; it controls a typed List supplied at the call site. These two argv properties are invalid for call-backed arguments. V2.6 does not define `delimit`.
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
-A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7, `ssh` may be direct or a logical `{helper, selection?}` binding. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
+A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7 and later, `ssh` may be direct or a logical `{helper, selection?}` binding. The current v2.8 schema also requires `result.format` on command-backed Tools. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
+
+Migration for command-backed Tools: replace legacy `output: txt` with `result: {format: text}` (or `yaml`, `json`, `xml` as appropriate); `txt` becomes `text`. Set the config schema to `att-config/v2.9` and Tool Group schema to `att-tool-group/v2.8`. A command Tool must choose a parse format. Call-backed Tool results are already typed; optional Tool-level `result.format` only supplies a serialization default. Do not use `raw`.
 
 ### Identifier and path constraints
 
@@ -2008,7 +2075,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.2",
+  "attVersion": "3.5.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2214,7 +2281,7 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 | 2 | CLI/configuration/validation/INVALID failure |
 | 3 | One or more ERROR results or unrecoverable runtime failure |
 
-### Complete option matrix (3.5.2)
+### Complete option matrix (3.5.3)
 
 `--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.6` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 
@@ -2306,9 +2373,9 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with `actions.fetch.result` should be upgraded to `att-flow/v3.1` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with a current `result` field should be upgraded to `att-flow/v3.2` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
 
-Current schemas are in [`schemas/`](../schemas/); retained older versions are only in [`schemas/history/`](../schemas/history/). Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
+Current schemas are in [`schemas/`](../schemas/); retained older versions are only in [`schemas/history/`](../schemas/history/). `validate --package` checks every catalog-registered schema resource, even when the package does not currently use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. When a descriptor declares a supported schema, inability to resolve its registered resource is also a hard error; ATT never skips schema verification or falls back to a CWD copy. Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
 
 Then use the diagnostic code and structured location. Do not automate against message text.
 
@@ -2319,7 +2386,7 @@ Then use the diagnostic code and structured location. Do not automate against me
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
 | `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with Chapter 6 and remove unsupported fields |
-| `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract, inspect exit code/stdout/stderr/raw output |
+| `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
 | `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
 | `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |
 
@@ -2344,6 +2411,10 @@ ATT treats an absent path as an authoring/runtime error instead of silently rend
 #### Why did a FAIL become ERROR?
 
 A false assertion is FAIL. Invalid expression syntax/navigation, tool failure, timeout, parse failure, I/O failure, or runtime exception is ERROR. Inspect the action evidence rather than only the final aggregate status.
+
+#### When does an unexpected exception get a stack trace?
+
+Unexpected internal failures such as a `NullPointerException`, `ClassCastException`, or non-domain `IllegalStateException` (including when nested in a wrapper cause) add a bounded `[ATT INTERNAL ERROR]` block to `case.log` with the execution phase. The stack is capped at 180 lines/16 KB and configured secrets plus sensitive key/value assignments are redacted. Public Action evidence contains only the compact error type/phase, not the stack. Expected transport, configuration, timeout, assertion, and ordinary MQ no-message outcomes remain concise. The shared logging path covers Run, Debug, and reusable Tool/HTTP/MQ/DB execution.
 
 #### Why did a tool run more than once?
 
@@ -2435,21 +2506,21 @@ The appendices collect stable lookup material that should not drive the main pro
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.8` (v2.1–v2.7 remain readable) |
+| Global configuration | `att-config/v2.9` (v2.1–v2.8 remain readable) |
 | DBHelper | `att-dbhelper/v2.5` |
 | MQHelper | `att-mqhelper/v1.1` (`v1.0` remains readable) |
 | HTTPHelper | `att-httphelper/v1.0` |
 | SSHHelper | `att-sshhelper/v1.0` |
-| Tool group | `att-tool-group/v2.7` (v2.6 remains readable) |
+| Tool group | `att-tool-group/v2.8` (v2.2, v2.6, and v2.7 remain readable) |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
-| Template | `att-template/v3.1` (`renderAs`/`saveAs` are rejected with migration suggestions) |
-| Flow | `att-flow/v3.1` (legacy read: `att-flow/v3.0`) |
+| Template | `att-template/v3.2` (`renderAs`/`saveAs` are rejected with migration suggestions) |
+| Flow | `att-flow/v3.2` (legacy read: `att-flow/v3.0`–`v3.1`) |
 | Debug input | `att-debug/v1.0` |
 | Load scenario | `att-load/v1.1` (`v1.0` remains readable) |
 | Load summary | `att-load-summary/v1.0` |
 
-`schemas/catalog.yaml` is the authoritative repository catalog. Current schemas live in `schemas/`, retained older schemas in `schemas/history/`. Compatibility is a reader contract; new authoring should use the current schema for the feature being authored.
+`schemas/catalog.yaml` is the authoritative repository catalog. Current schemas live in `schemas/`, retained older schemas in `schemas/history/`. `validate --package` checks every registered current/history resource; a missing or unsafe registration is a hard error and is never skipped or loaded from the process CWD. Compatibility is a reader contract; new authoring should use the current schema for the feature being authored.
 
 ### 14.2 Compatibility and Deprecated Aliases
 
@@ -2469,6 +2540,11 @@ Key current migrations are:
 - use environment profiles when DB/MQ/SSH/HTTPHelper bindings vary;
 - move common curl invocations to a logical `http.<id>.<method>` Action when pooled transport and typed response metadata are useful; existing curl Tools remain valid;
 - when an older descriptor uses newer fields, follow the validation diagnostic, migrate `schemaVersion` and any named legacy fields, then validate again; historical schema definitions live in `schemas/history/`;
+- migrate command Tool `output: txt|json|yaml|xml` to required Tool-level `result: {format: text|json|yaml|xml}`; Action-level `result.format` now controls serialization only, and `raw` is not a common result format;
+- use `att-config/v2.9`, `att-tool-group/v2.8`, and `att-template/v3.2` / `att-flow/v3.2`; prior registered schema resources remain in `schemas/history/` and are validated from the package catalog;
+- configure HTTPHelper results from response `Content-Type`; public header keys are lowercase, and Action serialization no longer changes the native typed result;
+- set optional MQ defaults in `message.requestQueue` for send/request and `message.replyQueue` for receive/request; explicit call arguments override the selected instance's inherited settings;
+- unexpected internal exceptions now include bounded, secret-sanitized stack detail in Case logs; expected transport and validation errors remain concise;
 - migrate physical group SSH to `ssh: {helper: <id>}` with `att-tool-group/v2.7` when logical multi-instance routing is needed;
 - treat Run, Debug and Load as peer execution modes.
 

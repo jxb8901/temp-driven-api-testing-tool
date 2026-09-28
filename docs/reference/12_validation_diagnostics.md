@@ -8,9 +8,9 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with `actions.fetch.result` should be upgraded to `att-flow/v3.1` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with a current `result` field should be upgraded to `att-flow/v3.2` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
 
-Current schemas are in [`schemas/`](../../schemas/); retained older versions are only in [`schemas/history/`](../../schemas/history/). Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
+Current schemas are in [`schemas/`](../../schemas/); retained older versions are only in [`schemas/history/`](../../schemas/history/). `validate --package` checks every catalog-registered schema resource, even when the package does not currently use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. When a descriptor declares a supported schema, inability to resolve its registered resource is also a hard error; ATT never skips schema verification or falls back to a CWD copy. Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
 
 Then use the diagnostic code and structured location. Do not automate against message text.
 
@@ -21,7 +21,7 @@ Then use the diagnostic code and structured location. Do not automate against me
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
 | `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with Chapter 6 and remove unsupported fields |
-| `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract, inspect exit code/stdout/stderr/raw output |
+| `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
 | `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
 | `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |
 
@@ -46,6 +46,10 @@ ATT treats an absent path as an authoring/runtime error instead of silently rend
 #### Why did a FAIL become ERROR?
 
 A false assertion is FAIL. Invalid expression syntax/navigation, tool failure, timeout, parse failure, I/O failure, or runtime exception is ERROR. Inspect the action evidence rather than only the final aggregate status.
+
+#### When does an unexpected exception get a stack trace?
+
+Unexpected internal failures such as a `NullPointerException`, `ClassCastException`, or non-domain `IllegalStateException` (including when nested in a wrapper cause) add a bounded `[ATT INTERNAL ERROR]` block to `case.log` with the execution phase. The stack is capped at 180 lines/16 KB and configured secrets plus sensitive key/value assignments are redacted. Public Action evidence contains only the compact error type/phase, not the stack. Expected transport, configuration, timeout, assertion, and ordinary MQ no-message outcomes remain concise. The shared logging path covers Run, Debug, and reusable Tool/HTTP/MQ/DB execution.
 
 #### Why did a tool run more than once?
 

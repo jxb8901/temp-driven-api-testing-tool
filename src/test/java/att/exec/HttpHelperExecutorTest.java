@@ -91,7 +91,11 @@ class HttpHelperExecutorTest {
             else if ("/status".equals(path)) response = "missing".getBytes(StandardCharsets.UTF_8);
             else if ("/status500".equals(path)) response = "server error".getBytes(StandardCharsets.UTF_8);
             else response = request.length == 0 ? exchange.getRequestMethod().getBytes(StandardCharsets.UTF_8) : request;
-            exchange.getResponseHeaders().add("Content-Type", "/json".equals(path) ? "application/json; charset=UTF-8" : "text/plain; charset=UTF-8");
+            String responseType = "/json".equals(path) ? "application/json; charset=UTF-8"
+                    : "/yaml".equals(path) ? "application/yaml; charset=UTF-8"
+                    : "/xml".equals(path) ? "application/xml; charset=UTF-8"
+                    : request.length > 0 ? "application/octet-stream" : "text/plain; charset=UTF-8";
+            exchange.getResponseHeaders().add("Content-Type", responseType);
             exchange.getResponseHeaders().add("X-Multi", "one");
             exchange.getResponseHeaders().add("X-Multi", "two");
             exchange.getResponseHeaders().add("Set-Cookie", "private=secret");
@@ -114,6 +118,7 @@ class HttpHelperExecutorTest {
     }
 
     private FrameworkConfig configuration(String url, String pool) throws Exception {
+        att.TestSchemas.install(root);
         Files.createDirectories(root.resolve("config/httphelpers"));
         Files.write(root.resolve("config/httphelpers/sit.yaml"), ("schemaVersion: att-httphelper/v1.0\nid: paymentApi\nbaseUrl: " + url
                 + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: 1000\n"
@@ -121,7 +126,7 @@ class HttpHelperExecutorTest {
         Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.0\nid: paymentApi\nbaseUrl: " + url
                 + "/uat\n").getBytes(StandardCharsets.UTF_8));
         Path config = root.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.8\nenvironment: SIT\nenvironments:\n"
+        Files.write(config, ("schemaVersion: att-config/v2.9\nenvironment: SIT\nenvironments:\n"
                 + "  SIT: {httphelpers: [config/httphelpers/sit.yaml]}\n"
                 + "  UAT: {httphelpers: [config/httphelpers/uat.yaml]}\n").getBytes(StandardCharsets.UTF_8));
         return new FrameworkConfigLoader().load(config, root, "SIT");
@@ -157,16 +162,18 @@ class HttpHelperExecutorTest {
             byte[] payload = new byte[]{0, 1, 2, (byte) 255};
             Path file = context.caseOutputDirectory().resolve("payload.bin");
             Files.write(file, payload);
-            ToolInvocationResult raw = http.execute("paymentApi", "post", args("path", "/echo", "file", file.toString()), context, 1000L, "file", "raw");
-            assertArrayEquals(payload, (byte[]) raw.output());
-            assertEquals(payload.length, raw.operationResult().outputMetadata().get("responseBytes"));
+            ToolInvocationResult binary = http.execute("paymentApi", "post", args("path", "/echo", "file", file.toString()), context, 1000L, "file", "text");
+            assertFalse(binary.executionSuccess());
+            assertEquals("HTTP_FORMAT", ((Map<?, ?>) binary.operationResult().outputMetadata().get("error")).get("type"));
             ToolInvocationResult json = http.execute("paymentApi", "get", args("path", "/json", "query", args("a b", "c&d")), context, 1000L, "json", "json");
+            assertTrue(json.executionSuccess(), String.valueOf(json.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) json.output()).get("ok"));
             assertEquals("a+b=c%26d", observedQuery.get());
             assertFalse(String.valueOf(json.operationResult().outputMetadata().get("url")).contains("?"));
-            assertEquals("<redacted>", ((Map<?, ?>) json.operationResult().outputMetadata().get("headers")).get("Set-cookie") instanceof java.util.List
-                    ? ((java.util.List<?>) ((Map<?, ?>) json.operationResult().outputMetadata().get("headers")).get("Set-cookie")).get(0)
-                    : ((java.util.List<?>) ((Map<?, ?>) json.operationResult().outputMetadata().get("headers")).get("Set-Cookie")).get(0));
+            Map<?, ?> responseHeaders = (Map<?, ?>) json.operationResult().outputMetadata().get("headers");
+            assertEquals("<redacted>", ((java.util.List<?>) responseHeaders.get("set-cookie")).get(0));
+            assertEquals("application/json; charset=UTF-8", ((java.util.List<?>) responseHeaders.get("content-type")).get(0));
+            assertEquals(java.util.Arrays.asList("one", "two"), responseHeaders.get("x-multi"));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) http.execute("paymentApi", "get", args("path", "/yaml"), context, 1000L, "yaml", "yaml").output()).get("ok"));
             assertNotNull(http.execute("paymentApi", "get", args("path", "/xml"), context, 1000L, "xml", "xml").output());
             assertEquals(404, http.execute("paymentApi", "get", args("path", "/status"), context, 1000L, "status", "text").operationResult().outputMetadata().get("statusCode"));
@@ -175,7 +182,8 @@ class HttpHelperExecutorTest {
             assertEquals(500, serverError.operationResult().outputMetadata().get("statusCode"));
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) http.execute("paymentApi", "post", args("path", "http://outside/"), context, 1000L, "bad", "text").operationResult().outputMetadata().get("error")).get("type"));
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) http.execute("paymentApi", "get", args("path", "/echo", "body", "x"), context, 1000L, "bad-body", "text").operationResult().outputMetadata().get("error")).get("type"));
-            ToolInvocationResult typed = http.execute("paymentApi", "post", args("path", "/echo", "body", args("ok", true)), context, 1000L, "typed", "json");
+            ToolInvocationResult typed = http.execute("paymentApi", "post", args("path", "/json", "body", args("ok", true)), context, 1000L, "typed", "text");
+            assertTrue(typed.executionSuccess(), String.valueOf(typed.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) typed.output()).get("ok"));
             ToolInvocationResult redirected = http.execute("paymentApi", "get", args("path", "/redirect", "followRedirects", true), context, 1000L, "redirect", "json");
             assertEquals(Boolean.TRUE, ((Map<?, ?>) redirected.output()).get("ok"));
@@ -241,13 +249,13 @@ class HttpHelperExecutorTest {
         context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", root);
         TemplateAction action = new TemplateAction("fetch", args("type", "tool", "call", "#{http.paymentApi.get(path='/json', query={status:'OPEN', limit:50})}",
                 "result", args("format", "json", "path", "response.json"),
-                "assert", "${output.statusCode} == 200"), "att-template/v3.1");
+                "assert", "${output.statusCode} == 200"), "att-template/v3.2");
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
              CaseExecutionLog log = new CaseExecutionLog(context.caseOutputDirectory().resolve("case.log"))) {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config), null, null, http,
                     new att.template.DefaultBuiltInProvider());
             ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
-                    new StageTemplate("T", root, Collections.singletonList(action)), context, log).get(0);
+                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.2"), context, log).get(0);
             assertEquals(ResultStatus.PASS, result.status(), result.message());
             assertEquals(Boolean.TRUE, context.resolve("ACTIONS.fetch.output.result.ok"));
             assertEquals(200, context.resolve("ACTIONS.fetch.output.statusCode"));
@@ -264,13 +272,13 @@ class HttpHelperExecutorTest {
         TemplateAction action = new TemplateAction("retryFetch", args("type", "tool",
                 "call", "#{http.paymentApi.get(path='/slow')}", "timeoutMs", 30,
                 "retry", args("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))),
-                "att-template/v3.1");
+                "att-template/v3.2");
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
              CaseExecutionLog log = new CaseExecutionLog(context.caseOutputDirectory().resolve("retry.log"))) {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config), null, null, http,
                     new att.template.DefaultBuiltInProvider());
             ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
-                    new StageTemplate("T", root, Collections.singletonList(action)), context, log).get(0);
+                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.2"), context, log).get(0);
             assertEquals(ResultStatus.ERROR, result.status());
             assertEquals(2, hits.get(), "Each author-configured retry is a new HTTP request");
         }

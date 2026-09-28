@@ -69,8 +69,7 @@ final class ActionResultArtifactWriter {
                     null, "result.path", null, null, null, null, actionId,
                     "Choose a unique target or set overwrite: true.", null);
         }
-        byte[] bytes = "raw".equalsIgnoreCase(format) && value instanceof byte[]
-                ? ((byte[]) value).clone() : render(format, value, dbResult).getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = render(format, value, dbResult).getBytes(StandardCharsets.UTF_8);
         if (overwrite) Files.write(target, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         else Files.write(target, bytes, StandardOpenOption.CREATE_NEW);
         return target;
@@ -78,9 +77,9 @@ final class ActionResultArtifactWriter {
 
 
     private String render(String format, Object value, boolean dbResult) throws Exception {
-        if ("raw".equalsIgnoreCase(format) || "text".equalsIgnoreCase(format)) {
+        if ("text".equalsIgnoreCase(format)) {
             if (value instanceof byte[]) return java.util.Base64.getEncoder().encodeToString((byte[]) value);
-            return dbResult ? dbText.format(value) : (value == null ? "" : String.valueOf(value));
+            return dbResult ? dbText.format(value) : codec.encode(value, "text");
         }
         return codec.encode(value, format);
     }

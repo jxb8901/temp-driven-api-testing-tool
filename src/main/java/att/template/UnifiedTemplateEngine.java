@@ -95,6 +95,16 @@ public class UnifiedTemplateEngine {
         return tool != null && tool.callBacked() ? "call-tool" : "tool";
     }
 
+    /** Format used to parse command stdout or serialize a configured Tool result. */
+    public String configuredToolResultFormat(String call) {
+        if (toolInvoker == null || call == null || call.trim().isEmpty()) return "";
+        try {
+            ToolCallParser.ParsedCall parsed = callParser.parse(call.trim());
+            ToolConfig configured = toolInvoker.tool(parsed.name());
+            return configured == null ? "" : configured.resultFormat();
+        } catch (RuntimeException ignored) { return ""; }
+    }
+
     public String render(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         String afterTools = renderTools(text, context, log);
         return renderValues(afterTools, context);
@@ -336,7 +346,7 @@ public class UnifiedTemplateEngine {
             String[] parts = name.split("\\.", -1);
             if (parts.length != 3) throw new IllegalArgumentException("HTTP call must be http.<helper>.<method>: " + name);
             String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
-            return httpHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, saveFormat);
+            return httpHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, saveFormat, log);
         }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             context.setToolMetadata(name);
@@ -395,8 +405,12 @@ public class UnifiedTemplateEngine {
         Map<String, Object> input = toolInvoker.prepareInput(tool.key(), supplied);
         ToolCallParser.ParsedCall target = callParser.parse(tool.call());
         boolean write = target.name().startsWith("db.") && target.name().endsWith(".update");
+        boolean resourceCall = target.name().startsWith("mq.") || target.name().startsWith("http.");
         if (write && !attempt) {
             throw new IllegalArgumentException("A call-backed DB update Tool may only be the primary call of a type: tool Action: " + tool.key());
+        }
+        if (resourceCall && !attempt) {
+            throw new IllegalArgumentException("MQ/HTTP call-backed Tools may only be the primary call of a type: tool Action: " + tool.key());
         }
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextInvocationId(tool.key()) : requestedId;
@@ -410,6 +424,7 @@ public class UnifiedTemplateEngine {
         boolean success = true;
         Map<String, Object> dbEvidence = new LinkedHashMap<String, Object>();
         Map<String, Object> commonDbEvidence = null;
+        att.exec.ToolInvocationResult nativeInvocation = null;
         if (cacheHit) {
             output = tool.caseCached() ? context.callToolCache(cacheKey)
                     : dbHelperExecutor.cached(dbInstance, cacheKey);
@@ -421,6 +436,16 @@ public class UnifiedTemplateEngine {
             calls.put(result.invocationId, result.evidence);
             dbEvidence.put(result.instance, calls);
             commonDbEvidence = result.evidence;
+        } else if (resourceCall) {
+            Map<String, Object> nativeArguments = resolveDefinitionArguments(target, input);
+            Object executed = executeResolvedCall(target.name(), nativeArguments, context, log, id, true,
+                    null, Long.valueOf(timeoutMs), "", "", false, bypassCache);
+            if (!(executed instanceof att.exec.ToolInvocationResult)) {
+                throw new IllegalStateException("Framework-native call did not return an invocation result: " + target.name());
+            }
+            nativeInvocation = (att.exec.ToolInvocationResult) executed;
+            output = nativeInvocation.output();
+            success = nativeInvocation.executionSuccess();
         } else {
             output = invokeBuiltInWithTimeout(target.name(), resolveDefinitionArguments(target, input), timeoutMs, id, started);
         }
@@ -442,6 +467,10 @@ public class UnifiedTemplateEngine {
             toolEvidence.put("toolKey", tool.localKey());
         }
         if (!dbEvidence.isEmpty()) toolEvidence.put("DB", dbEvidence);
+        if (nativeInvocation != null) {
+            Map<String, Object> nativeRecord = nativeInvocation.invocation();
+            for (String key : new String[]{"MQ", "HTTP", "DB"}) if (nativeRecord.get(key) != null) toolEvidence.put(key, nativeRecord.get(key));
+        }
         if (cached) {
             Map<String, Object> cache = new LinkedHashMap<String, Object>();
             cache.put("scope", tool.cache());
@@ -469,14 +498,28 @@ public class UnifiedTemplateEngine {
         invocation.put("output", output);
         invocation.put("TOOL", toolNode);
         if (!dbEvidence.isEmpty()) invocation.put("DB", dbEvidence);
+        if (nativeInvocation != null) {
+            Map<String, Object> nativeRecord = nativeInvocation.invocation();
+            for (String key : new String[]{"MQ", "HTTP", "DB"}) if (nativeRecord.get(key) != null) invocation.put(key, nativeRecord.get(key));
+        }
         Map<String, Object> commonToolEvidence = new LinkedHashMap<String, Object>(toolEvidence);
         commonToolEvidence.remove("DB");
         Map<String, Object> actionEvidence = ActionExecutionResult.evidence("tool", commonToolEvidence);
         if (commonDbEvidence != null) {
             actionEvidence.putAll(ActionExecutionResult.evidence("db", commonDbEvidence));
         }
+        ActionExecutionResult operationResult;
+        if (nativeInvocation != null) {
+            ActionExecutionResult nativeResult = nativeInvocation.operationResult();
+            actionEvidence = new LinkedHashMap<String, Object>(nativeResult.evidence());
+            ActionExecutionResult.mergeEvidence(actionEvidence, ActionExecutionResult.evidence("tool", commonToolEvidence));
+            operationResult = new ActionExecutionResult(output, actionEvidence, success, nativeResult.diagnostic(),
+                    nativeResult.durationMs(), nativeResult.outputMetadata());
+        } else {
+            operationResult = new ActionExecutionResult(output, actionEvidence, success);
+        }
         att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult(tool.key(), id, output, invocation,
-                success, actionEvidence);
+                success, operationResult);
         if (attempt && !success && dbTimeout(output)) {
             throw new att.exec.ToolExecutionException("TIMEOUT", "Tool timed out: " + tool.key(), invocation, null, null);
         }
@@ -554,7 +597,7 @@ public class UnifiedTemplateEngine {
         java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
         String invocationId = context.nextDbInvocationId(parts[1]);
         String operation = "update".equals(parts[2]) ? "update" : "query";
-        DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs);
+        DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs, log);
         if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         context.recordActionEvidence(result.operationResult().evidence());
@@ -671,7 +714,7 @@ public class UnifiedTemplateEngine {
         java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextDbInvocationId(parts[1]) : requestedId;
-        DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id);
+        DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id, null, log);
         if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         context.recordActionEvidence(result.operationResult().evidence());
