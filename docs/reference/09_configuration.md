@@ -6,9 +6,10 @@ This chapter is the authoritative reading reference for author-authored configur
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, MQ helper paths, optional global SSH |
+| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/SSHHelper paths, optional legacy inline SSH |
 | Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
+| SSHHelper | configured `sshhelpers` YAML path | logical SSH ID, physical instances, defaults, selection and fan-out cap |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -16,6 +17,8 @@ This chapter is the authoritative reading reference for author-authored configur
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
 ### Multi-environment profiles in V3.5.2
+
+`att-config/v2.7` extends the v2.6 profile model with `sshhelpers`. A profile may replace its SSHHelper list in addition to DB/MQ lists. New logical SSH Tool groups use `att-tool-group/v2.7` and `att-sshhelper/v1.0`; see [SSHHelper](../../docs/reference/05_resources/sshhelper.md) for complete SIT/UAT configs, selection rules, evidence, migration and safety warnings. The v2.6 examples below remain valid for existing DB/MQ-only packages.
 
 ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
@@ -123,11 +126,12 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../../schemas/att-config-v2.6.schema.json) |
+| Global configuration | `att-config/v2.7` | [att-config-v2.7.schema.json](../../schemas/att-config-v2.7.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../../schemas/att-dbhelper-v2.5.schema.json) |
 | MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../../schemas/att-mqhelper-v1.1.schema.json) |
-| Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../../schemas/att-tool-group-v2.6.schema.json) |
+| SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../../schemas/att-sshhelper-v1.0.schema.json) |
+| Tool group | `att-tool-group/v2.7` | [att-tool-group-v2.7.schema.json](../../schemas/att-tool-group-v2.7.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../../schemas/att-sidecar-v2.2.schema.json) |
 | Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../../schemas/att-sidecar-v2.1.schema.json) |
@@ -197,7 +201,8 @@ environments:
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
-| `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
+| `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths; v2.7 only |
+| `environments` | absent | Non-empty map of profile names; v2.7 profiles may contain `dbhelpers`, `mqhelpers`, and/or `sshhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -205,7 +210,7 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `ssh`, `tools`, `environments`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -356,7 +361,7 @@ Every argument requires `name`, `description`, and a YAML boolean `required`. Fo
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
-A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
+A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7, `ssh` may be direct or a logical `{helper, selection?}` binding. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
 
 ### Identifier and path constraints
 

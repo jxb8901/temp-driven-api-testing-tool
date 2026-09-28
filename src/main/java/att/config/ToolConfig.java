@@ -20,6 +20,8 @@ public final class ToolConfig {
     private final String groupId;
     private final String localKey;
     private final SshConfig ssh;
+    private final String sshHelper;
+    private final String sshSelectionStrategy;
     private final Path sourceFile;
     private final String output;
     private final Long timeoutMs;
@@ -60,6 +62,14 @@ public final class ToolConfig {
                       List<String> commandArgv, String call, String cache, List<String> groupScriptArgv,
                       String output, Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile,
                       Long timeoutMs) {
+        this(key, localKey, groupId, name, description, commandArgv, call, cache, groupScriptArgv,
+                output, arguments, ssh, sourceFile, timeoutMs, "", "");
+    }
+
+    public ToolConfig(String key, String localKey, String groupId, String name, String description,
+                      List<String> commandArgv, String call, String cache, List<String> groupScriptArgv,
+                      String output, Map<String, ToolArgumentConfig> arguments, SshConfig ssh, Path sourceFile,
+                      Long timeoutMs, String sshHelper, String sshSelectionStrategy) {
         this.key = key;
         this.localKey = localKey;
         this.groupId = groupId == null ? "" : groupId;
@@ -74,6 +84,8 @@ public final class ToolConfig {
         this.arguments = arguments == null ? Collections.<String, ToolArgumentConfig>emptyMap()
                 : new LinkedHashMap<String, ToolArgumentConfig>(arguments);
         this.ssh = ssh;
+        this.sshHelper = sshHelper == null ? "" : sshHelper;
+        this.sshSelectionStrategy = sshSelectionStrategy == null ? "" : sshSelectionStrategy;
         this.sourceFile = sourceFile;
     }
 
@@ -93,6 +105,8 @@ public final class ToolConfig {
     public String localKey() { return localKey; }
     public boolean grouped() { return !groupId.isEmpty(); }
     public SshConfig ssh() { return ssh; }
+    public String sshHelper() { return sshHelper; }
+    public String sshSelectionStrategy() { return sshSelectionStrategy; }
     public Path sourceFile() { return sourceFile; }
     public String output() { return output; }
     public Long timeoutMs() { return timeoutMs; }

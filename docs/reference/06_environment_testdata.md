@@ -4,9 +4,9 @@ Environment selection changes resource binding, not Action logic.
 
 ### Environment profiles
 
-`att-config/v2.6` may declare an `environment` default and an `environments` map. `--config` selects the base configuration file; `--env` selects one named binding inside that configuration. Explicit `--env` wins over the configured default. Unknown environments fail before external execution.
+`att-config/v2.7` may declare an `environment` default and an `environments` map. `--config` selects the base configuration file; `--env` selects one named binding inside that configuration. Explicit `--env` wins over the configured default. Unknown environments fail before external execution. Existing v2.6 profiles remain readable for DB/MQ-only packages.
 
-Profiles are typed shallow bindings, not generic recursive YAML inheritance. Current profile-owned lists are `dbhelpers` and `mqhelpers`: when a profile supplies one of those lists it replaces that resource list; an omitted list inherits the common root list.
+Profiles are typed shallow bindings, not generic recursive YAML inheritance. Current profile-owned lists are `dbhelpers`, `mqhelpers` and `sshhelpers`: when a profile supplies one of those lists it replaces that resource list; an omitted list inherits the common root list.
 
 ```yaml
 environment: SIT
@@ -14,12 +14,14 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    sshhelpers: [config/sshhelpers/sit/application.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    sshhelpers: [config/sshhelpers/uat/application.yaml]
 ```
 
-The descriptor in every environment should expose the same stable logical IDs (`orders`, `payment`, etc.). Template/Flow/Action references therefore remain unchanged across SIT/UAT/PREPROD.
+The descriptor in every environment should expose the same stable logical IDs (`orders`, `payment`, `application`, etc.). Template/Flow/Action references and Tool-group helper bindings therefore remain unchanged across SIT/UAT/PREPROD. See the [SSHHelper chapter](../../docs/reference/05_resources/sshhelper.md) for complete examples and fan-out safety.
 
 ### Topology and secrets
 
@@ -31,7 +33,7 @@ Run, Validate, Debug and Load resolve the environment through the same effective
 
 ### Migration from separate configs
 
-Existing separate `--config config/environments/sit.yaml` / `uat.yaml` workflows remain useful when whole configurations genuinely differ. Profiles are preferable when the package contract is common and only typed DB/MQ bindings vary. Separate configs remain preferable for materially different package policy, roots, Tool topology or configuration ownership.
+Existing separate `--config config/environments/sit.yaml` / `uat.yaml` workflows remain useful when whole configurations genuinely differ. Profiles are preferable when the package contract is common and only typed DB/MQ/SSH bindings vary. Separate configs remain preferable for materially different package policy, roots, Tool topology or configuration ownership.
 
 ### Test data extension point
 

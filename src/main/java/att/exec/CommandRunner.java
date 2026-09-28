@@ -192,6 +192,8 @@ public class CommandRunner {
         }
         public java.nio.file.Path stdoutArtifact() { return stdoutArtifact; }
         public java.nio.file.Path stderrArtifact() { return stderrArtifact; }
+        public int memoryLimitBytes() { return memoryLimitBytes; }
+        public long artifactLimitBytes() { return artifactLimitBytes; }
         static CapturePolicy previewOnly(int memoryLimitBytes) { return new CapturePolicy(memoryLimitBytes, memoryLimitBytes, null, null); }
     }
 }

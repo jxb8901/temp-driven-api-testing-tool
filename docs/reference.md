@@ -623,15 +623,16 @@ Load execution identity and evidence-only scheduler diagnostics are defined cent
 
 ## 05 Resources and Integrations
 
-Tool, DBHelper and MQHelper are peer integration/resource types. They have different descriptors and lifecycle rules but converge on the common operation-result/evidence contract in 5.4.
+Tool, DBHelper, MQHelper and SSHHelper are peer integration/resource types. SSHHelper routes command-backed Tools. They converge on the common operation-result/evidence contract in 5.5.
 
 ```text
 Tool      -> process/call operation --\
 DBHelper  -> JDBC operation ----------+--> Action output
 MQHelper  -> MQ operation ------------/
+SSHHelper -> Tool SSH routing --------/
 ```
 
-Resource IDs are logical contracts referenced by Templates/expressions. Environment profiles may bind the same DB/MQ logical ID to different descriptors without changing Action YAML.
+Resource IDs are logical contracts referenced by Templates/expressions or Tool groups. Environment profiles may bind the same DB/MQ/SSH logical ID to different descriptors without changing Action YAML.
 
 ### 5.1 Tool
 
@@ -834,7 +835,78 @@ Output and evidence retain the logical helper id and expose the selected physica
 
 `output.selectionStrategy` identifies the configured group policy (`single`, `random`, or `roundRobin`), not the selection source for an individual invocation. When a call explicitly supplies `instance`, that policy value remains unchanged and `output.instance` identifies the physical instance actually selected.
 
-### 5.4 Common Operation Result and Evidence
+### 5.4 SSHHelper: logical SSH targets
+
+SSHHelper routes a command-backed Tool to a stable logical application-server ID instead of embedding a physical host in the Tool group. The `att-sshhelper/v1.0` YAML descriptor contains `id`, optional `name`/`description`, optional `defaults` (`user`, `port`, `identityFile`), a non-empty ordered `instances` list, optional `selection.strategy`, and optional `fanout.maxConcurrency` (default 4, range 1–256). Each instance needs `id` and `host`; `user` must come from the instance or defaults. Instance fields override defaults; port defaults to 22 and must be 1–65535. Helper and instance IDs match `[A-Za-z_][A-Za-z0-9_-]*` and are unique ignoring case. Invalid hosts/users, unknown properties, duplicates, missing users, unsafe paths, and unsupported strategies fail before SSH execution.
+
+```yaml
+# config/sshhelpers/sit/application.yaml
+schemaVersion: att-sshhelper/v1.0
+id: application
+name: Application servers
+description: SIT application tier
+defaults: {user: deploy, port: 22, identityFile: '${ENV:APP_SSH_KEY}'}
+selection: {strategy: roundRobin}
+fanout: {maxConcurrency: 2}
+instances:
+  - {id: app1, host: sit-app1.example}
+  - {id: app2, host: sit-app2.example, port: 2222}
+```
+
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.7`. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
+
+```yaml
+# config/config.yaml
+schemaVersion: att-config/v2.7
+environment: SIT
+toolGroups: [config/tools/application.yaml]
+environments:
+  SIT:
+    sshhelpers: [config/sshhelpers/sit/application.yaml]
+  UAT:
+    sshhelpers: [config/sshhelpers/uat/application.yaml]
+```
+
+```yaml
+# config/sshhelpers/uat/application.yaml
+schemaVersion: att-sshhelper/v1.0
+id: application
+defaults: {user: deploy, identityFile: '${ENV:APP_SSH_KEY}'}
+selection: {strategy: all}
+fanout: {maxConcurrency: 2}
+instances:
+  - {id: app1, host: uat-app1.example}
+  - {id: app2, host: uat-app2.example}
+```
+
+```yaml
+# config/tools/application.yaml
+schemaVersion: att-tool-group/v2.7
+id: app
+name: Application tools
+description: Remote application inspection
+ssh:
+  helper: application
+  selection: {strategy: all} # optional group override
+tools:
+  status:
+    name: Status
+    description: Print service status
+    command: [systemctl, is-active, example.service]
+    output: txt
+```
+
+The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. Existing inline global SSH and v2.6/v2.2 group files remain readable; the logical form requires v2.7. There is no Action- or per-call strategy override.
+
+Strategy precedence is group override then helper default. One instance works without a strategy (`single`); multiple instances require one. `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **`all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in the SSH diagnostics chapter.
+
+For a single selected host, parsed `output.result` remains the legacy scalar/object value. Evidence adds `sshHelper`, `instance`, `host`, `selectionStrategy`, `selectionSource` (`helper` or `toolGroup`), transport, start/end/duration, exit code, output and errors. For `all`, `output.result` contains `sshHelper`, effective `selectionStrategy`, `selectionSource`, and `instances` keyed in descriptor order. Every entry has `instance`, `host`, `port`, `transport`, `startedAt`, `endedAt`, `durationMs`, `status`, and when available `exitCode`, `stdout`, `stderr`, `rawOutput`, parsed `output`, or `error`. A completed command has `status: PASS` even with a non-zero `exitCode`; that code is evidence for the Action assertion, not an operational failure. The operation fails only on an execution, output-parse, cancellation, or timeout error; other hosts' evidence is retained. Assertions may inspect `${output.result.instances.app1.exitCode}`, `${output.result.instances.app1.status}`, or `${output.result.instances.app1.output}`. Credential contents and environment-supplied key paths are not recorded; keep private keys outside the package and do not put secrets in commands.
+
+Environment-supplied identity paths are redacted from argv, transport stderr (including streamed Case-log diagnostics), and exception evidence for both single-host and `all` execution. This no-recording guarantee applies to ATT metadata and transport diagnostics; parsed business stdout remains unchanged, so commands must not print secret paths.
+
+Migration: leave direct SSH unchanged if one physical target suffices. To migrate, move its host/user/port/key into a helper descriptor, bind that descriptor per environment, upgrade the group to v2.7, replace physical `ssh` with `ssh: {helper: application}`, and validate each environment. Actions stay unchanged. Inventory discovery, per-Action host override, distributed transactions, cross-host failover and orchestration are out of scope.
+
+### 5.5 Common Operation Result and Evidence
 
 Tool, DB and MQ executors converge at one operation boundary before the Template runner applies Action lifecycle, assertions and retry policy.
 
@@ -866,9 +938,9 @@ Environment selection changes resource binding, not Action logic.
 
 ### Environment profiles
 
-`att-config/v2.6` may declare an `environment` default and an `environments` map. `--config` selects the base configuration file; `--env` selects one named binding inside that configuration. Explicit `--env` wins over the configured default. Unknown environments fail before external execution.
+`att-config/v2.7` may declare an `environment` default and an `environments` map. `--config` selects the base configuration file; `--env` selects one named binding inside that configuration. Explicit `--env` wins over the configured default. Unknown environments fail before external execution. Existing v2.6 profiles remain readable for DB/MQ-only packages.
 
-Profiles are typed shallow bindings, not generic recursive YAML inheritance. Current profile-owned lists are `dbhelpers` and `mqhelpers`: when a profile supplies one of those lists it replaces that resource list; an omitted list inherits the common root list.
+Profiles are typed shallow bindings, not generic recursive YAML inheritance. Current profile-owned lists are `dbhelpers`, `mqhelpers` and `sshhelpers`: when a profile supplies one of those lists it replaces that resource list; an omitted list inherits the common root list.
 
 ```yaml
 environment: SIT
@@ -876,12 +948,14 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    sshhelpers: [config/sshhelpers/sit/application.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    sshhelpers: [config/sshhelpers/uat/application.yaml]
 ```
 
-The descriptor in every environment should expose the same stable logical IDs (`orders`, `payment`, etc.). Template/Flow/Action references therefore remain unchanged across SIT/UAT/PREPROD.
+The descriptor in every environment should expose the same stable logical IDs (`orders`, `payment`, `application`, etc.). Template/Flow/Action references and Tool-group helper bindings therefore remain unchanged across SIT/UAT/PREPROD. See the [SSHHelper chapter](../docs/reference/05_resources/sshhelper.md) for complete examples and fan-out safety.
 
 ### Topology and secrets
 
@@ -893,7 +967,7 @@ Run, Validate, Debug and Load resolve the environment through the same effective
 
 ### Migration from separate configs
 
-Existing separate `--config config/environments/sit.yaml` / `uat.yaml` workflows remain useful when whole configurations genuinely differ. Profiles are preferable when the package contract is common and only typed DB/MQ bindings vary. Separate configs remain preferable for materially different package policy, roots, Tool topology or configuration ownership.
+Existing separate `--config config/environments/sit.yaml` / `uat.yaml` workflows remain useful when whole configurations genuinely differ. Profiles are preferable when the package contract is common and only typed DB/MQ/SSH bindings vary. Separate configs remain preferable for materially different package policy, roots, Tool topology or configuration ownership.
 
 ### Test data extension point
 
@@ -1497,9 +1571,10 @@ This chapter is the authoritative reading reference for author-authored configur
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, MQ helper paths, optional global SSH |
+| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/SSHHelper paths, optional legacy inline SSH |
 | Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
 | Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
+| SSHHelper | configured `sshhelpers` YAML path | logical SSH ID, physical instances, defaults, selection and fan-out cap |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -1507,6 +1582,8 @@ This chapter is the authoritative reading reference for author-authored configur
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
 ### Multi-environment profiles in V3.5.2
+
+`att-config/v2.7` extends the v2.6 profile model with `sshhelpers`. A profile may replace its SSHHelper list in addition to DB/MQ lists. New logical SSH Tool groups use `att-tool-group/v2.7` and `att-sshhelper/v1.0`; see [SSHHelper](../docs/reference/05_resources/sshhelper.md) for complete SIT/UAT configs, selection rules, evidence, migration and safety warnings. The v2.6 examples below remain valid for existing DB/MQ-only packages.
 
 ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
@@ -1614,11 +1691,12 @@ V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V2
 | Artifact | Schema identifier | Formal definition |
 |---|---|---|
 | Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.6` | [att-config-v2.6.schema.json](../schemas/att-config-v2.6.schema.json) |
+| Global configuration | `att-config/v2.7` | [att-config-v2.7.schema.json](../schemas/att-config-v2.7.schema.json) |
 | Legacy global configuration (read compatibility) | `att-config/v2.1`, `att-config/v2.2`, `att-config/v2.5` | [att-config-v2.5.schema.json](../schemas/att-config-v2.5.schema.json) |
 | Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
 | MQ helper descriptor | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` | [att-mqhelper-v1.0.schema.json](../schemas/att-mqhelper-v1.0.schema.json), [att-mqhelper-v1.1.schema.json](../schemas/att-mqhelper-v1.1.schema.json) |
-| Tool group | `att-tool-group/v2.6` | [att-tool-group-v2.6.schema.json](../schemas/att-tool-group-v2.6.schema.json) |
+| SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../schemas/att-sshhelper-v1.0.schema.json) |
+| Tool group | `att-tool-group/v2.7` | [att-tool-group-v2.7.schema.json](../schemas/att-tool-group-v2.7.schema.json) |
 | Legacy Tool group (read compatibility) | `att-tool-group/v2.2` | [att-tool-group-v2.2.schema.json](../schemas/att-tool-group-v2.2.schema.json) |
 | Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
 | Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/att-sidecar-v2.1.schema.json) |
@@ -1688,7 +1766,8 @@ environments:
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
-| `environments` | absent | Non-empty map of profile names; each profile may contain only `dbhelpers` and/or `mqhelpers` typed lists |
+| `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths; v2.7 only |
+| `environments` | absent | Non-empty map of profile names; v2.7 profiles may contain `dbhelpers`, `mqhelpers`, and/or `sshhelpers` typed lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -1696,7 +1775,7 @@ Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `ssh`, `tools`, `environments`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -1847,7 +1926,7 @@ Every argument requires `name`, `description`, and a YAML boolean `required`. Fo
 
 Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
 
-A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
+A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7, `ssh` may be direct or a logical `{helper, selection?}` binding. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
 
 ### Identifier and path constraints
 
@@ -2285,10 +2364,11 @@ The appendices collect stable lookup material that should not drive the main pro
 
 | Artifact | Current schema |
 |---|---|
-| Global configuration | `att-config/v2.6` |
+| Global configuration | `att-config/v2.7` (v2.6 remains readable) |
 | DBHelper | `att-dbhelper/v2.5` |
 | MQHelper | `att-mqhelper/v1.0`, `att-mqhelper/v1.1` |
-| Tool group | `att-tool-group/v2.6` |
+| SSHHelper | `att-sshhelper/v1.0` |
+| Tool group | `att-tool-group/v2.7` (v2.6 remains readable) |
 | Sidecar | `att-sidecar/v2.2` |
 | Snapshot | `att-testcases/v2.4` |
 | Template | `att-template/v3.1` (`renderAs`/`saveAs` are rejected with migration suggestions) |
@@ -2314,7 +2394,8 @@ Key current migrations are:
 - prefer `EXEC` / `META` over legacy Context aliases;
 - use `output.result` / `EXEC.ACTIONS.<id>.output.result` and the common evidence/attempt contract;
 - treat Tool, DBHelper and MQHelper as peer resources;
-- use environment profiles when only typed DB/MQ bindings vary;
+- use environment profiles when DB/MQ/SSHHelper bindings vary;
+- migrate physical group SSH to `ssh: {helper: <id>}` with `att-tool-group/v2.7` when logical multi-instance routing is needed;
 - treat Run, Debug and Load as peer execution modes.
 
 The auditable disposition of the pre-#42 monolithic manual is recorded in `docs/reference-migration-map.md`.

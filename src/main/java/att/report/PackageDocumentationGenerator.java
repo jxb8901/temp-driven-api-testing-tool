@@ -182,6 +182,7 @@ public final class PackageDocumentationGenerator {
             body.append("</p>");
             if (!tool.groupScriptArgv().isEmpty()) body.append("<p>group script argv: <code>[\"").append(escape(joinEscaped(tool.groupScriptArgv()))).append("\"]</code></p>");
             if (tool.ssh() != null) body.append("<p>SSH: <code>").append(escape(tool.ssh().destination())).append(":").append(tool.ssh().port()).append("</code></p>");
+            if (!tool.sshHelper().isEmpty()) body.append("<p>SSH helper: <code>").append(escape(tool.sshHelper())).append("</code>; selection: <code>").append(escape(tool.sshSelectionStrategy().isEmpty() ? config.sshHelper(tool.sshHelper()).strategy() : tool.sshSelectionStrategy())).append("</code></p>");
             body.append("<table><tr><th>Key</th><th>Name</th><th>Description</th><th>Required</th><th>argName</th><th>argNameMode</th></tr>");
             for (ToolArgumentConfig arg : tool.arguments().values()) body.append("<tr><td>").append(escape(arg.key())).append("</td><td>").append(escape(arg.name())).append("</td><td>").append(escape(arg.description())).append("</td><td>").append(arg.required()).append("</td><td>").append(escape(arg.argName())).append("</td><td>").append(escape(arg.namedArgv() ? arg.argNameMode() : "")).append("</td></tr>");
             body.append("</table></section>"); search.add(tool.key()); search.add(tool.name()); search.add(tool.description());

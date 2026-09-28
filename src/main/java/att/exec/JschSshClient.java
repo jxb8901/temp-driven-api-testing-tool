@@ -30,6 +30,12 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
     @Override
     public CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot)
             throws IOException, InterruptedException {
+        return run(ssh, remoteCommand, timeout, projectRoot, null);
+    }
+
+    @Override
+    public CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot,
+                             CommandRunner.CapturePolicy capture) throws IOException, InterruptedException {
         if (!Files.isRegularFile(knownHosts) || Files.isSymbolicLink(knownHosts) || !Files.isReadable(knownHosts)) {
             throw new IOException("Java SSH fallback requires a readable non-symlink known_hosts file: " + knownHosts);
         }
@@ -43,8 +49,12 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
 
         Session session = null;
         ChannelExec channel = null;
-        BoundedStreamCapture stdout = new BoundedStreamCapture(65536, 65536, null);
-        BoundedStreamCapture stderr = new BoundedStreamCapture(65536, 65536, null);
+        int memoryLimit = capture == null ? 65536 : capture.memoryLimitBytes();
+        long artifactLimit = capture == null ? 65536 : capture.artifactLimitBytes();
+        BoundedStreamCapture stdout = new BoundedStreamCapture(memoryLimit, artifactLimit,
+                capture == null ? null : capture.stdoutArtifact());
+        BoundedStreamCapture stderr = new BoundedStreamCapture(memoryLimit, artifactLimit,
+                capture == null ? null : capture.stderrArtifact());
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout.toMillis());
         try {
             session = jsch.getSession(ssh.user(), ssh.host(), ssh.port());
@@ -68,7 +78,12 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
             }
             return result(channel.getExitStatus(), stdout, stderr, false);
         } catch (JSchException e) {
+            if (System.nanoTime() >= deadline || (e.getMessage() != null && e.getMessage().toLowerCase(java.util.Locale.ROOT).contains("timeout")))
+                return result(-1, stdout, stderr, true);
             throw new IOException("Java SSH execution failed for " + ssh.destination() + ": " + e.getMessage(), e);
+        } catch (IOException e) {
+            if (System.nanoTime() >= deadline) return result(-1, stdout, stderr, true);
+            throw e;
         } finally {
             if (channel != null && channel.isConnected()) channel.disconnect();
             if (session != null && session.isConnected()) session.disconnect();
@@ -89,6 +104,7 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
 
     private static CommandResult result(int exitCode, BoundedStreamCapture stdout, BoundedStreamCapture stderr, boolean timedOut) {
         return new CommandResult(exitCode, stdout.preview(), stderr.preview(), timedOut, stdout.bytes(), stderr.bytes(),
-                stdout.memoryTruncated(), stderr.memoryTruncated(), false, false, null, null);
+                stdout.memoryTruncated(), stderr.memoryTruncated(), stdout.artifactTruncated(), stderr.artifactTruncated(),
+                stdout.artifact(), stderr.artifact());
     }
 }
