@@ -122,7 +122,6 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
     }
 
     private void reportError(LoadEvent event) {
-        if (!verbose) return;
         String status = event.dropped() ? "DROPPED"
                 : event.status() == null ? "ERROR" : event.status().name();
         StringBuilder line = new StringBuilder("[LOAD] ERROR runId=").append(runId)
@@ -143,9 +142,14 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
     private void printProgress(String label, String terminalStatus) {
         if ("PROGRESS".equals(label) && finished.get()) return;
         if ("SUMMARY".equals(label)) {
-            emit("[LOAD] SUMMARY runId=" + runId + " model=" + model + " status=" + terminalStatus
-                    + " completed=" + completed.get() + " pass=" + passed.get() + " fail=" + failed.get()
-                    + " error=" + errors.get() + " dropped=" + dropped.get());
+            StringBuilder summary = new StringBuilder("[LOAD] SUMMARY runId=").append(runId)
+                    .append(" model=").append(model).append(" status=").append(terminalStatus)
+                    .append(" completed=").append(completed.get()).append(" pass=").append(passed.get())
+                    .append(" fail=").append(failed.get()).append(" error=").append(errors.get())
+                    .append(" dropped=").append(dropped.get());
+            long suppressed = suppressedErrors.getAndSet(0L);
+            if (suppressed > 0L) summary.append(" suppressedErrors=").append(suppressed);
+            emit(summary.toString());
             return;
         }
         long elapsedMs = Math.max(0L, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));

@@ -68,6 +68,57 @@ class LoadConsoleProgressTest {
         progress.close();
     }
 
+    @Test void quietReportsFailuresAndDroppedArrivalsWithoutProgress() throws Exception {
+        LoadScenario scenario = scenario();
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        LoadConsoleProgress progress = new LoadConsoleProgress("quiet-errors", scenario,
+                new PrintStream(bytes, true, "UTF-8"), 10L, 0L, false, false);
+        progress.onEvent(LoadEvent.completed("quiet-errors", "closed", "STEADY", "success-secret", "VU-1",
+                1L, 1L, 2L, 5L, ResultStatus.PASS));
+        assertEquals("", bytes.toString("UTF-8"));
+        progress.onEvent(LoadEvent.completed("quiet-errors", "closed", "STEADY", "failure-secret", "VU-1",
+                2L, 1L, 2L, 5L, ResultStatus.ERROR, "TIMEOUT", null));
+        progress.onEvent(LoadEvent.dropped("quiet-errors", "arrivalRate", "STEADY", "drop-secret",
+                3L, 3L, 4L));
+
+        String during = bytes.toString("UTF-8");
+        assertEquals(2, occurrences(during, "[LOAD] ERROR"));
+        assertTrue(during.contains("sequence=2 status=ERROR errorType=TIMEOUT"));
+        assertTrue(during.contains("sequence=3 status=DROPPED"));
+        assertFalse(during.contains("secret"));
+        assertFalse(during.contains("START"));
+        assertFalse(during.contains("PROGRESS"));
+        assertFalse(during.contains("SUMMARY"));
+
+        progress.finish("ERROR");
+        String complete = bytes.toString("UTF-8");
+        assertTrue(complete.contains("[LOAD] SUMMARY runId=quiet-errors model=closed status=ERROR"));
+        assertTrue(complete.contains("completed=2 pass=1 fail=0 error=1 dropped=1"));
+        progress.close();
+    }
+
+    @Test void quietRateLimitsErrorRecordsAndSummarizesSuppressedCount() throws Exception {
+        LoadScenario scenario = scenario();
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        LoadConsoleProgress progress = new LoadConsoleProgress("quiet-limited", scenario,
+                new PrintStream(bytes, true, "UTF-8"), 10L, 60000L, false, false);
+        for (int sequence = 1; sequence <= 3; sequence++) {
+            progress.onEvent(LoadEvent.completed("quiet-limited", "closed", "STEADY",
+                    "private-" + sequence, "VU-1", sequence, 1L, 2L, 5L,
+                    ResultStatus.ERROR, "RUNTIME_ERROR", null));
+        }
+
+        String during = bytes.toString("UTF-8");
+        assertEquals(1, occurrences(during, "[LOAD] ERROR"));
+        assertFalse(during.contains("private-"));
+        assertFalse(during.contains("PROGRESS"));
+        progress.finish("ERROR");
+        String complete = bytes.toString("UTF-8");
+        assertTrue(complete.contains("error=3 dropped=0 suppressedErrors=2"));
+        assertEquals(1, occurrences(complete, "[LOAD] ERROR"));
+        progress.close();
+    }
+
     private static LoadScenario scenario() {
         return new LoadScenario(Paths.get("progress.yaml"), "template", "LOAD_TEMPLATE",
                 Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
