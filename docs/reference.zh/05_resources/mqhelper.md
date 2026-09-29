@@ -48,6 +48,8 @@ pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 
 username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_PROPERTY/PASSWORD_PROPERTY。`evidence.payload` 支援 `metadata` 或 `none`；`metadata` 只在 evidence 保留 policy marker，`none` 則省略。Environment credential 是 secret，不會進入 evidence、log、report 或 generated docs。
 
+`connection.transport` 可選 `MQSeries Client`、`MQSeries` 或 `MQSeries Bindings`，v1.0/v1.1 預設為 `MQSeries Client`；v1.1 instance 值會覆寫 `defaults.connection.transport`。ATT 會將所選 IBM MQ client constant 原型別連同 `MQConstants.TRANSPORT_PROPERTY` 傳入；若已安裝 client 缺少該 transport constant，會明確指出所需 constant/dependency，不會代換成數字。
+
 message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
 
 `message.requestQueue` 和 `message.replyQueue` 是各 matching operation 的 optional defaults：send/request 使用 `requestQueue`；receive/request 使用 `replyQueue`。v1.1 會先選擇或解析 physical instance，再 materialize 該 instance 繼承後的 `message` settings，最後套用 call argument。因此有效優先序為 explicit call argument > selected instance override > group default > runtime default（如有）> point-of-use validation error。ATT 不會借用其他 physical instance 的 queue default；若最後仍沒有有效 queue，會在 connect 前令呼叫失敗。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
@@ -63,7 +65,7 @@ result:
   overwrite: false
 ~~~
 
-MQ reply bytes 會按收到的 CCSID 解碼為原生 `String`；Action `result.format` 不會解析或替換該值。共用格式為 `text|json|yaml|xml`，只選擇如何將 typed value 序列化到檔案或 Case log。沒有 public `raw` Action result。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
+MQ reply bytes 會先按收到的 CCSID 解碼，再依有效 `responseFormat`（`text|json|yaml|xml`）解析。`request`/`receive` 的優先序為 call `responseFormat` > 所選 instance 繼承後的 `requestReply.responseFormat` > `text`；`send` 不接受 `responseFormat`。Action `result.format` 仍只負責序列化，不會改變 resource response parser。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
 
 ~~~yaml
 - id: requestXml

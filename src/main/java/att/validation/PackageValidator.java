@@ -157,11 +157,32 @@ public final class PackageValidator {
             }
         }
         addWindowsShellExecutableWarning(diagnostics);
+        if ("package".equals(options.validationScope())) {
+            diagnostics.addAll(SchemaVersionDiagnostics.collect(projectRoot));
+            removeRedundantHistoricalSchemaWarnings(diagnostics);
+        }
         deduplicateMigrationDiagnostics(diagnostics);
         if (cases == 0) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTION_EMPTY, Diagnostic.Severity.ERROR, "Case selection is empty", null, null, null, null, null, null));
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
         return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
+    }
+
+    /** An old-schema advisory adds no value beside an error for that same descriptor. */
+    private void removeRedundantHistoricalSchemaWarnings(List<Diagnostic> diagnostics) {
+        Set<String> invalidFiles = new LinkedHashSet<String>();
+        for (Diagnostic diagnostic : diagnostics) {
+            if (diagnostic.severity() == Diagnostic.Severity.ERROR && diagnostic.file() != null)
+                invalidFiles.add(diagnostic.file());
+        }
+        List<Diagnostic> retained = new ArrayList<Diagnostic>();
+        for (Diagnostic diagnostic : diagnostics) {
+            if (DiagnosticCodes.SCHEMA_VERSION_OLD.equals(diagnostic.code())
+                    && invalidFiles.contains(diagnostic.file())) continue;
+            retained.add(diagnostic);
+        }
+        diagnostics.clear();
+        diagnostics.addAll(retained);
     }
 
     private static final class CaseLocation {

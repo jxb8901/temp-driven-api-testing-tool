@@ -53,4 +53,18 @@ class ExecutionOptionsTest {
         assertTrue(options.verbose());
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"debug", "template", "X", "--all"}));
     }
+
+    @Test void defaultsInteractiveCommandsToVerboseAndQuietRetainsAnOptOut() {
+        ExecutionOptions run = ExecutionOptions.parse(new String[]{"run", "--all"});
+        ExecutionOptions debug = ExecutionOptions.parse(new String[]{"debug", "template", "SIMPLE"});
+        ExecutionOptions load = ExecutionOptions.parse(new String[]{"load", "scenario.yaml"});
+        assertTrue(run.verbose());
+        assertTrue(debug.verbose());
+        assertTrue(load.verbose());
+        assertTrue(ExecutionOptions.parse(new String[]{"debug", "template", "SIMPLE", "--verbose"}).verbose());
+        assertTrue(ExecutionOptions.parse(new String[]{"load", "scenario.yaml", "--verbose"}).verbose());
+        assertFalse(ExecutionOptions.parse(new String[]{"run", "--all", "--quiet"}).verbose());
+        assertFalse(ExecutionOptions.parse(new String[]{"debug", "template", "SIMPLE", "--quiet"}).verbose());
+        assertFalse(ExecutionOptions.parse(new String[]{"load", "scenario.yaml", "--quiet"}).verbose());
+    }
 }

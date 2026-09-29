@@ -27,6 +27,7 @@
         "host": {"type": "string", "minLength": 1},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
         "channel": {"type": "string", "minLength": 1},
+        "transport": {"enum": ["MQSeries Client", "MQSeries", "MQSeries Bindings"]},
         "username": {"type": "string"},
         "password": {"type": "string"}
       },
@@ -48,7 +49,10 @@
     },
     "requestReply": {
       "type": "object",
-      "properties": {"waitMs": {"type": "integer", "minimum": 0, "maximum": 3600000}},
+      "properties": {
+        "waitMs": {"type": "integer", "minimum": 0, "maximum": 3600000},
+        "responseFormat": {"enum": ["text", "json", "yaml", "xml"]}
+      },
       "additionalProperties": false
     },
     "pool": {

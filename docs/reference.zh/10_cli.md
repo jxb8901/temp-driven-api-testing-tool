@@ -44,20 +44,25 @@
 | `./att.sh run <selection> --output-dir <dir>` | 覆盖输出根目录 |
 | `./att.sh run <selection> --ci-output junit,json` | 写出 CI XML/JSON 与 JUnit HTML |
 | `./att.sh run <selection> --format json` | 输出机器可读摘要 |
-| `./att.sh run <selection> --quiet` | 抑制默认生命周期和完整 Case 日志输出 |
-| `./att.sh run <selection> --verbose` | 明确保留默认生命周期进度和完整 Case 日志镜像；为兼容性保留 |
+| `./att.sh run <selection> --quiet` | 抑制详细实时进度；保留最终摘要和错误 |
+| `./att.sh run <selection> --verbose` | 为兼容性保留；详细实时进度已是默认行为 |
 | `./att.sh debug template <id>` | 执行一个 Template；自动发现 `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | 执行一个规范 Flow；自动发现 `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | 执行一个 Tool；自动发现 `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | 覆盖目标自动发现的 debug 输入 |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 将 debug 输出隔离到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 输出紧凑机器可读摘要；完整证据仍在 `result.yaml` |
+| `./att.sh debug <type> <id> --quiet` | 抑制详细实时进度；保留最终摘要和错误 |
+| `./att.sh load <scenario.yaml> --quiet` | 抑制定期实时进度；保留最终摘要和错误 |
+| `./att.sh load <scenario.yaml> --verbose` | 为兼容性保留；有界实时进度已是默认行为 |
 | `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中归档最新完成 run |
 | `./att.sh clean` | 删除文档化生成输出 |
 
 ### Standalone debug 配置例子
+
+`run`、`debug` 和 `load` 默认采用交互式 verbose 行为。Lifecycle、Case、Stage、Action、资源 attempt、retry、assertion 和错误事件会即时写出并及时 flush。实时 Case-log 镜像复用与 `case.log` 相同的脱敏 append 路径；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事实来源。并发 Case-log 区块会带有 Case ID 前缀。`--quiet` 抑制详细实时进度，但保留最终摘要和错误。使用 `--format json` 时，机器可读内容仍写入 stdout，实时进度写入 stderr。Load 只定期输出有界计数/速率并节流错误，不会为每个成功 iteration 输出一大段内容。
 
 以下每个文件都是完整的 `att-debug/v1.0` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和临时覆盖值的不同写法。
 

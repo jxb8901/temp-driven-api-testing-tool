@@ -81,6 +81,8 @@ public final class MqHelperExecutor {
             InternalExceptionLogger.logIfInternal(log, "mq.resolveArguments", error, Collections.<String>emptyList());
             return failure(instance, operation, invocationId, "MQ_ARGUMENT", error.getMessage(), error);
         }
+        String effectiveResponseFormat = "send".equals(operation) ? null
+                : args.containsKey("responseFormat") ? String.valueOf(args.get("responseFormat")) : helper.responseFormat();
         Instant started = Instant.now();
         final long deadlineNanos = timeoutMs == null ? Long.MAX_VALUE
                 : System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs.longValue());
@@ -91,8 +93,13 @@ public final class MqHelperExecutor {
         result.put("result", null);
         evidence.put("instance", helper.instanceId()); evidence.put("helperId", logical.logicalId()); evidence.put("physicalInstance", helper.instanceId());
         evidence.put("selectionStrategy", logical.selectionStrategy()); evidence.put("operation", operation);
+        if (effectiveResponseFormat != null) {
+            result.put("responseFormat", effectiveResponseFormat);
+            evidence.put("responseFormat", effectiveResponseFormat);
+        }
         evidence.put("queueManager", helper.queueManager());
         evidence.put("host", helper.host()); evidence.put("port", helper.port()); evidence.put("channel", helper.channel());
+        evidence.put("transport", helper.transport());
         evidence.put("charset", helper.charset()); evidence.put("ccsid", helper.ccsid());
         if (helper.encoding() != null) evidence.put("encoding", helper.encoding());
         if (helper.expiry() != null) evidence.put("expiry", helper.expiry());
@@ -172,7 +179,8 @@ public final class MqHelperExecutor {
                         evidence.put("replyMessageId", replyMessageId); evidence.put("replyCorrelationId", correlationId);
                         evidence.put("replyBytes", received.payload() == null ? 0 : received.payload().length);
                         addReplyMetadata(result, evidence, received);
-                        Object business = represent(received, representation, helper);
+                        phase = "mq.parseReply";
+                        Object business = represent(received, effectiveResponseFormat, helper);
                         result.put("result", business);
                         saveIfRequested(result, context, log, actionId, savePath, representation, received.payload(), business, overwrite);
                         success = true;
@@ -206,7 +214,8 @@ public final class MqHelperExecutor {
                     evidence.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
                     evidence.put("bytes", received == null || received.payload() == null ? 0 : received.payload().length);
                     addReplyMetadata(result, evidence, received);
-                    Object business = represent(received, representation, helper);
+                    phase = "mq.parseReply";
+                    Object business = represent(received, effectiveResponseFormat, helper);
                     result.put("result", business);
                     saveIfRequested(result, context, log, actionId, savePath, representation,
                             received == null ? null : received.payload(), business, overwrite);
@@ -218,6 +227,12 @@ public final class MqHelperExecutor {
                     if (!success) addDeadlineError(result, evidence);
                 }
             } else throw new IllegalArgumentException("Unknown MQ operation: " + operation);
+        } catch (MqResultParseException error) {
+            success = false;
+            Map<String, Object> detail = new LinkedHashMap<String, Object>();
+            detail.put("type", "MQ_RESULT_PARSE_ERROR");
+            detail.put("message", "MQ reply body is not valid " + effectiveResponseFormat);
+            result.put("error", detail); evidence.put("error", detail);
         } catch (MqTransport.Exception error) {
             success = false; addError(result, evidence, error, helper);
             markInternalFailure(result, evidence, error, phase, helper, log);
@@ -284,14 +299,15 @@ public final class MqHelperExecutor {
         if ("receive".equals(operation) && args.get("queue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".receive requires queue or configured message.replyQueue on the selected instance");
         for (String key : new String[]{"queue", "requestQueue", "replyQueue"}) if (args.containsKey(key)) validQueue(string(args.get(key), key));
         if (args.containsKey("waitMs")) integer(args.get("waitMs"), "waitMs", 0, 3600000);
+        if (args.containsKey("responseFormat")) responseFormat(args.get("responseFormat"));
         if ("receive".equals(operation) && args.containsKey("correlationId") && String.valueOf(args.get("correlationId")).trim().isEmpty()) throw new IllegalArgumentException("correlationId must not be blank");
         if (args.get("instance") != null) string(args.get("instance"), "instance");
     }
 
     private boolean allowed(String operation, String key) {
         if ("send".equals(operation)) return "queue".equals(key) || "file".equals(key) || "instance".equals(key);
-        if ("receive".equals(operation)) return "queue".equals(key) || "waitMs".equals(key) || "correlationId".equals(key) || "instance".equals(key);
-        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "waitMs".equals(key) || "instance".equals(key);
+        if ("receive".equals(operation)) return "queue".equals(key) || "waitMs".equals(key) || "correlationId".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
+        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "waitMs".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
     }
 
     private Path payloadFile(String value, CaseRuntimeContext context) throws IOException {
@@ -319,12 +335,28 @@ public final class MqHelperExecutor {
         return result;
     }
 
+    private String responseFormat(Object value) {
+        if (!(value instanceof String)) throw new IllegalArgumentException("responseFormat must be text, json, yaml, or xml");
+        String format = (String) value;
+        if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format)))
+            throw new IllegalArgumentException("responseFormat must be one of text, json, yaml, or xml");
+        return format;
+    }
+
     private Object represent(MqTransport.Message message, String format, MqHelperConfig helper) throws Exception {
         byte[] payload = message == null ? null : message.payload();
         int ccsid = message == null || message.ccsid() == null || message.ccsid().intValue() <= 0
                 ? helper.charset() : message.ccsid().intValue();
         String text = new String(payload == null ? new byte[0] : payload, mqCharset(ccsid));
-        return text;
+        if ("text".equals(format)) return text;
+        try { return new ToolInvoker(projectRoot, config).parseOutput(text, format); }
+        catch (Exception invalid) { throw new MqResultParseException(format, invalid); }
+    }
+
+    private static final class MqResultParseException extends Exception {
+        private MqResultParseException(String format, Throwable cause) {
+            super("MQ reply body is not valid " + format, cause);
+        }
     }
 
     private void saveIfRequested(Map<String, Object> result, CaseRuntimeContext context, CaseExecutionLog log, String actionId,

@@ -467,6 +467,10 @@ thresholds:
 
 `target.type` is `template`, `flow`, or `tool`. Only Tool targets accept `target.arguments`. Scenario `inputs` become each iteration's `EXEC.INPUT`. Existing v1.0 scenarios continue through the original single-workload path.
 
+#### Live console progress
+
+`load` streams a start/configuration line, then bounded periodic counters, active work, throughput, and mean latency. Failures, errors, timeouts, and dropped arrivals are reported immediately with rate limiting; successful iterations are never printed one by one. `--quiet` keeps only the final summary and errors. `--format json` keeps JSON on stdout and sends live progress to stderr. The final `load-summary` and report remain authoritative.
+
 #### Multi-workload contract (`att-load/v1.1`)
 
 A v1.1 scenario owns one or more named `workloads`. Each workload has a stable `id`, one fixed target, optional inputs/Tool arguments, its own load settings, and optional workload thresholds.
@@ -775,6 +779,8 @@ pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 
 username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY before constructing MQQueueManager. `evidence.payload` accepts `metadata` or `none`; `metadata` keeps only the policy marker in evidence, while `none` omits it. Environment credentials are secret and never enter evidence, logs, reports, or generated docs.
 
+`connection.transport` selects the IBM MQ transport using one of `MQSeries Client`, `MQSeries`, or `MQSeries Bindings`; it defaults to `MQSeries Client` for v1.0 and v1.1, and v1.1 instance values override `defaults.connection.transport`. ATT passes the selected IBM MQ client constant as-is with `MQConstants.TRANSPORT_PROPERTY`; if the installed client lacks that transport constant, ATT reports the required constant and client dependency instead of substituting a numeric value.
+
 message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
 
 `message.requestQueue` and `message.replyQueue` are optional defaults for all matching operations: send/request use `requestQueue`; receive/request use `replyQueue`. For v1.1, ATT selects or resolves the requested physical instance first, materializes that instance's inherited `message` settings, then applies the call argument as the final override. Thus the effective order is explicit call argument > selected instance override > group default > runtime default (if defined) > point-of-use validation error. ATT never borrows a queue default from a different physical instance. If the effective queue is still absent, the call fails before connecting. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
@@ -790,7 +796,7 @@ result:
   overwrite: false
 ~~~
 
-MQ reply bytes are decoded to a native `String` using the received CCSID when available; Action `result.format` does not parse or replace that value. The common formats are `text|json|yaml|xml` and only choose how the typed value is serialized to a file or Case log. There is no public `raw` Action result. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
+MQ reply bytes are decoded using the received CCSID when available, then parsed as the effective `responseFormat` (`text|json|yaml|xml`). For `request`, precedence is call `responseFormat` > selected instance's inherited `requestReply.responseFormat` > `text`; `receive` uses the same precedence. `send` rejects `responseFormat`. Action `result.format` remains serialization-only and never changes the resource response parser. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
 
 ~~~yaml
 - id: requestXml
@@ -1067,6 +1073,7 @@ defaults:
   headers: {Accept: application/json, X-Channel: ATT}
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
+  responseFormat: auto
   followRedirects: false
 pool:
   maxConnections: 50
@@ -1083,7 +1090,7 @@ tls:
 
 The [schema](../schemas/att-httphelper-v1.0.schema.json) rejects unknown fields and unsafe values. `baseUrl` must be absolute HTTP/HTTPS without embedded credentials, query or fragment. Path resolution uses standard URI resolution: `/v1/orders` starts at the origin root, whereas `v1/orders` resolves against the configured base path. Absolute per-call URLs, protocol-relative paths, and paths with a literal query/fragment are rejected. Pass an encoded `query` map instead; query values are omitted from recorded URLs.
 
-Use `#{http.<id>.request(method='POST', path='/v1/orders', ...)}` or convenience `get`, `post`, `put`, `patch`, `delete`, `head`, `options`. Calls must be the primary call of a `type: tool` Action. Arguments are named: `method` (only for `request`), `path`, `query`, `headers`, `body`, `file`, `contentType`, `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs`, and `followRedirects`. Header names compare case-insensitively; call headers override helper defaults. `file` reads exact bytes from a safe Case output or package path; relative file paths start at the Case output directory. `body` accepts bytes, text or a typed value serialized as UTF-8 JSON. `body` and `file` are exclusive; GET and HEAD reject both. Content type may be overridden per call. No implicit cookie session is shared across Cases.
+Use `#{http.<id>.request(method='POST', path='/v1/orders', ...)}` or convenience `get`, `post`, `put`, `patch`, `delete`, `head`, `options`. Calls must be the primary call of a `type: tool` Action. Arguments are named: `method` (only for `request`), `path`, `query`, `headers`, `body`, `file`, `contentType`, `responseFormat`, `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs`, and `followRedirects`. `responseFormat` accepts `auto|text|json|yaml|xml` and applies to every HTTP method; the call overrides `defaults.responseFormat`, whose default is `auto`. Header names compare case-insensitively; call headers override helper defaults. `file` reads exact bytes from a safe Case output or package path; relative file paths start at the Case output directory. `body` accepts bytes, text or a typed value serialized as UTF-8 JSON. `body` and `file` are exclusive; GET and HEAD reject both. Content type may be overridden per call. No implicit cookie session is shared across Cases.
 
 ```yaml
 actions:
@@ -1097,7 +1104,7 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-HTTP response decoding is native and independent of Action `result.format`: JSON media types produce ATT typed JSON values; YAML media types produce typed YAML values; XML media types produce ATT's typed XML value; other textual media types decode using the declared charset or UTF-8. An `application/octet-stream` response fails as `HTTP_FORMAT` because arbitrary bytes are not a supported common Action result. Malformed structured bodies also fail explicitly. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
+`responseFormat: auto` preserves Content-Type-based detection (including `HTTP_FORMAT` for unsupported `application/octet-stream`); explicit formats override Content-Type. JSON/YAML/XML responses use ATT's typed parsers, and `text` returns decoded text. A malformed explicit/auto structured body fails as `HTTP_RESULT_PARSE_ERROR`, distinct from transport/protocol failure. Metadata and evidence record both effective `responseFormat` and `resolvedResponseFormat`. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
 
 HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Public response-header keys are normalized to lowercase so case-sensitive Context paths are stable; repeated values remain lists. Only secret-bearing response headers and values matching configured credentials or values from secret-bearing request headers are redacted. Ordinary values that happen to match `Accept` or another non-secret request header remain visible. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
 
@@ -2306,20 +2313,25 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --queue` | Wait for another ATT process using the same output root |
 | `./att.sh run <selection> --allow-parallel-runs` | Allow concurrent ATT processes; does not parallelize Cases in this run |
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
-| `./att.sh run <selection> --quiet` | Suppress the default lifecycle and Case-log output |
-| `./att.sh run <selection> --verbose` | Explicitly retain the default lifecycle progress and complete Case-log mirroring; accepted for compatibility |
+| `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+| `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | Execute one Tool; auto-discover `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | Override the target's auto-discovered debug input |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
+| `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+| `./att.sh load <scenario.yaml> --quiet` | Suppress periodic live progress; keep the final summary and errors |
+| `./att.sh load <scenario.yaml> --verbose` | Accepted for compatibility; bounded live progress is already the default |
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
 | `./att.sh clean` | Remove documented generated outputs |
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
+
+`run`, `debug`, and `load` default to interactive verbose behavior. Lifecycle, Case, Stage, Action, resource-attempt, retry, assertion, and error records are written as they occur and flushed promptly. The live Case-log mirror uses the same redacted append path as `case.log`; `case.log`, `case.yaml`/`result.yaml`, reports, and evidence remain the persistent source of truth. Concurrent Case-log chunks carry a Case ID prefix. `--quiet` suppresses detailed live progress but retains a final summary and errors. With `--format json`, machine-readable output remains on stdout and live progress is sent to stderr. Load progress prints bounded periodic counters/rates and throttled errors, never one console block per successful iteration.
 
 ### Standalone debug inputs and outputs
 
@@ -2518,7 +2530,9 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with a current `result` field should be upgraded to `att-flow/v3.2` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors are not warned about or rewritten.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with a current `result` field should be upgraded to `att-flow/v3.2` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors remain supported and are never rewritten.
+
+Package validation also emits `ATT-SCHEMA-001` when a descriptor is valid under a registered historical schema but a newer schema for that descriptor family is available. The warning includes the declared and current versions plus the `schemaVersion` source location; validation still uses the declared schema and never rewrites the descriptor. Current versions are not warned. Invalid old descriptors retain their normal validation error and #71 migration guidance without an extra old-version warning. Unsupported versions and missing registered schema resources remain errors. Historical files merely present under `schemas/history/` do not trigger warnings; only package descriptors declaring those versions do.
 
 Current schemas are in [`schemas/`](../schemas/); retained older versions are only in [`schemas/history/`](../schemas/history/). `validate --package` checks every catalog-registered schema resource, even when the package does not currently use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. When a descriptor declares a supported schema, inability to resolve its registered resource is also a hard error; ATT never skips schema verification or falls back to a CWD copy. Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
 

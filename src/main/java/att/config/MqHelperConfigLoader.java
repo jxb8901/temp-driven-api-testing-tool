@@ -93,11 +93,12 @@ public final class MqHelperConfigLoader {
         String name = SchemaSupport.string(map.get("name"), "mqhelper.name", true);
         String description = SchemaSupport.string(map.get("description"), "mqhelper.description", true);
         Map<?, ?> connection = SchemaSupport.map(map.get("connection"), "mqhelper.connection");
-        SchemaSupport.rejectUnknown(connection, "mqhelper.connection", "queueManager", "host", "port", "channel", "username", "password");
+        SchemaSupport.rejectUnknown(connection, "mqhelper.connection", "queueManager", "host", "port", "channel", "transport", "username", "password");
         String queueManager = text(connection.get("queueManager"), "mqhelper.connection.queueManager");
         String host = text(connection.get("host"), "mqhelper.connection.host");
         String channel = text(connection.get("channel"), "mqhelper.connection.channel");
         int port = integer(connection.get("port"), 1414, 1, 65535, "mqhelper.connection.port");
+        String transport = transport(connection.get("transport"), "mqhelper.connection.transport");
         if (containsUnsafeConnectionText(queueManager) || containsUnsafeConnectionText(host) || containsUnsafeConnectionText(channel)) {
             throw new IllegalArgumentException("mqhelper connection values must not contain whitespace or control characters");
         }
@@ -120,8 +121,9 @@ public final class MqHelperConfigLoader {
         String requestQueue = queue(message.get("requestQueue"), "mqhelper.message.requestQueue");
         String replyQueue = queue(message.get("replyQueue"), "mqhelper.message.replyQueue");
         Map<?, ?> requestReply = optionalMap(map.get("requestReply"), "mqhelper.requestReply");
-        SchemaSupport.rejectUnknown(requestReply, "mqhelper.requestReply", "waitMs");
+        SchemaSupport.rejectUnknown(requestReply, "mqhelper.requestReply", "waitMs", "responseFormat");
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.requestReply.waitMs");
+        String responseFormat = responseFormat(requestReply.get("responseFormat"), "mqhelper.requestReply.responseFormat");
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
         SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
         String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "none", "metadata");
@@ -132,7 +134,8 @@ public final class MqHelperConfigLoader {
         long borrowTimeout = durationMs(pool.get("borrowTimeout"), 2000L, "mqhelper.pool.borrowTimeout");
         return new MqHelperConfig(id, name, description, queueManager, host, port, channel,
                 username, password, charset, encoding, expiry, format, persistence,
-                requestQueue, replyQueue, waitMs, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
+                requestQueue, replyQueue, transport, waitMs, responseFormat, payload,
+                poolMaxSize, poolMinIdle, borrowTimeout, file);
     }
 
     private MqHelperConfig parseV11(Map<?, ?> map, Path file) {
@@ -207,6 +210,7 @@ public final class MqHelperConfigLoader {
         String host = text(connection.get("host"), "mqhelper.instances[" + instanceId + "].connection.host");
         String channel = text(connection.get("channel"), "mqhelper.instances[" + instanceId + "].connection.channel");
         int port = integer(connection.get("port"), 0, 1, 65535, "mqhelper.instances[" + instanceId + "].connection.port");
+        String transport = transport(connection.get("transport"), "mqhelper.instances[" + instanceId + "].connection.transport");
         if (containsUnsafeConnectionText(queueManager) || containsUnsafeConnectionText(host) || containsUnsafeConnectionText(channel)) {
             throw new IllegalArgumentException("mqhelper connection values must not contain whitespace or control characters");
         }
@@ -226,12 +230,13 @@ public final class MqHelperConfigLoader {
         String requestQueue = queue(message.get("requestQueue"), "mqhelper.instances[" + instanceId + "].message.requestQueue");
         String replyQueue = queue(message.get("replyQueue"), "mqhelper.instances[" + instanceId + "].message.replyQueue");
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.instances[" + instanceId + "].requestReply.waitMs");
+        String responseFormat = responseFormat(requestReply.get("responseFormat"), "mqhelper.instances[" + instanceId + "].requestReply.responseFormat");
         int poolMaxSize = integer(pool.get("maxSize"), 20, 1, 10000, "mqhelper.instances[" + instanceId + "].pool.maxSize");
         int poolMinIdle = integer(pool.get("minIdle"), 0, 0, poolMaxSize, "mqhelper.instances[" + instanceId + "].pool.minIdle");
         long borrowTimeout = durationMs(pool.get("borrowTimeout"), 2000L, "mqhelper.instances[" + instanceId + "].pool.borrowTimeout");
         MqHelperConfig flat = new MqHelperConfig(instanceId, name, description, queueManager, host, port, channel,
                 username, password, charset, encoding, expiry, format, persistence, requestQueue, replyQueue,
-                waitMs, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
+                transport, waitMs, responseFormat, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
         return MqHelperConfig.physical(flat, logicalId, instanceId);
     }
 
@@ -247,7 +252,7 @@ public final class MqHelperConfigLoader {
     }
 
     private void validateConnectionFields(Map<?, ?> connection, String owner, boolean effective) {
-        SchemaSupport.rejectUnknown(connection, owner, "queueManager", "host", "port", "channel", "username", "password");
+        SchemaSupport.rejectUnknown(connection, owner, "queueManager", "host", "port", "channel", "transport", "username", "password");
         if (effective) {
             if (connection.get("queueManager") == null || connection.get("host") == null || connection.get("port") == null || connection.get("channel") == null) {
                 throw new IllegalArgumentException(owner + " must resolve queueManager, host, port, and channel for every physical instance");
@@ -256,6 +261,7 @@ public final class MqHelperConfigLoader {
         if (connection.get("queueManager") != null) text(connection.get("queueManager"), owner + ".queueManager");
         if (connection.get("host") != null) text(connection.get("host"), owner + ".host");
         if (connection.get("channel") != null) text(connection.get("channel"), owner + ".channel");
+        if (connection.get("transport") != null) transport(connection.get("transport"), owner + ".transport");
         if (connection.get("port") != null) integer(connection.get("port"), 0, 1, 65535, owner + ".port");
         if (connection.get("username") != null) SchemaSupport.string(connection.get("username"), owner + ".username", false);
         if (connection.get("password") != null) SchemaSupport.string(connection.get("password"), owner + ".password", false);
@@ -266,8 +272,17 @@ public final class MqHelperConfigLoader {
     }
 
     private void validateRequestReplyFields(Map<?, ?> requestReply, String owner) {
-        SchemaSupport.rejectUnknown(requestReply, owner, "waitMs");
+        SchemaSupport.rejectUnknown(requestReply, owner, "waitMs", "responseFormat");
         if (requestReply.get("waitMs") != null) integer(requestReply.get("waitMs"), 0, 0, 3600000, owner + ".waitMs");
+        if (requestReply.get("responseFormat") != null) responseFormat(requestReply.get("responseFormat"), owner + ".responseFormat");
+    }
+
+    private String transport(Object value, String owner) {
+        return choice(value, "MQSeries Client", owner, "MQSeries Client", "MQSeries", "MQSeries Bindings");
+    }
+
+    private String responseFormat(Object value, String owner) {
+        return choice(value, "text", owner, "text", "json", "yaml", "xml");
     }
 
     private void validatePoolFields(Map<?, ?> pool, String owner) {

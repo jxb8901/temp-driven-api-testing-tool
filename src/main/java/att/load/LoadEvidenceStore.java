@@ -17,9 +17,14 @@ import java.util.Set;
 /** Bounded failure/sample evidence sink, separate from functional run artifacts. */
 public final class LoadEvidenceStore implements LoadEventListener {
     private final LoadEvidencePolicy policy;
+    private final LoadEventListener observer;
     private final List<LoadEvent> retained = new ArrayList<LoadEvent>();
     private final Set<String> reservedSuccesses = new LinkedHashSet<String>();
-    public LoadEvidenceStore(LoadEvidencePolicy policy) { this.policy = policy; }
+    public LoadEvidenceStore(LoadEvidencePolicy policy) { this(policy, null); }
+    public LoadEvidenceStore(LoadEvidencePolicy policy, LoadEventListener observer) {
+        this.policy = policy;
+        this.observer = observer;
+    }
     public boolean retainsFailureEvidence() { return policy.failure() == LoadEvidencePolicy.Failure.FULL; }
     public synchronized boolean reserveSuccess(String iterationId) {
         if (iterationId == null || reservedSuccesses.contains(iterationId)) return false;
@@ -28,7 +33,12 @@ public final class LoadEvidenceStore implements LoadEventListener {
         reservedSuccesses.add(iterationId);
         return true;
     }
-    @Override public synchronized void onEvent(LoadEvent event) {
+    @Override public void onEvent(LoadEvent event) {
+        if (observer != null) try { observer.onEvent(event); }
+        catch (RuntimeException ignored) { /* Presentation must not alter load execution semantics. */ }
+        retain(event);
+    }
+    private synchronized void retain(LoadEvent event) {
         if (event == null || event.dropped() || !event.completed()) return;
         boolean reserved = reservedSuccesses.remove(event.iterationId());
         if (retained.size() >= policy.maxSamples()) return;

@@ -29,6 +29,8 @@ class MqHelperConfigLoaderTest {
         assertNotNull(broker);
         assertEquals(1414, broker.port());
         assertEquals(2500, broker.requestReplyWaitMs());
+        assertEquals("MQSeries Client", broker.transport());
+        assertEquals("text", broker.responseFormat());
         assertTrue(broker.credentialsConfigured());
         assertFalse(broker.metadata().toString().contains("secret"));
         assertFalse(broker.toString().contains("secret"));
@@ -64,6 +66,33 @@ class MqHelperConfigLoaderTest {
         assertEquals("0", broker.persistence());
         assertEquals("REQUEST.Q", broker.requestQueue());
         assertEquals("REPLY.Q", broker.replyQueue());
+    }
+
+    @Test void loadsTransportAndResponseFormatForV10AndV11Instances() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
+        Path legacy = directory.resolve("legacy.yaml");
+        Files.write(legacy, ("schemaVersion: att-mqhelper/v1.0\n" +
+                "id: legacy\nname: Legacy\ndescription: Legacy MQ\n" +
+                "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.CH, transport: MQSeries}\n" +
+                "requestReply: {responseFormat: yaml}\n").getBytes("UTF-8"));
+        Path group = directory.resolve("group.yaml");
+        Files.write(group, ("schemaVersion: att-mqhelper/v1.1\n" +
+                "id: group\nname: Group\ndescription: Group MQ\n" +
+                "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.CH, transport: 'MQSeries Bindings'}\n" +
+                "  requestReply: {responseFormat: json}\n" +
+                "instances:\n  - id: a\n  - id: b\n    connection: {transport: MQSeries}\n    requestReply: {responseFormat: xml}\n" +
+                "selection: {strategy: roundRobin}\n").getBytes("UTF-8"));
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/legacy.yaml, config/mqhelpers/group.yaml]\n").getBytes("UTF-8"));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
+        assertEquals("MQSeries", loaded.mqHelper("legacy").transport());
+        assertEquals("yaml", loaded.mqHelper("legacy").responseFormat());
+        assertEquals("MQSeries Bindings", loaded.mqHelper("group").instance("a").transport());
+        assertEquals("json", loaded.mqHelper("group").instance("a").responseFormat());
+        assertEquals("MQSeries", loaded.mqHelper("group").instance("b").transport());
+        assertEquals("xml", loaded.mqHelper("group").instance("b").responseFormat());
+        assertEquals("MQSeries", loaded.mqHelper("legacy").metadata().get("transport"));
     }
 
     @Test void rejectsConflictingCharsetAndCcsid() throws Exception {

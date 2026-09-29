@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.Collections;
+import java.util.List;
+import java.util.ArrayList;
 
 /** Resolves a schema only through the package's authoritative schema catalog. */
 public final class SchemaFiles {
@@ -58,6 +61,94 @@ public final class SchemaFiles {
         } catch (Exception error) {
             throw unavailable("Schema catalog cannot be read", "catalog=" + catalog + ", reason=" + error.getMessage(),
                     "Restore a readable schema catalog and the registered schema resources from the ATT package.");
+        }
+    }
+
+    /**
+     * Returns the registered historical schema versions and their current
+     * counterpart. The catalog's current/history locations, not filename
+     * ordering, define which version is current for each descriptor family.
+     */
+    public static Map<String, String> historicalSchemaVersions(Path projectRoot) {
+        List<RegisteredSchema> registered = registeredJsonSchemas(projectRoot);
+        Map<String, String> current = new LinkedHashMap<String, String>();
+        for (RegisteredSchema schema : registered) {
+            if (schema.historical) continue;
+            String family = family(schema.version);
+            String previous = current.put(family, schema.version);
+            if (previous != null && !previous.equals(schema.version))
+                throw unavailable("Schema catalog has multiple current versions", "family=" + family,
+                        "Register exactly one current schema resource for each descriptor family.");
+        }
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        for (RegisteredSchema schema : registered) {
+            if (!schema.historical) continue;
+            String latest = current.get(family(schema.version));
+            if (latest != null && !latest.equals(schema.version)) result.put(schema.version, latest);
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
+    /** Resolves a registered JSON Schema by its declared schemaVersion. */
+    public static Path resolveVersion(Path projectRoot, String schemaVersion) {
+        for (RegisteredSchema schema : registeredJsonSchemas(projectRoot)) {
+            if (schema.version.equals(schemaVersion)) {
+                Path selected = projectRoot.toAbsolutePath().normalize().resolve("schemas").resolve(schema.path).normalize();
+                Path schemas = projectRoot.toAbsolutePath().normalize().resolve("schemas");
+                if (!selected.startsWith(schemas)) throw unavailable("Schema catalog contains an unsafe path", "schemaVersion=" + schemaVersion,
+                        "Use a package-contained path in the schema catalog.");
+                requireRegular(selected, "Registered schema resource is unavailable",
+                        "Restore the registered schema at " + schema.path + ".");
+                return selected;
+            }
+        }
+        throw unavailable("Schema version is not registered", "schemaVersion=" + schemaVersion,
+                "Use a schemaVersion registered by this ATT package.");
+    }
+
+    private static List<RegisteredSchema> registeredJsonSchemas(Path projectRoot) {
+        Path root = projectRoot.toAbsolutePath().normalize();
+        validateCatalog(root);
+        Path schemas = root.resolve("schemas");
+        Path catalog = schemas.resolve("catalog.yaml");
+        try {
+            Object loaded = YamlSupport.load(catalog);
+            Object registry = ((Map<?, ?>) loaded).get("schemas");
+            List<RegisteredSchema> result = new ArrayList<RegisteredSchema>();
+            Set<String> versions = new HashSet<String>();
+            for (Object rawPath : ((Map<?, ?>) registry).values()) {
+                String path = String.valueOf(rawPath).replace('\\', '/');
+                if (!path.endsWith(".json")) continue;
+                Path resource = schemas.resolve(path).normalize();
+                if (!resource.startsWith(schemas)) throw unavailable("Schema catalog contains an unsafe path", "path=" + path,
+                        "Use a package-contained schemas/ or schemas/history/ path in the catalog.");
+                com.fasterxml.jackson.databind.JsonNode document = JsonSupport.mapper().readTree(Files.readAllBytes(resource));
+                com.fasterxml.jackson.databind.JsonNode versionNode = document.path("properties").path("schemaVersion").path("const");
+                if (!versionNode.isTextual()) continue;
+                String version = versionNode.asText();
+                if (!versions.add(version)) throw unavailable("Schema catalog has duplicate schema versions", "schemaVersion=" + version,
+                        "Register each schemaVersion at exactly one path.");
+                result.add(new RegisteredSchema(version, path, path.startsWith("history/")));
+            }
+            return result;
+        } catch (DiagnosticException error) {
+            throw error;
+        } catch (Exception error) {
+            throw unavailable("Schema catalog cannot be read", "catalog=" + catalog + ", reason=" + error.getMessage(),
+                    "Restore a readable schema catalog and its registered JSON Schema resources.");
+        }
+    }
+
+    private static String family(String version) {
+        int marker = version.lastIndexOf("/v");
+        return marker < 0 ? version : version.substring(0, marker);
+    }
+
+    private static final class RegisteredSchema {
+        private final String version, path;
+        private final boolean historical;
+        private RegisteredSchema(String version, String path, boolean historical) {
+            this.version = version; this.path = path; this.historical = historical;
         }
     }
 

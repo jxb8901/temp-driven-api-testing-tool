@@ -205,6 +205,42 @@ class MqHelperExecutorTest {
         assertEquals("HELLO", result.result().get("result"));
     }
 
+    @Test void resourceResponseFormatParsesMqReplyWithoutChangingActionSerializationFormat() throws Exception {
+        Path caseDir = tempDir.resolve("json-response-case"); Files.createDirectories(caseDir);
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1}, "{\"status\":\"ok\",\"count\":2}".getBytes("UTF-8"));
+
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                map("queue", "REPLY.Q", "responseFormat", "json"), context(caseDir), null, "receive-json",
+                "reply", null, "yaml", false);
+
+        assertTrue(result.success());
+        assertEquals("json", result.result().get("responseFormat"));
+        assertEquals("json", result.evidence().get("responseFormat"));
+        assertEquals("yaml", result.evidence().get("resultFormat"));
+        assertEquals("ok", ((Map<?, ?>) result.result().get("result")).get("status"));
+    }
+
+    @Test void invalidMqResponseFormatIsReportedWithoutLeakingPayloadAndSendRejectsItBeforeConnecting() throws Exception {
+        Path caseDir = tempDir.resolve("invalid-response-case"); Files.createDirectories(caseDir);
+        FakeFactory factory = new FakeFactory();
+        factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1}, "SECRET-BODY {".getBytes("UTF-8"));
+        MqInvocationResult invalid = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                map("queue", "REPLY.Q", "responseFormat", "json"), context(caseDir), null, "receive-invalid-json");
+        assertFalse(invalid.success());
+        assertEquals("MQ_RESULT_PARSE_ERROR", ((Map<?, ?>) invalid.result().get("error")).get("type"));
+        assertFalse(invalid.result().toString().contains("SECRET-BODY"));
+        assertFalse(invalid.evidence().toString().contains("SECRET-BODY"));
+
+        Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
+        FakeFactory sendFactory = new FakeFactory();
+        MqInvocationResult send = new MqHelperExecutor(tempDir, config(), sendFactory).execute("broker", "send",
+                map("queue", "REQUEST.Q", "file", payload.toString(), "responseFormat", "json"),
+                context(caseDir), null, "send-response-format");
+        assertFalse(send.success());
+        assertTrue(sendFactory.connectedInstances.isEmpty());
+    }
+
     @Test void noneEvidencePolicyOmitsPayloadEvidence() throws Exception {
         Path caseDir = tempDir.resolve("none-evidence-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1, 2});

@@ -13,6 +13,7 @@
       "headers": {"$ref": "#/$defs/headers"},
       "connectTimeoutMs": {"$ref": "#/$defs/timeout"},
       "readTimeoutMs": {"$ref": "#/$defs/timeout"},
+      "responseFormat": {"enum": ["auto", "text", "json", "yaml", "xml"]},
       "followRedirects": {"type": "boolean"}
     }, "additionalProperties": false},
     "pool": {"type": "object", "properties": {

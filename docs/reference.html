@@ -1336,6 +1336,15 @@ or <code>tool</code>. Only Tool targets accept
 <code>target.arguments</code>. Scenario <code>inputs</code> become each
 iteration's <code>EXEC.INPUT</code>. Existing v1.0 scenarios continue
 through the original single-workload path.</p>
+<h4 id="live-console-progress">Live console progress</h4>
+<p><code>load</code> streams a start/configuration line, then bounded
+periodic counters, active work, throughput, and mean latency. Failures,
+errors, timeouts, and dropped arrivals are reported immediately with
+rate limiting; successful iterations are never printed one by one.
+<code>--quiet</code> keeps only the final summary and errors.
+<code>--format json</code> keeps JSON on stdout and sends live progress
+to stderr. The final <code>load-summary</code> and report remain
+authoritative.</p>
 <h4 id="multi-workload-contract-att-loadv11">Multi-workload contract
 (<code>att-load/v1.1</code>)</h4>
 <p>A v1.1 scenario owns one or more named <code>workloads</code>. Each
@@ -1760,6 +1769,15 @@ PASSWORD_PROPERTY before constructing MQQueueManager.
 <code>none</code>; <code>metadata</code> keeps only the policy marker in
 evidence, while <code>none</code> omits it. Environment credentials are
 secret and never enter evidence, logs, reports, or generated docs.</p>
+<p><code>connection.transport</code> selects the IBM MQ transport using
+one of <code>MQSeries Client</code>, <code>MQSeries</code>, or
+<code>MQSeries Bindings</code>; it defaults to
+<code>MQSeries Client</code> for v1.0 and v1.1, and v1.1 instance values
+override <code>defaults.connection.transport</code>. ATT passes the
+selected IBM MQ client constant as-is with
+<code>MQConstants.TRANSPORT_PROPERTY</code>; if the installed client
+lacks that transport constant, ATT reports the required constant and
+client dependency instead of substituting a numeric value.</p>
 <p>message.charset is an integer IBM MQ CCSID for
 MQMessage.characterSet, not a Java charset name. ccsid remains a
 compatibility alias and must equal charset when both are present.
@@ -1796,14 +1814,17 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href=
 <span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
 <span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> response.txt</span></span>
 <span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
-<p>MQ reply bytes are decoded to a native <code>String</code> using the
-received CCSID when available; Action <code>result.format</code> does
-not parse or replace that value. The common formats are
-<code>text|json|yaml|xml</code> and only choose how the typed value is
-serialized to a file or Case log. There is no public <code>raw</code>
-Action result. A pathless <code>result</code> creates no file;
-<code>path: console</code> writes the selected serialization to the Case
-log and creates no <code>output.targetFiles</code> entry. No implicit
+<p>MQ reply bytes are decoded using the received CCSID when available,
+then parsed as the effective <code>responseFormat</code>
+(<code>text|json|yaml|xml</code>). For <code>request</code>, precedence
+is call <code>responseFormat</code> &gt; selected instance's inherited
+<code>requestReply.responseFormat</code> &gt; <code>text</code>;
+<code>receive</code> uses the same precedence. <code>send</code> rejects
+<code>responseFormat</code>. Action <code>result.format</code> remains
+serialization-only and never changes the resource response parser. A
+pathless <code>result</code> creates no file; <code>path: console</code>
+writes the selected serialization to the Case log and creates no
+<code>output.targetFiles</code> entry. No implicit
 <code>.reply.bin</code> is created. Overwrite/path safety follow the
 common Action rules.</p>
 <div class="sourceCode" id="cb31"><pre
@@ -2253,18 +2274,19 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb54-1"><a href=
 <span id="cb54-7"><a href="#cb54-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">headers</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">Accept</span><span class="kw">:</span><span class="at"> application/json</span><span class="kw">,</span><span class="at"> </span><span class="fu">X-Channel</span><span class="kw">:</span><span class="at"> ATT</span><span class="kw">}</span></span>
 <span id="cb54-8"><a href="#cb54-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
 <span id="cb54-9"><a href="#cb54-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">readTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
-<span id="cb54-10"><a href="#cb54-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">followRedirects</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
-<span id="cb54-11"><a href="#cb54-11" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span></span>
-<span id="cb54-12"><a href="#cb54-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxConnections</span><span class="kw">:</span><span class="at"> </span><span class="dv">50</span></span>
-<span id="cb54-13"><a href="#cb54-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxConnectionsPerRoute</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
-<span id="cb54-14"><a href="#cb54-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectionRequestTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
-<span id="cb54-15"><a href="#cb54-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">keepAliveMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
-<span id="cb54-16"><a href="#cb54-16" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">idleEvictMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">60000</span></span>
-<span id="cb54-17"><a href="#cb54-17" aria-hidden="true" tabindex="-1"></a><span class="fu">auth</span><span class="kw">:</span></span>
-<span id="cb54-18"><a href="#cb54-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> bearer</span></span>
-<span id="cb54-19"><a href="#cb54-19" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">token</span><span class="kw">:</span><span class="at"> ${ENV:PAYMENT_API_TOKEN}</span></span>
-<span id="cb54-20"><a href="#cb54-20" aria-hidden="true" tabindex="-1"></a><span class="fu">tls</span><span class="kw">:</span></span>
-<span id="cb54-21"><a href="#cb54-21" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">verifyHostname</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<span id="cb54-10"><a href="#cb54-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">responseFormat</span><span class="kw">:</span><span class="at"> auto</span></span>
+<span id="cb54-11"><a href="#cb54-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">followRedirects</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
+<span id="cb54-12"><a href="#cb54-12" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span></span>
+<span id="cb54-13"><a href="#cb54-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxConnections</span><span class="kw">:</span><span class="at"> </span><span class="dv">50</span></span>
+<span id="cb54-14"><a href="#cb54-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxConnectionsPerRoute</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
+<span id="cb54-15"><a href="#cb54-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectionRequestTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb54-16"><a href="#cb54-16" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">keepAliveMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
+<span id="cb54-17"><a href="#cb54-17" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">idleEvictMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">60000</span></span>
+<span id="cb54-18"><a href="#cb54-18" aria-hidden="true" tabindex="-1"></a><span class="fu">auth</span><span class="kw">:</span></span>
+<span id="cb54-19"><a href="#cb54-19" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> bearer</span></span>
+<span id="cb54-20"><a href="#cb54-20" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">token</span><span class="kw">:</span><span class="at"> ${ENV:PAYMENT_API_TOKEN}</span></span>
+<span id="cb54-21"><a href="#cb54-21" aria-hidden="true" tabindex="-1"></a><span class="fu">tls</span><span class="kw">:</span></span>
+<span id="cb54-22"><a href="#cb54-22" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">verifyHostname</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>The <a href="../schemas/att-httphelper-v1.0.schema.json">schema</a>
 rejects unknown fields and unsafe values. <code>baseUrl</code> must be
 absolute HTTP/HTTPS without embedded credentials, query or fragment.
@@ -2282,12 +2304,16 @@ or convenience <code>get</code>, <code>post</code>, <code>put</code>,
 <code>type: tool</code> Action. Arguments are named: <code>method</code>
 (only for <code>request</code>), <code>path</code>, <code>query</code>,
 <code>headers</code>, <code>body</code>, <code>file</code>,
-<code>contentType</code>, <code>connectTimeoutMs</code>,
-<code>readTimeoutMs</code>, <code>connectionRequestTimeoutMs</code>, and
-<code>followRedirects</code>. Header names compare case-insensitively;
-call headers override helper defaults. <code>file</code> reads exact
-bytes from a safe Case output or package path; relative file paths start
-at the Case output directory. <code>body</code> accepts bytes, text or a
+<code>contentType</code>, <code>responseFormat</code>,
+<code>connectTimeoutMs</code>, <code>readTimeoutMs</code>,
+<code>connectionRequestTimeoutMs</code>, and
+<code>followRedirects</code>. <code>responseFormat</code> accepts
+<code>auto|text|json|yaml|xml</code> and applies to every HTTP method;
+the call overrides <code>defaults.responseFormat</code>, whose default
+is <code>auto</code>. Header names compare case-insensitively; call
+headers override helper defaults. <code>file</code> reads exact bytes
+from a safe Case output or package path; relative file paths start at
+the Case output directory. <code>body</code> accepts bytes, text or a
 typed value serialized as UTF-8 JSON. <code>body</code> and
 <code>file</code> are exclusive; GET and HEAD reject both. Content type
 may be overridden per call. No implicit cookie session is shared across
@@ -2302,16 +2328,17 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb55-1"><a href=
 <span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a>        contentType=&#39;application/json&#39;)}</span>
 <span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span><span class="kw">,</span><span class="at"> </span><span class="fu">path</span><span class="kw">:</span><span class="at"> responses/payment.json</span><span class="kw">}</span></span>
 <span id="cb55-9"><a href="#cb55-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${output.statusCode} == 201&quot;</span></span></code></pre></div>
-<p>HTTP response decoding is native and independent of Action
-<code>result.format</code>: JSON media types produce ATT typed JSON
-values; YAML media types produce typed YAML values; XML media types
-produce ATT's typed XML value; other textual media types decode using
-the declared charset or UTF-8. An <code>application/octet-stream</code>
-response fails as <code>HTTP_FORMAT</code> because arbitrary bytes are
-not a supported common Action result. Malformed structured bodies also
-fail explicitly. The common Action formats are only <code>text</code>,
-<code>json</code>, <code>yaml</code>, and <code>xml</code>;
-<code>result.format</code> controls serialization to
+<p><code>responseFormat: auto</code> preserves Content-Type-based
+detection (including <code>HTTP_FORMAT</code> for unsupported
+<code>application/octet-stream</code>); explicit formats override
+Content-Type. JSON/YAML/XML responses use ATT's typed parsers, and
+<code>text</code> returns decoded text. A malformed explicit/auto
+structured body fails as <code>HTTP_RESULT_PARSE_ERROR</code>, distinct
+from transport/protocol failure. Metadata and evidence record both
+effective <code>responseFormat</code> and
+<code>resolvedResponseFormat</code>. The common Action formats are only
+<code>text</code>, <code>json</code>, <code>yaml</code>, and
+<code>xml</code>; <code>result.format</code> controls serialization to
 <code>result.path</code> or <code>path: console</code> and never
 reparses or mutates <code>output.result</code>.</p>
 <p>HTTP metadata is directly under <code>output</code>:
@@ -5456,12 +5483,13 @@ run</td>
 </tr>
 <tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --quiet</code></td>
-<td>Suppress the default lifecycle and Case-log output</td>
+<td>Suppress detailed live progress; keep the final summary and
+errors</td>
 </tr>
 <tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --verbose</code></td>
-<td>Explicitly retain the default lifecycle progress and complete
-Case-log mirroring; accepted for compatibility</td>
+<td>Accepted for compatibility; detailed live progress is already the
+default</td>
 </tr>
 <tr class="odd">
 <td><code>./att.sh debug template &lt;id&gt;</code></td>
@@ -5493,19 +5521,34 @@ Case-log mirroring; accepted for compatibility</td>
 remains in <code>result.yaml</code></td>
 </tr>
 <tr class="odd">
+<td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --quiet</code></td>
+<td>Suppress detailed live progress; keep the final summary and
+errors</td>
+</tr>
+<tr class="even">
+<td><code>./att.sh load &lt;scenario.yaml&gt; --quiet</code></td>
+<td>Suppress periodic live progress; keep the final summary and
+errors</td>
+</tr>
+<tr class="odd">
+<td><code>./att.sh load &lt;scenario.yaml&gt; --verbose</code></td>
+<td>Accepted for compatibility; bounded live progress is already the
+default</td>
+</tr>
+<tr class="even">
 <td><code>./att.sh report --run-id &lt;id&gt;</code></td>
 <td>Regenerate <code>report/index.html</code> and
 <code>report/junit.html</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh docs</code></td>
 <td>Generate <code>build/docs/index.html</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh build</code></td>
 <td>Archive latest completed run in <code>build/</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh clean</code></td>
 <td>Remove documented generated outputs</td>
 </tr>
@@ -5515,6 +5558,18 @@ remains in <code>result.yaml</code></td>
 option values are errors. <code>--package</code> and
 <code>--selected</code> are mutually exclusive. Selected validation and
 run require an explicit selection.</p>
+<p><code>run</code>, <code>debug</code>, and <code>load</code> default
+to interactive verbose behavior. Lifecycle, Case, Stage, Action,
+resource-attempt, retry, assertion, and error records are written as
+they occur and flushed promptly. The live Case-log mirror uses the same
+redacted append path as <code>case.log</code>; <code>case.log</code>,
+<code>case.yaml</code>/<code>result.yaml</code>, reports, and evidence
+remain the persistent source of truth. Concurrent Case-log chunks carry
+a Case ID prefix. <code>--quiet</code> suppresses detailed live progress
+but retains a final summary and errors. With <code>--format json</code>,
+machine-readable output remains on stdout and live progress is sent to
+stderr. Load progress prints bounded periodic counters/rates and
+throttled errors, never one console block per successful iteration.</p>
 <h3 id="standalone-debug-inputs-and-outputs">Standalone debug inputs and
 outputs</h3>
 <p>Debug input files use <code>att-debug/v1.0</code>. <code>case</code>
@@ -5890,7 +5945,18 @@ specific <code>result.format/path/overwrite</code> field mappings. If
 the current-schema probe also fails, ATT advises reviewing the original
 violation and current schema without claiming that a version bump is
 enough. Unsupported versions continue to fail as unsupported; valid
-older descriptors are not warned about or rewritten.</p>
+older descriptors remain supported and are never rewritten.</p>
+<p>Package validation also emits <code>ATT-SCHEMA-001</code> when a
+descriptor is valid under a registered historical schema but a newer
+schema for that descriptor family is available. The warning includes the
+declared and current versions plus the <code>schemaVersion</code> source
+location; validation still uses the declared schema and never rewrites
+the descriptor. Current versions are not warned. Invalid old descriptors
+retain their normal validation error and #71 migration guidance without
+an extra old-version warning. Unsupported versions and missing
+registered schema resources remain errors. Historical files merely
+present under <code>schemas/history/</code> do not trigger warnings;
+only package descriptors declaring those versions do.</p>
 <p>Current schemas are in <a
 href="../schemas/"><code>schemas/</code></a>; retained older versions
 are only in <a

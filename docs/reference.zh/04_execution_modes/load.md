@@ -20,6 +20,10 @@ thresholds:
 
 `target.type` 只可以是 `template`、`flow`、`tool`；只有 Tool target 可使用 `target.arguments`。Scenario `inputs` 會成為每個 iteration 的 `EXEC.INPUT`。既有 v1.0 scenario 繼續沿用原本的 single-workload execution path。
 
+#### 即時主控台進度
+
+`load` 會即時輸出 start/configuration，之後定期顯示有界計數、執行中工作、throughput 和平均 latency。Failure、error、timeout 及 dropped arrival 會即時報告並限流；成功 iteration 不會逐筆列印。`--quiet` 只保留最終摘要和錯誤。使用 `--format json` 時，JSON 保留在 stdout，即時進度寫到 stderr。最終 `load-summary` 和 report 仍是權威結果。
+
 #### Multi-workload 契約（`att-load/v1.1`）
 
 v1.1 scenario 包含一個或多個具名 `workloads`。每個 workload 有穩定 `id`、一個固定 target、可選 inputs/Tool arguments、自己的 load 設定，以及可選 workload thresholds。

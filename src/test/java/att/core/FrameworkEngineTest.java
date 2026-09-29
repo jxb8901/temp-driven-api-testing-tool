@@ -95,7 +95,7 @@ class FrameworkEngineTest {
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
                 "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    description: API status\n    assert: \"${ACTIONS.callApi.output.result.Status} == 'SUCCESS'\"\n    expected: SUCCESS\n    actual: \"${ACTIONS.callApi.output.result.Status}\"\n");
-        writeTool(projectRoot.resolve("tools/invoke.sh"), "printf '%s\\n' \"$PWD\" > tool-cwd.txt\nprintf '%s\\n%s\\n' \"$ATT_ROOT_DIR\" \"$ATT_CASE_OUTPUT_DIR\" > tool-env.txt\nprintf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
+        writeTool(projectRoot.resolve("tools/invoke.sh"), "sleep 1\nprintf '%s\\n' \"$PWD\" > tool-cwd.txt\nprintf '%s\\n%s\\n' \"$ATT_ROOT_DIR\" \"$ATT_CASE_OUTPUT_DIR\" > tool-env.txt\nprintf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
                 "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
@@ -107,13 +107,35 @@ class FrameworkEngineTest {
         ExecutionOptions verboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose", "--profile"});
         java.io.ByteArrayOutputStream console = new java.io.ByteArrayOutputStream();
         java.io.PrintStream previous = System.out;
-        RunSummary summary;
+        java.util.concurrent.atomic.AtomicReference<RunSummary> summaryRef = new java.util.concurrent.atomic.AtomicReference<RunSummary>();
+        java.util.concurrent.atomic.AtomicReference<Throwable> runError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Thread running;
+        boolean sawLiveActionStart = false;
+        boolean runStillActiveAtActionStart = false;
         try {
             System.setOut(new java.io.PrintStream(console));
-            summary = new FrameworkEngine(projectRoot, globalConfig()).run(verboseOptions);
+            running = new Thread(() -> {
+                try { summaryRef.set(new FrameworkEngine(projectRoot, globalConfig()).run(verboseOptions)); }
+                catch (Throwable error) { runError.set(error); }
+            });
+            running.start();
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4L);
+            while (System.nanoTime() < deadline && running.isAlive()) {
+                if (console.toString("UTF-8").contains("type: tool, status: START")) {
+                    sawLiveActionStart = true;
+                    runStillActiveAtActionStart = running.isAlive();
+                    break;
+                }
+                Thread.sleep(10L);
+            }
+            running.join(4000L);
         } finally {
             System.setOut(previous);
         }
+        assertTrue(runError.get() == null, String.valueOf(runError.get()));
+        assertTrue(sawLiveActionStart, console.toString("UTF-8"));
+        assertTrue(runStillActiveAtActionStart, "Run Action start must be visible while the Tool is still running");
+        RunSummary summary = summaryRef.get();
         String verbose = console.toString("UTF-8");
         assertTrue(verbose.contains("[RUN] id=TEST-V2"));
         assertTrue(verbose.contains("[SUITE]"));
@@ -121,6 +143,8 @@ class FrameworkEngineTest {
         assertTrue(verbose.contains("[STAGE] case=payments.payment.TC001 stage=invoke"));
         assertTrue(verbose.contains("[ACTION] case=payments.payment.TC001 stage=invoke action=callApi status=PASS"));
         assertTrue(verbose.contains("[CASE-LOG] case=payments.payment.TC001"));
+        assertTrue(verbose.contains("[CASE-LOG case=payments.payment.TC001] [ACTION]"));
+        assertTrue(verbose.contains("resource: TOOL"));
         assertTrue(verbose.contains("<Response>"));
 
         ExecutionOptions defaultOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-DEFAULT"});
@@ -132,6 +156,7 @@ class FrameworkEngineTest {
             System.setOut(previous);
         }
         assertTrue(defaultConsole.toString("UTF-8").contains("[RUN] id=TEST-DEFAULT"));
+        assertTrue(defaultConsole.toString("UTF-8").contains("type: tool, status: START"));
 
         ExecutionOptions noWorkbook = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-NO-WORKBOOK"});
         new FrameworkEngine(projectRoot, globalConfig("none")).run(noWorkbook);

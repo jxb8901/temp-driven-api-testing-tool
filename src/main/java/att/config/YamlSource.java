@@ -2,6 +2,7 @@ package att.config;
 
 import att.validation.SourceLocation;
 import org.yaml.snakeyaml.error.Mark;
+import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.nodes.*;
 import java.nio.file.Path;
 import java.util.*;
@@ -51,6 +52,10 @@ public final class YamlSource {
         ScalarNode scalar = scalars.get(pointer(field));
         if (scalar == null) return location(field);
         SourceLocation range = location(field);
+        if (range.line() != range.endLine() && blockScalar(scalar)) {
+            SourceLocation physical = blockScalarExpressionLocation(scalar, range, offset, lines);
+            if (physical != null) return physical;
+        }
         if (range.line() != range.endLine() || range.line() > lines.size()) return range;
         String line = lines.get(range.line() - 1);
         int start = range.column() - 1;
@@ -66,6 +71,67 @@ public final class YamlSource {
         else return range;
         int column = start + quote + Math.min(Math.max(0, offset), value.length()) + 1;
         return new SourceLocation(file, range.line(), column, range.line(), column, null);
+    }
+
+    public boolean isBlockScalar(String field) {
+        ScalarNode scalar = scalars.get(pointer(field));
+        return scalar != null && blockScalar(scalar);
+    }
+
+    private static boolean blockScalar(ScalarNode scalar) {
+        return scalar.getScalarStyle() == DumperOptions.ScalarStyle.FOLDED
+                || scalar.getScalarStyle() == DumperOptions.ScalarStyle.LITERAL;
+    }
+
+    /** Maps decoded block-scalar offsets back to their original physical source line/column. */
+    private SourceLocation blockScalarExpressionLocation(ScalarNode scalar, SourceLocation range,
+                                                         int offset, List<String> lines) {
+        if (range.line() >= lines.size()) return null;
+        int lastLine = Math.min(range.endLine(), lines.size());
+        int baseIndent = Integer.MAX_VALUE;
+        for (int line = range.line(); line < lastLine; line++) {
+            String raw = lines.get(line);
+            if (raw.trim().isEmpty()) continue;
+            baseIndent = Math.min(baseIndent, indentation(raw));
+        }
+        if (baseIndent == Integer.MAX_VALUE) return null;
+
+        StringBuilder decoded = new StringBuilder();
+        List<Integer> sourceLines = new ArrayList<Integer>();
+        List<Integer> sourceColumns = new ArrayList<Integer>();
+        String previous = null;
+        int previousIndent = baseIndent;
+        for (int index = range.line(); index < lastLine; index++) {
+            String raw = lines.get(index);
+            int indent = Math.min(indentation(raw), raw.length());
+            String content = raw.substring(Math.min(baseIndent, raw.length()));
+            if (content.trim().isEmpty()) content = "";
+            if (previous != null) {
+                boolean preserveBreak = scalar.getScalarStyle() == DumperOptions.ScalarStyle.LITERAL
+                        || previous.isEmpty() || content.isEmpty()
+                        || previousIndent > baseIndent || indent > baseIndent;
+                decoded.append(preserveBreak ? '\n' : ' ');
+                sourceLines.add(index); sourceColumns.add(indent + 1);
+            }
+            for (int column = 0; column < content.length(); column++) {
+                decoded.append(content.charAt(column));
+                sourceLines.add(index + 1); sourceColumns.add(baseIndent + column + 1);
+            }
+            previous = content;
+            previousIndent = indent;
+        }
+        String value = scalar.getValue();
+        if (decoded.length() != value.length() || !decoded.toString().equals(value)) return null;
+        if (value.isEmpty() || sourceLines.isEmpty()) return null;
+        int position = Math.max(0, Math.min(offset, value.length() - 1));
+        return new SourceLocation(file, sourceLines.get(position), sourceColumns.get(position),
+                sourceLines.get(position), sourceColumns.get(position), null);
+    }
+
+    private static int indentation(String line) {
+        int count = 0;
+        while (count < line.length() && (line.charAt(count) == ' ' || line.charAt(count) == '\t')) count++;
+        return count;
     }
 
     public static SourceLocation range(String file, Mark start, Mark end) {

@@ -21,7 +21,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
             properties.put(stringConstant(constants, "HOST_NAME_PROPERTY", "hostname"), config.host());
             properties.put(stringConstant(constants, "PORT_PROPERTY", "port"), Integer.valueOf(config.port()));
             properties.put(stringConstant(constants, "CHANNEL_PROPERTY", "channel"), config.channel());
-            properties.put(stringConstant(constants, "TRANSPORT_PROPERTY", "transport"), constant(constants, "TRANSPORT_MQSERIES_CLIENT", 1));
+            properties.put(transportPropertyName(constants), transportConstant(constants, config.transport()));
             if (config.credentialsConfigured()) {
                 if (!config.username().isEmpty()) properties.put(stringConstant(constants, "USER_ID_PROPERTY", "userID"), config.username());
                 if (!config.password().isEmpty()) properties.put(stringConstant(constants, "PASSWORD_PROPERTY", "password"), config.password());
@@ -127,6 +127,33 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         Method method = target.getClass().getMethod(name, types);
         try { return method.invoke(target, args); }
         catch (InvocationTargetException error) { throw error; }
+    }
+    static String transportPropertyName(Class<?> constants) {
+        Object value = requiredConstant(constants, "TRANSPORT_PROPERTY");
+        if (!(value instanceof String) || ((String) value).trim().isEmpty())
+            throw new IllegalStateException("IBM MQ TRANSPORT_PROPERTY must be a non-blank string constant");
+        return (String) value;
+    }
+    static Object transportConstant(Class<?> constants, String transport) {
+        String constantName;
+        if ("MQSeries Client".equals(transport)) constantName = "TRANSPORT_MQSERIES_CLIENT";
+        else if ("MQSeries".equals(transport)) constantName = "TRANSPORT_MQSERIES";
+        else if ("MQSeries Bindings".equals(transport)) constantName = "TRANSPORT_MQSERIES_BINDINGS";
+        else throw new IllegalArgumentException("Unsupported IBM MQ transport '" + transport
+                    + "'; supported values: MQSeries Client, MQSeries, MQSeries Bindings");
+        return requiredConstant(constants, constantName);
+    }
+    private static Object requiredConstant(Class<?> type, String name) {
+        try {
+            Object value = type.getField(name).get(null);
+            if (value == null) throw new IllegalStateException("IBM MQ constant " + name + " is null");
+            return value;
+        } catch (NoSuchFieldException missing) {
+            throw new IllegalStateException("IBM MQ client does not expose " + name
+                    + " required for the selected transport; upgrade com.ibm.mq:com.ibm.mq.allclient", missing);
+        } catch (IllegalAccessException inaccessible) {
+            throw new IllegalStateException("IBM MQ constant " + name + " is inaccessible", inaccessible);
+        }
     }
     private static void set(Object target, String field, Object value) throws Exception {
         try { Field declared = target.getClass().getField(field); declared.set(target, value); }

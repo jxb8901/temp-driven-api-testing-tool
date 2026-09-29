@@ -178,7 +178,7 @@ public final class ExecutionOptions {
         Set<String> excludeTags = new LinkedHashSet<String>();
         String runId = "";
         boolean all = false, rerun = false, dry = false, failFast = false, updateSnapshot = false, profile = false;
-        boolean quiet = false, verbose = "run".equals(command), explicitVerbose = false, packageScope = false, selectedScope = false;
+        boolean quiet = false, verbose = "run".equals(command) || "debug".equals(command) || "load".equals(command), explicitVerbose = false, packageScope = false, selectedScope = false;
         String format = "human";
         String concurrencyMode = "reject";
         Path output = null;

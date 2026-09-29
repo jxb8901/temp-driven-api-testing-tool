@@ -10,7 +10,7 @@ class FrameworkRunnerTest {
         java.lang.reflect.Method help=FrameworkRunner.class.getDeclaredMethod("help"); help.setAccessible(true);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream(); PrintStream previous=System.out;
         try { System.setOut(new PrintStream(bytes)); help.invoke(null); } finally { System.setOut(previous); }
-        String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertTrue(text.contains("--update-snapshot")); assertTrue(text.contains("att.bat")); assertTrue(text.contains("defaults to --all")); assertTrue(text.contains("verbose lifecycle")); assertTrue(text.contains("debug template|flow|tool")); assertTrue(text.contains("--overload-policy")); assertTrue(text.contains("load-summary.json|yaml")); assertFalse(text.contains("--single-page"));
+        String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertTrue(text.contains("--update-snapshot")); assertTrue(text.contains("att.bat")); assertTrue(text.contains("defaults to --all")); assertTrue(text.contains("stream bounded progress by default")); assertTrue(text.contains("debug template|flow|tool")); assertTrue(text.contains("--overload-policy")); assertTrue(text.contains("load-summary.json|yaml")); assertFalse(text.contains("--single-page"));
     }
 
     @Test void verboseIsAnExplicitOutputModeAndConflictsWithQuiet() {
@@ -24,6 +24,8 @@ class FrameworkRunnerTest {
         assertTrue(quiet.quiet());
         assertFalse(quiet.verbose());
         assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose", "--quiet"}));
+        assertTrue(att.core.ExecutionOptions.parse(new String[]{"debug", "template", "X"}).verbose());
+        assertTrue(att.core.ExecutionOptions.parse(new String[]{"load", "scenario.yaml"}).verbose());
     }
 
     @Test void snapshotDefaultsToAllWorkbooksAndRejectsRunOnlyOptions() {
@@ -69,5 +71,23 @@ class FrameworkRunnerTest {
                         + "    location: file=template.yaml, field=actions.verify.assert, template=VERIFY, action=verify\n"
                         + "    suggestion: Add an assertion.\n",
                 bytes.toString("UTF-8"));
+    }
+
+    @Test void quietValidationKeepsErrorsButSuppressesInformationalDiagnostics() throws Exception {
+        java.util.List<att.validation.Diagnostic> diagnostics = java.util.Arrays.asList(
+                new att.validation.Diagnostic("ATT-TPL-001", att.validation.Diagnostic.Severity.ERROR,
+                        "Action failed", "template.yaml", "actions.call", null, null, null, "PAYMENT", "call", "Inspect case.log."),
+                new att.validation.Diagnostic("ATT-INFO-001", att.validation.Diagnostic.Severity.INFO,
+                        "Optional dependency", "template.yaml", "actions.call", null, null, null, "PAYMENT", "call", "No action required."));
+        att.validation.PackageValidator.ValidationSummary summary = new att.validation.PackageValidator.ValidationSummary("package", 1, 1, 1, 0, diagnostics);
+        att.core.ExecutionOptions options = att.core.ExecutionOptions.parse(new String[]{"validate", "--package", "--quiet"});
+        java.lang.reflect.Method method = FrameworkRunner.class.getDeclaredMethod("printDiagnostics",
+                att.validation.PackageValidator.ValidationSummary.class, att.core.ExecutionOptions.class, PrintStream.class, boolean.class);
+        method.setAccessible(true);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        method.invoke(null, summary, options, new PrintStream(bytes), false);
+        String output = bytes.toString("UTF-8");
+        assertTrue(output.contains("ATT-TPL-001"));
+        assertFalse(output.contains("ATT-INFO-001"));
     }
 }

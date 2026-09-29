@@ -47,20 +47,20 @@ public final class FrameworkRunner {
             profile.end("configLoadMs", profilePhase);
             if ("debug".equals(options.command())) {
                 att.debug.DebugEngine.Result debug = new att.debug.DebugEngine(root, config).run(options);
-                if (!options.quiet()) {
-                    if ("json".equals(options.format())) {
-                        java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
-                        output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
-                        output.put("durationMs", debug.durationMs()); output.put("log", debug.logPath().toString());
-                        output.put("result", debug.resultPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
-                    } else {
-                        String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
-                        System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
-                                + " | Duration: " + debug.durationMs() + "ms");
+                if ("json".equals(options.format())) {
+                    java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
+                    output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
+                    output.put("durationMs", debug.durationMs()); output.put("log", debug.logPath().toString());
+                    output.put("result", debug.resultPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
+                } else {
+                    String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
+                    System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
+                            + " | Duration: " + debug.durationMs() + "ms");
+                    if (!options.quiet()) {
                         System.out.println("Log: " + debug.logPath());
                         System.out.println("Result: " + debug.resultPath());
-                        if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
                     }
+                    if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
                 }
                 if (debug.exitCode() != 0) System.exit(debug.exitCode());
                 return;
@@ -143,6 +143,15 @@ public final class FrameworkRunner {
                 System.out.printf(options.verbose() ? "[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n" : "Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
                 System.out.println("Report: " + summary.reportPath());
+            } else {
+                System.out.printf("Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
+                        summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
+                System.out.println("Report: " + summary.reportPath());
+                for (att.core.TestResult result : summary.results()) {
+                    if (result.status() == att.core.ResultStatus.PASS || result.status() == att.core.ResultStatus.SKIPPED) continue;
+                    System.err.println("[RUN] " + result.status() + " case=" + result.caseId()
+                            + " caseLog=" + result.caseLogPath());
+                }
             }
             if (summary.exitCode() != 0) System.exit(summary.exitCode());
         } catch (IllegalArgumentException e) {
@@ -158,7 +167,7 @@ public final class FrameworkRunner {
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.wrap(DiagnosticCodes.RUN_FAILED,
                     "Unexpected ATT runtime failure", e, null, null,
-                    "Inspect the cause, Case log, and run evidence; rerun with --verbose when safe.");
+                    "Inspect the cause, Case log, and run evidence; use --quiet to suppress live progress.");
             if (options != null && "json".equals(options.format()))
                 System.err.println(att.validation.DiagnosticRenderer.jsonError(typed.toDiagnostic()));
             else System.err.println(typed.format());
@@ -171,48 +180,64 @@ public final class FrameworkRunner {
                                 PerformanceProfile profile) throws Exception {
         Path outputRoot = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
         String runId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty() ? "load-" + System.currentTimeMillis() : options.runId());
-        java.nio.file.Path loadRoot = outputRoot.resolve("load").toAbsolutePath().normalize();
-        java.nio.file.Files.createDirectories(loadRoot);
-        java.nio.file.Path reservedRunDirectory = att.core.IdentifierValidator.strictChild(loadRoot, runId, "Load run directory");
-        if (java.nio.file.Files.exists(reservedRunDirectory))
-            throw new IllegalArgumentException("Load run ID already exists: " + runId + " (" + reservedRunDirectory + "). Choose a different --run-id.");
-        att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario));
-        att.load.LoadRunResult result;
-        java.util.Map<String, Object> resourceMetrics;
-        long loadExecutionPhase = profile.begin();
-        try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
-            att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
-            att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
-                    ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
-                    : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
-            try { result = scheduler.run(); } finally { scheduler.close(); }
-            resourceMetrics = resources.metrics();
+        java.io.PrintStream progressOutput = "json".equals(options.format()) ? System.err : System.out;
+        att.load.LoadConsoleProgress progress = new att.load.LoadConsoleProgress(runId, scenario, progressOutput,
+                options.verbose() && !options.quiet());
+        try {
+            java.nio.file.Path loadRoot = outputRoot.resolve("load").toAbsolutePath().normalize();
+            java.nio.file.Files.createDirectories(loadRoot);
+            java.nio.file.Path reservedRunDirectory = att.core.IdentifierValidator.strictChild(loadRoot, runId, "Load run directory");
+            if (java.nio.file.Files.exists(reservedRunDirectory))
+                throw new IllegalArgumentException("Load run ID already exists: " + runId + " (" + reservedRunDirectory + "). Choose a different --run-id.");
+            att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario), progress);
+            att.load.LoadRunResult result;
+            java.util.Map<String, Object> resourceMetrics;
+            long loadExecutionPhase = profile.begin();
+            try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
+                att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
+                att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
+                        ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
+                        : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
+                try { result = scheduler.run(); } finally { scheduler.close(); }
+                resourceMetrics = resources.metrics();
+            }
+            profile.end("loadExecutionMs", loadExecutionPhase);
+            java.nio.file.Path runDirectory = reservedRunDirectory;
+            java.nio.file.Files.createDirectories(runDirectory);
+            java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
+            result = result.withResources(resourceMetrics)
+                    .withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics()))
+                    .withEvidence(retainedEvidence);
+            long loadReportPhase = profile.begin();
+            java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
+            profile.end("loadReportMs", loadReportPhase);
+            profile.counter("loadScheduled", result.metrics().longValue("scheduled"));
+            profile.counter("loadStarted", result.metrics().longValue("started"));
+            profile.counter("loadCompleted", result.metrics().longValue("completed"));
+            profile.counter("loadDropped", result.metrics().longValue("dropped"));
+            profile.write(runDirectory);
+            int exitCode = result.exitCode();
+            progress.finish(result.status().name());
+            if ("json".equals(options.format())) {
+                java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());
+                output.put("report", report.toString()); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
+            } else if (options.quiet()) {
+                System.out.println("Report: " + report);
+            } else {
+                System.out.println("Report: " + report);
+                System.out.println("Metrics: " + result.metrics().values());
+            }
+            if (exitCode != 0) System.exit(exitCode);
+        } catch (InterruptedException interrupted) {
+            progress.finish("CANCELLED");
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        } catch (Exception error) {
+            progress.finish(Thread.currentThread().isInterrupted() ? "CANCELLED" : "ERROR");
+            throw error;
+        } finally {
+            progress.close();
         }
-        profile.end("loadExecutionMs", loadExecutionPhase);
-        java.nio.file.Path runDirectory = reservedRunDirectory;
-        java.nio.file.Files.createDirectories(runDirectory);
-        java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
-        result = result.withResources(resourceMetrics)
-                .withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics()))
-                .withEvidence(retainedEvidence);
-        long loadReportPhase = profile.begin();
-        java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
-        profile.end("loadReportMs", loadReportPhase);
-        profile.counter("loadScheduled", result.metrics().longValue("scheduled"));
-        profile.counter("loadStarted", result.metrics().longValue("started"));
-        profile.counter("loadCompleted", result.metrics().longValue("completed"));
-        profile.counter("loadDropped", result.metrics().longValue("dropped"));
-        profile.write(runDirectory);
-        int exitCode = result.exitCode();
-        if ("json".equals(options.format())) {
-            java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());
-            output.put("report", report.toString()); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
-        } else if (!options.quiet()) {
-            System.out.println("LOAD " + result.status().name() + " | model=" + scenario.model().wireName() + " | runId=" + result.runId());
-            System.out.println("Report: " + report);
-            System.out.println("Metrics: " + result.metrics().values());
-        }
-        if (exitCode != 0) System.exit(exitCode);
     }
 
     private static void help() {
@@ -221,7 +246,7 @@ public final class FrameworkRunner {
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run enables verbose lifecycle and Case-log output by default; --quiet suppresses it; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run, debug, and load stream bounded progress by default; --quiet keeps the final summary; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {
@@ -231,9 +256,10 @@ public final class FrameworkRunner {
         printDiagnostics(validation, options, output, false);
     }
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output, boolean leadingBlank) {
-        if (options.quiet() || !"human".equals(options.format())) return;
+        if (!"human".equals(options.format())) return;
         java.util.List<att.validation.Diagnostic> visible = new java.util.ArrayList<att.validation.Diagnostic>();
         for (att.validation.Diagnostic diagnostic : validation.diagnostics) {
+            if (options.quiet() && diagnostic.severity() != att.validation.Diagnostic.Severity.ERROR) continue;
             if ("run".equals(options.command()) && !options.verbose()
                     && diagnostic.severity() == att.validation.Diagnostic.Severity.INFO) continue;
             visible.add(diagnostic);

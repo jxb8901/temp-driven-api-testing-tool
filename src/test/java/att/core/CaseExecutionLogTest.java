@@ -3,6 +3,8 @@ package att.core;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.file.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -94,8 +96,45 @@ class CaseExecutionLogTest {
         assertTrue(text.contains("evidenceError"));
     }
 
+    @Test void consoleMirrorFlushesEachAlreadyRedactedAppendWithCaseIdentity() throws Exception {
+        Path file = tempDir.resolve("live.log");
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        CountingPrintStream output = new CountingPrintStream(bytes);
+        CaseExecutionLog log = new CaseExecutionLog(file, false, new CaseLogConsoleMirror("payments.payment.TC001", output));
+        log.registerSecretRedactions(java.util.Collections.singletonList("secret-value"));
+        log.appendRaw("ACTION START", "token=secret-value");
+
+        String live = bytes.toString("UTF-8");
+        String persisted = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(live.startsWith("[CASE-LOG case=payments.payment.TC001] [ACTION START]"));
+        assertTrue(live.contains("token=[REDACTED_SECRET]"));
+        assertFalse(live.contains("secret-value"));
+        assertFalse(persisted.contains("secret-value"));
+        assertTrue(output.flushes > 0);
+    }
+
+    @Test void concurrentMirrorsKeepEachAppendedChunkAtomicAndIdentifiable() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        PrintStream output = new PrintStream(bytes, true, "UTF-8");
+        CaseLogConsoleMirror first = new CaseLogConsoleMirror("case-A", output);
+        CaseLogConsoleMirror second = new CaseLogConsoleMirror("case-B", output);
+        Thread a = new Thread(() -> { for (int i = 0; i < 100; i++) first.accept("event-A-" + i + "\n"); });
+        Thread b = new Thread(() -> { for (int i = 0; i < 100; i++) second.accept("event-B-" + i + "\n"); });
+        a.start(); b.start(); a.join(); b.join();
+        String[] lines = bytes.toString("UTF-8").split("\\n");
+        assertEquals(200, lines.length);
+        for (String line : lines) assertTrue(line.startsWith("[CASE-LOG case=case-A] ")
+                || line.startsWith("[CASE-LOG case=case-B] "), line);
+    }
+
     private Map<String,Object> status(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("status",value);return result;}
     private Map<String,Object> nestedStatus(String value){Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("TOOL",status(value));return result;}
 
     private int occurrences(String text,String value){int count=0,index=0;while((index=text.indexOf(value,index))>=0){count++;index+=value.length();}return count;}
+
+    private static final class CountingPrintStream extends PrintStream {
+        private int flushes;
+        private CountingPrintStream(ByteArrayOutputStream bytes) { super(bytes, true); }
+        @Override public void flush() { flushes++; super.flush(); }
+    }
 }

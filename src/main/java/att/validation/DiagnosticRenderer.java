@@ -50,12 +50,19 @@ public final class DiagnosticRenderer {
             out.append('\n').append(indent).append(item.getKey()).append(": ").append(item.getValue());
         SourceLocation source = diagnostic.source();
         if (source != null && source.excerpt() != null) {
-            out.append('\n').append(indent).append(source.excerpt());
-            out.append('\n').append(indent);
+            String[] excerptLines = source.excerpt().split("\\r?\\n", -1);
+            int caretLine = Math.max(0, Math.min(excerptLines.length - 1, source.line() - source.excerptStartLine()));
+            String markedLine = excerptLines[caretLine];
             // A bad/untrusted column must not allocate an arbitrarily large caret line.
-            int spaces = Math.min(source.column() - 1, source.excerpt().length());
-            for (int index = 0; index < spaces; index++) out.append(source.excerpt().charAt(index) == '\t' ? '\t' : ' ');
-            out.append('^');
+            int spaces = Math.min(Math.max(0, source.column() - 1), markedLine.length());
+            for (int index = 0; index < excerptLines.length; index++) {
+                out.append('\n').append(indent).append(excerptLines[index]);
+                if (index == caretLine) {
+                    out.append('\n').append(indent);
+                    for (int column = 0; column < spaces; column++) out.append(markedLine.charAt(column) == '\t' ? '\t' : ' ');
+                    out.append('^');
+                }
+            }
         }
         if (diagnostic.occurrences() > 1) {
             out.append('\n').append(indent).append("occurrences: ").append(diagnostic.occurrences());

@@ -20,6 +20,10 @@ thresholds:
 
 `target.type` is `template`, `flow`, or `tool`. Only Tool targets accept `target.arguments`. Scenario `inputs` become each iteration's `EXEC.INPUT`. Existing v1.0 scenarios continue through the original single-workload path.
 
+#### Live console progress
+
+`load` streams a start/configuration line, then bounded periodic counters, active work, throughput, and mean latency. Failures, errors, timeouts, and dropped arrivals are reported immediately with rate limiting; successful iterations are never printed one by one. `--quiet` keeps only the final summary and errors. `--format json` keeps JSON on stdout and sends live progress to stderr. The final `load-summary` and report remain authoritative.
+
 #### Multi-workload contract (`att-load/v1.1`)
 
 A v1.1 scenario owns one or more named `workloads`. Each workload has a stable `id`, one fixed target, optional inputs/Tool arguments, its own load settings, and optional workload thresholds.
