@@ -777,7 +777,7 @@ pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 
 username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_PROPERTY/PASSWORD_PROPERTY。`evidence.payload` 支援 `metadata` 或 `none`；`metadata` 只在 evidence 保留 policy marker，`none` 則省略。Environment credential 是 secret，不會進入 evidence、log、report 或 generated docs。
 
-`connection.transport` 可選 `MQSeries Client`、`MQSeries` 或 `MQSeries Bindings`，v1.0/v1.1 預設為 `MQSeries Client`；v1.1 instance 值會覆寫 `defaults.connection.transport`。ATT 會將所選 IBM MQ client constant 原型別連同 `MQConstants.TRANSPORT_PROPERTY` 傳入；若已安裝 client 缺少該 transport constant，會明確指出所需 constant/dependency，不會代換成數字。
+`connection.transport` 可在 v1.1 設定為 `MQSeries Client`、`MQSeries` 或 `MQSeries Bindings`；v1.1 instance 值會覆寫 `defaults.connection.transport`。歷史 v1.0 schema 不接受此欄位，但 runtime 預設仍為 `MQSeries Client`。ATT 會將所選 IBM MQ client constant 原型別連同 `MQConstants.TRANSPORT_PROPERTY` 傳入；若已安裝 client 缺少該 transport constant，會明確指出所需 constant/dependency，不會代換成數字。
 
 message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
 
@@ -794,7 +794,7 @@ result:
   overwrite: false
 ~~~
 
-MQ reply bytes 會先按收到的 CCSID 解碼，再依有效 `responseFormat`（`text|json|yaml|xml`）解析。`request`/`receive` 的優先序為 call `responseFormat` > 所選 instance 繼承後的 `requestReply.responseFormat` > `text`；`send` 不接受 `responseFormat`。Action `result.format` 仍只負責序列化，不會改變 resource response parser。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
+MQ reply bytes 會先按收到的 CCSID 解碼，再依有效 `responseFormat`（`text|json|yaml|xml`）解析。v1.1 可設定 `requestReply.responseFormat`；v1.0 descriptor 不接受此欄位，runtime 預設為 `text`。`request`/`receive` 的優先序為 call `responseFormat` > 所選 instance 繼承後的 v1.1 `requestReply.responseFormat` > `text`；`send` 不接受 `responseFormat`。Action `result.format` 仍只負責序列化，不會改變 resource response parser。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
 
 ~~~yaml
 - id: requestXml

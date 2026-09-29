@@ -93,12 +93,12 @@ public final class MqHelperConfigLoader {
         String name = SchemaSupport.string(map.get("name"), "mqhelper.name", true);
         String description = SchemaSupport.string(map.get("description"), "mqhelper.description", true);
         Map<?, ?> connection = SchemaSupport.map(map.get("connection"), "mqhelper.connection");
-        SchemaSupport.rejectUnknown(connection, "mqhelper.connection", "queueManager", "host", "port", "channel", "transport", "username", "password");
+        SchemaSupport.rejectUnknown(connection, "mqhelper.connection", "queueManager", "host", "port", "channel", "username", "password");
         String queueManager = text(connection.get("queueManager"), "mqhelper.connection.queueManager");
         String host = text(connection.get("host"), "mqhelper.connection.host");
         String channel = text(connection.get("channel"), "mqhelper.connection.channel");
         int port = integer(connection.get("port"), 1414, 1, 65535, "mqhelper.connection.port");
-        String transport = transport(connection.get("transport"), "mqhelper.connection.transport");
+        String transport = transport(null, "mqhelper.connection.transport");
         if (containsUnsafeConnectionText(queueManager) || containsUnsafeConnectionText(host) || containsUnsafeConnectionText(channel)) {
             throw new IllegalArgumentException("mqhelper connection values must not contain whitespace or control characters");
         }
@@ -121,9 +121,9 @@ public final class MqHelperConfigLoader {
         String requestQueue = queue(message.get("requestQueue"), "mqhelper.message.requestQueue");
         String replyQueue = queue(message.get("replyQueue"), "mqhelper.message.replyQueue");
         Map<?, ?> requestReply = optionalMap(map.get("requestReply"), "mqhelper.requestReply");
-        SchemaSupport.rejectUnknown(requestReply, "mqhelper.requestReply", "waitMs", "responseFormat");
+        SchemaSupport.rejectUnknown(requestReply, "mqhelper.requestReply", "waitMs");
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.requestReply.waitMs");
-        String responseFormat = responseFormat(requestReply.get("responseFormat"), "mqhelper.requestReply.responseFormat");
+        String responseFormat = responseFormat(null, "mqhelper.requestReply.responseFormat");
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
         SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
         String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "none", "metadata");

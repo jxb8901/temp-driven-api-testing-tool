@@ -78,6 +78,39 @@ public final class YamlSource {
         return scalar != null && blockScalar(scalar);
     }
 
+    /** Decoded value captured by SnakeYAML for a scalar field, if present. */
+    public String scalarValue(String field) {
+        ScalarNode scalar = scalars.get(pointer(field));
+        return scalar == null ? null : scalar.getValue();
+    }
+
+    /** Finds a short, single-line fragment directly in a block scalar's physical body. */
+    public SourceLocation blockScalarTextLocation(String field, String text, List<String> lines) {
+        ScalarNode scalar = scalars.get(pointer(field));
+        if (scalar == null || !blockScalar(scalar) || text == null || text.isEmpty()) return null;
+        SourceLocation range = location(field);
+        int lastLine = Math.min(range.endLine(), lines.size());
+        for (int line = range.line() + 1; line <= lastLine; line++) {
+            String raw = lines.get(line - 1);
+            int column = raw.indexOf(text);
+            if (column >= 0) return new SourceLocation(file, line, column + 1, line, column + 1, null);
+        }
+        return null;
+    }
+
+    /** Points at the first non-blank physical body line when no precise fragment can be mapped. */
+    public SourceLocation blockScalarBodyLocation(String field, List<String> lines) {
+        if (!isBlockScalar(field)) return null;
+        SourceLocation range = location(field);
+        int lastLine = Math.min(range.endLine(), lines.size());
+        for (int line = range.line() + 1; line <= lastLine; line++) {
+            String raw = lines.get(line - 1);
+            if (!raw.trim().isEmpty()) return new SourceLocation(file, line, indentation(raw) + 1,
+                    line, indentation(raw) + 1, null);
+        }
+        return null;
+    }
+
     private static boolean blockScalar(ScalarNode scalar) {
         return scalar.getScalarStyle() == DumperOptions.ScalarStyle.FOLDED
                 || scalar.getScalarStyle() == DumperOptions.ScalarStyle.LITERAL;

@@ -193,6 +193,14 @@ class HttpHelperExecutorTest {
                     args("path", "/status", "responseFormat", "json"), context, 1000L, "bad-json", "text");
             assertEquals("HTTP_RESULT_PARSE_ERROR", ((Map<?, ?>) parseError.operationResult().outputMetadata().get("error")).get("type"));
             assertFalse(parseError.operationResult().outputMetadata().toString().contains("missing"));
+            assertEquals(404, parseError.operationResult().outputMetadata().get("statusCode"));
+            assertEquals("text/plain; charset=UTF-8", parseError.operationResult().outputMetadata().get("contentType"));
+            assertEquals(7, parseError.operationResult().outputMetadata().get("responseBytes"));
+            Map<?, ?> httpEvidence = (Map<?, ?>) parseError.evidence().get("http");
+            Map<?, ?> invocation = (Map<?, ?>) ((java.util.List<?>) httpEvidence.get("invocations")).get(0);
+            assertEquals(404, invocation.get("statusCode"));
+            assertEquals("text/plain; charset=UTF-8", invocation.get("contentType"));
+            assertEquals(7, invocation.get("responseBytes"));
         }
     }
 

@@ -1769,15 +1769,16 @@ PASSWORD_PROPERTY before constructing MQQueueManager.
 <code>none</code>; <code>metadata</code> keeps only the policy marker in
 evidence, while <code>none</code> omits it. Environment credentials are
 secret and never enter evidence, logs, reports, or generated docs.</p>
-<p><code>connection.transport</code> selects the IBM MQ transport using
-one of <code>MQSeries Client</code>, <code>MQSeries</code>, or
-<code>MQSeries Bindings</code>; it defaults to
-<code>MQSeries Client</code> for v1.0 and v1.1, and v1.1 instance values
-override <code>defaults.connection.transport</code>. ATT passes the
-selected IBM MQ client constant as-is with
-<code>MQConstants.TRANSPORT_PROPERTY</code>; if the installed client
-lacks that transport constant, ATT reports the required constant and
-client dependency instead of substituting a numeric value.</p>
+<p><code>connection.transport</code> is configurable in v1.1 using
+<code>MQSeries Client</code>, <code>MQSeries</code>, or
+<code>MQSeries Bindings</code>; v1.1 instance values override
+<code>defaults.connection.transport</code>. The historical v1.0 schema
+does not accept this field, but its runtime default remains
+<code>MQSeries Client</code>. ATT passes the selected IBM MQ client
+constant as-is with <code>MQConstants.TRANSPORT_PROPERTY</code>; if the
+installed client lacks that transport constant, ATT reports the required
+constant and client dependency instead of substituting a numeric
+value.</p>
 <p>message.charset is an integer IBM MQ CCSID for
 MQMessage.characterSet, not a Java charset name. ccsid remains a
 compatibility alias and must equal charset when both are present.
@@ -1816,8 +1817,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href=
 <span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
 <p>MQ reply bytes are decoded using the received CCSID when available,
 then parsed as the effective <code>responseFormat</code>
-(<code>text|json|yaml|xml</code>). For <code>request</code>, precedence
-is call <code>responseFormat</code> &gt; selected instance's inherited
+(<code>text|json|yaml|xml</code>). v1.1 may configure
+<code>requestReply.responseFormat</code>; v1.0 does not accept this
+descriptor field and keeps the runtime default <code>text</code>. For
+<code>request</code>, precedence is call <code>responseFormat</code>
+&gt; selected instance's inherited v1.1
 <code>requestReply.responseFormat</code> &gt; <code>text</code>;
 <code>receive</code> uses the same precedence. <code>send</code> rejects
 <code>responseFormat</code>. Action <code>result.format</code> remains

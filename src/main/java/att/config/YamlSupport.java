@@ -61,14 +61,47 @@ public final class YamlSupport {
             YamlSource source = SOURCES.get(file.toAbsolutePath().normalize());
             if (source == null) return null;
             att.template.ExpressionSyntaxException syntax = att.template.ExpressionSyntaxException.find(failure);
-            if (syntax != null) try {
-                SourceLocation range = source.location(field);
-                SourceLocation location = source.expressionLocation(field, syntax.offset(),
-                        Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8));
-                return withExcerpt(location, file, field, source.isBlockScalar(field) ? range : null);
+            SourceLocation range = source.location(field);
+            try {
+                java.util.List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8);
+                String reference = syntax == null ? diagnosticReference(failure, source.scalarValue(field)) : null;
+                int offset = syntax == null
+                        ? (reference == null ? -1 : source.scalarValue(field).indexOf(reference))
+                        : syntax.offset();
+                if (offset >= 0) {
+                    SourceLocation location = source.expressionLocation(field, offset, lines);
+                    if (source.isBlockScalar(field) && location.line() == range.line() && reference != null) {
+                        SourceLocation physical = source.blockScalarTextLocation(field, reference, lines);
+                        if (physical != null) location = physical;
+                    }
+                    return withExcerpt(location, file, field, source.isBlockScalar(field) ? range : null);
+                }
+                if (source.isBlockScalar(field)) {
+                    SourceLocation body = source.blockScalarBodyLocation(field, lines);
+                    return withExcerpt(body == null ? range : body, file, field, range);
+                }
             } catch (IOException ignored) { /* Retain the captured scalar range. */ }
-            return withExcerpt(source.location(field), file, field);
+            return withExcerpt(range, file, field);
         }
+    }
+
+    private static String diagnosticReference(Throwable failure, String scalar) {
+        if (scalar == null) return null;
+        DiagnosticException diagnostic = DiagnosticException.find(failure);
+        if (diagnostic == null) return null;
+        String[] messages = {diagnostic.summary(), diagnostic.detail()};
+        for (String message : messages) {
+            if (message == null) continue;
+            int start = 0;
+            while ((start = message.indexOf("${", start)) >= 0) {
+                int end = message.indexOf('}', start + 2);
+                if (end < 0) break;
+                String reference = message.substring(start, end + 1);
+                if (scalar.contains(reference)) return reference;
+                start = end + 1;
+            }
+        }
+        return null;
     }
 
     private static SourceLocation withExcerpt(SourceLocation location, Path file, String field) {

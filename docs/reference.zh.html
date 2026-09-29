@@ -1648,13 +1648,14 @@ MQConstants.USER_ID_PROPERTY/PASSWORD_PROPERTY。<code>evidence.payload</code>
 只在 evidence 保留 policy marker，<code>none</code> 則省略。Environment
 credential 是 secret，不會進入 evidence、log、report 或 generated
 docs。</p>
-<p><code>connection.transport</code> 可選
+<p><code>connection.transport</code> 可在 v1.1 設定為
 <code>MQSeries Client</code>、<code>MQSeries</code> 或
-<code>MQSeries Bindings</code>，v1.0/v1.1 預設為
-<code>MQSeries Client</code>；v1.1 instance 值會覆寫
-<code>defaults.connection.transport</code>。ATT 會將所選 IBM MQ client
-constant 原型別連同 <code>MQConstants.TRANSPORT_PROPERTY</code>
-傳入；若已安裝 client 缺少該 transport constant，會明確指出所需
+<code>MQSeries Bindings</code>；v1.1 instance 值會覆寫
+<code>defaults.connection.transport</code>。歷史 v1.0 schema
+不接受此欄位，但 runtime 預設仍為 <code>MQSeries Client</code>。ATT
+會將所選 IBM MQ client constant 原型別連同
+<code>MQConstants.TRANSPORT_PROPERTY</code> 傳入；若已安裝 client 缺少該
+transport constant，會明確指出所需
 constant/dependency，不會代換成數字。</p>
 <p>message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ
 CCSID，不是 Java charset name；ccsid 是 compatibility
@@ -1689,8 +1690,11 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href=
 <span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">path</span><span class="kw">:</span><span class="at"> response.txt</span></span>
 <span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">overwrite</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
 <p>MQ reply bytes 會先按收到的 CCSID 解碼，再依有效
-<code>responseFormat</code>（<code>text|json|yaml|xml</code>）解析。<code>request</code>/<code>receive</code>
-的優先序為 call <code>responseFormat</code> &gt; 所選 instance 繼承後的
+<code>responseFormat</code>（<code>text|json|yaml|xml</code>）解析。v1.1
+可設定 <code>requestReply.responseFormat</code>；v1.0 descriptor
+不接受此欄位，runtime 預設為
+<code>text</code>。<code>request</code>/<code>receive</code> 的優先序為
+call <code>responseFormat</code> &gt; 所選 instance 繼承後的 v1.1
 <code>requestReply.responseFormat</code> &gt;
 <code>text</code>；<code>send</code> 不接受
 <code>responseFormat</code>。Action <code>result.format</code>

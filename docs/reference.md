@@ -779,7 +779,7 @@ pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 
 username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY before constructing MQQueueManager. `evidence.payload` accepts `metadata` or `none`; `metadata` keeps only the policy marker in evidence, while `none` omits it. Environment credentials are secret and never enter evidence, logs, reports, or generated docs.
 
-`connection.transport` selects the IBM MQ transport using one of `MQSeries Client`, `MQSeries`, or `MQSeries Bindings`; it defaults to `MQSeries Client` for v1.0 and v1.1, and v1.1 instance values override `defaults.connection.transport`. ATT passes the selected IBM MQ client constant as-is with `MQConstants.TRANSPORT_PROPERTY`; if the installed client lacks that transport constant, ATT reports the required constant and client dependency instead of substituting a numeric value.
+`connection.transport` is configurable in v1.1 using `MQSeries Client`, `MQSeries`, or `MQSeries Bindings`; v1.1 instance values override `defaults.connection.transport`. The historical v1.0 schema does not accept this field, but its runtime default remains `MQSeries Client`. ATT passes the selected IBM MQ client constant as-is with `MQConstants.TRANSPORT_PROPERTY`; if the installed client lacks that transport constant, ATT reports the required constant and client dependency instead of substituting a numeric value.
 
 message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
 
@@ -796,7 +796,7 @@ result:
   overwrite: false
 ~~~
 
-MQ reply bytes are decoded using the received CCSID when available, then parsed as the effective `responseFormat` (`text|json|yaml|xml`). For `request`, precedence is call `responseFormat` > selected instance's inherited `requestReply.responseFormat` > `text`; `receive` uses the same precedence. `send` rejects `responseFormat`. Action `result.format` remains serialization-only and never changes the resource response parser. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
+MQ reply bytes are decoded using the received CCSID when available, then parsed as the effective `responseFormat` (`text|json|yaml|xml`). v1.1 may configure `requestReply.responseFormat`; v1.0 does not accept this descriptor field and keeps the runtime default `text`. For `request`, precedence is call `responseFormat` > selected instance's inherited v1.1 `requestReply.responseFormat` > `text`; `receive` uses the same precedence. `send` rejects `responseFormat`. Action `result.format` remains serialization-only and never changes the resource response parser. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
 
 ~~~yaml
 - id: requestXml

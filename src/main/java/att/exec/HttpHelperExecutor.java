@@ -151,11 +151,6 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     byte[] bytes = entity == null ? new byte[0] : EntityUtils.toByteArray(entity);
                     ensureDeadline(deadline, "read");
                     String contentType = response.getFirstHeader("Content-Type") == null ? "" : response.getFirstHeader("Content-Type").getValue();
-                    phase = "http.decode";
-                    String resolvedResponseFormat = resolveResponseFormat(contentType, request.responseFormat);
-                    metadata.put("resolvedResponseFormat", resolvedResponseFormat);
-                    evidence.put("resolvedResponseFormat", resolvedResponseFormat);
-                    Object result = decode(bytes, contentType, resolvedResponseFormat);
                     metadata.put("method", method); metadata.put("url", safeUrl(url, helper));
                     metadata.put("statusCode", status);
                     metadata.put("reasonPhrase", response.getStatusLine().getReasonPhrase());
@@ -163,9 +158,16 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     metadata.put("responseBytes", bytes.length);
                     metadata.put("requestBytes", request.body == null ? 0 : request.body.length);
                     metadata.put("headers", responseHeaders(response, request.headers, helper));
+                    evidence.put("method", method); evidence.put("url", safeUrl(url, helper));
                     evidence.put("statusCode", status); evidence.put("responseBytes", bytes.length);
+                    evidence.put("requestBytes", request.body == null ? 0 : request.body.length);
                     evidence.put("contentType", contentType);
                     evidence.put("durationMs", elapsed(started));
+                    phase = "http.decode";
+                    String resolvedResponseFormat = resolveResponseFormat(contentType, request.responseFormat);
+                    metadata.put("resolvedResponseFormat", resolvedResponseFormat);
+                    evidence.put("resolvedResponseFormat", resolvedResponseFormat);
+                    Object result = decode(bytes, contentType, resolvedResponseFormat);
                     return result(name, invocationId, result, true, metadata, evidence, null);
                 } catch (org.apache.http.conn.ConnectionPoolTimeoutException exhausted) {
                     throw new HttpFailure("HTTP_POOL_TIMEOUT", "HTTP connection pool borrow timed out");
