@@ -467,6 +467,10 @@ thresholds:
 
 `target.type` 只可以是 `template`、`flow`、`tool`；只有 Tool target 可使用 `target.arguments`。Scenario `inputs` 會成為每個 iteration 的 `EXEC.INPUT`。既有 v1.0 scenario 繼續沿用原本的 single-workload execution path。
 
+#### 即時主控台進度
+
+`load` 會即時輸出 start/configuration，之後定期顯示有界計數、執行中工作、throughput 和平均 latency。Failure、error、timeout 及 dropped arrival 會即時報告並限流；成功 iteration 不會逐筆列印。`--quiet` 只保留最終摘要和錯誤。使用 `--format json` 時，JSON 保留在 stdout，即時進度寫到 stderr。最終 `load-summary` 和 report 仍是權威結果。
+
 #### Multi-workload 契約（`att-load/v1.1`）
 
 v1.1 scenario 包含一個或多個具名 `workloads`。每個 workload 有穩定 `id`、一個固定 target、可選 inputs/Tool arguments、自己的 load 設定，以及可選 workload thresholds。
@@ -773,6 +777,8 @@ pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
 
 username/password 在建立 MQQueueManager 前分別對應 MQConstants.USER_ID_PROPERTY/PASSWORD_PROPERTY。`evidence.payload` 支援 `metadata` 或 `none`；`metadata` 只在 evidence 保留 policy marker，`none` 則省略。Environment credential 是 secret，不會進入 evidence、log、report 或 generated docs。
 
+`connection.transport` 可在 v1.1 設定為 `MQSeries Client`、`MQSeries` 或 `MQSeries Bindings`；v1.1 instance 值會覆寫 `defaults.connection.transport`。歷史 v1.0 schema 不接受此欄位，但 runtime 預設仍為 `MQSeries Client`。ATT 會將所選 IBM MQ client constant 原型別連同 `MQConstants.TRANSPORT_PROPERTY` 傳入；若已安裝 client 缺少該 transport constant，會明確指出所需 constant/dependency，不會代換成數字。
+
 message.charset 是寫入 MQMessage.characterSet 的整數 IBM MQ CCSID，不是 Java charset name；ccsid 是 compatibility alias，兩者同時出現必須相等。encoding 寫入 MQMessage.encoding。空的 message.format 合法且保持 empty；MQSTR、MQFMT_STRING、MQHRF2、MQFMT_NONE、NONE 仍支援。persistence 支援 asQueue/0、persistent/1、notPersistent/nonPersistent/2。expiry -1 是 MQEI_UNLIMITED；正數使用 IBM MQ 十分之一秒，不是 milliseconds。
 
 `message.requestQueue` 和 `message.replyQueue` 是各 matching operation 的 optional defaults：send/request 使用 `requestQueue`；receive/request 使用 `replyQueue`。v1.1 會先選擇或解析 physical instance，再 materialize 該 instance 繼承後的 `message` settings，最後套用 call argument。因此有效優先序為 explicit call argument > selected instance override > group default > runtime default（如有）> point-of-use validation error。ATT 不會借用其他 physical instance 的 queue default；若最後仍沒有有效 queue，會在 connect 前令呼叫失敗。Request file 經 MQMessage.write(byte[]) 保持 bytes。只有 request output queue 使用 `MQOO_BIND_NOT_FIXED`；send output 使用普通 `MQOO_OUTPUT`，reply input 使用 shared input。ATT 設定 MQPMO_NEW_MSG_ID，使用 MQGMO_WAIT、MQMO_MATCH_CORREL_ID 和 waitMs 的 waitInterval，以 request MsgId 對 reply correlationId。Put/get 使用 NO_SYNCPOINT，不呼叫 legacy commit()。Descriptor 只有在 `encoding` 是合法的 IBM MQ integer/decimal/float 組合時才會接受。
@@ -788,7 +794,7 @@ result:
   overwrite: false
 ~~~
 
-MQ reply bytes 會按收到的 CCSID 解碼為原生 `String`；Action `result.format` 不會解析或替換該值。共用格式為 `text|json|yaml|xml`，只選擇如何將 typed value 序列化到檔案或 Case log。沒有 public `raw` Action result。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
+MQ reply bytes 會先按收到的 CCSID 解碼，再依有效 `responseFormat`（`text|json|yaml|xml`）解析。v1.1 可設定 `requestReply.responseFormat`；v1.0 descriptor 不接受此欄位，runtime 預設為 `text`。`request`/`receive` 的優先序為 call `responseFormat` > 所選 instance 繼承後的 v1.1 `requestReply.responseFormat` > `text`；`send` 不接受 `responseFormat`。Action `result.format` 仍只負責序列化，不會改變 resource response parser。省略 path 不建立檔案；`path: console` 將選定序列化寫入 Case log，不會新增 `output.targetFiles`。不會隱式建立 `.reply.bin`。Overwrite/path safety 沿用 common Action rules。
 
 ~~~yaml
 - id: requestXml
@@ -1065,6 +1071,7 @@ defaults:
   headers: {Accept: application/json, X-Channel: ATT}
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
+  responseFormat: auto
   followRedirects: false
 pool:
   maxConnections: 50
@@ -1081,7 +1088,7 @@ tls:
 
 [Schema](../schemas/att-httphelper-v1.0.schema.json) 拒絕未知欄位及不安全數值。`baseUrl` 必須是沒有內嵌憑證、query 或 fragment 的絕對 HTTP/HTTPS URL。路徑依標準 URI 規則解析：`/v1/orders` 從 origin root 開始，`v1/orders` 則依 base path 解析。每次呼叫不得使用絕對 URL、`//` path 或內含 query/fragment 的 path；請用 `query` map，由 client 編碼，並從記錄的 URL 移除 query 值。
 
-可使用 `#{http.<id>.request(method='POST', path='/v1/orders', ...)}`，或 `get`、`post`、`put`、`patch`、`delete`、`head`、`options`。HTTP 呼叫必須是 `type: tool` Action 的 primary call。具名參數為 `method`（僅 `request`）、`path`、`query`、`headers`、`body`、`file`、`contentType`、`connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs`、`followRedirects`。Header 名稱不分大小寫，call 值覆蓋 helper 預設。`file` 從安全的 Case output 或 package 路徑逐 byte 讀取；相對路徑從 Case output 開始。`body` 可為 bytes、文字或序列化為 UTF-8 JSON 的型別值。`body` 與 `file` 不可同時設定；GET/HEAD 均不接受 body。`contentType` 可逐次覆蓋。Case 之間不會隱式共享 cookie session。
+可使用 `#{http.<id>.request(method='POST', path='/v1/orders', ...)}`，或 `get`、`post`、`put`、`patch`、`delete`、`head`、`options`。HTTP 呼叫必須是 `type: tool` Action 的 primary call。具名參數為 `method`（僅 `request`）、`path`、`query`、`headers`、`body`、`file`、`contentType`、`responseFormat`、`connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs`、`followRedirects`。`responseFormat` 接受 `auto|text|json|yaml|xml`，適用所有 HTTP method；call 覆蓋 `defaults.responseFormat`，預設為 `auto`。Header 名稱不分大小寫，call 值覆蓋 helper 預設。`file` 從安全的 Case output 或 package 路徑逐 byte 讀取；相對路徑從 Case output 開始。`body` 可為 bytes、文字或序列化為 UTF-8 JSON 的型別值。`body` 與 `file` 不可同時設定；GET/HEAD 均不接受 body。`contentType` 可逐次覆蓋。Case 之間不會隱式共享 cookie session。
 
 ```yaml
 actions:
@@ -1095,7 +1102,7 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-HTTP response 解碼依原生媒體型別進行，與 Action `result.format` 無關：JSON media type 產生 ATT typed JSON 值；YAML media type 產生 typed YAML 值；XML media type 產生 ATT typed XML 值；其他文字媒體依宣告 charset 或 UTF-8 解碼。`application/octet-stream` 因任意 bytes 不是共用 Action 支援的結果而以 `HTTP_FORMAT` 失敗；結構化內容格式錯誤也會明確失敗。共用 Action 格式只有 `text`、`json`、`yaml`、`xml`；`result.format` 只控制寫入 `result.path` 或 `path: console` 的序列化，不會重新解析或改變 `output.result`。
+`responseFormat: auto` 保留依 Content-Type 偵測的行為（不支援的 `application/octet-stream` 仍以 `HTTP_FORMAT` 失敗）；明確指定格式則覆蓋 Content-Type。JSON/YAML/XML 使用 ATT typed parser，`text` 回傳解碼文字。結構化 body 解析失敗會回報獨立的 `HTTP_RESULT_PARSE_ERROR`，與 transport/protocol failure 區分。Metadata/evidence 記錄有效 `responseFormat` 及 `resolvedResponseFormat`。共用 Action 格式只有 `text`、`json`、`yaml`、`xml`；`result.format` 只控制寫入 `result.path` 或 `path: console` 的序列化，不會重新解析或改變 `output.result`。
 
 HTTP metadata 直接位於 `output`：`httpHelper`、`method`、不含 query 的安全 `url`、`statusCode`、`reasonPhrase`、`contentType`、`requestBytes`、`responseBytes` 與多值 `headers`。公開 response-header key 一律轉成小寫，令大小寫敏感的 Context path 穩定；重複值仍以 list 保留。只遮蔽敏感 response header，以及與設定憑證或敏感 request header 值相符的 response 值。一般 `Accept` 等非敏感 request header，即使值相同亦不會遮蔽。Request headers、query 值、認證 secret 與 payload 不會記入 HTTP evidence。
 
@@ -2010,20 +2017,25 @@ ATT 3.3.0 可另外提供 `summary`、`detail`、`source`、`context` 和 `schem
 | `./att.sh run <selection> --output-dir <dir>` | 覆盖输出根目录 |
 | `./att.sh run <selection> --ci-output junit,json` | 写出 CI XML/JSON 与 JUnit HTML |
 | `./att.sh run <selection> --format json` | 输出机器可读摘要 |
-| `./att.sh run <selection> --quiet` | 抑制默认生命周期和完整 Case 日志输出 |
-| `./att.sh run <selection> --verbose` | 明确保留默认生命周期进度和完整 Case 日志镜像；为兼容性保留 |
+| `./att.sh run <selection> --quiet` | 抑制详细实时进度；保留最终摘要和错误 |
+| `./att.sh run <selection> --verbose` | 为兼容性保留；详细实时进度已是默认行为 |
 | `./att.sh debug template <id>` | 执行一个 Template；自动发现 `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | 执行一个规范 Flow；自动发现 `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | 执行一个 Tool；自动发现 `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | 覆盖目标自动发现的 debug 输入 |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 将 debug 输出隔离到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 输出紧凑机器可读摘要；完整证据仍在 `result.yaml` |
+| `./att.sh debug <type> <id> --quiet` | 抑制详细实时进度；保留最终摘要和错误 |
+| `./att.sh load <scenario.yaml> --quiet` | 抑制定期实时进度；保留最终摘要和错误 |
+| `./att.sh load <scenario.yaml> --verbose` | 为兼容性保留；有界实时进度已是默认行为 |
 | `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中归档最新完成 run |
 | `./att.sh clean` | 删除文档化生成输出 |
 
 ### Standalone debug 配置例子
+
+`run`、`debug` 和 `load` 默认采用交互式 verbose 行为。Lifecycle、Case、Stage、Action、资源 attempt、retry、assertion 和错误事件会即时写出并及时 flush。实时 Case-log 镜像复用与 `case.log` 相同的脱敏 append 路径；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事实来源。并发 Case-log 区块会带有 Case ID 前缀。`--quiet` 抑制详细实时进度，但保留最终摘要和错误。使用 `--format json` 时，机器可读内容仍写入 stdout，实时进度写入 stderr。Load 只定期输出有界计数/速率并节流错误，不会为每个成功 iteration 输出一大段内容。
 
 以下每个文件都是完整的 `att-debug/v1.0` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和临时覆盖值的不同写法。
 
@@ -2230,7 +2242,9 @@ ATT 会复制源工作簿，并使用 `report.mode: append-to-copy` 追加配置
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如含現行 `result` 欄位的 `att-flow/v3.0` 應升至 `att-flow/v3.2` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如含現行 `result` 欄位的 `att-flow/v3.0` 應升至 `att-flow/v3.2` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported；合法舊版仍受支援且不會被自動改寫。
+
+Package 驗證亦會對通過其已註冊舊版 schema 的 descriptor 發出 `ATT-SCHEMA-001` WARNING，列明宣告版本、現行版本及 `schemaVersion` 來源位置。驗證仍使用 descriptor 宣告的 schema，不會改寫檔案。現行版本不會警告；舊版 descriptor 若有錯誤，仍保留原有驗證錯誤與 #71 遷移指引，不再額外發出舊版提示。未知版本及缺少已註冊 schema 資源仍屬錯誤。`schemas/history/` 中只因保留歷史 schema 檔案不會觸發警告，只有實際宣告舊版的 package descriptor 才會。
 
 現行 schema 位於 [`schemas/`](../schemas/)，保留的舊版僅位於 [`schemas/history/`](../schemas/history/)。`validate --package` 會檢查 catalog 註冊的每一份 schema，即使 package 當下沒有使用。註冊資源缺失、無法讀取、不安全或重複，會硬性回報 `PACKAGE_INVALID`。描述檔宣告受支援 schema 時，若無法解析其註冊資源亦屬硬錯誤；ATT 不會略過 schema 驗證，也不會退回載入 process CWD 中的副本。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
 

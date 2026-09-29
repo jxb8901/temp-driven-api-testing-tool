@@ -47,20 +47,25 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --queue` | Wait for another ATT process using the same output root |
 | `./att.sh run <selection> --allow-parallel-runs` | Allow concurrent ATT processes; does not parallelize Cases in this run |
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
-| `./att.sh run <selection> --quiet` | Suppress the default lifecycle and Case-log output |
-| `./att.sh run <selection> --verbose` | Explicitly retain the default lifecycle progress and complete Case-log mirroring; accepted for compatibility |
+| `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+| `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | Execute one Tool; auto-discover `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | Override the target's auto-discovered debug input |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
+| `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+| `./att.sh load <scenario.yaml> --quiet` | Suppress periodic live progress; keep the final summary and errors |
+| `./att.sh load <scenario.yaml> --verbose` | Accepted for compatibility; bounded live progress is already the default |
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
 | `./att.sh clean` | Remove documented generated outputs |
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
+
+`run`, `debug`, and `load` default to interactive verbose behavior. Lifecycle, Case, Stage, Action, resource-attempt, retry, assertion, and error records are written as they occur and flushed promptly. The live Case-log mirror uses the same redacted append path as `case.log`; `case.log`, `case.yaml`/`result.yaml`, reports, and evidence remain the persistent source of truth. Concurrent Case-log chunks carry a Case ID prefix. `--quiet` suppresses detailed live progress but retains a final summary and errors. With `--format json`, machine-readable output remains on stdout and live progress is sent to stderr. Load progress prints bounded periodic counters/rates and throttled errors, never one console block per successful iteration.
 
 ### Standalone debug inputs and outputs
 

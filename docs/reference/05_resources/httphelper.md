@@ -23,6 +23,7 @@ defaults:
   headers: {Accept: application/json, X-Channel: ATT}
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
+  responseFormat: auto
   followRedirects: false
 pool:
   maxConnections: 50
@@ -39,7 +40,7 @@ tls:
 
 The [schema](../../schemas/att-httphelper-v1.0.schema.json) rejects unknown fields and unsafe values. `baseUrl` must be absolute HTTP/HTTPS without embedded credentials, query or fragment. Path resolution uses standard URI resolution: `/v1/orders` starts at the origin root, whereas `v1/orders` resolves against the configured base path. Absolute per-call URLs, protocol-relative paths, and paths with a literal query/fragment are rejected. Pass an encoded `query` map instead; query values are omitted from recorded URLs.
 
-Use `#{http.<id>.request(method='POST', path='/v1/orders', ...)}` or convenience `get`, `post`, `put`, `patch`, `delete`, `head`, `options`. Calls must be the primary call of a `type: tool` Action. Arguments are named: `method` (only for `request`), `path`, `query`, `headers`, `body`, `file`, `contentType`, `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs`, and `followRedirects`. Header names compare case-insensitively; call headers override helper defaults. `file` reads exact bytes from a safe Case output or package path; relative file paths start at the Case output directory. `body` accepts bytes, text or a typed value serialized as UTF-8 JSON. `body` and `file` are exclusive; GET and HEAD reject both. Content type may be overridden per call. No implicit cookie session is shared across Cases.
+Use `#{http.<id>.request(method='POST', path='/v1/orders', ...)}` or convenience `get`, `post`, `put`, `patch`, `delete`, `head`, `options`. Calls must be the primary call of a `type: tool` Action. Arguments are named: `method` (only for `request`), `path`, `query`, `headers`, `body`, `file`, `contentType`, `responseFormat`, `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs`, and `followRedirects`. `responseFormat` accepts `auto|text|json|yaml|xml` and applies to every HTTP method; the call overrides `defaults.responseFormat`, whose default is `auto`. Header names compare case-insensitively; call headers override helper defaults. `file` reads exact bytes from a safe Case output or package path; relative file paths start at the Case output directory. `body` accepts bytes, text or a typed value serialized as UTF-8 JSON. `body` and `file` are exclusive; GET and HEAD reject both. Content type may be overridden per call. No implicit cookie session is shared across Cases.
 
 ```yaml
 actions:
@@ -53,7 +54,7 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-HTTP response decoding is native and independent of Action `result.format`: JSON media types produce ATT typed JSON values; YAML media types produce typed YAML values; XML media types produce ATT's typed XML value; other textual media types decode using the declared charset or UTF-8. An `application/octet-stream` response fails as `HTTP_FORMAT` because arbitrary bytes are not a supported common Action result. Malformed structured bodies also fail explicitly. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
+`responseFormat: auto` preserves Content-Type-based detection (including `HTTP_FORMAT` for unsupported `application/octet-stream`); explicit formats override Content-Type. JSON/YAML/XML responses use ATT's typed parsers, and `text` returns decoded text. A malformed explicit/auto structured body fails as `HTTP_RESULT_PARSE_ERROR`, distinct from transport/protocol failure. Metadata and evidence record both effective `responseFormat` and `resolvedResponseFormat`. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
 
 HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Public response-header keys are normalized to lowercase so case-sensitive Context paths are stable; repeated values remain lists. Only secret-bearing response headers and values matching configured credentials or values from secret-bearing request headers are redacted. Ordinary values that happen to match `Accept` or another non-secret request header remain visible. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
 

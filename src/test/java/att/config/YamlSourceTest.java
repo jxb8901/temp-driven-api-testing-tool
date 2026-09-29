@@ -2,6 +2,10 @@ package att.config;
 
 import att.validation.DiagnosticCodes;
 import att.validation.DiagnosticException;
+import att.validation.Diagnostic;
+import att.validation.DiagnosticContext;
+import att.validation.DiagnosticRenderer;
+import att.validation.DiagnosticCodes;
 import att.validation.SourceLocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -73,6 +77,51 @@ class YamlSourceTest {
         assertEquals(10, YamlSupport.location(file, "escaped", syntax).column());
         assertNull(YamlSupport.location(file, "inline.value", null).excerpt());
         assertNull(YamlSupport.location(file, "api.value", null).excerpt());
+    }
+
+    @Test void blockScalarCallErrorsMapToOriginalLineAndRenderBoundedMultilineExcerpts() throws Exception {
+        String foldedText = "call: >-\n  #{http.payment.post(path='/x',\n    responseFormat=json,\n    body=)}\n";
+        Path folded = write("folded-call.yaml", foldedText);
+        Map<?, ?> foldedValue = (Map<?, ?>) YamlSupport.load(folded);
+        String call = String.valueOf(foldedValue.get("call"));
+        int offset = call.indexOf("body=") + "body=".length();
+        att.template.ExpressionSyntaxException failure = new att.template.ExpressionSyntaxException(offset, offset + 1, "value", ")");
+        SourceLocation source = YamlSupport.location(folded, "call", failure);
+        assertEquals(4, source.line());
+        assertEquals(10, source.column());
+        assertTrue(source.excerpt().contains("call: >-"));
+        assertTrue(source.excerpt().contains("body=)}"));
+        assertEquals(source.line(), ((Map<?, ?>) source.toMap()).get("line"));
+        assertEquals(1, ((Map<?, ?>) source.toMap()).get("excerptStartLine"));
+
+        Diagnostic diagnostic = new Diagnostic(DiagnosticCodes.TEMPLATE_INVALID, Diagnostic.Severity.ERROR,
+                "Invalid call expression", folded.toString(), "call", null, null, null, null, null,
+                "Correct the call expression.", null, null, source, DiagnosticContext.EMPTY);
+        String rendered = DiagnosticRenderer.validation(diagnostic);
+        assertTrue(rendered.contains("call: >-"));
+        assertTrue(rendered.contains("body=)}\n             ^"), rendered);
+
+        StringBuilder longBlock = new StringBuilder("call: |-\n");
+        for (int line = 0; line < 20; line++) longBlock.append("  part").append(line).append("\n");
+        longBlock.append("  body=)}\n");
+        Path literal = write("literal-call.yaml", longBlock.toString());
+        Map<?, ?> literalValue = (Map<?, ?>) YamlSupport.load(literal);
+        String literalCall = String.valueOf(literalValue.get("call"));
+        int literalOffset = literalCall.indexOf("body=") + "body=".length();
+        SourceLocation bounded = YamlSupport.location(literal, "call",
+                new att.template.ExpressionSyntaxException(literalOffset, literalOffset + 1, "value", ")"));
+        assertTrue(bounded.excerpt().split("\\r?\\n", -1).length <= 12);
+        assertTrue(bounded.excerpt().contains("body=)}"));
+        assertTrue(bounded.line() > bounded.excerptStartLine());
+
+        Path single = write("single-call.yaml", "call: \"#{http.payment.get(path='/x', body=)}\"\n");
+        Map<?, ?> singleValue = (Map<?, ?>) YamlSupport.load(single);
+        String singleCall = String.valueOf(singleValue.get("call"));
+        SourceLocation inline = YamlSupport.location(single, "call",
+                new att.template.ExpressionSyntaxException(singleCall.indexOf("body=") + 5,
+                        singleCall.indexOf("body=") + 6, "value", ")"));
+        assertEquals(1, inline.line());
+        assertFalse(inline.excerpt().contains("\n"));
     }
 
     @Test void everySchemaViolationCarriesItsOwnPhysicalSource() throws Exception {

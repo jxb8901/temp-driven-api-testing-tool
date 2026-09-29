@@ -23,6 +23,7 @@ defaults:
   headers: {Accept: application/json, X-Channel: ATT}
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
+  responseFormat: auto
   followRedirects: false
 pool:
   maxConnections: 50
@@ -39,7 +40,7 @@ tls:
 
 [Schema](../../schemas/att-httphelper-v1.0.schema.json) 拒絕未知欄位及不安全數值。`baseUrl` 必須是沒有內嵌憑證、query 或 fragment 的絕對 HTTP/HTTPS URL。路徑依標準 URI 規則解析：`/v1/orders` 從 origin root 開始，`v1/orders` 則依 base path 解析。每次呼叫不得使用絕對 URL、`//` path 或內含 query/fragment 的 path；請用 `query` map，由 client 編碼，並從記錄的 URL 移除 query 值。
 
-可使用 `#{http.<id>.request(method='POST', path='/v1/orders', ...)}`，或 `get`、`post`、`put`、`patch`、`delete`、`head`、`options`。HTTP 呼叫必須是 `type: tool` Action 的 primary call。具名參數為 `method`（僅 `request`）、`path`、`query`、`headers`、`body`、`file`、`contentType`、`connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs`、`followRedirects`。Header 名稱不分大小寫，call 值覆蓋 helper 預設。`file` 從安全的 Case output 或 package 路徑逐 byte 讀取；相對路徑從 Case output 開始。`body` 可為 bytes、文字或序列化為 UTF-8 JSON 的型別值。`body` 與 `file` 不可同時設定；GET/HEAD 均不接受 body。`contentType` 可逐次覆蓋。Case 之間不會隱式共享 cookie session。
+可使用 `#{http.<id>.request(method='POST', path='/v1/orders', ...)}`，或 `get`、`post`、`put`、`patch`、`delete`、`head`、`options`。HTTP 呼叫必須是 `type: tool` Action 的 primary call。具名參數為 `method`（僅 `request`）、`path`、`query`、`headers`、`body`、`file`、`contentType`、`responseFormat`、`connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs`、`followRedirects`。`responseFormat` 接受 `auto|text|json|yaml|xml`，適用所有 HTTP method；call 覆蓋 `defaults.responseFormat`，預設為 `auto`。Header 名稱不分大小寫，call 值覆蓋 helper 預設。`file` 從安全的 Case output 或 package 路徑逐 byte 讀取；相對路徑從 Case output 開始。`body` 可為 bytes、文字或序列化為 UTF-8 JSON 的型別值。`body` 與 `file` 不可同時設定；GET/HEAD 均不接受 body。`contentType` 可逐次覆蓋。Case 之間不會隱式共享 cookie session。
 
 ```yaml
 actions:
@@ -53,7 +54,7 @@ actions:
     assert: "${output.statusCode} == 201"
 ```
 
-HTTP response 解碼依原生媒體型別進行，與 Action `result.format` 無關：JSON media type 產生 ATT typed JSON 值；YAML media type 產生 typed YAML 值；XML media type 產生 ATT typed XML 值；其他文字媒體依宣告 charset 或 UTF-8 解碼。`application/octet-stream` 因任意 bytes 不是共用 Action 支援的結果而以 `HTTP_FORMAT` 失敗；結構化內容格式錯誤也會明確失敗。共用 Action 格式只有 `text`、`json`、`yaml`、`xml`；`result.format` 只控制寫入 `result.path` 或 `path: console` 的序列化，不會重新解析或改變 `output.result`。
+`responseFormat: auto` 保留依 Content-Type 偵測的行為（不支援的 `application/octet-stream` 仍以 `HTTP_FORMAT` 失敗）；明確指定格式則覆蓋 Content-Type。JSON/YAML/XML 使用 ATT typed parser，`text` 回傳解碼文字。結構化 body 解析失敗會回報獨立的 `HTTP_RESULT_PARSE_ERROR`，與 transport/protocol failure 區分。Metadata/evidence 記錄有效 `responseFormat` 及 `resolvedResponseFormat`。共用 Action 格式只有 `text`、`json`、`yaml`、`xml`；`result.format` 只控制寫入 `result.path` 或 `path: console` 的序列化，不會重新解析或改變 `output.result`。
 
 HTTP metadata 直接位於 `output`：`httpHelper`、`method`、不含 query 的安全 `url`、`statusCode`、`reasonPhrase`、`contentType`、`requestBytes`、`responseBytes` 與多值 `headers`。公開 response-header key 一律轉成小寫，令大小寫敏感的 Context path 穩定；重複值仍以 list 保留。只遮蔽敏感 response header，以及與設定憑證或敏感 request header 值相符的 response 值。一般 `Accept` 等非敏感 request header，即使值相同亦不會遮蔽。Request headers、query 值、認證 secret 與 payload 不會記入 HTTP evidence。
 

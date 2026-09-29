@@ -12,6 +12,7 @@ public final class HttpHelperConfig {
     private final URI baseUrl;
     private final Map<String, String> headers;
     private final int connectTimeoutMs, readTimeoutMs, maxConnections, maxConnectionsPerRoute;
+    private final String responseFormat;
     private final int connectionRequestTimeoutMs, keepAliveMs, idleEvictMs;
     private final boolean followRedirects;
     private final String authType, username, password, token;
@@ -23,6 +24,16 @@ public final class HttpHelperConfig {
                             int maxConnectionsPerRoute, int connectionRequestTimeoutMs, int keepAliveMs,
                             int idleEvictMs, String authType, String username, String password, String token,
                             Path trustStore, String trustStorePassword) {
+        this(id, baseUrl, headers, connectTimeoutMs, readTimeoutMs, followRedirects, maxConnections,
+                maxConnectionsPerRoute, connectionRequestTimeoutMs, keepAliveMs, idleEvictMs,
+                authType, username, password, token, trustStore, trustStorePassword, "auto");
+    }
+
+    public HttpHelperConfig(String id, URI baseUrl, Map<String, String> headers, int connectTimeoutMs,
+                            int readTimeoutMs, boolean followRedirects, int maxConnections,
+                            int maxConnectionsPerRoute, int connectionRequestTimeoutMs, int keepAliveMs,
+                            int idleEvictMs, String authType, String username, String password, String token,
+                            Path trustStore, String trustStorePassword, String responseFormat) {
         this.id = id; this.baseUrl = baseUrl;
         this.headers = Collections.unmodifiableMap(new LinkedHashMap<String, String>(headers));
         this.connectTimeoutMs = connectTimeoutMs; this.readTimeoutMs = readTimeoutMs;
@@ -32,12 +43,14 @@ public final class HttpHelperConfig {
         this.keepAliveMs = keepAliveMs; this.idleEvictMs = idleEvictMs;
         this.authType = authType; this.username = username; this.password = password; this.token = token;
         this.trustStore = trustStore; this.trustStorePassword = trustStorePassword;
+        this.responseFormat = responseFormat == null ? "auto" : responseFormat;
     }
     public String id() { return id; }
     public URI baseUrl() { return baseUrl; }
     public Map<String, String> headers() { return headers; }
     public int connectTimeoutMs() { return connectTimeoutMs; }
     public int readTimeoutMs() { return readTimeoutMs; }
+    public String responseFormat() { return responseFormat; }
     public boolean followRedirects() { return followRedirects; }
     public int maxConnections() { return maxConnections; }
     public int maxConnectionsPerRoute() { return maxConnectionsPerRoute; }

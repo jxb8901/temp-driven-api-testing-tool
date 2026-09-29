@@ -100,6 +100,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
             Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
             phase = "http.request";
             Request request = request(helper, operation, args, context);
+            metadata.put("responseFormat", request.responseFormat);
+            evidence.put("responseFormat", request.responseFormat);
             metadata.put("method", request.method);
             metadata.put("url", safeUrl(request.url, helper));
             evidence.put("method", request.method); evidence.put("url", safeUrl(request.url, helper));
@@ -149,8 +151,6 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     byte[] bytes = entity == null ? new byte[0] : EntityUtils.toByteArray(entity);
                     ensureDeadline(deadline, "read");
                     String contentType = response.getFirstHeader("Content-Type") == null ? "" : response.getFirstHeader("Content-Type").getValue();
-                    phase = "http.decode";
-                    Object result = decode(bytes, contentType);
                     metadata.put("method", method); metadata.put("url", safeUrl(url, helper));
                     metadata.put("statusCode", status);
                     metadata.put("reasonPhrase", response.getStatusLine().getReasonPhrase());
@@ -158,9 +158,16 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     metadata.put("responseBytes", bytes.length);
                     metadata.put("requestBytes", request.body == null ? 0 : request.body.length);
                     metadata.put("headers", responseHeaders(response, request.headers, helper));
+                    evidence.put("method", method); evidence.put("url", safeUrl(url, helper));
                     evidence.put("statusCode", status); evidence.put("responseBytes", bytes.length);
+                    evidence.put("requestBytes", request.body == null ? 0 : request.body.length);
                     evidence.put("contentType", contentType);
                     evidence.put("durationMs", elapsed(started));
+                    phase = "http.decode";
+                    String resolvedResponseFormat = resolveResponseFormat(contentType, request.responseFormat);
+                    metadata.put("resolvedResponseFormat", resolvedResponseFormat);
+                    evidence.put("resolvedResponseFormat", resolvedResponseFormat);
+                    Object result = decode(bytes, contentType, resolvedResponseFormat);
                     return result(name, invocationId, result, true, metadata, evidence, null);
                 } catch (org.apache.http.conn.ConnectionPoolTimeoutException exhausted) {
                     throw new HttpFailure("HTTP_POOL_TIMEOUT", "HTTP connection pool borrow timed out");
@@ -220,7 +227,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         invocation.put("id", id); invocation.put("type", "http"); invocation.put("name", name);
         invocation.put("status", success ? "PASS" : "ERROR");
         invocation.put("durationMs", evidence.get("durationMs"));
-        for (String key : new String[]{"httpHelper", "method", "url", "statusCode", "responseBytes", "requestBytes", "contentType"})
+        for (String key : new String[]{"httpHelper", "method", "url", "statusCode", "responseBytes", "requestBytes", "contentType", "responseFormat", "resolvedResponseFormat"})
             if (metadata.containsKey(key)) invocation.put(key, metadata.get(key));
         if (diagnostic != null) invocation.put("error", diagnostic);
         invocation.put("HTTP", evidence);
@@ -234,8 +241,14 @@ public final class HttpHelperExecutor implements AutoCloseable {
         for (String key : args.keySet()) if (!("method".equals(key) || "path".equals(key) || "query".equals(key)
                 || "headers".equals(key) || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
                 || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
-                || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)))
+                || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)
+                || "responseFormat".equals(key)))
             throw new HttpFailure("HTTP_ARGUMENT", "Unknown HTTP request argument: " + key);
+        Object requestedFormat = args.get("responseFormat");
+        String responseFormat = requestedFormat == null ? helper.responseFormat() : string(requestedFormat, "responseFormat");
+        if (!("auto".equals(responseFormat) || "text".equals(responseFormat) || "json".equals(responseFormat)
+                || "yaml".equals(responseFormat) || "xml".equals(responseFormat)))
+            throw new HttpFailure("HTTP_ARGUMENT", "responseFormat must be auto, text, json, yaml, or xml");
         String method = "request".equalsIgnoreCase(operation) ? string(args.get("method"), "method") : operation.toUpperCase(Locale.ROOT);
         method = method.toUpperCase(Locale.ROOT);
         if (!("GET".equals(method) || "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)
@@ -294,7 +307,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
                 putHeader(headers, "Content-Type", "application/json; charset=UTF-8");
         }
         boolean redirects = args.get("followRedirects") == null ? helper.followRedirects() : bool(args.get("followRedirects"), "followRedirects");
-        return new Request(method, url, headers, body, redirects,
+        return new Request(method, url, headers, body, redirects, responseFormat,
                 timeout(args.get("connectionRequestTimeoutMs")), timeout(args.get("connectTimeoutMs")), timeout(args.get("readTimeoutMs")));
     }
 
@@ -321,7 +334,19 @@ public final class HttpHelperExecutor implements AutoCloseable {
         if (!real.startsWith(caseRoot) && !real.startsWith(project)) throw new IOException("HTTP request file escapes ATT package");
         return real;
     }
-    private Object decode(byte[] bytes, String contentType) throws Exception {
+    private String resolveResponseFormat(String contentType, String requestedFormat) {
+        if (!"auto".equals(requestedFormat)) return requestedFormat;
+        String mediaType = contentType == null ? "" : contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        if ("application/octet-stream".equals(mediaType))
+            throw new HttpFailure("HTTP_FORMAT", "Binary HTTP response cannot be published as a common typed Action result");
+        if ("application/json".equals(mediaType) || mediaType.endsWith("+json")) return "json";
+        if ("application/yaml".equals(mediaType) || "text/yaml".equals(mediaType)
+                || "application/x-yaml".equals(mediaType) || "text/x-yaml".equals(mediaType)) return "yaml";
+        if ("application/xml".equals(mediaType) || "text/xml".equals(mediaType) || mediaType.endsWith("+xml")) return "xml";
+        return "text";
+    }
+
+    private Object decode(byte[] bytes, String contentType, String format) throws Exception {
         Charset charset = StandardCharsets.UTF_8;
         if (!contentType.isEmpty()) {
             try {
@@ -330,18 +355,9 @@ public final class HttpHelperExecutor implements AutoCloseable {
             } catch (Exception invalidCharset) { throw new HttpFailure("HTTP_FORMAT", "Invalid HTTP response charset"); }
         }
         String text = new String(bytes, charset);
-        String mediaType = contentType == null ? "" : contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
-        if ("application/octet-stream".equals(mediaType)) {
-            throw new HttpFailure("HTTP_FORMAT", "Binary HTTP response cannot be published as a common typed Action result");
-        }
-        String format = null;
-        if ("application/json".equals(mediaType) || mediaType.endsWith("+json")) format = "json";
-        else if ("application/yaml".equals(mediaType) || "text/yaml".equals(mediaType)
-                || "application/x-yaml".equals(mediaType) || "text/x-yaml".equals(mediaType)) format = "yaml";
-        else if ("application/xml".equals(mediaType) || "text/xml".equals(mediaType) || mediaType.endsWith("+xml")) format = "xml";
-        if (format == null) return text;
+        if ("text".equals(format)) return text;
         try { return new ToolInvoker(projectRoot, config).parseOutput(text, format); }
-        catch (Exception invalidBody) { throw new HttpFailure("HTTP_FORMAT", "HTTP response is not valid " + format, invalidBody); }
+        catch (Exception invalidBody) { throw new HttpFailure("HTTP_RESULT_PARSE_ERROR", "HTTP response body is not valid " + format, invalidBody); }
     }
     private static Map<String, List<String>> responseHeaders(HttpResponse response,
                                                               Map<String, String> requestHeaders,
@@ -435,11 +451,13 @@ public final class HttpHelperExecutor implements AutoCloseable {
         private final Map<String, String> headers;
         private final byte[] body;
         private final boolean followRedirects;
+        private final String responseFormat;
         private final Integer poolTimeoutMs, connectTimeoutMs, readTimeoutMs;
         private Request(String method, URI url, Map<String, String> headers, byte[] body,
-                        boolean followRedirects, Integer pool, Integer connect, Integer read) {
+                        boolean followRedirects, String responseFormat, Integer pool, Integer connect, Integer read) {
             this.method = method; this.url = url; this.headers = headers; this.body = body;
             this.followRedirects = followRedirects;
+            this.responseFormat = responseFormat;
             this.poolTimeoutMs = pool; this.connectTimeoutMs = connect; this.readTimeoutMs = read;
         }
     }

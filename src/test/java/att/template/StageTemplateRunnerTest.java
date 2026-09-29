@@ -13,6 +13,39 @@ import static org.junit.jupiter.api.Assertions.*;
 class StageTemplateRunnerTest {
     @TempDir Path tempDir;
 
+    @Test void runtimeContextFailureInsideFoldedCallPointsAtReference() throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        Path templateDir = tempDir.resolve("templates/context-path");
+        Files.createDirectories(templateDir);
+        String reference = "${output.result.EaiRtn.EaiCode}";
+        String templateText = "schemaVersion: att-template/v3.2\nname: Context path\ndescription: Runtime source mapping\n"
+                + "actions:\n  invoke:\n    type: tool\n    call: >-\n"
+                + "      #{sample(value=" + reference + ")}\n";
+        Path descriptor = templateDir.resolve("template.yaml");
+        Files.write(descriptor, templateText.getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load("context-path");
+
+        Path caseDir = tempDir.resolve("context-path-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "Context path", Collections.<String, Object>emptyMap()),
+                "Context path", templateDir);
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute(
+                "invoke", template, context, new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals("ATT-CTX-001", results.get(0).diagnostic().code());
+        att.validation.SourceLocation source = results.get(0).diagnostic().source();
+        assertNotNull(source);
+        assertEquals(8, source.line());
+        assertEquals(templateText.split("\\n")[7].indexOf(reference) + 1, source.column());
+        assertTrue(source.excerpt().contains("call: >-"));
+        assertTrue(source.excerpt().contains(reference));
+    }
+
     @Test void commonResultUsesTypedFormatAndTextRepresentation() throws Exception {
         Path caseDir = tempDir.resolve("v25-save");
         Files.createDirectories(caseDir);

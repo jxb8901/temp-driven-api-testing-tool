@@ -118,10 +118,15 @@ class HttpHelperExecutorTest {
     }
 
     private FrameworkConfig configuration(String url, String pool) throws Exception {
+        return configuration(url, pool, null);
+    }
+
+    private FrameworkConfig configuration(String url, String pool, String responseFormat) throws Exception {
         att.TestSchemas.install(root);
         Files.createDirectories(root.resolve("config/httphelpers"));
         Files.write(root.resolve("config/httphelpers/sit.yaml"), ("schemaVersion: att-httphelper/v1.0\nid: paymentApi\nbaseUrl: " + url
                 + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: 1000\n"
+                + (responseFormat == null ? "" : "  responseFormat: " + responseFormat + "\n")
                 + (pool == null ? "" : "pool:\n" + pool)).getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.0\nid: paymentApi\nbaseUrl: " + url
                 + "/uat\n").getBytes(StandardCharsets.UTF_8));
@@ -130,6 +135,73 @@ class HttpHelperExecutorTest {
                 + "  SIT: {httphelpers: [config/httphelpers/sit.yaml]}\n"
                 + "  UAT: {httphelpers: [config/httphelpers/uat.yaml]}\n").getBytes(StandardCharsets.UTF_8));
         return new FrameworkConfigLoader().load(config, root, "SIT");
+    }
+
+    @Test void resourceResponseFormatHasCallOverrideAndAutoPreservesContentTypeDetection() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null, "text");
+        assertEquals("text", config.httpHelper("paymentApi").responseFormat());
+        CaseRuntimeContext context = context();
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            ToolInvocationResult helperDefault = http.execute("paymentApi", "get", args("path", "/json"),
+                    context, 1000L, "http-default-text", "xml");
+            assertTrue(helperDefault.executionSuccess());
+            assertEquals("{\"ok\":true}", helperDefault.output());
+            assertEquals("text", helperDefault.operationResult().outputMetadata().get("responseFormat"));
+            assertEquals("text", helperDefault.operationResult().outputMetadata().get("resolvedResponseFormat"));
+
+            ToolInvocationResult callOverride = http.execute("paymentApi", "get",
+                    args("path", "/json", "responseFormat", "json"), context, 1000L, "http-call-json", "text");
+            assertTrue(callOverride.executionSuccess());
+            assertEquals(Boolean.TRUE, ((Map<?, ?>) callOverride.output()).get("ok"));
+            Map<?, ?> httpEvidence = (Map<?, ?>) callOverride.operationResult().evidence().get("http");
+            Map<?, ?> invocationEvidence = (Map<?, ?>) ((java.util.List<?>) httpEvidence.get("invocations")).get(0);
+            assertEquals("json", invocationEvidence.get("responseFormat"));
+            assertEquals("json", invocationEvidence.get("resolvedResponseFormat"));
+
+            ToolInvocationResult contentTypeOverride = http.execute("paymentApi", "post",
+                    args("path", "/echo", "body", args("ok", true), "responseFormat", "json"),
+                    context, 1000L, "http-octets-as-json", "yaml");
+            assertTrue(contentTypeOverride.executionSuccess(), String.valueOf(contentTypeOverride.operationResult().diagnostic()));
+            assertEquals(Boolean.TRUE, ((Map<?, ?>) contentTypeOverride.output()).get("ok"));
+            assertEquals("json", contentTypeOverride.operationResult().outputMetadata().get("resolvedResponseFormat"));
+        }
+
+        FrameworkConfig automatic = configuration(url, null);
+        assertEquals("auto", automatic.httpHelper("paymentApi").responseFormat());
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, automatic)) {
+            ToolInvocationResult auto = http.execute("paymentApi", "get", args("path", "/json"),
+                    context, 1000L, "http-auto", "text");
+            assertEquals(Boolean.TRUE, ((Map<?, ?>) auto.output()).get("ok"));
+            assertEquals("auto", auto.operationResult().outputMetadata().get("responseFormat"));
+            assertEquals("json", auto.operationResult().outputMetadata().get("resolvedResponseFormat"));
+        }
+    }
+
+    @Test void responseFormatValidationAndParseFailuresAreSafeAndDistinct() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null);
+        CaseRuntimeContext context = context();
+        int before = hits.get();
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            ToolInvocationResult invalidFormat = http.execute("paymentApi", "get",
+                    args("path", "/json", "responseFormat", "binary"), context, 1000L, "bad-response-format", "text");
+            assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) invalidFormat.operationResult().outputMetadata().get("error")).get("type"));
+            assertEquals(before, hits.get());
+
+            ToolInvocationResult parseError = http.execute("paymentApi", "get",
+                    args("path", "/status", "responseFormat", "json"), context, 1000L, "bad-json", "text");
+            assertEquals("HTTP_RESULT_PARSE_ERROR", ((Map<?, ?>) parseError.operationResult().outputMetadata().get("error")).get("type"));
+            assertFalse(parseError.operationResult().outputMetadata().toString().contains("missing"));
+            assertEquals(404, parseError.operationResult().outputMetadata().get("statusCode"));
+            assertEquals("text/plain; charset=UTF-8", parseError.operationResult().outputMetadata().get("contentType"));
+            assertEquals(7, parseError.operationResult().outputMetadata().get("responseBytes"));
+            Map<?, ?> httpEvidence = (Map<?, ?>) parseError.evidence().get("http");
+            Map<?, ?> invocation = (Map<?, ?>) ((java.util.List<?>) httpEvidence.get("invocations")).get(0);
+            assertEquals(404, invocation.get("statusCode"));
+            assertEquals("text/plain; charset=UTF-8", invocation.get("contentType"));
+            assertEquals(7, invocation.get("responseBytes"));
+        }
     }
 
     private CaseRuntimeContext context() throws Exception {

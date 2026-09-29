@@ -8,7 +8,9 @@
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如含現行 `result` 欄位的 `att-flow/v3.0` 應升至 `att-flow/v3.2` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported，合法舊版檔案不會被警告或自動改寫。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 會先用描述檔**宣告的**舊版 schema 驗證，適用於 config、Flow、Template、Tool Group、sidecar、load scenario 及 MQHelper 等保留舊版的類型。若檔案只改 `schemaVersion` 便能通過現行 schema，診斷會保留原違規、檔案及 YAML 欄位位置，並列出宣告／現行版本與升級建議。例如含現行 `result` 欄位的 `att-flow/v3.0` 應升至 `att-flow/v3.2` 後重驗。`renderAs`／`saveAs` 仍提供專門的 `result.format/path/overwrite` 欄位對照。若現行 schema 探測也失敗，ATT 會建議檢視原違規與現行 schema，不會聲稱只改版本便足夠。未知版本仍報 unsupported；合法舊版仍受支援且不會被自動改寫。
+
+Package 驗證亦會對通過其已註冊舊版 schema 的 descriptor 發出 `ATT-SCHEMA-001` WARNING，列明宣告版本、現行版本及 `schemaVersion` 來源位置。驗證仍使用 descriptor 宣告的 schema，不會改寫檔案。現行版本不會警告；舊版 descriptor 若有錯誤，仍保留原有驗證錯誤與 #71 遷移指引，不再額外發出舊版提示。未知版本及缺少已註冊 schema 資源仍屬錯誤。`schemas/history/` 中只因保留歷史 schema 檔案不會觸發警告，只有實際宣告舊版的 package descriptor 才會。
 
 現行 schema 位於 [`schemas/`](../../schemas/)，保留的舊版僅位於 [`schemas/history/`](../../schemas/history/)。`validate --package` 會檢查 catalog 註冊的每一份 schema，即使 package 當下沒有使用。註冊資源缺失、無法讀取、不安全或重複，會硬性回報 `PACKAGE_INVALID`。描述檔宣告受支援 schema 時，若無法解析其註冊資源亦屬硬錯誤；ATT 不會略過 schema 驗證，也不會退回載入 process CWD 中的副本。作者確認遷移建議後自行更新版本及必要欄位，再對各 `--env` 重跑 `validate --package`；驗證不會改寫 YAML。
 

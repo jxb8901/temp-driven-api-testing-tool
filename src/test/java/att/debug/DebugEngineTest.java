@@ -9,11 +9,14 @@ import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,6 +71,74 @@ class DebugEngineTest {
         assertEquals("ATT-DEBUG-001", result.diagnostic().code());
         assertTrue(Files.exists(result.logPath()));
         assertFalse(Files.exists(project.resolve("output/latest-run.yaml")));
+    }
+
+    @Test void streamsDebugActionStartBeforeSlowToolReturns() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Files.createDirectories(project.resolve("templates/SLOW"));
+        Files.write(project.resolve("templates/SLOW/template.yaml"), (
+                "schemaVersion: att-template/v2.3\nname: SLOW\ndescription: slow debug\nactions:\n"
+                        + "  wait:\n    type: tool\n    call: '#{slow()}'\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/SLOW/debug.yaml"),
+                "schemaVersion: att-debug/v1.0\ncase: {caseName: slow}\n".getBytes(StandardCharsets.UTF_8));
+        ToolConfig slow = new ToolConfig("slow", "Slow", "Slow test tool", "/bin/sleep 1", "txt",
+                Collections.<String, ToolArgumentConfig>emptyMap());
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("slow", slow), null, null);
+        DebugEngine engine = new DebugEngine(project, config);
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"debug", "template", "SLOW"});
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        AtomicReference<DebugEngine.Result> result = new AtomicReference<DebugEngine.Result>();
+        AtomicReference<Throwable> error = new AtomicReference<Throwable>();
+        Thread execution = new Thread(() -> {
+            try { result.set(engine.run(options)); }
+            catch (Throwable failure) { error.set(failure); }
+        });
+        boolean sawStart = false;
+        boolean stillRunningAtStart = false;
+        try {
+            System.setOut(new PrintStream(bytes, true, "UTF-8"));
+            execution.start();
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4L);
+            while (System.nanoTime() < deadline && execution.isAlive()) {
+                if (bytes.toString("UTF-8").contains("type: tool, status: START")) {
+                    sawStart = true;
+                    stillRunningAtStart = execution.isAlive();
+                    break;
+                }
+                Thread.sleep(10L);
+            }
+            execution.join(4000L);
+        } finally {
+            System.setOut(previous);
+        }
+        assertNull(error.get());
+        assertTrue(sawStart, bytes.toString("UTF-8"));
+        assertTrue(stillRunningAtStart, "the Action start must be visible while the Tool is still running");
+        assertNotNull(result.get());
+        assertEquals(ResultStatus.PASS, result.get().status());
+        String live = bytes.toString("UTF-8");
+        assertTrue(live.contains("[DEBUG] INPUT target=template:SLOW"));
+        assertTrue(live.contains("resource: TOOL"));
+        assertTrue(live.contains("status: PASS"));
+    }
+
+    @Test void mirrorsInternalStackDiagnosticsLiveAndKeepsThemInCaseLog() throws Exception {
+        Path logPath = temp.resolve("internal-case.log");
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        PrintStream output = new PrintStream(bytes, true, "UTF-8");
+        att.core.CaseExecutionLog log = new att.core.CaseExecutionLog(logPath, false,
+                new att.core.CaseLogConsoleMirror("DEBUG.template.INTERNAL", output));
+        assertTrue(att.core.InternalExceptionLogger.logIfInternal(log, "template.assign",
+                new NullPointerException("synthetic internal failure"), Collections.<String>emptyList()));
+        log.close();
+        String live = bytes.toString("UTF-8");
+        String persisted = new String(Files.readAllBytes(logPath), StandardCharsets.UTF_8);
+        assertTrue(live.contains("[ATT INTERNAL ERROR]"));
+        assertTrue(persisted.contains("[ATT INTERNAL ERROR]"));
+        assertTrue(live.contains("NullPointerException"));
+        assertTrue(persisted.contains("NullPointerException"));
     }
 
     private DebugEngine.Result run(Path project, FrameworkConfig config, String type, String id, String... extra) throws Exception {

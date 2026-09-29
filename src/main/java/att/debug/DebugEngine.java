@@ -52,6 +52,15 @@ public final class DebugEngine {
     }
 
     public Result run(ExecutionOptions options) throws Exception {
+        java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
+        String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
+        att.core.ConsoleCancellationHook cancellation = new att.core.ConsoleCancellationHook(cancellationOutput,
+                "[DEBUG] CANCELLED target=" + target);
+        try { return runInternal(options); }
+        finally { cancellation.close(); }
+    }
+
+    private Result runInternal(ExecutionOptions options) throws Exception {
         Instant started = Instant.now();
         String targetType = options.debugTargetType();
         String targetId = options.debugTargetId();
@@ -86,12 +95,23 @@ public final class DebugEngine {
         List<ValidationResult> actionResults = new ArrayList<ValidationResult>();
 
         try {
-            log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors());
+            java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
+            if (options.verbose() && !options.quiet())
+                consoleLine(console, "[DEBUG] START target=" + targetType + ":" + targetId
+                        + " input=" + (options.debugInput() == null ? "auto" : options.debugInput())
+                        + " output=" + debugDirectory);
+            log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors(),
+                    options.verbose() && !options.quiet()
+                            ? new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId, console)
+                            : null);
             input = loadInput(options, targetType, targetId);
             result.put("input", input.path.toString());
             ResolvedTarget resolved = resolveTarget(targetType, targetId, input);
             StageCaseData stage = input.stage(resolved.template.name());
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
+            if (options.verbose() && !options.quiet())
+                consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
+                        + " case=" + testCase.caseId() + " resolved=" + input.path);
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                     resolved.flows, input.path, "debug", input.inputs);
@@ -148,7 +168,7 @@ public final class DebugEngine {
         } catch (Exception e) {
             diagnostic = new DiagnosticException(DiagnosticCodes.RUN_FAILED, "Debug execution failed",
                     e.getMessage(), null, "debug", null, null, null, targetId, null,
-                    "Inspect case.log and artifacts, then rerun with --verbose.", e)
+                    "Inspect case.log and artifacts; use --quiet to suppress live progress.", e)
                     .withDetail("Debug input: " + (input == null ? expectedInput(options, targetType, targetId) : input.path));
             status = ResultStatus.ERROR;
             exitCode = 3;
@@ -297,6 +317,17 @@ public final class DebugEngine {
     private void appendError(CaseExecutionLog log, DiagnosticException error) {
         if (log == null) return;
         try { log.append("DEBUG ERROR", error.toDiagnostic().toMap()); } catch (Exception ignored) { }
+    }
+
+    private static void consoleLine(java.io.PrintStream output, String line) {
+        synchronized (output) {
+            output.println(line);
+            output.flush();
+        }
+    }
+
+    private static String safeConsoleIdentity(String value) {
+        return value == null ? "unknown" : value.replaceAll("[^A-Za-z0-9_.:-]", "_");
     }
 
     private List<ResultStatus> statuses(List<ValidationResult> values) {

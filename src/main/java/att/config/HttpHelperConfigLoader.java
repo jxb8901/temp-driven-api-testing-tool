@@ -74,6 +74,11 @@ public final class HttpHelperConfigLoader {
         Map<?, ?> auth = section(map.get("auth"), "auth");
         Map<?, ?> tls = section(map.get("tls"), "tls");
         Map<String, String> headers = headers(defaults.get("headers"));
+        String responseFormat = defaults.get("responseFormat") == null ? "auto"
+                : SchemaSupport.string(defaults.get("responseFormat"), "httphelper.defaults.responseFormat", true);
+        if (!("auto".equals(responseFormat) || "text".equals(responseFormat) || "json".equals(responseFormat)
+                || "yaml".equals(responseFormat) || "xml".equals(responseFormat)))
+            throw new IllegalArgumentException("httphelper.defaults.responseFormat must be auto, text, json, yaml, or xml");
         int max = number(pool.get("maxConnections"), 50, "pool.maxConnections");
         int perRoute = number(pool.get("maxConnectionsPerRoute"), 20, "pool.maxConnectionsPerRoute");
         if (perRoute > max) throw new IllegalArgumentException("pool.maxConnectionsPerRoute must not exceed pool.maxConnections");
@@ -108,7 +113,7 @@ public final class HttpHelperConfigLoader {
                 number(pool.get("connectionRequestTimeoutMs"), 5000, "pool.connectionRequestTimeoutMs"),
                 number(pool.get("keepAliveMs"), 30000, "pool.keepAliveMs"),
                 number(pool.get("idleEvictMs"), 60000, "pool.idleEvictMs"), type, username, password, token,
-                trust, secret(tls.get("trustStorePassword"), "tls.trustStorePassword"));
+                trust, secret(tls.get("trustStorePassword"), "tls.trustStorePassword"), responseFormat);
     }
 
     private static Map<?, ?> section(Object value, String field) {

@@ -92,6 +92,7 @@ public class UnifiedTemplateEngine {
         if (parsed.name().startsWith("http.")) return "http";
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return "builtin";
         ToolConfig tool = toolInvoker == null ? null : toolInvoker.tool(parsed.name());
+        if (tool != null && !tool.sshHelper().isEmpty()) return "ssh";
         return tool != null && tool.callBacked() ? "call-tool" : "tool";
     }
 

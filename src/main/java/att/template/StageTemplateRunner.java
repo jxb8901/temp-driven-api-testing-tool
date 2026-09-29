@@ -70,9 +70,15 @@ public class StageTemplateRunner {
                 }
                 executionField = "render".equals(type) ? "payload" : "tool".equals(type) ? "call" : "db".equals(type) ? (action.query().isEmpty() ? "update" : "query")
                         : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : "assign".equals(type) ? "expression" : "use";
+                Map<String, Object> actionStart = new LinkedHashMap<String, Object>();
+                actionStart.put("stage", stageName);
+                actionStart.put("action", action.id());
+                actionStart.put("type", type);
+                actionStart.put("status", "START");
+                appendProgress(log, "ACTION", actionStart);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
-                else if ("tool".equals(type)) toolStatus = executeTool(action, context, log, output, targets, node);
-                else if ("db".equals(type)) toolStatus = executeDb(action, context, log, output, targets);
+                else if ("tool".equals(type)) toolStatus = executeTool(stageName, action, context, log, output, targets, node);
+                else if ("db".equals(type)) toolStatus = executeDb(stageName, action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
@@ -166,10 +172,19 @@ public class StageTemplateRunner {
         List<ValidationResult> internal = new ArrayList<ValidationResult>();
         CaseRuntimeContext.FlowEvidence evidence = null;
         context.beginFlow(flow.id(), action.id());
+        Map<String, Object> flowEvent = new LinkedHashMap<String, Object>();
+        flowEvent.put("stage", stageName);
+        flowEvent.put("action", action.id());
+        flowEvent.put("flowId", flow.id());
+        flowEvent.put("template", flow.name());
+        flowEvent.put("status", "START");
+        appendProgress(log, "FLOW", flowEvent);
+        String flowStatus = "ERROR";
         try {
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
             internal.addAll(execute(stageName + "." + action.id(), body, context, log));
             ResultStatus status = aggregateFlow(internal);
+            flowStatus = status.name();
             output.put("status", status.name()); output.put("success", status == ResultStatus.PASS);
             att.validation.Diagnostic diagnostic = null;
             for (ValidationResult result : internal) {
@@ -187,6 +202,8 @@ public class StageTemplateRunner {
             Map<String, Object> flowNode = new LinkedHashMap<String, Object>();
             flowNode.putAll(evidence.flow()); flowNode.put("name", flow.name()); flowNode.put("actions", evidence.actions());
             node.put("flow", flowNode);
+            flowEvent.put("status", flowStatus);
+            appendProgress(log, "FLOW", flowEvent);
         }
     }
 
@@ -342,7 +359,7 @@ public class StageTemplateRunner {
         context.assignCaseVariable(action.name(), value);
     }
 
-    private ResultStatus executeDb(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+    private ResultStatus executeDb(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
                                    Map<String, Object> output, List<String> targets) throws Exception {
         att.exec.DbHelperExecutor executor = templateEngine.dbHelperExecutor();
         if (executor == null) throw new IllegalStateException("DB action execution is unavailable");
@@ -394,22 +411,31 @@ public class StageTemplateRunner {
         for (int number = 1; number <= maxAttempts; number++) {
             String invocationId = context.nextDbInvocationId(action.db());
             att.exec.DbInvocationResult result;
-            if (action.timeoutMs() != null) {
-                // Explicit Action timeout overrides the helper's statement timeout.
-                // Positional execution is also valid
-                // for SQL normalized from named parameters; parameter order was
-                // fixed by NamedSqlParameters.bind above.
-                result = executor.execute(action.db(), query ? "query" : "update", sql, source,
-                        params, invocationId, action.timeoutMs());
-            } else {
-                result = parameterNames.isEmpty()
-                        ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
-                        : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
+            appendResourceEvent(log, stageName, action.id(), "db", number, "START", null, null);
+            long operationStarted = System.nanoTime();
+            try {
+                if (action.timeoutMs() != null) {
+                    // Explicit Action timeout overrides the helper's statement timeout.
+                    // Positional execution is also valid for SQL normalized from named parameters.
+                    result = executor.execute(action.db(), query ? "query" : "update", sql, source,
+                            params, invocationId, action.timeoutMs());
+                } else {
+                    result = parameterNames.isEmpty()
+                            ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
+                            : executor.execute(action.db(), query ? "query" : "update", sql, source, params, parameterNames, invocationId);
+                }
+            } catch (Exception error) {
+                appendResourceEvent(log, stageName, action.id(), "db", number, "ERROR",
+                        elapsedMillis(operationStarted), error.getClass().getSimpleName());
+                throw error;
             }
             try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
             catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
 
             ActionExecutionResult operationResult = result.operationResult();
+            appendResourceEvent(log, stageName, action.id(), "db", number,
+                    operationResult.executionSuccess() ? "PASS" : "ERROR", operationResult.durationMs(),
+                    operationResult.executionSuccess() ? null : dbFailureType(operationResult.result()));
             publishOperationResult(output, operationResult);
             Map<String, Object> attempt = new LinkedHashMap<String, Object>();
             attempt.put("attempt", number);
@@ -426,6 +452,7 @@ public class StageTemplateRunner {
                 if (query && "TIMEOUT".equals(category)
                         && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                     attempt.put("retryReason", "TIMEOUT");
+                    appendResourceEvent(log, stageName, action.id(), "db", number, "RETRY", null, "TIMEOUT");
                     waitBeforeRetry(intervalMs);
                     continue;
                 }
@@ -482,7 +509,7 @@ public class StageTemplateRunner {
         return type == null ? null : String.valueOf(type);
     }
 
-    private ResultStatus executeTool(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
+    private ResultStatus executeTool(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
                              List<String> targets, Map<String, Object> node) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
@@ -497,17 +524,32 @@ public class StageTemplateRunner {
         String format = save.specified() ? toolFormat(save, kind, action.call()) : "";
         boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
+            appendResourceEvent(log, stageName, action.id(), kind, number, "START", null, null);
+            long operationStarted = System.nanoTime();
             try {
                 // Process capture files are bounded stream/log evidence, not the
                 // selected Action result. Persist raw output.result through the
                 // common writer so output.result and result.path cannot diverge.
                 String operationSaveAs = "";
-                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(action.call(), context, log,
-                        context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, "",
-                        save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
+                att.exec.ToolInvocationResult result;
+                try {
+                    result = templateEngine.executeToolAttempt(action.call(), context, log,
+                            context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, "",
+                            save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
+                } catch (att.exec.ToolExecutionException error) {
+                    throw error;
+                } catch (Exception error) {
+                    appendResourceEvent(log, stageName, action.id(), kind, number, "ERROR",
+                            elapsedMillis(operationStarted), error.getClass().getSimpleName());
+                    throw error;
+                }
                 Map<String, Object> invocation = new LinkedHashMap<String, Object>(result.invocation());
                 invocation.put("attempt", number);
                 ActionExecutionResult operation = result.operationResult();
+                appendResourceEvent(log, stageName, action.id(), kind, number,
+                        operation.executionSuccess() ? "PASS" : "ERROR",
+                        operation.durationMs() >= 0L ? operation.durationMs() : elapsedMillis(operationStarted),
+                        operation.executionSuccess() ? null : "OPERATION_FAILED");
                 Object selectedResult = resultValue(operation.result());
                 if (save.configured()) {
                     if (console) {
@@ -537,6 +579,7 @@ public class StageTemplateRunner {
                             || ("http".equals(kind) && httpTimeout(operation.outputMetadata())))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");
+                        appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
                         waitBeforeRetry(intervalMs);
                         continue;
                     }
@@ -559,8 +602,11 @@ public class StageTemplateRunner {
                     return ResultStatus.FAIL;
                 }
                 invocation.put("retryReason", "ASSERTION");
+                appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "ASSERTION");
                 waitBeforeRetry(intervalMs);
             } catch (att.exec.ToolExecutionException e) {
+                appendResourceEvent(log, stageName, action.id(), kind, number, "ERROR",
+                        elapsedMillis(operationStarted), e.category());
                 Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
                 evidence.put("attempt", number);
                 evidence.put("category", e.category());
@@ -579,6 +625,7 @@ public class StageTemplateRunner {
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
                 if ("TIMEOUT".equals(e.category()) && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                     evidence.put("retryReason", "TIMEOUT");
+                    appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
                     waitBeforeRetry(intervalMs);
                     continue;
                 }
@@ -586,6 +633,27 @@ public class StageTemplateRunner {
             }
         }
         throw new IllegalStateException("Tool action completed without a final attempt: " + action.id());
+    }
+
+    private void appendResourceEvent(CaseExecutionLog log, String stage, String action, String kind,
+                                     int attempt, String status, Long durationMs, String errorType) {
+        Map<String, Object> event = new LinkedHashMap<String, Object>();
+        event.put("stage", stage);
+        event.put("action", action);
+        event.put("resource", kind == null ? "tool" : kind.toUpperCase(java.util.Locale.ROOT));
+        event.put("attempt", Integer.valueOf(attempt));
+        event.put("status", status);
+        if (durationMs != null && durationMs.longValue() >= 0L) event.put("durationMs", durationMs);
+        if (errorType != null && !errorType.isEmpty()) event.put("errorType", errorType);
+        appendProgress(log, "RESOURCE", event);
+    }
+
+    private void appendProgress(CaseExecutionLog log, String section, Map<String, Object> event) {
+        try { log.append(section, event); } catch (Exception ignored) { /* progress must not change execution semantics */ }
+    }
+
+    private static long elapsedMillis(long startedNanos) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0L, System.nanoTime() - startedNanos));
     }
 
     @SuppressWarnings("unchecked")

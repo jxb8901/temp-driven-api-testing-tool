@@ -83,6 +83,9 @@ public class FrameworkEngine {
                 verbose(options, "[RUN] queued: waiting for the active run to complete");
             }
         });
+        java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
+        ConsoleCancellationHook cancellation = new ConsoleCancellationHook(cancellationOutput,
+                "[RUN] CANCELLED runId=" + runId);
         try {
         Files.createDirectories(outputRoot);
         Path runDirectory = finalRunDirectory;
@@ -167,7 +170,8 @@ public class FrameworkEngine {
         writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
         return new RunSummary(results, runDirectory.resolve("report/index.html"));
         } finally {
-            concurrencyGuard.close();
+            try { concurrencyGuard.close(); }
+            finally { cancellation.close(); }
         }
     }
 
@@ -181,12 +185,16 @@ public class FrameworkEngine {
         Path caseOutputDir = IdentifierValidator.strictChild(runDirectory, validatedCaseId, "Case directory");
         Files.createDirectories(caseOutputDir);
         Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
-        if (options.verbose() && !options.quiet() && "human".equals(options.format())) {
-            System.out.println("[CASE-LOG] case=" + testCase.caseId() + " file=" + portable(caseLogPath));
+        java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
+        if (options.verbose() && !options.quiet()) {
+            synchronized (console) {
+                console.println("[CASE-LOG] case=" + testCase.caseId() + " file=" + portable(caseLogPath));
+                console.flush();
+            }
         }
         CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors(),
-                options.verbose() && !options.quiet() && "human".equals(options.format())
-                        ? new java.util.function.Consumer<String>() { @Override public void accept(String text) { System.out.print(text); } }
+                options.verbose() && !options.quiet()
+                        ? new CaseLogConsoleMirror(testCase.caseId(), console)
                         : null);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, testCase.caseId(), runId,
                 runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
@@ -331,7 +339,13 @@ public class FrameworkEngine {
     }
 
     private void verbose(ExecutionOptions options, String message) {
-        if (options.verbose() && !options.quiet() && "human".equals(options.format())) System.out.println(message);
+        if (options.verbose() && !options.quiet()) {
+            java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
+            synchronized (console) {
+                console.println(message);
+                console.flush();
+            }
+        }
     }
 
     private String message(Exception error) {

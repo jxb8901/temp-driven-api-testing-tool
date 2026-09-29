@@ -61,12 +61,47 @@ public final class YamlSupport {
             YamlSource source = SOURCES.get(file.toAbsolutePath().normalize());
             if (source == null) return null;
             att.template.ExpressionSyntaxException syntax = att.template.ExpressionSyntaxException.find(failure);
-            if (syntax != null) try {
-                return withExcerpt(source.expressionLocation(field, syntax.offset(),
-                        Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8)), file, field);
+            SourceLocation range = source.location(field);
+            try {
+                java.util.List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8);
+                String reference = syntax == null ? diagnosticReference(failure, source.scalarValue(field)) : null;
+                int offset = syntax == null
+                        ? (reference == null ? -1 : source.scalarValue(field).indexOf(reference))
+                        : syntax.offset();
+                if (offset >= 0) {
+                    SourceLocation location = source.expressionLocation(field, offset, lines);
+                    if (source.isBlockScalar(field) && location.line() == range.line() && reference != null) {
+                        SourceLocation physical = source.blockScalarTextLocation(field, reference, lines);
+                        if (physical != null) location = physical;
+                    }
+                    return withExcerpt(location, file, field, source.isBlockScalar(field) ? range : null);
+                }
+                if (source.isBlockScalar(field)) {
+                    SourceLocation body = source.blockScalarBodyLocation(field, lines);
+                    return withExcerpt(body == null ? range : body, file, field, range);
+                }
             } catch (IOException ignored) { /* Retain the captured scalar range. */ }
-            return withExcerpt(source.location(field), file, field);
+            return withExcerpt(range, file, field);
         }
+    }
+
+    private static String diagnosticReference(Throwable failure, String scalar) {
+        if (scalar == null) return null;
+        DiagnosticException diagnostic = DiagnosticException.find(failure);
+        if (diagnostic == null) return null;
+        String[] messages = {diagnostic.summary(), diagnostic.detail()};
+        for (String message : messages) {
+            if (message == null) continue;
+            int start = 0;
+            while ((start = message.indexOf("${", start)) >= 0) {
+                int end = message.indexOf('}', start + 2);
+                if (end < 0) break;
+                String reference = message.substring(start, end + 1);
+                if (scalar.contains(reference)) return reference;
+                start = end + 1;
+            }
+        }
+        return null;
     }
 
     private static SourceLocation withExcerpt(SourceLocation location, Path file, String field) {
@@ -77,6 +112,27 @@ public final class YamlSupport {
             // Inline YAML maps may contain secrets in neighbouring fields.
             return line == null || sensitive(line) ? location : new SourceLocation(location.file(), location.line(), location.column(),
                     location.endLine(), location.endColumn(), line);
+        } catch (Exception ignored) { return location; }
+    }
+
+    private static SourceLocation withExcerpt(SourceLocation location, Path file, String field, SourceLocation blockRange) {
+        if (location == null || blockRange == null || field == null || sensitive(field)) return withExcerpt(location, file, field);
+        final int maxLines = 12;
+        try {
+            java.util.List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8);
+            int first = Math.max(blockRange.line(), location.line() - maxLines / 2);
+            if (first + maxLines - 1 < location.line()) first = location.line() - maxLines + 1;
+            int last = Math.min(blockRange.endLine(), Math.min(lines.size(), first + maxLines - 1));
+            if (last < location.line()) return location;
+            StringBuilder excerpt = new StringBuilder();
+            for (int line = first; line <= last; line++) {
+                String text = lines.get(line - 1);
+                if (sensitive(text)) return location;
+                if (excerpt.length() > 0) excerpt.append('\n');
+                excerpt.append(text);
+            }
+            return new SourceLocation(location.file(), location.line(), location.column(),
+                    location.endLine(), location.endColumn(), excerpt.toString(), first);
         } catch (Exception ignored) { return location; }
     }
     private static boolean sensitive(String field) {
