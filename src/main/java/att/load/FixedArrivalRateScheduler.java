@@ -35,6 +35,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                                      LoadEvidenceStore evidenceStore, Path outputRoot) {
         this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), null, evidenceStore, outputRoot, null);
     }
+    public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId,
+                                     LoadEvidenceStore evidenceStore) {
+        this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), null, evidenceStore,
+                executor == null ? null : executor.outputRoot(), null);
+    }
     FixedArrivalRateScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                               Consumer<LoadEvent> listener, LoadSchedulerTiming timing) {
         this(scenario, executor, runId, listener, timing, null, null, null, null);
@@ -108,12 +113,24 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
                     if (!scenario.legacyV1()) request = request.withWorkloadId(scenario.workloadId());
-                    Path sampleRoot = sampleOutputRoot(id);
-                    if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
-                    request = request.withFailureEvidence(evidenceStore == null || evidenceStore.retainsFailureEvidence());
+                    Path evidenceRoot = evidenceOutputRoot(id);
+                    if (evidenceRoot != null) {
+                        request = request.withOutputDirectory(evidenceRoot)
+                                .withEvidenceRetention(true, false);
+                    } else if (evidenceStore != null) {
+                        request = request.withEvidenceRetention(false, false);
+                    }
                     IterationResult result = executor.execute(request);
+                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id)) {
+                        result = result.materializeEvidence();
+                    } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
+                        evidenceStore.releaseEvidence(id);
+                    }
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
-                } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
+                } catch (RuntimeException error) {
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id)) evidenceStore.releaseEvidence(id);
+                    status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
+                }
                 finally {
                     long completedAt = timing.now(); inFlight.decrementAndGet();
                     LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "arrivalRate", phase, id, null,
@@ -127,8 +144,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         return scenario.legacyV1() ? event : event.withWorkloadIdentity(
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
     }
-    private Path sampleOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccess(iterationId)) return null;
+    private Path evidenceOutputRoot(String iterationId) {
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
     }

@@ -3,7 +3,11 @@ package att.load;
 import att.core.CaseRuntimeContext;
 import att.core.ResultStatus;
 import att.core.ValidationResult;
+import att.core.CaseExecutionLog;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -20,6 +24,7 @@ public final class IterationResult {
     private final Path outputDirectory;
     private final att.validation.Diagnostic diagnostic;
     private final boolean evidenceRetained;
+    private final CaseExecutionLog evidenceLog;
 
     IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
                     List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic) {
@@ -30,9 +35,16 @@ public final class IterationResult {
     IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
                     List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic,
                     boolean evidenceRetained) {
+        this(iterationId, status, duration, context, validations, outputDirectory, diagnostic, evidenceRetained, null);
+    }
+
+    IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
+                    List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic,
+                    boolean evidenceRetained, CaseExecutionLog evidenceLog) {
         this.iterationId = iterationId; this.status = status; this.duration = duration; this.context = context;
         this.validations = Collections.unmodifiableList(new ArrayList<ValidationResult>(validations));
         this.outputDirectory = outputDirectory; this.diagnostic = diagnostic; this.evidenceRetained = evidenceRetained;
+        this.evidenceLog = evidenceLog;
     }
     public String iterationId() { return iterationId; }
     public ResultStatus status() { return status; }
@@ -41,6 +53,36 @@ public final class IterationResult {
     public List<ValidationResult> validations() { return validations; }
     public Path outputDirectory() { return outputDirectory; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
+
+    /** Materializes deferred failure evidence after a post-completion retention claim. */
+    IterationResult materializeEvidence() {
+        if (evidenceRetained || evidenceLog == null || outputDirectory == null) return this;
+        boolean interrupted = Thread.interrupted();
+        try {
+            Files.createDirectories(outputDirectory);
+            evidenceLog.materialize(outputDirectory.resolve("case.log"));
+            if (context != null) Files.write(outputDirectory.resolve("case.yaml"),
+                    new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
+            if (!Files.isRegularFile(outputDirectory.resolve("case.log"))) return this;
+            return new IterationResult(iterationId, status, duration, context, validations, outputDirectory,
+                    diagnostic, true, null);
+        } catch (IOException | RuntimeException ignored) {
+            deletePartialWorkspace();
+            return this;
+        } finally {
+            if (interrupted || Thread.interrupted()) Thread.currentThread().interrupt();
+        }
+    }
+
+    private void deletePartialWorkspace() {
+        if (!Files.exists(outputDirectory)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(outputDirectory)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
+    }
+
     public EvidenceRef evidenceRef() {
         if (!evidenceRetained) return null;
         Path caseLog = outputDirectory == null ? null : outputDirectory.resolve("case.log");

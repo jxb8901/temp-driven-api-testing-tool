@@ -57,6 +57,87 @@ class MqHelperExecutorTest {
         assertEquals(1, factory.queueCloses);
     }
 
+    @Test void absoluteProjectPayloadWorksBeforeLazyLoadIterationWorkspaceExists() throws Exception {
+        Path payload = tempDir.resolve("templates/flows/mqtest/BOC060032.xml");
+        Files.createDirectories(payload.getParent());
+        Files.write(payload, new byte[]{7, 8, 9});
+        Path lazyIterationDirectory = tempDir.resolve("output/load/lazy-run/iterations/iteration-1");
+        FakeFactory factory = new FakeFactory();
+        factory.noMessage = true;
+
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
+                context(lazyIterationDirectory), null, "lazy-load-request");
+
+        assertTrue(result.success(), result.result().toString());
+        assertFalse(Files.exists(lazyIterationDirectory), "payload validation must not materialize a successful Load workspace");
+        assertEquals(1, factory.connectedInstances.size(), "MQ connect must be reached after payload validation");
+    }
+
+    @Test void absolutePayloadOutsidePackageReportsContainmentInsteadOfMissingWorkspace() throws Exception {
+        Path outside = tempDir.resolveSibling("att-mq-outside-payload-" + System.nanoTime() + ".xml");
+        Files.write(outside, new byte[]{1});
+        Path missingIterationDirectory = tempDir.resolve("output/load/missing/iterations/iteration-1");
+        FakeFactory factory = new FakeFactory();
+        try {
+            MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
+                    map("queue", "REQUEST.Q", "file", outside.toString()), context(missingIterationDirectory), null, "outside-payload");
+
+            assertFalse(result.success());
+            String message = String.valueOf(((Map<?, ?>) result.result().get("error")).get("message"));
+            assertTrue(message.contains("escapes the ATT package"), message);
+            assertFalse(message.contains("NoSuchFileException"), message);
+            assertTrue(factory.connectedInstances.isEmpty());
+        } finally {
+            Files.deleteIfExists(outside);
+        }
+    }
+
+    @Test void genuinelyMissingAbsolutePayloadNamesPayloadEvenWhenWorkspaceIsLazy() throws Exception {
+        Path missingPayload = tempDir.resolve("templates/flows/mqtest/missing.xml");
+        Path missingIterationDirectory = tempDir.resolve("output/load/missing-payload/iterations/iteration-1");
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), new FakeFactory()).execute("broker", "send",
+                map("queue", "REQUEST.Q", "file", missingPayload.toString()), context(missingIterationDirectory), null, "missing-payload");
+
+        assertFalse(result.success());
+        String message = String.valueOf(((Map<?, ?>) result.result().get("error")).get("message"));
+        assertTrue(message.contains("MQ payload file does not exist or is unsafe"), message);
+        assertFalse(message.contains("NoSuchFileException"), message);
+    }
+
+    @Test void relativePayloadTraversalAndSymlinkEscapeRemainRejected() throws Exception {
+        Path caseDir = tempDir.resolve("relative-case");
+        Files.createDirectories(caseDir);
+        Path outside = tempDir.resolve("relative-outside.xml");
+        Files.write(outside, new byte[]{1});
+        FakeFactory traversalFactory = new FakeFactory();
+        MqInvocationResult traversal = new MqHelperExecutor(tempDir, config(), traversalFactory).execute("broker", "send",
+                map("queue", "REQUEST.Q", "file", "../relative-outside.xml"), context(caseDir), null, "relative-traversal");
+        assertFalse(traversal.success());
+        assertTrue(String.valueOf(((Map<?, ?>) traversal.result().get("error")).get("message")).contains("escapes the Case output directory"));
+        assertTrue(traversalFactory.connectedInstances.isEmpty());
+
+        Path link = tempDir.resolve("templates/linked-payload.xml");
+        Files.createDirectories(link.getParent());
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | SecurityException unsupported) {
+            Files.deleteIfExists(outside);
+            return;
+        }
+        try {
+            FakeFactory linkFactory = new FakeFactory();
+            MqInvocationResult symlink = new MqHelperExecutor(tempDir, config(), linkFactory).execute("broker", "send",
+                    map("queue", "REQUEST.Q", "file", link.toString()), context(caseDir), null, "absolute-symlink");
+            assertFalse(symlink.success());
+            assertTrue(String.valueOf(((Map<?, ?>) symlink.result().get("error")).get("message")).contains("does not exist or is unsafe"));
+            assertTrue(linkFactory.connectedInstances.isEmpty());
+        } finally {
+            Files.deleteIfExists(link);
+            Files.deleteIfExists(outside);
+        }
+    }
+
     @Test void requestMatchesReplyCorrelationAndKeepsReplyInMemoryByDefault() throws Exception {
         Path caseDir = tempDir.resolve("request-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});

@@ -12,27 +12,31 @@ public final class IterationRequest {
     private final Instant startedAt, runStartedAt;
     private final Map<String, Object> inputs;
     private final Path outputDirectory;
-    private final boolean retainFailureEvidence;
+    private final boolean retainSuccessEvidence, retainFailureEvidence;
 
     public IterationRequest(String model, String iterationId, long iteration, String phase,
                             Instant startedAt, String userId, Map<String, Object> inputs, Path outputDirectory) {
-        this("LOAD", null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory, true, null);
+        this("LOAD", null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory,
+                outputDirectory != null, true, null);
     }
 
     public IterationRequest(String runId, String model, String iterationId, long iteration, String phase,
                             Instant startedAt, String userId, Map<String, Object> inputs, Path outputDirectory) {
-        this(runId, null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory, true, null);
+        this(runId, null, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory,
+                outputDirectory != null, true, null);
     }
 
     public IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
                             String phase, Instant startedAt, String userId, Map<String, Object> inputs,
                             Path outputDirectory) {
-        this(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory, true, null);
+        this(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, outputDirectory,
+                outputDirectory != null, true, null);
     }
 
     private IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
                              String phase, Instant startedAt, String userId, Map<String, Object> inputs,
-                             Path outputDirectory, boolean retainFailureEvidence, String workloadId) {
+                             Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
+                             String workloadId) {
         if (runId == null || runId.trim().isEmpty()) throw new IllegalArgumentException("Load runId must not be blank");
         if (!("closed".equals(model) || "arrivalRate".equals(model))) throw new IllegalArgumentException("LOAD.model must be closed or arrivalRate");
         if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.iterationId must not be blank");
@@ -49,6 +53,7 @@ public final class IterationRequest {
         this.inputs = inputs == null || inputs.isEmpty() ? Collections.<String, Object>emptyMap()
                 : Collections.unmodifiableMap(LoadIsolation.deepCopyMap(inputs));
         this.outputDirectory = outputDirectory;
+        this.retainSuccessEvidence = retainSuccessEvidence;
         this.retainFailureEvidence = retainFailureEvidence;
         this.workloadId = workloadId;
     }
@@ -71,15 +76,19 @@ public final class IterationRequest {
     }
     public IterationRequest withOutputDirectory(Path directory) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
-                retainFailureEvidence, workloadId);
+                directory != null, retainFailureEvidence, workloadId);
     }
     public IterationRequest withFailureEvidence(boolean enabled) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, enabled, workloadId);
+                outputDirectory, retainSuccessEvidence, enabled, workloadId);
+    }
+    public IterationRequest withEvidenceRetention(boolean success, boolean failure) {
+        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, success, failure, workloadId);
     }
     public IterationRequest withWorkloadId(String value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainFailureEvidence, value);
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, value);
     }
     public String runId() { return runId; }
     public String model() { return model; }
@@ -92,5 +101,6 @@ public final class IterationRequest {
     public String workloadId() { return workloadId; }
     public Map<String, Object> inputs() { return inputs; }
     public Path outputDirectory() { return outputDirectory; }
+    public boolean retainSuccessEvidence() { return retainSuccessEvidence; }
     public boolean retainFailureEvidence() { return retainFailureEvidence; }
 }

@@ -318,3 +318,17 @@ A single-instance v1.1 group uses that instance directly. A group with multiple 
 Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. With `evidence.payload: none`, the payload policy marker is omitted; credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.
 
 `output.selectionStrategy` identifies the configured group policy (`single`, `random`, or `roundRobin`), not the selection source for an individual invocation. When a call explicitly supplies `instance`, that policy value remains unchanged and `output.instance` identifies the physical instance actually selected.
+
+#### Payload paths in Load mode
+
+`file` accepts an absolute path only when its resolved regular file is inside the ATT package root. This is useful for a Flow or Template that uses a checked-in request payload, for example:
+
+~~~text
+#{mq.toeaimq.request(file='/fpp/att/templates/flows/mqtest/BOC060032.xml')}
+~~~
+
+Load iteration workspaces are intentionally lazy. An absolute package payload is validated against the package root and therefore does not require the current `output/load/<runId>/iterations/<iterationId>/` directory to exist. ATT does not create one empty iteration directory per successful iteration merely to validate this file. The payload is validated before MQ connect/open/put/get, so a failure at this point is a local path-safety error, not an IBM MQ transport, queue, or response-parse error.
+
+Relative paths keep the Case-output contract: ATT resolves them below the current Case output directory, rejects `..` traversal, rejects payload symlinks and symlink escapes, and requires a safe regular file. Absolute files outside the package and genuinely missing files are rejected; the diagnostic names the payload problem rather than exposing an unrelated lazy-workspace `NoSuchFileException`.
+
+For troubleshooting, first check whether the `file` value is absolute or relative, then check the resolved file and the relevant root. Do not pre-create every Load workspace as a workaround. Use `evidence: {mode: failures}` or `metrics` according to the evidence guide when the test should avoid retaining successful iteration artifacts.

@@ -316,3 +316,17 @@ Public call 維持 logical id：
 Output 與 evidence 同時保留 logical helper id 並公開選中的 physical instance。Evidence 也會記錄適用 strategy、queue manager、operation、queue names、MsgId/CorrelId 及安全的 connection metadata。使用 `evidence.payload: none` 時會省略 payload policy marker；credential 與 payload bytes 永不包含其中。Validation 會拒絕重複 physical id、未知 inherited field、缺少 effective connection field、非法 strategy 或 override，以及無效的 effective message/requestReply/pool 值。
 
 `output.selectionStrategy` 表示已設定的 group policy（`single`、`random` 或 `roundRobin`），而非單次 invocation 的選擇來源。若呼叫明確提供 `instance`，此 policy 值仍維持不變；`output.instance` 則表示實際選中的 physical instance。
+
+#### Load 模式的 payload path
+
+`file` 的 absolute path 只有在 resolved regular file 位於 ATT package root 之內時才接受。這適合 Flow 或 Template 使用 package 內的 checked-in request payload，例如：
+
+~~~text
+#{mq.toeaimq.request(file='/fpp/att/templates/flows/mqtest/BOC060032.xml')}
+~~~
+
+Load iteration workspace 採 lazy 設計。Absolute package payload 只需對 package root 做 validation，因此即使目前的 `output/load/<runId>/iterations/<iterationId>/` 尚未存在，也不需要先建立。ATT 不會為了驗證檔案而替每個成功 iteration 建立空 directory。此 payload check 發生在 MQ connect/open/put/get 之前，所以這類 failure 是 local path-safety error，不是 IBM MQ transport、queue 或 response parse error。
+
+Relative path 保持 Case-output contract：會在目前 Case output 下 resolve、拒絕 `..` traversal、拒絕 payload symlink 和 symlink escape，並要求是安全的 regular file。Package 外的 absolute file 和真正不存在的 file 都會被拒絕；diagnostic 會指出 payload 問題，不會顯示 unrelated lazy-workspace `NoSuchFileException`。
+
+Troubleshooting 時先判斷 `file` 是 absolute 還是 relative，再檢查 resolved file 與適用 root。不要以預先建立所有 Load workspace 作為 workaround；如需避免成功 iteration artifact，可按 evidence guide 使用 `evidence: {mode: failures}` 或 `metrics`。
