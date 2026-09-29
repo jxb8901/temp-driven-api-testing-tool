@@ -19,20 +19,23 @@ public final class LoadEvidenceStore implements LoadEventListener {
     private final LoadEvidencePolicy policy;
     private final LoadEventListener observer;
     private final List<LoadEvent> retained = new ArrayList<LoadEvent>();
-    private final Set<String> reservedSuccesses = new LinkedHashSet<String>();
+    private final Set<String> reservedEvidence = new LinkedHashSet<String>();
     public LoadEvidenceStore(LoadEvidencePolicy policy) { this(policy, null); }
     public LoadEvidenceStore(LoadEvidencePolicy policy, LoadEventListener observer) {
         this.policy = policy;
         this.observer = observer;
     }
     public boolean retainsFailureEvidence() { return policy.failure() == LoadEvidencePolicy.Failure.FULL; }
-    public synchronized boolean reserveSuccess(String iterationId) {
-        if (iterationId == null || reservedSuccesses.contains(iterationId)) return false;
-        if (retained.size() + reservedSuccesses.size() >= policy.maxSamples()) return false;
-        if (!policy.retainSuccess(iterationId)) return false;
-        reservedSuccesses.add(iterationId);
+    public boolean retainsSuccessEvidence(String iterationId) { return policy.retainSuccess(iterationId); }
+    public synchronized boolean reserveEvidence(String iterationId) {
+        if (iterationId == null || reservedEvidence.contains(iterationId)) return false;
+        if ((long) retained.size() + reservedEvidence.size() >= policy.maxSamples()) return false;
+        if (!policy.retainSuccess(iterationId) && !policy.retainFailure()) return false;
+        reservedEvidence.add(iterationId);
         return true;
     }
+    /** @deprecated use {@link #reserveEvidence(String)} for both success and failure policies. */
+    @Deprecated public boolean reserveSuccess(String iterationId) { return reserveEvidence(iterationId); }
     @Override public void onEvent(LoadEvent event) {
         if (observer != null) try { observer.onEvent(event); }
         catch (RuntimeException ignored) { /* Presentation must not alter load execution semantics. */ }
@@ -40,13 +43,14 @@ public final class LoadEvidenceStore implements LoadEventListener {
     }
     private synchronized void retain(LoadEvent event) {
         if (event == null || event.dropped() || !event.completed()) return;
-        boolean reserved = reservedSuccesses.remove(event.iterationId());
-        if (retained.size() >= policy.maxSamples()) return;
-        if (!event.success()) {
-            if (policy.failure() == LoadEvidencePolicy.Failure.FULL) retained.add(event);
-            return;
-        }
-        if (reserved || policy.retain(event, retained.size())) retained.add(event);
+        boolean reserved = reservedEvidence.remove(event.iterationId());
+        if (!reserved || retained.size() >= policy.maxSamples()) return;
+        if (!policy.retain(event, retained.size()) || !evidenceExists(event.evidence())) return;
+        retained.add(event);
+    }
+    private boolean evidenceExists(EvidenceRef evidence) {
+        if (evidence == null || evidence.workspace() == null || !Files.isDirectory(evidence.workspace())) return false;
+        return evidence.caseLog() == null || Files.isRegularFile(evidence.caseLog());
     }
     public synchronized List<LoadEvent> events() { return Collections.unmodifiableList(new ArrayList<LoadEvent>(retained)); }
     public synchronized Map<String, Object> write(Path runDirectory) throws IOException {

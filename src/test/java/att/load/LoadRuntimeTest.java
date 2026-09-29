@@ -2,7 +2,10 @@ package att.load;
 
 import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.time.Duration;
 import java.time.Instant;
@@ -17,6 +20,8 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadRuntimeTest {
+    @TempDir Path temp;
+
     @Test void metricsExcludeWarmupFromSlaAndKeepDropsSeparate() {
         long now = System.currentTimeMillis();
         LoadMetrics metrics = new LoadMetrics("arrivalRate", now);
@@ -222,12 +227,18 @@ class LoadRuntimeTest {
         } finally { executor.shutdownNow(); pool.close(); }
     }
 
-    @Test void evidenceDoesNotMisclassifyDroppedArrivalsAsSutFailures() {
+    @Test void evidenceDoesNotMisclassifyDroppedArrivalsAsSutFailures() throws Exception {
         long now = System.currentTimeMillis();
         LoadEvidencePolicy policy = new LoadEvidencePolicy(LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10);
         LoadEvidenceStore store = new LoadEvidenceStore(policy);
         store.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "dropped-1", 1, now, now + 1));
-        store.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "failed-1", null, 2, now, now, now + 1, ResultStatus.FAIL));
+        assertTrue(store.reserveEvidence("failed-1"));
+        Path workspace = temp.resolve("failed-1");
+        Files.createDirectories(workspace);
+        Path caseLog = workspace.resolve("case.log");
+        Files.write(caseLog, java.util.Collections.singletonList("failure"));
+        store.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "failed-1", null, 2, now, now, now + 1,
+                ResultStatus.FAIL, new EvidenceRef(workspace, caseLog, null)));
         assertEquals(1, store.events().size());
         assertEquals("failed-1", store.events().get(0).iterationId());
     }

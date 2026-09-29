@@ -1667,9 +1667,10 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href=
 <span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> all</span></span></code></pre></div>
 <p>The explicit equivalent of full retention is:</p>
 <div class="sourceCode" id="cb27"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">success</span><span class="kw">:</span><span class="at"> full</span></span>
-<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">failure</span><span class="kw">:</span><span class="at"> full</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="co"># This explicit form is available in att-load/v1.1.</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">success</span><span class="kw">:</span><span class="at"> full</span></span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">failure</span><span class="kw">:</span><span class="at"> full</span></span></code></pre></div>
 <h5 id="field-semantics-and-precedence">Field semantics and
 precedence</h5>
 <p><code>mode</code> supplies the default policy. Explicit
@@ -1697,7 +1698,9 @@ corresponding mode-derived value independently; the framework default is
 means mode-derived</td>
 <td><code>sample</code> is the only success policy affected by
 <code>sampleRate</code>; <code>full</code> retains every eligible
-completed success.</td>
+completed success. Explicit <code>full</code> requires
+<code>att-load/v1.1</code>; the frozen v1.0 schema accepts
+<code>mode: all</code> but rejects this field value.</td>
 </tr>
 <tr class="odd">
 <td><code>failure</code></td>
@@ -1732,6 +1735,15 @@ explicitly configured. For example, <code>mode: all</code> with
 configured cap”, not unlimited retention. Dropped arrivals are scheduler
 events, not completed iterations, and never create retained iteration
 evidence.</p>
+<p><code>maxSamples</code> is enforced atomically across retained
+records and in-flight evidence reservations. An eligible success or
+failure must reserve a slot before its iteration can receive a retained
+workspace. A completion is retained only when its reservation, policy,
+and materialized evidence all agree; a candidate that loses eligibility
+or finishes after the cap is released and its temporary workspace is
+removed. This keeps retained records from pointing at missing evidence
+and bounds workspace/evidence overhead to the configured cap, including
+<code>mode: failures</code>.</p>
 <h5 id="retained-artifacts-and-sizing">Retained artifacts and
 sizing</h5>
 <p>The aggregate result and retained records are separate concerns:</p>
@@ -1747,11 +1759,12 @@ HTML report, and bounded metrics exist for every completed run. A
 retained evidence file is a link to an iteration workspace; it is not
 the aggregate latency/throughput metric. Successful workspaces are
 normally lazy and are materialized only when the evidence policy retains
-them. Failure workspaces are materialized only when failure evidence is
-enabled. v1.0 uses the single-target <code>samples/</code> and
-<code>failures/</code> directories; v1.1 adds
-<code>&lt;workloadId&gt;</code> so records from separate targets cannot
-be confused.</p>
+them. Failure workspaces are also reservation-backed, so
+<code>mode: failures</code> cannot materialize more than the available
+cap even when many failures finish concurrently. v1.0 uses the
+single-target <code>samples/</code> and <code>failures/</code>
+directories; v1.1 adds <code>&lt;workloadId&gt;</code> so records from
+separate targets cannot be confused.</p>
 <p>For a concrete estimate, <code>10 TPS × 5 minutes</code> produces
 about <code>3,000</code> scheduled iterations. With
 <code>success: sample</code> and <code>sampleRate: 0.02</code>, roughly
@@ -1764,9 +1777,10 @@ cap.</p>
 <code>failures</code> for normal load tests, and <code>samples</code>
 when representative successful request context is needed.
 <code>all</code> does not alter scheduler semantics or measured latency,
-but it can write one workspace and evidence record per completed
-iteration; avoid it for long, high-TPS, production-like tests unless the
-resulting disk and generator overhead are acceptable.</p>
+but without an explicit cap it can write one workspace and evidence
+record per completed iteration; avoid it for long, high-TPS,
+production-like tests unless the resulting disk and generator overhead
+are acceptable.</p>
 <h5 id="closed-vu-and-arrival-rate-examples">Closed-VU and arrival-rate
 examples</h5>
 <p>The same policy applies to both scheduler models:</p>
@@ -1809,6 +1823,10 @@ not completed iterations.</li>
 <li><strong>Does <code>sampleRate</code> affect failures?</strong> No.
 It is consulted only for <code>success: sample</code>; failure retention
 follows <code>failure</code>.</li>
+<li><strong>Why did a failure not get a workspace under
+<code>mode: failures</code>?</strong> The shared cap may already be held
+by retained or in-flight evidence. Only iterations with a reservation
+can materialize retained evidence.</li>
 <li><strong>Do dropped arrivals create retained evidence?</strong> No.
 They remain scheduler metrics/events and are excluded from retained
 iteration evidence.</li>
@@ -1828,6 +1846,18 @@ explicitly configured. Existing scenarios that used
 <code>mode: all</code> while relying on low success sampling may
 therefore create substantially more evidence; review disk budget and use
 <code>samples</code> when representative successes are sufficient.</p>
+<h5 id="schema-migration-for-explicit-full-success">Schema migration for
+explicit full success</h5>
+<p>The historical <code>att-load/v1.0</code> schema is frozen. Its
+<code>evidence.success</code> enum remains <code>none</code> or
+<code>sample</code>; <code>success: full</code> is intentionally
+rejected even though the runtime policy supports full success retention.
+A v1.0 scenario that needs full success evidence should keep
+<code>evidence: {mode: all}</code> or migrate to v1.1 by changing
+<code>schemaVersion</code> to <code>att-load/v1.1</code>, moving
+<code>target</code>, <code>inputs</code>, and <code>load</code> under
+one workload such as <code>workloads: [{id: default, ...}]</code>, and
+then using the explicit <code>success: full</code> field.</p>
 <h4 id="mq-payload-files-in-lazy-load-workspaces">MQ payload files in
 lazy Load workspaces</h4>
 <p>An MQ <code>file</code> argument may use an absolute path to a

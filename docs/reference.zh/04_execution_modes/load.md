@@ -219,6 +219,7 @@ evidence:
 完整保留亦可用顯式 policy 表示：
 
 ```yaml
+# 這個 explicit form 只適用於 att-load/v1.1。
 evidence:
   success: full
   failure: full
@@ -231,12 +232,14 @@ evidence:
 | 欄位 | 值／default | 語義 |
 |---|---|---|
 | `mode` | `metrics`、`failures`、`samples`、`all`；default `failures` | 選擇上表的 success/failure policy。 |
-| `success` | `none`、`sample`、`full`；省略時由 mode 決定 | 只有 `sample` 會受 `sampleRate` 影響；`full` 保留每個符合條件的 completed success。 |
+| `success` | `none`、`sample`、`full`；省略時由 mode 決定 | 只有 `sample` 會受 `sampleRate` 影響；`full` 保留每個符合條件的 completed success。顯式 `full` 需要 `att-load/v1.1`；frozen v1.0 schema 接受 `mode: all`，但拒絕這個 field value。 |
 | `failure` | `none`、`full`；省略時由 mode 決定 | `full` 獨立保留符合條件的 completed failure，不受 success sampling 影響。 |
 | `sampleRate` | `0` 至 `1`；只有 `success: sample` 預設 `0.01` | deterministic success sampling 比例；`none` 與 `full` 會忽略並解析為 `0`。 |
 | `maxSamples` | `>= 0` 整數；bounded policy default `1000` | 所有 retained completed success/failure 共用的一個總 cap；`0` 表示不保留。顯式值也適用於 `all`。 |
 
 `mode: all` 及 `success: full` 預設沒有 implicit retention cap。因此 `all` 會保留每一個 completed success 和 failure，除非顯式設定 `maxSamples`。例如 `mode: all` 加 `maxSamples: 1000` 的意思是「最多保留 1000 筆符合條件的 record」，不是 unlimited retention。Dropped arrival 不是 completed iteration，不會建立 retained iteration evidence。
+
+`maxSamples` 會在 retained record 與 in-flight evidence reservation 之間以 atomic 方式執行。符合 policy 的 success 或 failure 必須先取得 slot，iteration 才可以建立 retained workspace。只有 reservation、policy 與已 materialize 的 evidence 都成立時，completion 才會被保留；失去資格或 cap 已滿的候選會釋放 reservation 並清理 temporary workspace。這可以避免 retained record 指向不存在的 evidence，並把 workspace/evidence overhead（包括 `mode: failures`）限制在設定的 cap 內。
 
 ##### Retained artifact 與容量估算
 
@@ -252,11 +255,11 @@ output/load/<runId>/
 └── iterations/...               # 需要時才建立的 temporary/retained workspace
 ```
 
-每個完成的 run 都會有 summary、HTML report 和 bounded metrics。Retained evidence file 只是指向 iteration workspace 的 link，不是 aggregate latency/throughput metric。成功 workspace 一般採 lazy materialization，只有 policy 要保留時才建立；failure workspace 只有啟用 failure evidence 才建立。v1.0 使用單 target 的 `samples/` 和 `failures/`；v1.1 再加上 `<workloadId>`，避免不同 target 的 record 混淆。
+每個完成的 run 都會有 summary、HTML report 和 bounded metrics。Retained evidence file 只是指向 iteration workspace 的 link，不是 aggregate latency/throughput metric。成功 workspace 一般採 lazy materialization，只有 policy 要保留時才建立；failure workspace 也由 reservation 控制，因此 `mode: failures` 即使大量 failure 同時完成，也不會超過可用 cap。v1.0 使用單 target 的 `samples/` 和 `failures/`；v1.1 再加上 `<workloadId>`，避免不同 target 的 record 混淆。
 
 具體估算：`10 TPS × 5 分鐘` 約產生 `3,000` 個 scheduled iteration。使用 `success: sample` 與 `sampleRate: 0.02` 時，約有 `60` 個成功 record 在 cap 前符合取樣資格。Failure 由 `failure` policy 獨立處理，不會受 success sample rate 影響；但兩者共用顯式的 `maxSamples` 總 cap。
 
-`metrics` 的 disk/IO overhead 最低；一般 load test 使用 `failures`；需要代表性成功 request context 時使用 `samples`。`all` 不會改變 scheduler 或 measured latency，但可能為每個 completed iteration 寫出 workspace 和 evidence；長時間、高 TPS、production-like 測試應先評估 disk 和 generator overhead。
+`metrics` 的 disk/IO overhead 最低；一般 load test 使用 `failures`；需要代表性成功 request context 時使用 `samples`。`all` 不會改變 scheduler 或 measured latency，但未設定顯式 cap 時可能為每個 completed iteration 寫出 workspace 和 evidence；長時間、高 TPS、production-like 測試應先評估 disk 和 generator overhead。
 
 ##### Closed-VU 與 arrival-rate 例子
 
@@ -287,12 +290,17 @@ Evidence policy 在 run 開始時套用。它不會把 arrival-rate 變成 queue
 - **為什麼 retention 在 N 筆後停止？** 顯式 `maxSamples` 是 success/failure 共用的總 cap。省略時 bounded policy default 是 `1000`；`all` 沒有 implicit cap。
 - **`mode: all` 是否真的代表全部？** 是；所有 completed success/failure 都符合保留資格，除非顯式設定 `maxSamples`。Dropped arrival 不算 completed iteration。
 - **`sampleRate` 會影響 failure 嗎？** 不會；它只在 `success: sample` 時使用，failure 由 `failure` policy 決定。
+- **為什麼 `mode: failures` 的某個 failure 沒有 workspace？** Shared cap 可能已被 retained 或 in-flight evidence 佔用；只有有 reservation 的 iteration 才能 materialize retained evidence。
 - **Dropped arrival 會建立 retained evidence 嗎？** 不會；它只留在 scheduler metrics/events。
 - **某一個 workload 的 evidence 在哪裡？** v1.0 查看 `samples/` 或 `failures/`；v1.1 查看 `samples/<workloadId>/` 或 `failures/<workloadId>/`，並以 summary/report 的 relative path 為準。
 
 ##### `mode: all` migration note
 
 舊版 ATT 將 `mode: all` 當作 sampled successes 加上 full failures，並套用 default success `sampleRate`。修正後是 full successes 加上 full failures；除非顯式設定 `maxSamples`，否則沒有 implicit cap。若既有 scenario 依賴 `mode: all` 的低 success sampling，升級後 evidence volume 可能大幅增加；請重新評估 disk budget，或改用 `samples`。
+
+##### 顯式 full success 的 schema migration
+
+歷史 `att-load/v1.0` schema 是 frozen 的。它的 `evidence.success` enum 仍然只有 `none` 或 `sample`；即使 runtime policy 支援 full success retention，也會刻意拒絕 `success: full`。v1.0 scenario 若需要完整成功 evidence，可以繼續使用 `evidence: {mode: all}`；或升級至 v1.1：把 `schemaVersion` 改為 `att-load/v1.1`，將 `target`、`inputs`、`load` 移到一個 workload（例如 `workloads: [{id: default, ...}]`）下，再使用顯式 `success: full`。
 
 #### Lazy Load workspace 下的 MQ payload
 

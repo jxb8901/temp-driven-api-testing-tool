@@ -58,7 +58,6 @@ public final class IterationExecutor implements LoadIterationRunner {
         Instant started = Instant.now();
         Path iterationDirectory = null;
         boolean retainedWorkspace = request.outputDirectory() != null;
-        boolean retainFailureEvidence = request.retainFailureEvidence();
         CaseRuntimeContext context = null;
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         CaseExecutionLog log = null;
@@ -105,9 +104,10 @@ public final class IterationExecutor implements LoadIterationRunner {
             if (log != null) try { log.close(); } catch (Exception ignored) { }
         }
         Duration duration = Duration.between(started, Instant.now());
-        boolean retainEvidence = status == ResultStatus.PASS ? retainedWorkspace : retainFailureEvidence;
+        boolean retainEvidence = status == ResultStatus.PASS
+                ? request.retainSuccessEvidence() : request.retainFailureEvidence();
         if (retainEvidence && log != null) {
-            try { log.materialize(iterationDirectory.resolve("case.log")); iterationDirectory = iterationDirectory.resolve("case.log").getParent(); }
+            try { log.materialize(iterationDirectory.resolve("case.log")); }
             catch (Exception ignored) { }
         }
         if (context != null && iterationDirectory != null && retainEvidence) {
@@ -117,8 +117,21 @@ public final class IterationExecutor implements LoadIterationRunner {
                         new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
             } catch (Exception ignored) { }
         }
+        boolean evidenceAvailable = retainEvidence && iterationDirectory != null
+                && Files.isDirectory(iterationDirectory)
+                && Files.isRegularFile(iterationDirectory.resolve("case.log"));
+        if (!evidenceAvailable && request.outputDirectory() != null) deleteWorkspace(iterationDirectory);
         return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic,
-                retainEvidence);
+                evidenceAvailable);
+    }
+
+    private void deleteWorkspace(Path directory) {
+        if (directory == null || !Files.exists(directory)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
     }
 
     private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {

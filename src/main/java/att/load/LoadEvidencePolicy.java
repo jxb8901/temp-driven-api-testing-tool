@@ -46,6 +46,7 @@ public final class LoadEvidencePolicy {
         if (iterationId == null) return false;
         return success == Success.FULL || sampleSuccess(iterationId);
     }
+    public boolean retainFailure() { return failure == Failure.FULL; }
     public boolean sampleSuccess(String iterationId) {
         if (iterationId == null || success != Success.SAMPLE || sampleRate <= 0.0) return false;
         long hash = ((long) iterationId.hashCode()) & 0xffffffffL;

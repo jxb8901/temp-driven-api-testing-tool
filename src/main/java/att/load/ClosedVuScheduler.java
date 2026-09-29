@@ -36,6 +36,11 @@ public final class ClosedVuScheduler implements LoadScheduler {
                              LoadEvidenceStore evidenceStore, Path outputRoot) {
         this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), evidenceStore, outputRoot, null);
     }
+    public ClosedVuScheduler(LoadScenario scenario, IterationExecutor executor, String runId,
+                             LoadEvidenceStore evidenceStore) {
+        this(scenario, executor, runId, adapt(evidenceStore), LoadSchedulerTiming.system(), evidenceStore,
+                executor == null ? null : executor.outputRoot(), null);
+    }
     ClosedVuScheduler(LoadScenario scenario, LoadIterationRunner executor, String runId,
                       Consumer<LoadEvent> listener, LoadSchedulerTiming timing) {
         this(scenario, executor, runId, listener, timing, null, null, null);
@@ -94,9 +99,13 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
                 if (!scenario.legacyV1()) request = request.withWorkloadId(scenario.workloadId());
-                Path sampleRoot = sampleOutputRoot(iterationId);
-                if (sampleRoot != null) request = request.withOutputDirectory(sampleRoot);
-                request = request.withFailureEvidence(evidenceStore == null || evidenceStore.retainsFailureEvidence());
+                Path evidenceRoot = evidenceOutputRoot(iterationId);
+                if (evidenceRoot != null) {
+                    request = request.withOutputDirectory(evidenceRoot)
+                            .withEvidenceRetention(evidenceStore.retainsSuccessEvidence(iterationId), evidenceStore.retainsFailureEvidence());
+                } else if (evidenceStore != null) {
+                    request = request.withEvidenceRetention(false, false);
+                }
                 long iterationStarted = timing.now();
                 att.core.ResultStatus status;
                 String errorType = null;
@@ -136,8 +145,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
         }
     }
     private long remainingRunMillis(long startedAt) { return LoadPhase.totalMs(scenario) - (timing.now() - startedAt); }
-    private Path sampleOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccess(iterationId)) return null;
+    private Path evidenceOutputRoot(String iterationId) {
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
     }

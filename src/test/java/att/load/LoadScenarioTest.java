@@ -31,14 +31,22 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScenarioTest {
     @TempDir Path temp;
 
-    @Test void explicitFullSuccessPolicyIsAcceptedByBothLoadSchemaVersions() throws Exception {
+    @Test void explicitFullSuccessPolicyIsCurrentSchemaOnly() throws Exception {
         Path project = project();
         Path v10File = write(project, "full-v10.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "load: {users: 1, duration: 1s}\n"
                 + "evidence: {success: full, failure: full}\n");
-        LoadScenario v10 = new LoadScenarioLoader(project).load(v10File);
-        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(v10).success());
+        DiagnosticException v10Error = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(v10File));
+        assertTrue(v10Error.getMessage().contains("success"), v10Error.getMessage());
+
+        Path v10ModeAllFile = write(project, "all-v10.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {mode: all, failure: full}\n");
+        LoadScenario v10ModeAll = new LoadScenarioLoader(project).load(v10ModeAllFile);
+        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(v10ModeAll).success(),
+                "v1.0 mode: all remains valid and retains full success evidence");
 
         Path v11File = write(project, "full-v11.yaml", "schemaVersion: att-load/v1.1\nworkloads:\n"
                 + "  - id: default\n"
@@ -220,6 +228,7 @@ class LoadScenarioTest {
 
             LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
                     LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10));
+            assertTrue(evidence.reserveEvidence("resolved-iteration"));
             long now = System.currentTimeMillis();
             evidence.onEvent(LoadEvent.completed("resolved-run", "closed", "STEADY", "resolved-iteration", "VU-1", 1,
                     now, now, now + 1, result.status(), result.evidenceRef()));
@@ -330,6 +339,42 @@ class LoadScenarioTest {
             assertTrue(evidence.events().isEmpty());
             assertEquals(0, evidence.write(outputRoot.resolve("load/reserved-run")).get("count"));
             assertFalse(Files.exists(outputRoot.resolve("load/reserved-run")));
+        } finally { resources.close(); }
+    }
+
+    @Test void concurrentFailureEvidenceReservationsBoundWorkspacesAndRetainedLinks() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/CAPPED_FAIL_TEMPLATE"));
+        write(project, "templates/CAPPED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+                + "name: CAPPED_FAIL_TEMPLATE\ndescription: capped concurrent failures\nactions:\n"
+                + "  verify: {type: assert, assert: \"'actual' == 'expected'\", expected: expected, actual: actual}\n");
+        Path scenarioFile = write(project, "capped-failures.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: CAPPED_FAIL_TEMPLATE}\n"
+                + "load: {users: 8, duration: 150ms}\n"
+                + "evidence: {mode: failures, maxSamples: 3}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("capped-failure-output");
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario,
+                    new IterationExecutor(project, config, target, resources, outputRoot), "capped-run", evidence, outputRoot);
+            try { scheduler.run(); } finally { scheduler.close(); }
+
+            Path iterations = outputRoot.resolve("load/capped-run/iterations");
+            long workspaceCount;
+            try (java.util.stream.Stream<Path> paths = Files.list(iterations)) {
+                workspaceCount = paths.filter(Files::isDirectory).count();
+            }
+            assertEquals(3, evidence.events().size());
+            assertEquals(evidence.events().size(), workspaceCount,
+                    "a reservation that is not retained must not leave an orphan workspace");
+            assertTrue(evidence.events().stream().allMatch(event -> event.evidence() != null
+                    && Files.isDirectory(event.evidence().workspace())
+                    && Files.isRegularFile(event.evidence().caseLog())));
         } finally { resources.close(); }
     }
 

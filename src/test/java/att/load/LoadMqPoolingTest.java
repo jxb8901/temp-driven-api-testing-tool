@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoadMqPoolingTest {
@@ -45,7 +47,7 @@ class LoadMqPoolingTest {
             Future<IterationResult> second = workers.submit(() -> executor.execute(request("mq-2", "VU-2")));
             IterationResult timedOut = second.get(2L, TimeUnit.SECONDS);
             assertEquals(ResultStatus.ERROR, timedOut.status());
-            assertEquals("MQ_POOL_TIMEOUT", timedOut.context().resolve("EXEC.ACTIONS.receive.output.error.type"));
+            assertEquals("MQ_POOL_TIMEOUT", timedOut.context().resolve("EXEC.ACTIONS.request.output.error.type"));
             assertEquals(1, delegate.maxConcurrentGets.get());
 
             delegate.releaseGet.countDown();
@@ -57,7 +59,7 @@ class LoadMqPoolingTest {
             assertEquals(1, delegate.connections.get());
             assertEquals(1, delegate.maxConcurrentGets.get());
             assertEquals(0, resources.mqPool("broker").active());
-            assertEquals(2, delegate.queueCloses.get());
+            assertEquals(4, delegate.queueCloses.get());
         } finally {
             delegate.releaseGet.countDown();
             workers.shutdownNow();
@@ -84,10 +86,48 @@ class LoadMqPoolingTest {
             assertTrue(workers.awaitTermination(2L, TimeUnit.SECONDS));
             assertTrue(awaitActive(resources.mqPool("broker"), 2L), "cancelled MQ iteration leaked its lease");
             assertEquals(1, delegate.disconnects.get());
-            assertEquals(1, delegate.queueCloses.get());
+            assertEquals(2, delegate.queueCloses.get());
         } finally {
             delegate.releaseGet.countDown();
             workers.shutdownNow();
+        }
+    }
+
+    @Test
+    void loadMqRequestUsesProductionIterationPathWithoutEagerSuccessWorkspaceAndRetainsCappedFailure() throws Exception {
+        BlockingFactory successFactory = new BlockingFactory();
+        successFactory.releaseGet.countDown();
+        FrameworkConfig config = config(2, 0, 1000L);
+        LoadTarget target = target();
+        Path outputRoot = tempDir.resolve("load-output");
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config, successFactory)) {
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources, outputRoot);
+            IterationResult success = executor.execute(request("mq-success", "VU-1"));
+            assertEquals(ResultStatus.PASS, success.status());
+            assertEquals(1, successFactory.putCalls.get());
+            assertEquals(1, successFactory.getCalls.get());
+            assertFalse(Files.exists(success.outputDirectory()),
+                    "a successful load MQ request must not eagerly materialize its workspace");
+        }
+
+        BlockingFactory failureFactory = new BlockingFactory();
+        failureFactory.failGet = true;
+        failureFactory.releaseGet.countDown();
+        LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
+                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 1));
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config, failureFactory)) {
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources, outputRoot);
+            assertTrue(evidence.reserveEvidence("mq-failure"));
+            IterationResult failure = executor.execute(request("mq-failure", "VU-1")
+                    .withOutputDirectory(outputRoot.resolve("load/mq-run/iterations"))
+                    .withEvidenceRetention(false, true));
+            assertEquals(ResultStatus.ERROR, failure.status());
+            assertNotNull(failure.evidenceRef());
+            assertTrue(Files.isRegularFile(failure.outputDirectory().resolve("case.log")));
+            evidence.onEvent(LoadEvent.completed("mq-run", "closed", "STEADY", "mq-failure", "VU-1", 1,
+                    0L, 0L, 1L, failure.status(), failure.evidenceRef()));
+            assertEquals(1, evidence.events().size());
+            assertTrue(Files.isDirectory(evidence.events().get(0).evidence().workspace()));
         }
     }
 
@@ -106,9 +146,12 @@ class LoadMqPoolingTest {
         Path project = tempDir.resolve("project");
         Path directory = project.resolve("templates/MQ");
         Files.createDirectories(directory);
-        TemplateAction action = new TemplateAction("receive", map(
+        Path payload = directory.resolve("request.xml");
+        Files.write(payload, "<request/>\n".getBytes("UTF-8"));
+        TemplateAction action = new TemplateAction("request", map(
                 "type", "tool",
-                "call", "#{mq.broker.receive(queue='REPLY.Q', waitMs=1000)}"), "att-template/v3.0");
+                "call", "#{mq.broker.request(file='" + payload.toString()
+                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.0");
         StageTemplate template = new StageTemplate("MQ", directory, Collections.singletonList(action),
                 "att-template/v3.0", directory.resolve("template.yaml"));
         FlowRegistry flows = new FlowRegistry(project, project.resolve("templates"), false);
@@ -135,11 +178,14 @@ class LoadMqPoolingTest {
         final AtomicInteger connections = new AtomicInteger();
         final AtomicInteger disconnects = new AtomicInteger();
         final AtomicInteger queueCloses = new AtomicInteger();
+        final AtomicInteger putCalls = new AtomicInteger();
+        final AtomicInteger getCalls = new AtomicInteger();
         final AtomicInteger activeGets = new AtomicInteger();
         final AtomicInteger maxConcurrentGets = new AtomicInteger();
         final CountDownLatch getEntered = new CountDownLatch(1);
         final CountDownLatch releaseGet = new CountDownLatch(1);
         final CountDownLatch getFinished = new CountDownLatch(1);
+        boolean failGet;
 
         @Override public MqTransport.Connection connect(MqHelperConfig config) {
             connections.incrementAndGet();
@@ -147,10 +193,12 @@ class LoadMqPoolingTest {
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
                     return new MqTransport.Queue() {
                         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) {
+                            putCalls.incrementAndGet();
                             return new MqTransport.Message(new byte[]{1}, null, payload);
                         }
 
                         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
+                            getCalls.incrementAndGet();
                             int active = activeGets.incrementAndGet();
                             for (;;) {
                                 int previous = maxConcurrentGets.get();
@@ -159,6 +207,8 @@ class LoadMqPoolingTest {
                             getEntered.countDown();
                             try {
                                 releaseGet.await();
+                                if (failGet) throw new MqTransport.Exception("MQ request failed", 2, 2059,
+                                        "MQRC_Q_MGR_NOT_AVAILABLE", null);
                                 return new MqTransport.Message(new byte[]{1}, null, new byte[]{7});
                             } catch (InterruptedException interrupted) {
                                 Thread.currentThread().interrupt();

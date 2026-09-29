@@ -374,12 +374,13 @@ evidence:
 也可以用 explicit policy 表達 full retention：
 
 ```yaml
+# 這個 explicit form 只適用於 att-load/v1.1。
 evidence:
   success: full
   failure: full
 ```
 
-`success` 的有效值是 `none`、`sample`、`full`；`failure` 是 `none` 或 `full`。Explicit `success`/`failure` 各自優先於由 `mode` 推導的值，而省略 `evidence` 時 framework default 是 `failures`。`sampleRate` 範圍是 `0` 至 `1`，只有 `success: sample` 會使用它，default 是 `0.01`；`none` 和 `full` 會忽略它。`maxSamples` 是所有 retained completed success/failure 共用的總 cap，`0` 表示不保留。Bounded policy 未設定時 default 是 `1000`；`mode: all` 或 `success: full` 沒有 implicit cap，但顯式 `maxSamples` 仍會生效。
+`success` 的有效值是 `none`、`sample`、`full`；`failure` 是 `none` 或 `full`。Explicit `success`/`failure` 各自優先於由 `mode` 推導的值，而省略 `evidence` 時 framework default 是 `failures`。`success: full` 只適用於 `att-load/v1.1`；frozen 的 v1.0 schema 仍拒絕這個顯式值，v1.0 請使用 `mode: all` 或按 migration note 升級。`sampleRate` 範圍是 `0` 至 `1`，只有 `success: sample` 會使用它，default 是 `0.01`；`none` 和 `full` 會忽略它。`maxSamples` 是所有 retained completed success/failure 與 in-flight reservation 共用的總 cap，`0` 表示不保留。只有成功取得 reservation 的 iteration 才會 materialize retained workspace；未被保留的候選 workspace 會清理，因此 failure evidence overhead 也受 cap 限制。Bounded policy 未設定時 default 是 `1000`；`mode: all` 或 `success: full` 沒有 implicit cap，但顯式 `maxSamples` 仍會生效。
 
 容量估算：`10 TPS × 5 分鐘 ≈ 3,000 iterations`；`sampleRate: 0.02` 約有 `60` 個成功 sample 在 cap 前符合資格。Failure 由 `failure` policy 獨立處理，不受 sampleRate 影響；dropped arrivals 不是 completed iteration，不會產生 retained evidence。
 

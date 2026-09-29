@@ -167,8 +167,19 @@ class MultiWorkloadReviewRegressionTest {
         LoadSchedulerTiming timing = LoadSchedulerTiming.anchored(elapsed::get, 1_700_000_000_000L, 500L,
                 millis -> elapsed.addAndGet(millis));
         LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
-        LoadIterationRunner runner = request -> new IterationResult(request.iterationId(), ResultStatus.PASS,
-                Duration.ofMillis(1L), null, Collections.emptyList(), null, null);
+        LoadIterationRunner runner = request -> {
+            try {
+                Path workspace = request.outputDirectory().resolve(LoadIsolation.workspaceName(
+                        request.runId(), request.iterationId(), request.iteration()));
+                Files.createDirectories(workspace);
+                Path caseLog = workspace.resolve("case.log");
+                Files.write(caseLog, Collections.singletonList("retained"));
+                return new IterationResult(request.iterationId(), ResultStatus.PASS, Duration.ofMillis(1L), null,
+                        Collections.emptyList(), workspace, null, true);
+            } catch (java.io.IOException error) {
+                throw new RuntimeException(error);
+            }
+        };
         Path output = temp.resolve("identity-output");
         ClosedVuScheduler scheduler = new ClosedVuScheduler(workload, runner, "evidence-identity",
                 evidence::onEvent, timing, evidence, output, null);
