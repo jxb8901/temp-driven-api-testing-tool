@@ -104,6 +104,16 @@ class LoadEvidencePolicyTest {
         assertEquals("failure-1", sampled.events().get(0).iterationId());
     }
 
+    @Test void unsampledSuccessCannotReserveAFullFailureSlotBeforeOutcome() throws Exception {
+        LoadEvidenceStore sampled = new LoadEvidenceStore(new LoadEvidencePolicy(
+                LoadEvidencePolicy.Success.SAMPLE, LoadEvidencePolicy.Failure.FULL, 0.0, 1));
+        assertFalse(sampled.reserveSuccessEvidence("unsampled-success"));
+        assertTrue(sampled.claimFailureEvidence("failure-1"));
+        sampled.onEvent(event("failure-1", ResultStatus.FAIL));
+        assertEquals(1, sampled.events().size());
+        assertEquals("failure-1", sampled.events().get(0).iterationId());
+    }
+
     private static LoadEvidencePolicy policyStore(Object... values) {
         return LoadEvidencePolicy.from(scenario(values));
     }

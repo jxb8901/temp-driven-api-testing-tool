@@ -2,6 +2,7 @@ package att.load;
 
 import att.config.FrameworkConfig;
 import att.config.ToolConfig;
+import att.core.CaseExecutionLog;
 import att.core.ExecutionOptions;
 import att.core.ResultStatus;
 import att.core.TestCase;
@@ -15,15 +16,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -518,6 +522,67 @@ class LoadScenarioTest {
         }
     }
 
+    @Test void failureEvidenceClaimsQuotaAfterOutcomeInsteadOfStarvingAConcurrentFailure() throws Exception {
+        Map<String, Object> evidenceConfig = new LinkedHashMap<String, Object>();
+        evidenceConfig.put("mode", "failures");
+        evidenceConfig.put("maxSamples", Integer.valueOf(1));
+        LoadScenario scenario = new LoadScenario(Paths.get("failure-race.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), LoadScenario.Model.CLOSED,
+                2, 0.0, null, Duration.ZERO, Duration.ZERO, Duration.ofMillis(200L), Duration.ZERO,
+                Duration.ofSeconds(1L), 0, "drop", Collections.<String, Object>emptyMap(), evidenceConfig);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        Path outputRoot = temp.resolve("failure-race-output");
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch secondEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        LoadIterationRunner runner = request -> {
+            int call = calls.incrementAndGet();
+            try {
+                if (call == 1) {
+                    firstEntered.countDown();
+                    releaseFirst.await(2L, TimeUnit.SECONDS);
+                    return deferredResult(outputRoot, request, ResultStatus.PASS);
+                }
+                if (call == 2) {
+                    secondEntered.countDown();
+                    return deferredResult(outputRoot, request, ResultStatus.FAIL);
+                }
+                return deferredResult(outputRoot, request, ResultStatus.PASS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        };
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "failure-race", event -> evidence.onEvent(event),
+                LoadSchedulerTiming.system(), evidence, outputRoot, null);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        try {
+            Future<LoadRunResult> future = control.submit(scheduler::run);
+            assertTrue(firstEntered.await(2L, TimeUnit.SECONDS));
+            assertTrue(secondEntered.await(2L, TimeUnit.SECONDS));
+            releaseFirst.countDown();
+            future.get(5L, TimeUnit.SECONDS);
+            assertEquals(1, evidence.events().size(), "the completed failure must claim the free slot");
+            LoadEvent retained = evidence.events().get(0);
+            assertEquals(ResultStatus.FAIL, retained.status());
+            assertNotNull(retained.evidence());
+            assertTrue(Files.isDirectory(retained.evidence().workspace()));
+            assertTrue(Files.isRegularFile(retained.evidence().caseLog()));
+            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot)) {
+                List<Path> workspaces = paths.filter(Files::isDirectory)
+                        .filter(path -> path.getFileName().toString().startsWith("failure-race-VU-"))
+                        .collect(java.util.stream.Collectors.toList());
+                assertEquals(1, workspaces.size(), workspaces.toString());
+            }
+        } finally {
+            releaseFirst.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(2L, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void loadValidationIsModeAwareAndOptionalLoadPathsRemainPortable() throws Exception {
         Path project = project();
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
@@ -615,5 +680,19 @@ class LoadScenarioTest {
 
     private Path write(Path project, String name, String content) throws Exception {
         Path file = project.resolve(name); Files.write(file, content.getBytes(StandardCharsets.UTF_8)); return file;
+    }
+
+    private IterationResult deferredResult(Path outputRoot, IterationRequest request, ResultStatus status) {
+        Path directory = outputRoot.resolve("load").resolve("failure-race").resolve("iterations")
+                .resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
+        try {
+            CaseExecutionLog log = CaseExecutionLog.lightweight(directory.resolve("case.log"));
+            log.append("TEST", "deferred evidence");
+            log.close();
+            return new IterationResult(request.iterationId(), status, Duration.ofMillis(1L), null,
+                    Collections.emptyList(), directory, null, false, log);
+        } catch (Exception error) {
+            throw new IllegalStateException(error);
+        }
     }
 }

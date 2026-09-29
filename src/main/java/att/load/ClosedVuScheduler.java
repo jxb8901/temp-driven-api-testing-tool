@@ -102,7 +102,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 Path evidenceRoot = evidenceOutputRoot(iterationId);
                 if (evidenceRoot != null) {
                     request = request.withOutputDirectory(evidenceRoot)
-                            .withEvidenceRetention(evidenceStore.retainsSuccessEvidence(iterationId), evidenceStore.retainsFailureEvidence());
+                            .withEvidenceRetention(true, false);
                 } else if (evidenceStore != null) {
                     request = request.withEvidenceRetention(false, false);
                 }
@@ -114,9 +114,17 @@ public final class ClosedVuScheduler implements LoadScheduler {
                         sequenceValue, scheduledAt, iterationStarted)));
                 try {
                     IterationResult result = executor.execute(request);
+                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId)) {
+                        result = result.materializeEvidence();
+                    } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
+                        evidenceStore.releaseEvidence(iterationId);
+                    }
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 }
-                catch (RuntimeException failure) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
+                catch (RuntimeException failure) {
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId)) evidenceStore.releaseEvidence(iterationId);
+                    status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
+                }
                 long completedAt = timing.now();
                 LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "closed", phase, iterationId, userId,
                         sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence)));
@@ -146,7 +154,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
     }
     private long remainingRunMillis(long startedAt) { return LoadPhase.totalMs(scenario) - (timing.now() - startedAt); }
     private Path evidenceOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveEvidence(iterationId)) return null;
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
     }

@@ -116,13 +116,21 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     Path evidenceRoot = evidenceOutputRoot(id);
                     if (evidenceRoot != null) {
                         request = request.withOutputDirectory(evidenceRoot)
-                                .withEvidenceRetention(evidenceStore.retainsSuccessEvidence(id), evidenceStore.retainsFailureEvidence());
+                                .withEvidenceRetention(true, false);
                     } else if (evidenceStore != null) {
                         request = request.withEvidenceRetention(false, false);
                     }
                     IterationResult result = executor.execute(request);
+                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id)) {
+                        result = result.materializeEvidence();
+                    } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
+                        evidenceStore.releaseEvidence(id);
+                    }
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
-                } catch (RuntimeException error) { status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR"; }
+                } catch (RuntimeException error) {
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id)) evidenceStore.releaseEvidence(id);
+                    status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
+                }
                 finally {
                     long completedAt = timing.now(); inFlight.decrementAndGet();
                     LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "arrivalRate", phase, id, null,
@@ -137,7 +145,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
     }
     private Path evidenceOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveEvidence(iterationId)) return null;
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
     }

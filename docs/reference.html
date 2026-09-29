@@ -1736,14 +1736,14 @@ configured cap”, not unlimited retention. Dropped arrivals are scheduler
 events, not completed iterations, and never create retained iteration
 evidence.</p>
 <p><code>maxSamples</code> is enforced atomically across retained
-records and in-flight evidence reservations. An eligible success or
-failure must reserve a slot before its iteration can receive a retained
-workspace. A completion is retained only when its reservation, policy,
-and materialized evidence all agree; a candidate that loses eligibility
-or finishes after the cap is released and its temporary workspace is
-removed. This keeps retained records from pointing at missing evidence
-and bounds workspace/evidence overhead to the configured cap, including
-<code>mode: failures</code>.</p>
+records and in-flight success reservations. A success whose eligibility
+is known from its iteration ID may reserve a slot before execution.
+Failure quota is claimed only after the completed status is known, then
+the deferred log/context is materialized. This prevents an in-flight
+success or an unsampled iteration from starving a later eligible failure
+while still bounding retained workspace/evidence overhead to the
+configured cap. A completion is retained only when its claim, policy,
+and materialized evidence all agree.</p>
 <h5 id="retained-artifacts-and-sizing">Retained artifacts and
 sizing</h5>
 <p>The aggregate result and retained records are separate concerns:</p>
@@ -1759,12 +1759,13 @@ HTML report, and bounded metrics exist for every completed run. A
 retained evidence file is a link to an iteration workspace; it is not
 the aggregate latency/throughput metric. Successful workspaces are
 normally lazy and are materialized only when the evidence policy retains
-them. Failure workspaces are also reservation-backed, so
-<code>mode: failures</code> cannot materialize more than the available
-cap even when many failures finish concurrently. v1.0 uses the
-single-target <code>samples/</code> and <code>failures/</code>
-directories; v1.1 adds <code>&lt;workloadId&gt;</code> so records from
-separate targets cannot be confused.</p>
+them. Failure workspaces are claimed and materialized after completion,
+so <code>mode: failures</code> cannot let successful in-flight work
+consume the failure slot or exceed the available cap when many failures
+finish concurrently. v1.0 uses the single-target <code>samples/</code>
+and <code>failures/</code> directories; v1.1 adds
+<code>&lt;workloadId&gt;</code> so records from separate targets cannot
+be confused.</p>
 <p>For a concrete estimate, <code>10 TPS × 5 minutes</code> produces
 about <code>3,000</code> scheduled iterations. With
 <code>success: sample</code> and <code>sampleRate: 0.02</code>, roughly
@@ -1825,8 +1826,10 @@ It is consulted only for <code>success: sample</code>; failure retention
 follows <code>failure</code>.</li>
 <li><strong>Why did a failure not get a workspace under
 <code>mode: failures</code>?</strong> The shared cap may already be held
-by retained or in-flight evidence. Only iterations with a reservation
-can materialize retained evidence.</li>
+by retained evidence or success reservations that were known to be
+eligible. Failure quota is claimed after completion, so successful
+in-flight work does not permanently consume it; a failure that finishes
+after the total cap is full is not retained.</li>
 <li><strong>Do dropped arrivals create retained evidence?</strong> No.
 They remain scheduler metrics/events and are excluded from retained
 iteration evidence.</li>

@@ -122,7 +122,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                 && Files.isRegularFile(iterationDirectory.resolve("case.log"));
         if (!evidenceAvailable && request.outputDirectory() != null) deleteWorkspace(iterationDirectory);
         return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic,
-                evidenceAvailable);
+                evidenceAvailable, evidenceAvailable ? null : log);
     }
 
     private void deleteWorkspace(Path directory) {

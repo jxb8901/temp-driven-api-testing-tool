@@ -14,8 +14,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -128,6 +131,78 @@ class LoadMqPoolingTest {
                     0L, 0L, 1L, failure.status(), failure.evidenceRef()));
             assertEquals(1, evidence.events().size());
             assertTrue(Files.isDirectory(evidence.events().get(0).evidence().workspace()));
+        }
+    }
+
+    @Test
+    void loadSchedulerExecutesFlowMqRequestWithMetricsAndFailureEvidencePolicies() throws Exception {
+        Path project = tempDir.resolve("project");
+        att.TestSchemas.install(project);
+        Path flowDirectory = project.resolve("templates/flows/load/mq");
+        Files.createDirectories(flowDirectory);
+        Path payload = flowDirectory.resolve("request.xml");
+        Files.write(payload, "<request/>\n".getBytes("UTF-8"));
+        Files.write(flowDirectory.resolve("flow.yaml"), (
+                "schemaVersion: att-flow/v3.0\n"
+                + "id: load.mq.request.v1\nname: Load MQ request\ndescription: scheduler MQ flow\nactions:\n"
+                + "  request:\n    type: tool\n    call: \"#{mq.broker.request(file='" + payload.toString()
+                + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}\"\n").getBytes("UTF-8"));
+        FrameworkConfig config = config(2, 0, 1000L);
+        Path metricsScenarioFile = project.resolve("mq-metrics.yaml");
+        Files.write(metricsScenarioFile, ("schemaVersion: att-load/v1.0\n"
+                + "target: {type: flow, id: load.mq.request.v1}\n"
+                + "load: {users: 1, duration: 25ms}\nexecution: {thinkTime: 25ms}\n"
+                + "evidence: {mode: metrics}\n").getBytes("UTF-8"));
+        LoadScenario metricsScenario = new LoadScenarioLoader(project).load(metricsScenarioFile);
+        LoadTarget metricsTarget = new LoadTargetResolver(project, config).resolve(metricsScenario);
+        Path outputRoot = tempDir.resolve("scheduler-output");
+        BlockingFactory metricsFactory = new BlockingFactory();
+        metricsFactory.releaseGet.countDown();
+        List<LoadEvent> metricEvents = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadEvidenceStore metricsEvidence = new LoadEvidenceStore(LoadEvidencePolicy.from(metricsScenario));
+        try (LoadRunResources resources = new LoadRunResources(project, config, metricsFactory)) {
+            IterationExecutor executor = new IterationExecutor(project, config, metricsTarget, resources, outputRoot);
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(metricsScenario, executor, "mq-metrics", event -> {
+                metricEvents.add(event);
+                metricsEvidence.onEvent(event);
+            }, LoadSchedulerTiming.system(), metricsEvidence, outputRoot, null);
+            scheduler.run();
+            assertTrue(metricEvents.stream().anyMatch(LoadEvent::completed));
+            assertTrue(metricEvents.stream().filter(LoadEvent::completed).allMatch(event -> event.status() == ResultStatus.PASS));
+            assertFalse(Files.exists(outputRoot.resolve("load/mq-metrics/iterations")),
+                    "metrics mode must keep successful Flow iterations workspace-free");
+        }
+
+        Path failureScenarioFile = project.resolve("mq-failures.yaml");
+        Files.write(failureScenarioFile, ("schemaVersion: att-load/v1.0\n"
+                + "target: {type: flow, id: load.mq.request.v1}\n"
+                + "load: {users: 1, duration: 25ms}\nexecution: {thinkTime: 25ms}\n"
+                + "evidence: {mode: failures, maxSamples: 1}\n").getBytes("UTF-8"));
+        LoadScenario failureScenario = new LoadScenarioLoader(project).load(failureScenarioFile);
+        LoadTarget failureTarget = new LoadTargetResolver(project, config).resolve(failureScenario);
+        BlockingFactory failureFactory = new BlockingFactory();
+        failureFactory.failGet = true;
+        failureFactory.releaseGet.countDown();
+        List<LoadEvent> failureEvents = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadEvidenceStore failureEvidence = new LoadEvidenceStore(LoadEvidencePolicy.from(failureScenario));
+        try (LoadRunResources resources = new LoadRunResources(project, config, failureFactory)) {
+            IterationExecutor executor = new IterationExecutor(project, config, failureTarget, resources, outputRoot);
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(failureScenario, executor, "mq-failures", event -> {
+                failureEvents.add(event);
+                failureEvidence.onEvent(event);
+            }, LoadSchedulerTiming.system(), failureEvidence, outputRoot, null);
+            scheduler.run();
+            assertTrue(failureEvents.stream().anyMatch(LoadEvent::completed));
+            assertEquals(1, failureEvidence.events().size());
+            LoadEvent retained = failureEvidence.events().get(0);
+            assertEquals(ResultStatus.ERROR, retained.status());
+            assertNotNull(retained.evidence());
+            assertTrue(Files.isRegularFile(retained.evidence().caseLog()));
+            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot.resolve("load/mq-failures/iterations"))) {
+                assertEquals(1L, paths.filter(Files::isDirectory)
+                        .filter(path -> path.getFileName().toString().startsWith("mq-failures-"))
+                        .count());
+            }
         }
     }
 

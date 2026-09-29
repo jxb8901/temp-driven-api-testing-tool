@@ -27,6 +27,29 @@ public final class LoadEvidenceStore implements LoadEventListener {
     }
     public boolean retainsFailureEvidence() { return policy.failure() == LoadEvidencePolicy.Failure.FULL; }
     public boolean retainsSuccessEvidence(String iterationId) { return policy.retainSuccess(iterationId); }
+
+    /** Reserves a slot only when this iteration is known to be success-eligible. */
+    public synchronized boolean reserveSuccessEvidence(String iterationId) {
+        if (iterationId == null || reservedEvidence.contains(iterationId) || !policy.retainSuccess(iterationId)) return false;
+        if ((long) retained.size() + reservedEvidence.size() >= policy.maxSamples()) return false;
+        reservedEvidence.add(iterationId);
+        return true;
+    }
+
+    /** Claims a failure slot after the iteration outcome is known. */
+    public synchronized boolean claimFailureEvidence(String iterationId) {
+        if (iterationId == null || !policy.retainFailure()) return false;
+        if (reservedEvidence.contains(iterationId)) return true;
+        if ((long) retained.size() + reservedEvidence.size() >= policy.maxSamples()) return false;
+        reservedEvidence.add(iterationId);
+        return true;
+    }
+
+    /** Releases a pre-execution reservation that did not become retained evidence. */
+    public synchronized void releaseEvidence(String iterationId) {
+        if (iterationId != null) reservedEvidence.remove(iterationId);
+    }
+
     public synchronized boolean reserveEvidence(String iterationId) {
         if (iterationId == null || reservedEvidence.contains(iterationId)) return false;
         if ((long) retained.size() + reservedEvidence.size() >= policy.maxSamples()) return false;
@@ -34,8 +57,8 @@ public final class LoadEvidenceStore implements LoadEventListener {
         reservedEvidence.add(iterationId);
         return true;
     }
-    /** @deprecated use {@link #reserveEvidence(String)} for both success and failure policies. */
-    @Deprecated public boolean reserveSuccess(String iterationId) { return reserveEvidence(iterationId); }
+    /** @deprecated use {@link #reserveSuccessEvidence(String)} for success or {@link #claimFailureEvidence(String)} for failure. */
+    @Deprecated public boolean reserveSuccess(String iterationId) { return reserveSuccessEvidence(iterationId); }
     @Override public void onEvent(LoadEvent event) {
         if (observer != null) try { observer.onEvent(event); }
         catch (RuntimeException ignored) { /* Presentation must not alter load execution semantics. */ }

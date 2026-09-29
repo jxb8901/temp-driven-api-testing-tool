@@ -1622,14 +1622,14 @@ success 和 failure，除非顯式設定 <code>maxSamples</code>。例如
 的意思是「最多保留 1000 筆符合條件的 record」，不是 unlimited
 retention。Dropped arrival 不是 completed iteration，不會建立 retained
 iteration evidence。</p>
-<p><code>maxSamples</code> 會在 retained record 與 in-flight evidence
-reservation 之間以 atomic 方式執行。符合 policy 的 success 或 failure
-必須先取得 slot，iteration 才可以建立 retained workspace。只有
-reservation、policy 與已 materialize 的 evidence 都成立時，completion
-才會被保留；失去資格或 cap 已滿的候選會釋放 reservation 並清理 temporary
-workspace。這可以避免 retained record 指向不存在的 evidence，並把
-workspace/evidence overhead（包括
-<code>mode: failures</code>）限制在設定的 cap 內。</p>
+<p><code>maxSamples</code> 會在 retained record 與 in-flight success
+reservation 之間以 atomic 方式執行。若 success 是否符合 policy 可由
+iteration ID 先決定，才會在執行前取得 slot；failure 則要等 completed
+status 確定後才 claim 剩餘 quota，再延遲 materialize log/context。這避免
+in-flight success 或未取樣 iteration 搶走後續 eligible failure 的
+quota，同時仍把 retained workspace/evidence overhead 限制在設定的 cap
+內。只有 claim、policy 與已 materialize 的 evidence 都成立時，completion
+才會被保留。</p>
 <h5 id="retained-artifact-與容量估算">Retained artifact 與容量估算</h5>
 <p>Aggregate result 和 retained record 是兩種不同資料：</p>
 <pre class="text"><code>output/load/&lt;runId&gt;/
@@ -1642,9 +1642,10 @@ workspace/evidence overhead（包括
 <p>每個完成的 run 都會有 summary、HTML report 和 bounded
 metrics。Retained evidence file 只是指向 iteration workspace 的
 link，不是 aggregate latency/throughput metric。成功 workspace 一般採
-lazy materialization，只有 policy 要保留時才建立；failure workspace 也由
-reservation 控制，因此 <code>mode: failures</code> 即使大量 failure
-同時完成，也不會超過可用 cap。v1.0 使用單 target 的
+lazy materialization，只有 policy 要保留時才建立；failure workspace 在
+completed status 後才 claim 和 materialize，因此
+<code>mode: failures</code> 不會讓成功的 in-flight work 搶走 failure
+slot，也不會在大量 failure 同時完成時超過可用 cap。v1.0 使用單 target 的
 <code>samples/</code> 和 <code>failures/</code>；v1.1 再加上
 <code>&lt;workloadId&gt;</code>，避免不同 target 的 record 混淆。</p>
 <p>具體估算：<code>10 TPS × 5 分鐘</code> 約產生 <code>3,000</code> 個
@@ -1700,9 +1701,10 @@ completed success/failure 都符合保留資格，除非顯式設定
 不會；它只在 <code>success: sample</code> 時使用，failure 由
 <code>failure</code> policy 決定。</li>
 <li><strong>為什麼 <code>mode: failures</code> 的某個 failure 沒有
-workspace？</strong> Shared cap 可能已被 retained 或 in-flight evidence
-佔用；只有有 reservation 的 iteration 才能 materialize retained
-evidence。</li>
+workspace？</strong> Shared cap 可能已被 retained evidence
+或已知符合條件的 success reservation 佔用。Failure 是在 completed 後才
+claim quota，因此 success 的 in-flight work 不會永久搶走 failure
+slot；完成時 cap 已滿的 failure 不會保留。</li>
 <li><strong>Dropped arrival 會建立 retained evidence 嗎？</strong>
 不會；它只留在 scheduler metrics/events。</li>
 <li><strong>某一個 workload 的 evidence 在哪裡？</strong> v1.0 查看
