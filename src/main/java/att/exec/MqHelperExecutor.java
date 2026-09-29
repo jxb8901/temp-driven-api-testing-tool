@@ -316,9 +316,13 @@ public final class MqHelperExecutor {
         if (!path.isAbsolute() && !logical.startsWith(context.caseOutputDirectory().normalize())) throw new IOException("MQ payload path escapes the Case output directory: " + value);
         if (Files.isSymbolicLink(logical) || !Files.isRegularFile(logical, LinkOption.NOFOLLOW_LINKS)) throw new IOException("MQ payload file does not exist or is unsafe: " + value);
         Path real = logical.toRealPath();
-        Path caseRoot = context.caseOutputDirectory().toRealPath();
-        Path packageRoot = projectRoot.toRealPath();
-        if (!real.startsWith(caseRoot) && !real.startsWith(packageRoot)) throw new IOException("MQ payload file escapes the ATT package: " + value);
+        if (path.isAbsolute()) {
+            Path packageRoot = projectRoot.toRealPath();
+            if (!real.startsWith(packageRoot)) throw new IOException("MQ payload file escapes the ATT package: " + value);
+        } else {
+            Path caseRoot = context.caseOutputDirectory().toRealPath();
+            if (!real.startsWith(caseRoot)) throw new IOException("MQ payload file escapes the Case output directory: " + value);
+        }
         return real;
     }
 

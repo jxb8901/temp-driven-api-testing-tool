@@ -183,7 +183,7 @@ Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/
 | `thresholds.*` | 否 | `errorRate`/`droppedRate` 用 `%`，`achievedArrivalRate` 用 `%`、`/s` 或 `/m`，`p95`/`p99` 用 `ms`，`minThroughput` 用 `/s` 或 `/m`；`minThroughput` 对两种 workload 都适用。 |
 | `evidence.mode` | 否 | `metrics`、`failures`、`samples` 或 `all`。 |
 | `evidence.sampleRate` | 否 | `0` 到 `1` 之間的 sample fraction。 |
-| `evidence.maxSamples` | 否 | 非負整數 sample 上限。 |
+| `evidence.maxSamples` | 否 | 非負整數 retention 上限；對 retained success 和 failure 共用，而不是只限制 success sample。`all` 只有在顯式設定時才受 cap 限制。 |
 
 未知欄位會被拒絕；需要自訂 metadata 時只能使用根層 `x-*` 欄位。
 
@@ -332,3 +332,99 @@ mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedAr
 `LoadAcceptanceTest` 會先解析並驗證本目錄全部六個例子，再以真正的 CLI entry point 執行 closed、普通 arrival-rate 及 cap/drop saturation workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出，並檢查 configured arrival、achieved scheduling、completed TPS、scheduled/started/dropped 會一路保留到最終 report。`LoadCrossModeTest`、`ClosedVuSchedulerTest` 和 `FixedArrivalRateSchedulerTest` 覆蓋相同 component 的跨模式及兩種 scheduler lifecycle；`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection、DB/MQ resource diagnostics 和 HTML；DB/MQ pooling suites 覆蓋 reuse、timeout、exclusive lease、cancellation cleanup 和 deterministic shutdown。
 
 這是可重複的 ATT self-overhead gate，不是 SUT microbenchmark：它檢查每成功 iteration 不產生無界 Case/log churn、Context 不跨 iteration 共享、scheduler lag/metrics 保持有界、pool/resource cleanup 及 report/evidence retention 受策略控制。V1 不承諾 distributed/Poisson/weighted multi-scenario、rendezvous、adaptive pool 或 target CPU/memory benchmarking。
+
+## 11. Evidence retention guide / Evidence 保留指南
+
+Evidence policy 是整個 load run 的設定，不會改變 pacing、closed-VU 的穩定 `userId`、arrival-rate 的 `maxConcurrent`、drop/think time、threshold 或 latency metric。選擇原則如下：
+
+| mode | successful iterations | failed iterations | 典型用途 |
+|---|---|---|---|
+| `metrics` | none | none | 最低 disk/IO 的純效能測試 |
+| `failures` | none | full | 一般 SIT/UAT，亦是 default |
+| `samples` | sampled | full | 代表性成功加上每個 failure |
+| `all` | full | full | Troubleshooting 或短時間 controlled run |
+
+Default 是 `failures`。`all` 是 opt-in，可能為每個 completed iteration 建立 workspace 和 evidence file；長時間、高 TPS 測試應先估算 disk 和 generator overhead。
+
+以下是四種可直接複製的設定：
+
+```yaml
+evidence:
+  mode: metrics
+```
+
+```yaml
+evidence:
+  mode: failures
+  maxSamples: 100
+```
+
+```yaml
+evidence:
+  mode: samples
+  sampleRate: 0.02
+  maxSamples: 500
+```
+
+```yaml
+evidence:
+  mode: all
+```
+
+也可以用 explicit policy 表達 full retention：
+
+```yaml
+evidence:
+  success: full
+  failure: full
+```
+
+`success` 的有效值是 `none`、`sample`、`full`；`failure` 是 `none` 或 `full`。Explicit `success`/`failure` 各自優先於由 `mode` 推導的值，而省略 `evidence` 時 framework default 是 `failures`。`sampleRate` 範圍是 `0` 至 `1`，只有 `success: sample` 會使用它，default 是 `0.01`；`none` 和 `full` 會忽略它。`maxSamples` 是所有 retained completed success/failure 共用的總 cap，`0` 表示不保留。Bounded policy 未設定時 default 是 `1000`；`mode: all` 或 `success: full` 沒有 implicit cap，但顯式 `maxSamples` 仍會生效。
+
+容量估算：`10 TPS × 5 分鐘 ≈ 3,000 iterations`；`sampleRate: 0.02` 約有 `60` 個成功 sample 在 cap 前符合資格。Failure 由 `failure` policy 獨立處理，不受 sampleRate 影響；dropped arrivals 不是 completed iteration，不會產生 retained evidence。
+
+兩種 scheduler 都使用同一套 policy：
+
+```yaml
+# Closed VU
+schemaVersion: att-load/v1.0
+target: {type: template, id: PAYMENT}
+load: {users: 20, duration: 5m}
+evidence: {mode: samples, sampleRate: 0.02, maxSamples: 500}
+```
+
+```yaml
+# Fixed arrival rate
+schemaVersion: att-load/v1.0
+target: {type: flow, id: PAYMENT_LOOKUP}
+load: {arrivalRate: 10/s, duration: 5m, maxConcurrent: 50, overloadPolicy: drop}
+evidence: {mode: all, maxSamples: 5000}
+```
+
+Output layout：
+
+```text
+output/load/<runId>/
+├── load-summary.json
+├── load-summary.yaml
+├── report/index.html
+├── samples/<workloadId>/...
+├── failures/<workloadId>/...
+└── iterations/...
+```
+
+v1.0 是 single-target，通常直接使用 `samples/` 和 `failures/`；v1.1 會按 `workloadId` 分區。Summary/report 的 aggregate metrics 與 per-iteration evidence 是不同資料；成功 workspace 預設 lazy，只有 retention policy 要求時才建立。`all` 不會改變 scheduler，只會增加 generator 的 filesystem work。
+
+常見問題：
+
+- 只看到 failure：這是 `failures` default；改用 `samples` 或 `all` 才會保留成功 iteration。
+- 沒有成功 sample：檢查 mode、`success`、`sampleRate` 是否為零，及是否已達 `maxSamples`。
+- 在 N 筆後停止：顯式 `maxSamples` 是 success/failure 的共同總 cap；`all` 只有顯式 cap 才會停止。
+- `sampleRate` 不會影響 failure；dropped arrival 也不會建立 evidence。
+- v1.1 的 workload evidence 到 `samples/<workloadId>/` 或 `failures/<workloadId>/` 查找。
+
+Migration note：舊版 `mode: all` 實際上是 sampled success + full failure；目前 `mode: all` 是 full success + full failure，沒有 implicit cap（除非顯式設定 `maxSamples`）。如需 bounded 成功診斷，請改用 `samples`。
+
+## 12. MQ payload paths in Load / Load 下的 MQ payload path
+
+MQ `file` 可以是 ATT package 內 regular file 的 absolute path。即使 Load iteration workspace 尚未建立，ATT 仍會以 package root 完成 path validation，不會為成功 iteration 預先建立空 directory。Relative path 仍限制在 Case output；`..` traversal、payload symlink 和 symlink escape 都會被拒絕。真正不存在的 file 會直接報告 payload path 錯誤，而不是 unrelated iteration-directory `NoSuchFileException`。這個檢查發生在 MQ connect/open/put/get 前，不會改變 MQ queue、response parsing 或 load pacing。

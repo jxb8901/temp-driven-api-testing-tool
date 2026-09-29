@@ -625,6 +625,128 @@ DB/MQ resource diagnostics 仍屬 aggregate/run-scoped；成功 iteration worksp
 
 Load execution identity 與 evidence-only scheduler diagnostics 的中央定義見第 3 章；artifact schema/report 細節見第 11 章。
 
+#### Evidence retention 使用指南
+
+Evidence policy 是 run-scoped 設定，決定哪些已完成 iteration record 和 workspace 需要保留；它不會改變 scheduler、pacing、VU identity、`maxConcurrent`、overload/drop 行為、think time、threshold aggregate 或 measured latency。
+
+| `mode` | 成功 iteration | 失敗 iteration | 常見用途 |
+|---|---|---|---|
+| `metrics` | 不保留 | 不保留 | 純 performance 量度，最低 evidence I/O |
+| `failures` | 不保留 | 完整保留 | 一般 SIT/UAT load test；建議 default |
+| `samples` | 取樣保留 | 完整保留 | Representative success 加上所有 failure |
+| `all` | 完整保留 | 完整保留 | Troubleshooting 及短時間 controlled test |
+
+Default 是 `failures`：保留可行動的 failure，同時避免每個成功 iteration 都建立 Case workspace 和 evidence file。`all` 是明確 opt-in；在高 throughput 或長時間測試中，它會明顯增加 generator 的 disk 與 I/O 使用量。
+
+每一種 mode 都可以直接複製到 scenario：
+
+```yaml
+evidence:
+  mode: metrics
+```
+
+```yaml
+evidence:
+  mode: failures
+  maxSamples: 100
+```
+
+```yaml
+evidence:
+  mode: samples
+  sampleRate: 0.02
+  maxSamples: 500
+```
+
+```yaml
+evidence:
+  mode: all
+```
+
+完整保留亦可用顯式 policy 表示：
+
+```yaml
+evidence:
+  success: full
+  failure: full
+```
+
+##### 欄位語義與 precedence
+
+`mode` 提供 policy default；顯式 `success` 和 `failure` 會分別覆蓋各自的 mode-derived 值。完全省略 `evidence` 時，framework default 是 `mode: failures`。
+
+| 欄位 | 值／default | 語義 |
+|---|---|---|
+| `mode` | `metrics`、`failures`、`samples`、`all`；default `failures` | 選擇上表的 success/failure policy。 |
+| `success` | `none`、`sample`、`full`；省略時由 mode 決定 | 只有 `sample` 會受 `sampleRate` 影響；`full` 保留每個符合條件的 completed success。 |
+| `failure` | `none`、`full`；省略時由 mode 決定 | `full` 獨立保留符合條件的 completed failure，不受 success sampling 影響。 |
+| `sampleRate` | `0` 至 `1`；只有 `success: sample` 預設 `0.01` | deterministic success sampling 比例；`none` 與 `full` 會忽略並解析為 `0`。 |
+| `maxSamples` | `>= 0` 整數；bounded policy default `1000` | 所有 retained completed success/failure 共用的一個總 cap；`0` 表示不保留。顯式值也適用於 `all`。 |
+
+`mode: all` 及 `success: full` 預設沒有 implicit retention cap。因此 `all` 會保留每一個 completed success 和 failure，除非顯式設定 `maxSamples`。例如 `mode: all` 加 `maxSamples: 1000` 的意思是「最多保留 1000 筆符合條件的 record」，不是 unlimited retention。Dropped arrival 不是 completed iteration，不會建立 retained iteration evidence。
+
+##### Retained artifact 與容量估算
+
+Aggregate result 和 retained record 是兩種不同資料：
+
+```text
+output/load/<runId>/
+├── load-summary.json
+├── load-summary.yaml
+├── report/index.html
+├── samples/<workloadId>/...     # retained successful iterations
+├── failures/<workloadId>/...    # retained failed iterations
+└── iterations/...               # 需要時才建立的 temporary/retained workspace
+```
+
+每個完成的 run 都會有 summary、HTML report 和 bounded metrics。Retained evidence file 只是指向 iteration workspace 的 link，不是 aggregate latency/throughput metric。成功 workspace 一般採 lazy materialization，只有 policy 要保留時才建立；failure workspace 只有啟用 failure evidence 才建立。v1.0 使用單 target 的 `samples/` 和 `failures/`；v1.1 再加上 `<workloadId>`，避免不同 target 的 record 混淆。
+
+具體估算：`10 TPS × 5 分鐘` 約產生 `3,000` 個 scheduled iteration。使用 `success: sample` 與 `sampleRate: 0.02` 時，約有 `60` 個成功 record 在 cap 前符合取樣資格。Failure 由 `failure` policy 獨立處理，不會受 success sample rate 影響；但兩者共用顯式的 `maxSamples` 總 cap。
+
+`metrics` 的 disk/IO overhead 最低；一般 load test 使用 `failures`；需要代表性成功 request context 時使用 `samples`。`all` 不會改變 scheduler 或 measured latency，但可能為每個 completed iteration 寫出 workspace 和 evidence；長時間、高 TPS、production-like 測試應先評估 disk 和 generator overhead。
+
+##### Closed-VU 與 arrival-rate 例子
+
+同一套 policy 同時適用於兩種 scheduler：
+
+```yaml
+# Closed VU：每筆選中的 record 保留穩定 userId。
+schemaVersion: att-load/v1.0
+target: {type: template, id: PAYMENT}
+load: {users: 20, duration: 5m}
+evidence: {mode: samples, sampleRate: 0.02, maxSamples: 500}
+```
+
+```yaml
+# Fixed arrival rate：dropped arrival 仍是 drop，不會建立 evidence。
+schemaVersion: att-load/v1.0
+target: {type: flow, id: PAYMENT_LOOKUP}
+load: {arrivalRate: 10/s, duration: 5m, maxConcurrent: 50, overloadPolicy: drop}
+evidence: {mode: all, maxSamples: 5000}
+```
+
+Evidence policy 在 run 開始時套用。它不會把 arrival-rate 變成 queue、不會新增 VU identity、不會改變 closed-VU think time 或 `maxConcurrent`，也不會把 generator drop 當成 SUT error。v1.1 的同一個 run-scoped policy 會套用到每個 workload，而 retained file 會按 workload ID 分區。
+
+##### Troubleshooting
+
+- **為什麼沒有成功 sample？** 可能是 `metrics`/`failures`、`success: none`、`sampleRate: 0`，或成功 sample 已達 `maxSamples`。要 bounded 地檢查成功 iteration，可使用非零 `sampleRate` 的 `mode: samples`。
+- **為什麼只看到 failure？** 這是 `failures` default 的預期結果；需要成功 evidence 時選 `samples` 或 `all`。
+- **為什麼 retention 在 N 筆後停止？** 顯式 `maxSamples` 是 success/failure 共用的總 cap。省略時 bounded policy default 是 `1000`；`all` 沒有 implicit cap。
+- **`mode: all` 是否真的代表全部？** 是；所有 completed success/failure 都符合保留資格，除非顯式設定 `maxSamples`。Dropped arrival 不算 completed iteration。
+- **`sampleRate` 會影響 failure 嗎？** 不會；它只在 `success: sample` 時使用，failure 由 `failure` policy 決定。
+- **Dropped arrival 會建立 retained evidence 嗎？** 不會；它只留在 scheduler metrics/events。
+- **某一個 workload 的 evidence 在哪裡？** v1.0 查看 `samples/` 或 `failures/`；v1.1 查看 `samples/<workloadId>/` 或 `failures/<workloadId>/`，並以 summary/report 的 relative path 為準。
+
+##### `mode: all` migration note
+
+舊版 ATT 將 `mode: all` 當作 sampled successes 加上 full failures，並套用 default success `sampleRate`。修正後是 full successes 加上 full failures；除非顯式設定 `maxSamples`，否則沒有 implicit cap。若既有 scenario 依賴 `mode: all` 的低 success sampling，升級後 evidence volume 可能大幅增加；請重新評估 disk budget，或改用 `samples`。
+
+#### Lazy Load workspace 下的 MQ payload
+
+MQ `file` 可以使用 ATT package 內 regular file 的 absolute path。Load mode 會以 package root 驗證這類 path，因此即使目前 iteration workspace 尚未 materialize，也能正常使用；ATT 不會為了驗證 project payload 而建立空 workspace。
+
+Relative MQ payload path 仍限制在 Case output：拒絕 `..` traversal、symlink payload 和 symlink escape，且 resolved file 必須是安全的 regular file。真正不存在的 payload 會直接報告 payload path 問題。這些是 MQ connect/open/put/get 之前的 local path validation，不會改變 queue configuration、response parsing、pacing 或 evidence retention。
+
 ## 05 資源與整合
 
 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由；它們最終收斂到 common operation-result/evidence contract。
@@ -1045,6 +1167,20 @@ Public call 維持 logical id：
 Output 與 evidence 同時保留 logical helper id 並公開選中的 physical instance。Evidence 也會記錄適用 strategy、queue manager、operation、queue names、MsgId/CorrelId 及安全的 connection metadata。使用 `evidence.payload: none` 時會省略 payload policy marker；credential 與 payload bytes 永不包含其中。Validation 會拒絕重複 physical id、未知 inherited field、缺少 effective connection field、非法 strategy 或 override，以及無效的 effective message/requestReply/pool 值。
 
 `output.selectionStrategy` 表示已設定的 group policy（`single`、`random` 或 `roundRobin`），而非單次 invocation 的選擇來源。若呼叫明確提供 `instance`，此 policy 值仍維持不變；`output.instance` 則表示實際選中的 physical instance。
+
+#### Load 模式的 payload path
+
+`file` 的 absolute path 只有在 resolved regular file 位於 ATT package root 之內時才接受。這適合 Flow 或 Template 使用 package 內的 checked-in request payload，例如：
+
+~~~text
+#{mq.toeaimq.request(file='/fpp/att/templates/flows/mqtest/BOC060032.xml')}
+~~~
+
+Load iteration workspace 採 lazy 設計。Absolute package payload 只需對 package root 做 validation，因此即使目前的 `output/load/<runId>/iterations/<iterationId>/` 尚未存在，也不需要先建立。ATT 不會為了驗證檔案而替每個成功 iteration 建立空 directory。此 payload check 發生在 MQ connect/open/put/get 之前，所以這類 failure 是 local path-safety error，不是 IBM MQ transport、queue 或 response parse error。
+
+Relative path 保持 Case-output contract：會在目前 Case output 下 resolve、拒絕 `..` traversal、拒絕 payload symlink 和 symlink escape，並要求是安全的 regular file。Package 外的 absolute file 和真正不存在的 file 都會被拒絕；diagnostic 會指出 payload 問題，不會顯示 unrelated lazy-workspace `NoSuchFileException`。
+
+Troubleshooting 時先判斷 `file` 是 absolute 還是 relative，再檢查 resolved file 與適用 root。不要以預先建立所有 Load workspace 作為 workaround；如需避免成功 iteration artifact，可按 evidence guide 使用 `evidence: {mode: failures}` 或 `metrics`。
 
 ### 5.5 HTTPHelper
 

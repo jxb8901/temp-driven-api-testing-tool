@@ -29,7 +29,7 @@ public final class LoadEvidenceStore implements LoadEventListener {
     public synchronized boolean reserveSuccess(String iterationId) {
         if (iterationId == null || reservedSuccesses.contains(iterationId)) return false;
         if (retained.size() + reservedSuccesses.size() >= policy.maxSamples()) return false;
-        if (!policy.sampleSuccess(iterationId)) return false;
+        if (!policy.retainSuccess(iterationId)) return false;
         reservedSuccesses.add(iterationId);
         return true;
     }

@@ -72,7 +72,7 @@
     "evidence": {
       "type": "object",
       "properties": {
-        "success": {"enum": ["none", "sample"]},
+        "success": {"enum": ["none", "sample", "full"]},
         "failure": {"enum": ["none", "full"]},
         "mode": {"enum": ["metrics", "failures", "samples", "all"]},
         "sampleRate": {"type": "number", "minimum": 0, "maximum": 1},

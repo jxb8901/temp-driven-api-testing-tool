@@ -31,6 +31,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScenarioTest {
     @TempDir Path temp;
 
+    @Test void explicitFullSuccessPolicyIsAcceptedByBothLoadSchemaVersions() throws Exception {
+        Path project = project();
+        Path v10File = write(project, "full-v10.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: full, failure: full}\n");
+        LoadScenario v10 = new LoadScenarioLoader(project).load(v10File);
+        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(v10).success());
+
+        Path v11File = write(project, "full-v11.yaml", "schemaVersion: att-load/v1.1\nworkloads:\n"
+                + "  - id: default\n"
+                + "    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: full, failure: full}\n");
+        LoadScenario v11 = new LoadScenarioLoader(project).load(v11File);
+        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(v11).success());
+    }
+
     @Test void validatesBothWorkloadModelsAndExplicitOverridesWin() throws Exception {
         Path project = project();
         Path closed = write(project, "closed.yaml", "schemaVersion: att-load/v1.0\n"

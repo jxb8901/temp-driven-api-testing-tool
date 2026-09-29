@@ -625,6 +625,128 @@ DB/MQ resource diagnostics remain aggregate/run-scoped. Successful iteration wor
 
 Load execution identity and evidence-only scheduler diagnostics are defined centrally in Chapter 3; artifact schemas and report details are in Chapter 11.
 
+#### Evidence retention guide
+
+Evidence policy is a run-scoped choice. It controls which completed iteration records and workspaces are retained; it does not change scheduling, pacing, VU identity, `maxConcurrent`, overload/drop behavior, think time, threshold aggregation, or measured latency.
+
+| `mode` | Successful iterations | Failed iterations | Typical use |
+|---|---|---|---|
+| `metrics` | none | none | Pure performance measurement with the lowest evidence I/O |
+| `failures` | none | full | Normal SIT/UAT load testing; the recommended default |
+| `samples` | sampled | full | Representative successes plus every failure |
+| `all` | full | full | Troubleshooting and short, controlled tests only |
+
+The default is `failures`. It keeps actionable failures while avoiding a Case workspace and evidence file for every successful iteration. `all` is intentionally opt-in: it can materially increase generator disk and I/O usage.
+
+Each mode can be copied directly into a scenario:
+
+```yaml
+evidence:
+  mode: metrics
+```
+
+```yaml
+evidence:
+  mode: failures
+  maxSamples: 100
+```
+
+```yaml
+evidence:
+  mode: samples
+  sampleRate: 0.02
+  maxSamples: 500
+```
+
+```yaml
+evidence:
+  mode: all
+```
+
+The explicit equivalent of full retention is:
+
+```yaml
+evidence:
+  success: full
+  failure: full
+```
+
+##### Field semantics and precedence
+
+`mode` supplies the default policy. Explicit `success` and `failure` fields override their corresponding mode-derived value independently; the framework default is `mode: failures` when `evidence` is omitted.
+
+| Field | Values/default | Semantics |
+|---|---|---|
+| `mode` | `metrics`, `failures`, `samples`, `all`; default `failures` | Selects the success/failure policy shown above. |
+| `success` | `none`, `sample`, `full`; omitted means mode-derived | `sample` is the only success policy affected by `sampleRate`; `full` retains every eligible completed success. |
+| `failure` | `none`, `full`; omitted means mode-derived | `full` retains eligible completed failures independently of success sampling. |
+| `sampleRate` | `0` to `1`; default `0.01` only for `success: sample` | Fraction used for deterministic success sampling. It is ignored, and resolved to `0`, for `none` and `full`. |
+| `maxSamples` | Integer `>= 0`; default `1000` for bounded policies | One cap over all retained completed success and failure records. `0` retains none. An explicit value applies to `all` too. |
+
+`mode: all` and `success: full` have no implicit retention cap. Therefore `all` retains every completed success and failure unless `maxSamples` is explicitly configured. For example, `mode: all` with `maxSamples: 1000` is “all eligible records up to the configured cap”, not unlimited retention. Dropped arrivals are scheduler events, not completed iterations, and never create retained iteration evidence.
+
+##### Retained artifacts and sizing
+
+The aggregate result and retained records are separate concerns:
+
+```text
+output/load/<runId>/
+├── load-summary.json
+├── load-summary.yaml
+├── report/index.html
+├── samples/<workloadId>/...     # retained successful iterations
+├── failures/<workloadId>/...    # retained failed iterations
+└── iterations/...               # temporary/retained Case workspaces when needed
+```
+
+`load-summary.json`, `load-summary.yaml`, the HTML report, and bounded metrics exist for every completed run. A retained evidence file is a link to an iteration workspace; it is not the aggregate latency/throughput metric. Successful workspaces are normally lazy and are materialized only when the evidence policy retains them. Failure workspaces are materialized only when failure evidence is enabled. v1.0 uses the single-target `samples/` and `failures/` directories; v1.1 adds `<workloadId>` so records from separate targets cannot be confused.
+
+For a concrete estimate, `10 TPS × 5 minutes` produces about `3,000` scheduled iterations. With `success: sample` and `sampleRate: 0.02`, roughly `60` successful records are eligible before the retention cap. Failure records are evaluated independently by `failure`; they do not consume the success sample rate, although both kinds share the explicit total `maxSamples` cap.
+
+Use `metrics` for the lowest disk/IO overhead, `failures` for normal load tests, and `samples` when representative successful request context is needed. `all` does not alter scheduler semantics or measured latency, but it can write one workspace and evidence record per completed iteration; avoid it for long, high-TPS, production-like tests unless the resulting disk and generator overhead are acceptable.
+
+##### Closed-VU and arrival-rate examples
+
+The same policy applies to both scheduler models:
+
+```yaml
+# Closed VU: stable userId is retained in each selected record.
+schemaVersion: att-load/v1.0
+target: {type: template, id: PAYMENT}
+load: {users: 20, duration: 5m}
+evidence: {mode: samples, sampleRate: 0.02, maxSamples: 500}
+```
+
+```yaml
+# Fixed arrival rate: dropped arrivals remain drops and create no evidence record.
+schemaVersion: att-load/v1.0
+target: {type: flow, id: PAYMENT_LOOKUP}
+load: {arrivalRate: 10/s, duration: 5m, maxConcurrent: 50, overloadPolicy: drop}
+evidence: {mode: all, maxSamples: 5000}
+```
+
+Evidence policy is evaluated once for the run. It does not turn arrival-rate work into a queue, add a VU identity, change closed-VU think time, change `maxConcurrent`, or turn a generator drop into a SUT error. In v1.1, the same run-scoped policy is applied to every workload and retained files are partitioned by workload ID.
+
+##### Troubleshooting
+
+- **Why are there no successful samples?** The policy may be `metrics`/`failures`, `success` may be `none`, `sampleRate` may be `0`, or the sampled successes may have reached `maxSamples`. Use `mode: samples` with a non-zero rate for bounded inspection.
+- **Why do I only see failures?** That is the intended `failures` default. Select `samples` or `all` when successful iteration evidence is required.
+- **Why did retained evidence stop after N records?** An explicit `maxSamples` is a total cap across retained success and failure records. An omitted cap defaults to `1000` for bounded policies; `all` has no implicit cap.
+- **Does `mode: all` really mean all?** Yes: all completed successful and failed iterations are eligible, unless an explicit `maxSamples` cap is configured. Dropped arrivals are not completed iterations.
+- **Does `sampleRate` affect failures?** No. It is consulted only for `success: sample`; failure retention follows `failure`.
+- **Do dropped arrivals create retained evidence?** No. They remain scheduler metrics/events and are excluded from retained iteration evidence.
+- **Where is one workload's evidence?** v1.0 uses `samples/` or `failures/`; v1.1 uses `samples/<workloadId>/` or `failures/<workloadId>/`. Follow the relative path in `load-summary.json` or the report.
+
+##### Migration note for `mode: all`
+
+Previous ATT behavior treated `mode: all` like sampled successes plus full failures, using the default success `sampleRate`. The corrected behavior is full successes plus full failures, with no implicit cap unless `maxSamples` is explicitly configured. Existing scenarios that used `mode: all` while relying on low success sampling may therefore create substantially more evidence; review disk budget and use `samples` when representative successes are sufficient.
+
+#### MQ payload files in lazy Load workspaces
+
+An MQ `file` argument may use an absolute path to a regular file inside the ATT package. In Load mode this file is validated against the package root, so it works even when the current iteration workspace has not been materialized. ATT does not create an empty workspace merely to validate that project payload.
+
+Relative MQ payload paths remain Case-output scoped: `..` traversal is rejected, symlink payloads and symlink escapes are rejected, and the resolved file must be a safe regular file. A missing payload reports the payload path problem directly. These rules are local path validation and occur before MQ connect/open/put/get; they do not change queue configuration, response parsing, pacing, or evidence retention.
+
 ## 05 Resources and Integrations
 
 Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer integration/resource types. SSHHelper routes command-backed Tools. They converge on the common operation-result/evidence contract.
@@ -1047,6 +1169,20 @@ A single-instance v1.1 group uses that instance directly. A group with multiple 
 Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. With `evidence.payload: none`, the payload policy marker is omitted; credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.
 
 `output.selectionStrategy` identifies the configured group policy (`single`, `random`, or `roundRobin`), not the selection source for an individual invocation. When a call explicitly supplies `instance`, that policy value remains unchanged and `output.instance` identifies the physical instance actually selected.
+
+#### Payload paths in Load mode
+
+`file` accepts an absolute path only when its resolved regular file is inside the ATT package root. This is useful for a Flow or Template that uses a checked-in request payload, for example:
+
+~~~text
+#{mq.toeaimq.request(file='/fpp/att/templates/flows/mqtest/BOC060032.xml')}
+~~~
+
+Load iteration workspaces are intentionally lazy. An absolute package payload is validated against the package root and therefore does not require the current `output/load/<runId>/iterations/<iterationId>/` directory to exist. ATT does not create one empty iteration directory per successful iteration merely to validate this file. The payload is validated before MQ connect/open/put/get, so a failure at this point is a local path-safety error, not an IBM MQ transport, queue, or response-parse error.
+
+Relative paths keep the Case-output contract: ATT resolves them below the current Case output directory, rejects `..` traversal, rejects payload symlinks and symlink escapes, and requires a safe regular file. Absolute files outside the package and genuinely missing files are rejected; the diagnostic names the payload problem rather than exposing an unrelated lazy-workspace `NoSuchFileException`.
+
+For troubleshooting, first check whether the `file` value is absolute or relative, then check the resolved file and the relevant root. Do not pre-create every Load workspace as a workaround. Use `evidence: {mode: failures}` or `metrics` according to the evidence guide when the test should avoid retaining successful iteration artifacts.
 
 ### 5.5 HTTPHelper
 
