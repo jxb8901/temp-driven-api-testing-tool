@@ -279,6 +279,9 @@ id="toc-compatibility-aliases">Compatibility aliases</a></li>
 <li><a href="#41-run-模式" id="toc-41-run-模式">4.1 Run 模式</a></li>
 <li><a href="#42-standalone-debug" id="toc-42-standalone-debug">4.2
 Standalone Debug</a></li>
+<li><a href="#debug-排錯與-mq-payload-路徑"
+id="toc-debug-排錯與-mq-payload-路徑">Debug 排錯與 MQ payload
+路徑</a></li>
 <li><a href="#43-load-模式" id="toc-43-load-模式">4.3 Load 模式</a></li>
 </ul></li>
 <li><a href="#05-資源與整合" id="toc-05-資源與整合">05 資源與整合</a>
@@ -1221,6 +1224,64 @@ selected reusable-component
 邊界上與正常執行等價，但<strong>不是</strong> workbook Case：除非 debug
 input/artifact 明確提供，否則沒有 workbook selection、Stage history 或
 result-workbook lifecycle。</p>
+<h3 id="debug-排錯與-mq-payload-路徑">Debug 排錯與 MQ payload 路徑</h3>
+<p>當 debug target 無法解析時，先確認 target kind 及 identifier，再用
+<code>--input &lt;path&gt;</code> 排除 sidecar discovery
+因素。Template/Flow debug 會尋找
+<code>&lt;target directory&gt;/debug.yaml</code>；grouped Tool debug
+會尋找 <code>config/tools/&lt;group&gt;.debug.yaml</code>。只會驗證
+selected target 的 dependency closure，因此不需要無關 workbook 或 Case
+檔案。</p>
+<p>MQ 的 <code>file</code> argument 在 Debug、Run、Load
+使用相同的安全路徑規則：</p>
+<ul>
+<li>絕對路徑必須解析為 ATT package root 內的 regular file。即使 Load
+尚未建立 lazy iteration workspace，也會直接按 package root 驗證。</li>
+<li>相對路徑會在目前 active Case output directory
+下解析；<code>..</code> traversal、symlink payload、symlink
+escape、directory 及非 regular file 會在 MQ connect/open/put/get
+前被拒絕。</li>
+<li>遺失或不安全 payload 會直接指出 payload path。尚未建立 MQ
+connection，因此應先修正路徑，再檢查 broker credential 或 queue
+狀態。</li>
+</ul>
+<p>按 output directory 分辨排錯階段：</p>
+<table>
+<thead>
+<tr class="header">
+<th>症狀</th>
+<th>檢查</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>Debug input file does not exist</code></td>
+<td>在 selected target 旁加入 sidecar，或明確傳入
+<code>--input</code>。</td>
+</tr>
+<tr class="even">
+<td><code>target</code> 或 dependency validation 失敗</td>
+<td>確認 target type/id，並查看回報的 dependency field；不需要無關
+workbook。</td>
+</tr>
+<tr class="odd">
+<td>MQ 回報 payload 遺失或不安全</td>
+<td>核對 package 內的絕對路徑或 Case-output 內的相對路徑，移除 traversal
+及 symlink。</td>
+</tr>
+<tr class="even">
+<td>action 已執行但輸出不符預期</td>
+<td>查看 <code>output/debug/&lt;debugId&gt;/</code> 下的
+<code>case.log</code>、<code>result.yaml</code> 及 action
+artifacts，並對照 rendered inputs 與 selected environment。</td>
+</tr>
+</tbody>
+</table>
+<p>Load 專用的 evidence
+retention（<code>metrics</code>、<code>failures</code>、<code>samples</code>、<code>all</code>）不適用於
+standalone Debug invocation。Debug 會在自己的 debug directory 保留
+invocation result 與 artifacts；同一 target 若由 load run 執行，請參考
+Chapter 4 的 Load evidence retention 章節。</p>
 <h3 id="43-load-模式">4.3 Load 模式</h3>
 <p>ATT Load 透過有界的 load-run lifecycle 執行 Template、Flow 或 Tool
 target。<code>att-load/v1.0</code> 繼續作為單 target

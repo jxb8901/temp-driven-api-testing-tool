@@ -284,6 +284,9 @@ Execution Modes</a>
 <li><a href="#41-run-mode" id="toc-41-run-mode">4.1 Run Mode</a></li>
 <li><a href="#42-standalone-debug" id="toc-42-standalone-debug">4.2
 Standalone Debug</a></li>
+<li><a href="#debug-troubleshooting-and-mq-payload-paths"
+id="toc-debug-troubleshooting-and-mq-payload-paths">Debug
+troubleshooting and MQ payload paths</a></li>
 <li><a href="#43-load-mode" id="toc-43-load-mode">4.3 Load Mode</a></li>
 </ul></li>
 <li><a href="#05-resources-and-integrations"
@@ -1312,6 +1315,67 @@ It is execution-equivalent at the selected reusable-component boundary,
 but it is <strong>not</strong> a workbook Case: there is no workbook
 selection, Stage history or result-workbook lifecycle unless explicitly
 represented by debug inputs/artifacts.</p>
+<h3 id="debug-troubleshooting-and-mq-payload-paths">Debug
+troubleshooting and MQ payload paths</h3>
+<p>When a debug target cannot be resolved, check the target kind and
+identifier first, then use <code>--input &lt;path&gt;</code> to remove
+sidecar discovery from the diagnosis. Template and Flow debug discover
+<code>&lt;target directory&gt;/debug.yaml</code>; grouped Tool debug
+discovers <code>config/tools/&lt;group&gt;.debug.yaml</code>. The
+selected target's dependency closure is validated, so an unrelated
+workbook or Case file is not a prerequisite.</p>
+<p>MQ <code>file</code> arguments follow the same safe path rules in
+Debug, Run and Load:</p>
+<ul>
+<li>An absolute path must resolve to a regular file inside the ATT
+package root. It is validated against the package root even when Load
+has not materialized a lazy iteration workspace yet.</li>
+<li>A relative path is resolved under the active Case output directory.
+<code>..</code> traversal, symlink payloads, symlink escapes,
+directories and non-regular files are rejected before MQ
+connect/open/put/get.</li>
+<li>A missing or unsafe payload reports the payload path directly. No MQ
+connection is attempted, so a path error should be fixed before
+investigating broker credentials or queue state.</li>
+</ul>
+<p>Use the output directory to separate diagnosis stages:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Symptom</th>
+<th>Check</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>Debug input file does not exist</code></td>
+<td>Add the sidecar beside the selected target or pass
+<code>--input</code> explicitly.</td>
+</tr>
+<tr class="even">
+<td><code>target</code> or dependency validation fails</td>
+<td>Confirm the target type/id and inspect the reported dependency
+field; unrelated workbook files are not required.</td>
+</tr>
+<tr class="odd">
+<td>MQ reports a missing/unsafe payload</td>
+<td>Verify the absolute package path or the relative Case-output path;
+remove traversal and symlinks.</td>
+</tr>
+<tr class="even">
+<td>The action runs but output is unexpected</td>
+<td>Read <code>case.log</code>, <code>result.yaml</code> and the action
+artifacts under <code>output/debug/&lt;debugId&gt;/</code>; compare
+rendered inputs with the selected environment.</td>
+</tr>
+</tbody>
+</table>
+<p>Load-specific evidence retention (<code>metrics</code>,
+<code>failures</code>, <code>samples</code>, <code>all</code>) does not
+apply to a standalone Debug invocation. Debug always keeps its
+invocation result and artifacts under its own debug directory; see the
+Load evidence retention section in Chapter 4 when the same target is
+exercised by a load run.</p>
 <h3 id="43-load-mode">4.3 Load Mode</h3>
 <p>ATT Load executes Template, Flow or Tool targets through a bounded
 load-run lifecycle. <code>att-load/v1.0</code> remains the single-target
