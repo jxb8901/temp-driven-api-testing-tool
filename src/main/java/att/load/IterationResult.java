@@ -57,6 +57,7 @@ public final class IterationResult {
     /** Materializes deferred failure evidence after a post-completion retention claim. */
     IterationResult materializeEvidence() {
         if (evidenceRetained || evidenceLog == null || outputDirectory == null) return this;
+        boolean interrupted = Thread.interrupted();
         try {
             Files.createDirectories(outputDirectory);
             evidenceLog.materialize(outputDirectory.resolve("case.log"));
@@ -66,8 +67,20 @@ public final class IterationResult {
             return new IterationResult(iterationId, status, duration, context, validations, outputDirectory,
                     diagnostic, true, null);
         } catch (IOException | RuntimeException ignored) {
+            deletePartialWorkspace();
             return this;
+        } finally {
+            if (interrupted || Thread.interrupted()) Thread.currentThread().interrupt();
         }
+    }
+
+    private void deletePartialWorkspace() {
+        if (!Files.exists(outputDirectory)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(outputDirectory)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
     }
 
     public EvidenceRef evidenceRef() {
