@@ -551,7 +551,7 @@ class StageTemplateRunnerTest {
                                 "timeoutMs", 50, "onFailure", mode))));
                 List<ValidationResult> results;
                 try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
-                    results = new StageTemplateRunner(new UnifiedTemplateEngine(null, new PrivateCollectorBuiltIns()))
+                    results = new StageTemplateRunner(new PrivateCollectorEngine())
                             .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
                 }
                 assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
@@ -1036,21 +1036,36 @@ class StageTemplateRunnerTest {
             return arguments.get("value");
         }
     }
-    private static final class PrivateCollectorBuiltIns implements BuiltInProvider {
-        @Override public Set<String> names() { return new LinkedHashSet<String>(Arrays.asList("upper", "block", "fail")); }
-        @Override public Object invoke(String name, Map<String, Object> arguments) throws Exception {
-            if ("upper".equals(name)) return String.valueOf(arguments.get("value")).toUpperCase(Locale.ROOT);
-            if ("block".equals(name)) {
-                Thread.sleep(10000);
-                return "unexpected completion";
+    private final class PrivateCollectorEngine extends UnifiedTemplateEngine {
+        private PrivateCollectorEngine() { super(null, new PrivateCollectorBuiltIns()); }
+        @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,
+                CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs,
+                boolean overwrite, boolean bypassCache) throws Exception {
+            if (!call.startsWith("#{fail(")) {
+                return super.executeToolAttempt(call, context, log, invocationId, timeoutMs, saveAs, overwrite, bypassCache);
             }
-            String secret = String.valueOf(arguments.get("password"));
+            String secret = String.valueOf(context.require("EXEC.INPUT.password"));
             String detail = secret + String.join("", Collections.nCopies(10000, "z"));
+            Map<String, Object> input = map("password", secret, "payload", context.require("EXEC.INPUT.payload"));
             throw new ToolExecutionException("TIMEOUT", "Collector timed out: " + detail,
-                    map("name", name, "status", "TIMEOUT", "timeoutMs", 50L,
-                            "input", arguments, "payload", arguments.get("payload"),
+                    map("name", "fail", "status", "TIMEOUT", "timeoutMs", 50L,
+                            "input", input, "payload", input.get("payload"),
                             "argv", Arrays.asList(secret), "stderr", detail, "sshHelper", "app", "instance", "one"),
                     null, new IllegalStateException(secret));
+        }
+    }
+
+    private static final class PrivateCollectorBuiltIns implements BuiltInProvider {
+        @Override public Set<String> names() { return new LinkedHashSet<String>(Arrays.asList("upper", "block")); }
+        @Override public Object invoke(String name, Map<String, Object> arguments) {
+            if ("upper".equals(name)) return String.valueOf(arguments.get("value")).toUpperCase(Locale.ROOT);
+            try {
+                Thread.sleep(10000);
+                return "unexpected completion";
+            } catch (InterruptedException cancelled) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
         }
     }
 
