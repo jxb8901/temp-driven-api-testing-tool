@@ -62,6 +62,8 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> execNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> inputNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> varsNode = new LinkedHashMap<String, Object>();
+    /** Debug bootstrap names may be replaced by the first normal assign. */
+    private final java.util.Set<String> debugSeededVariableNames = new java.util.LinkedHashSet<String>();
     /** ATT-owned diagnostics, deliberately excluded from the expression Context. */
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
     /** Public uppercase load identity published below EXEC.LOAD. */
@@ -833,16 +835,24 @@ public final class CaseRuntimeContext {
                 : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(inputs));
     }
 
+    /** Seeds entries in the canonical EXEC.VARS map for standalone Debug only. */
+    public void seedDebugVariables(Map<String, Object> variables) {
+        if (variables == null || variables.isEmpty()) return;
+        for (Map.Entry<String, Object> entry : variables.entrySet()) {
+            validateCaseVariableName(entry.getKey());
+            if (varsNode.containsKey(entry.getKey())) {
+                throw new IllegalArgumentException("Duplicate EXEC.VARS bootstrap name '" + entry.getKey() + "'");
+            }
+            varsNode.put(entry.getKey(), debugCopy(entry.getValue()));
+            debugSeededVariableNames.add(entry.getKey());
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public void requireCaseVariableAvailable(String name) {
-        if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
-            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    "Invalid EXEC.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
-                    null, "name", null, null, null, null, null,
-                    "Use a simple case-sensitive identifier such as txnSeq.", null);
-        }
+        validateCaseVariableName(name);
         Map<String, Object> variables = varsNode;
-        if (variables.containsKey(name)) {
+        if (variables.containsKey(name) && !debugSeededVariableNames.contains(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
                     "Duplicate EXEC.VARS assignment '${EXEC.VARS." + name + "}'",
                     "The variable was already assigned earlier in this Test Case.", null, "name",
@@ -851,11 +861,37 @@ public final class CaseRuntimeContext {
         }
     }
 
+    private static void validateCaseVariableName(String name) {
+        if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                    "Invalid EXEC.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
+                    null, "name", null, null, null, null, null,
+                    "Use a simple case-sensitive identifier such as txnSeq.", null);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public void assignCaseVariable(String name, Object value) {
         requireCaseVariableAvailable(name);
         Map<String, Object> variables = varsNode;
         variables.put(name, value);
+        debugSeededVariableNames.remove(name);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object debugCopy(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                copy.put(String.valueOf(entry.getKey()), debugCopy(entry.getValue()));
+            return copy;
+        }
+        if (value instanceof java.util.List) {
+            java.util.List<Object> copy = new java.util.ArrayList<Object>();
+            for (Object item : (java.util.List<?>) value) copy.add(debugCopy(item));
+            return copy;
+        }
+        return value;
     }
 
     /** Expression-visible roots, including legacy aliases and current local bindings. */

@@ -114,13 +114,15 @@ public final class DebugEngine {
                         + " case=" + testCase.caseId() + " resolved=" + input.path);
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                    resolved.flows, input.path, "debug", input.inputs);
+                    resolved.flows, input.path, "debug", input.inputs, input.vars);
 
             context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
             context.setProject(projectRoot);
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
             context.setLegacyInputsView(input.inputs);
+            if ("template".equals(targetType) || "flow".equals(targetType))
+                context.seedDebugVariables(input.vars);
             context.put("CASE.environment", config.environment());
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
@@ -244,16 +246,29 @@ public final class DebugEngine {
             Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw debugError("Debug input must be a YAML map: " + path, "Use schemaVersion: " + Version.DEBUG_SCHEMA + ".");
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
-            Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-debug-v1.0.schema.json");
+            Object declaredVersion = map.get("schemaVersion");
+            String schemaVersion = declaredVersion == null ? "" : String.valueOf(declaredVersion);
+            String schemaName = Version.DEBUG_SCHEMA.equals(schemaVersion)
+                    ? "att-debug-v1.1.schema.json" : "att-debug-v1.0.schema.json";
+            Path schema = att.validation.SchemaFiles.resolve(projectRoot, schemaName);
             JsonSchemaVerifier.verify(schema, map);
+            if (Version.PREVIOUS_DEBUG_SCHEMA.equals(schemaVersion)) {
+                throw new DiagnosticException(DiagnosticCodes.SCHEMA_VERSION_OLD,
+                        "Debug input uses a historical schemaVersion",
+                        "declaredSchemaVersion=" + Version.PREVIOUS_DEBUG_SCHEMA
+                                + "\ncurrentSchemaVersion=" + Version.DEBUG_SCHEMA,
+                        path.toString(), "schemaVersion", null, null, null, null, null,
+                        "Upgrade schemaVersion to " + Version.DEBUG_SCHEMA + "; use top-level vars for initial EXEC.VARS values.", null);
+            }
             SchemaSupport.requireVersion(map, Version.DEBUG_SCHEMA, "debug input");
+            validateDebugVariables(map.get("vars"), type, path);
             return new DebugInput(path, map, type, id, config);
         } catch (DiagnosticException e) {
             throw e;
         } catch (Exception e) {
             throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID, "Invalid debug input", e.getMessage(), path.toString(),
                     "debug", null, null, null, id, null,
-                    "Correct the debug YAML and validate it against schemas/att-debug-v1.0.schema.json.", e);
+                    "Correct the debug YAML and validate it against schemas/att-debug-v1.1.schema.json.", e);
         }
     }
 
@@ -312,6 +327,53 @@ public final class DebugEngine {
     private DiagnosticException debugError(String message, String suggestion) {
         return new DiagnosticException(DiagnosticCodes.DEBUG_INVALID, message, null, null, "debug", null, null, null,
                 null, null, suggestion, null);
+    }
+
+    private void validateDebugVariables(Object raw, String targetType, Path path) {
+        if (raw == null) return;
+        if (!(raw instanceof Map)) throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                "Invalid debug.vars", "vars must be a YAML object/map", path.toString(), "vars",
+                null, null, null, null, null,
+                "Use vars: {name: value} only for standalone Template or Flow Debug.", null);
+        if ("tool".equals(targetType) && !((Map<?, ?>) raw).isEmpty())
+            throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                    "Debug vars are not supported for Tool targets",
+                    "debug.vars is supported only for standalone Template and Flow targets",
+                    path.toString(), "vars", null, null, null, null, null,
+                    "Use the Tool arguments contract for standalone Tool Debug.", null);
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) raw).entrySet()) {
+            String name = String.valueOf(entry.getKey());
+            if (!name.matches("[A-Za-z_][A-Za-z0-9_]*"))
+                throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                        "Invalid debug.vars name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
+                        path.toString(), "vars." + name, null, null, null, null, null,
+                        "Use a simple runtime variable name such as refNo or txnSeq.", null);
+            validateDebugValue(entry.getValue(), "vars." + name, path);
+        }
+    }
+
+    private void validateDebugValue(Object value, String field, Path path) {
+        if (value == null || value instanceof String || value instanceof Boolean || value instanceof Number) return;
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (!(entry.getKey() instanceof String))
+                    throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                            "Invalid debug.vars value", "Map keys must be strings at " + field,
+                            path.toString(), field, null, null, null, null, null,
+                            "Use string keys in debug.vars maps.", null);
+                validateDebugValue(entry.getValue(), field + "." + entry.getKey(), path);
+            }
+            return;
+        }
+        if (value instanceof Iterable) {
+            int index = 0;
+            for (Object item : (Iterable<?>) value) validateDebugValue(item, field + "[" + index++ + "]", path);
+            return;
+        }
+        throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                "Unsupported debug.vars value type", "field=" + field + ", type=" + value.getClass().getName(),
+                path.toString(), field, null, null, null, null, null,
+                "Use YAML null, string, boolean, number, map, or list values.", null);
     }
 
     private void appendError(CaseExecutionLog log, DiagnosticException error) {
@@ -395,11 +457,12 @@ public final class DebugEngine {
     }
 
     private static final class DebugInput {
-        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey;
+        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey;
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config) {
             this.path = path;
             this.caseValues = map(root.get("case"));
             this.inputs = map(root.get("inputs"));
+            this.vars = map(root.get("vars"));
             this.stageValues = map(map(root.get("stage")).get("values"));
             Object key = map(root.get("stage")).get("key");
             this.stageKey = key == null ? "DEBUG" : String.valueOf(key);

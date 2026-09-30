@@ -1,6 +1,7 @@
 schemaVersion: att-schema-catalog/v3.0
 schemas:
-  att-debug/v1.0: att-debug-v1.0.schema.json
+  att-debug/v1.1: att-debug-v1.1.schema.json
+  historicalDebugV10: history/att-debug-v1.0.schema.json
   att-load/v1.2: att-load-v1.2.schema.json
   att-load/v1.0: history/att-load-v1.0.schema.json
   att-load-summary/v1.0: att-load-summary-v1.0.schema.json

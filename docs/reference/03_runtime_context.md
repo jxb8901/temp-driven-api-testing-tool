@@ -2,6 +2,8 @@
 
 Run, Debug and Load share one canonical EXEC/META expression model. EXEC changes through framework lifecycle and explicit input/variable/action publication. META is curated, immutable and secret-safe.
 
+Standalone Debug bootstrap values are mapped into these canonical roots: `inputs` populates `EXEC.INPUT`, while Template/Flow `vars` seeds `EXEC.VARS` before the target starts. See [Standalone Debug](04_execution_modes/debug.md) for the v1.1 schema, typed literal rules and protected framework roots.
+
 ### Identity roots
 
 | Path | Meaning and type | Availability |

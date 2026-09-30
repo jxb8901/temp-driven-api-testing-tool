@@ -53,11 +53,66 @@ class DebugEngineTest {
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
         Path explicit = temp.resolve("override.yaml");
-        Files.write(explicit, ("schemaVersion: att-debug/v1.0\ncase:\n  value: explicit\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(explicit, ("schemaVersion: att-debug/v1.1\ncase:\n  value: explicit\n").getBytes(StandardCharsets.UTF_8));
         DebugEngine.Result result = run(project, config, "template", "SIMPLE", "--input", explicit.toString());
         assertEquals(ResultStatus.PASS, result.status());
         assertTrue(new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8).contains("explicit"));
         assertTrue(new String(Files.readAllBytes(result.resultPath()), StandardCharsets.UTF_8).contains("input: " + explicit));
+    }
+
+    @Test void debugVarsSeedTypedCanonicalContextAndCanBeReplacedByAssign() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Files.createDirectories(project.resolve("templates/VARS"));
+        Files.write(project.resolve("templates/VARS/template.yaml"), (
+                "schemaVersion: att-template/v3.3\nname: VARS\ndescription: Debug vars\nactions:\n"
+                        + "  before:\n    type: log\n    message: 'before=${EXEC.VARS.refNo}|${EXEC.VARS.retryCount}|${EXEC.VARS.order.id}|${EXEC.INPUT.amount}'\n"
+                        + "  replace:\n    type: assign\n    name: refNo\n    expression: REF002\n"
+                        + "  after:\n    type: log\n    message: 'after=${EXEC.VARS.refNo}'\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/VARS/debug.yaml"), (
+                "schemaVersion: att-debug/v1.1\ninputs:\n  amount: 100\nvars:\n  refNo: REF001\n  enabled: true\n  retryCount: 3\n  tags: [SIT, PAYMENT]\n  order:\n    id: ORD001\n    amount: 100\n").getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+
+        DebugEngine.Result result = run(project, config, "template", "VARS");
+
+        assertEquals(ResultStatus.PASS, result.status());
+        String log = new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8);
+        assertTrue(log.contains("before=REF001|3|ORD001|100"), log);
+        assertTrue(log.contains("after=REF002"), log);
+        String caseYaml = new String(Files.readAllBytes(result.outputDirectory().resolve("artifacts/case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(caseYaml.contains("refNo: REF002"), caseYaml);
+        assertTrue(caseYaml.contains("enabled: true"), caseYaml);
+        assertTrue(caseYaml.contains("tags: [SIT, PAYMENT]"), caseYaml);
+    }
+
+    @Test void historicalDebugSchemaReportsMigrationToV11() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Path input = temp.resolve("historical-debug.yaml");
+        Files.write(input, "schemaVersion: att-debug/v1.0\ninputs: {value: old}\n".getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+
+        DebugEngine.Result result = run(project, config, "template", "SIMPLE", "--input", input.toString());
+
+        assertEquals(ResultStatus.INVALID, result.status());
+        assertNotNull(result.diagnostic());
+        assertEquals("ATT-SCHEMA-001", result.diagnostic().code());
+        assertTrue(result.diagnostic().suggestion().contains("att-debug/v1.1"), result.diagnostic().format());
+    }
+
+    @Test void invalidDebugVarNameFailsBeforeTargetExecution() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Path input = temp.resolve("invalid-debug-vars.yaml");
+        Files.write(input, "schemaVersion: att-debug/v1.1\nvars:\n  bad-name: value\n".getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+
+        DebugEngine.Result result = run(project, config, "template", "SIMPLE", "--input", input.toString());
+
+        assertEquals(ResultStatus.INVALID, result.status());
+        assertNotNull(result.diagnostic());
+        assertEquals("ATT-DEBUG-001", result.diagnostic().code());
+        assertTrue(result.diagnostic().detail().contains("bad-name"), result.diagnostic().format());
     }
 
     @Test void missingSidecarIsDiagnosticAndDoesNotTouchNormalRunOutput() throws Exception {
@@ -80,7 +135,7 @@ class DebugEngineTest {
                 "schemaVersion: att-template/v3.3\nname: SLOW\ndescription: slow debug\nactions:\n"
                         + "  wait:\n    type: tool\n    call: '#{slow()}'\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/SLOW/debug.yaml"),
-                "schemaVersion: att-debug/v1.0\ncase: {caseName: slow}\n".getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-debug/v1.1\ncase: {caseName: slow}\n".getBytes(StandardCharsets.UTF_8));
         ToolConfig slow = new ToolConfig("slow", "Slow", "Slow test tool", "/bin/sleep 1", "txt",
                 Collections.<String, ToolArgumentConfig>emptyMap());
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
@@ -151,12 +206,12 @@ class DebugEngineTest {
     private Path fixture() throws Exception {
         Path project = fixtureWithoutSidecars();
         Files.write(project.resolve("templates/SIMPLE/debug.yaml"), (
-                "schemaVersion: att-debug/v1.0\ncase:\n  value: sidecar\n  caseId: EVIL\n  outputDirectory: EVIL\n  VARS: EVIL\n  STAGES: EVIL\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-debug/v1.1\ncase:\n  value: sidecar\n  caseId: EVIL\n  outputDirectory: EVIL\n  VARS: EVIL\n  STAGES: EVIL\n" ).getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/debug/echo/debug.yaml"), (
-                "schemaVersion: att-debug/v1.0\ninputs:\n  message: hello\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-debug/v1.1\ninputs:\n  message: hello\n" ).getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(project.resolve("config/tools"));
         Files.write(project.resolve("config/tools/echo.debug.yaml"), (
-                "schemaVersion: att-debug/v1.0\narguments:\n  value: hello-tool\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-debug/v1.1\narguments:\n  value: hello-tool\n" ).getBytes(StandardCharsets.UTF_8));
         return project;
     }
 

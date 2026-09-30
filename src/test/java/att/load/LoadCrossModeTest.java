@@ -122,7 +122,7 @@ class LoadCrossModeTest {
         write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.3\n"
                 + "id: shared.echo.v1\nname: Shared Echo\ndescription: cross-mode flow\nactions:\n"
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
-        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.0\ninputs:\n  value: shared-value\n");
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs:\n  value: shared-value\n");
         return project;
     }
 

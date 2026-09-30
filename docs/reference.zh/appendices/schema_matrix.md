@@ -14,7 +14,7 @@ ATT 3.6.0 現行 schema：
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Debug input | att-debug/v1.0 |
+| Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.2 |
 | Load summary | att-load-summary/v1.0 |
 | Run manifest | att-run/v2.1 |

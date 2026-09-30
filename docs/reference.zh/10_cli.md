@@ -64,12 +64,12 @@
 
 `run`、`debug` 和 `load` 默认采用交互式 verbose 行为。Lifecycle、Case、Stage、Action、资源 attempt、retry、assertion 和错误事件会即时写出并及时 flush。实时 Case-log 镜像复用与 `case.log` 相同的脱敏 append 路径；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事实来源。并发 Case-log 区块会带有 Case ID 前缀。`--quiet` 抑制详细实时进度，但保留最终摘要和错误。使用 `--format json` 时，机器可读内容仍写入 stdout，实时进度写入 stderr。Load 只定期输出有界计数/速率并节流错误，不会为每个成功 iteration 输出一大段内容。
 
-以下每个文件都是完整的 `att-debug/v1.0` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和临时覆盖值的不同写法。
+以下每个文件都是完整的 `att-debug/v1.1` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和临时覆盖值的不同写法。
 
 Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseName: PAYMENT debug
   amount: 100
@@ -92,7 +92,7 @@ Template 表达式应优先读取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environ
 Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseName: Compose debug
   traceId: TRACE-001
@@ -116,7 +116,7 @@ Flow 可用 `${EXEC.INPUT.source}` 读取 `inputs`；如果没有名为 `inputs`
 分组 Tool sidecar（`fpp.invokeApi` 对应 `config/tools/fpp.debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   RefNo: REF001
 tools:
@@ -139,7 +139,7 @@ tools:
 未分组 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 arguments:
   requestFile: /tmp/payment-request.xml
   environment: SIT
@@ -166,7 +166,7 @@ arguments:
 保护字段例子：
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseId: pretend-id
   outputDirectory: /tmp/pretend-output

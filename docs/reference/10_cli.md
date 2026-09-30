@@ -69,18 +69,18 @@ Options are command-specific. Unknown commands/options and missing option values
 
 ### Standalone debug inputs and outputs
 
-Debug input files use `att-debug/v1.0`. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, and `inputs` is adapted directly into canonical `EXEC.INPUT.*`. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`. An explicit `--input` always wins over auto-discovery.
+Debug input files use the current `att-debug/v1.1` schema. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, `inputs` is adapted directly into canonical `EXEC.INPUT.*`, and `vars` seeds initial `EXEC.VARS.*` for Template/Flow Debug. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`; Tool Debug does not support `vars`. An explicit `--input` always wins over auto-discovery. Historical `att-debug/v1.0` inputs must be migrated.
 
 Before execution ATT validates only the selected Template or Flow dependency closure, or the selected Tool definition. It does not require unrelated workbook snapshots or unrelated malformed Template descriptors to pass. The selected target still uses the normal Template/Flow/Tool runner, including Context resolution, Flow nesting, Tool retry/timeout, evidence, Action result persistence, DB finalization, and Case-log behavior.
 
 #### Configuration examples
 
-The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.0` document.
+The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.1` document.
 
 Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseName: PAYMENT debug
   amount: 100
@@ -97,7 +97,7 @@ Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions shoul
 Flow sidecar (`templates/flows/common/compose/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseName: Compose debug
   traceId: TRACE-001
@@ -115,7 +115,7 @@ Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available a
 Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   RefNo: REF001
 tools:
@@ -132,7 +132,7 @@ Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the grou
 Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 arguments:
   requestFile: /tmp/payment-request.xml
   environment: SIT
