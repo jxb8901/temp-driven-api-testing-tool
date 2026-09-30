@@ -96,6 +96,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                 throw invalidId;
             }
             executionWorkspace = executionWorkspace(request, executionId);
+            Files.createDirectories(executionWorkspace);
             context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
             transientWorkspace = Files.createTempDirectory("att-load-execution-");
             context.setCommandWorkingDirectory(transientWorkspace);
@@ -170,10 +171,19 @@ public final class IterationExecutor implements LoadIterationRunner {
         if (evidenceAvailable) {
             deleteWorkspace(transientWorkspace);
             transientWorkspace = null;
+        } else {
+            deleteEmptyWorkspace(executionWorkspace);
         }
         return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
                 executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
                 evidenceAvailable ? null : log, transientWorkspace);
+    }
+
+    private void deleteEmptyWorkspace(Path directory) {
+        if (directory == null || !Files.isDirectory(directory)) return;
+        try (java.nio.file.DirectoryStream<Path> contents = Files.newDirectoryStream(directory)) {
+            if (!contents.iterator().hasNext()) Files.deleteIfExists(directory);
+        } catch (IOException ignored) { }
     }
 
     private void deleteWorkspace(Path directory) {

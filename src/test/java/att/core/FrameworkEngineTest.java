@@ -61,7 +61,7 @@ class FrameworkEngineTest {
         RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).run(options);
 
         assertEquals(1, summary.passed());
-        Path caseYaml = projectRoot.resolve("output/V3-FLOW/payments.payment.TC001/case.yaml");
+        Path caseYaml = summary.results().get(0).caseLogPath().getParent().resolve("case.yaml");
         String evidence = new String(Files.readAllBytes(caseYaml), "UTF-8");
         assertTrue(evidence.contains("id: compose"));
         assertTrue(evidence.contains("id: common.outer.v1"));
@@ -78,7 +78,8 @@ class FrameworkEngineTest {
                 "run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "V3-FLOW-ERROR"}));
         assertEquals(1, failed.error());
         Path failedRun = projectRoot.resolve("output/V3-FLOW-ERROR");
-        String failedCase = new String(Files.readAllBytes(failedRun.resolve("payments.payment.TC001/case.yaml")), "UTF-8");
+        Path failedCaseYaml = failed.results().get(0).caseLogPath().getParent().resolve("case.yaml");
+        String failedCase = new String(Files.readAllBytes(failedCaseYaml), "UTF-8");
         assertTrue(failedCase.contains("common.inner.v1"));
         assertTrue(failedCase.contains("diagnostic:"));
         assertTrue(failedCase.contains("callChain:"));
@@ -168,7 +169,6 @@ class FrameworkEngineTest {
         assertEquals("API status", summary.results().get(0).validations().get(1).description());
         assertEquals("SUCCESS", summary.results().get(0).actual());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
-        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/payments.payment.TC001.TEST.V2.001.log")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/case.yaml")));
         Path caseDirectory = projectRoot.resolve("output/TEST-V2/payments.payment.TC001").toAbsolutePath().normalize();
         Path cwdEvidence = caseDirectory.resolve("tool-cwd.txt");

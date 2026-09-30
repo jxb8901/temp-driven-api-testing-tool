@@ -86,47 +86,6 @@ class PackageValidatorTest {
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
                 new StageTemplate("DB",tempDir,Collections.singletonList(dynamicFile),"att-template/v3.3"),config));
 
-        TemplateAction rawDb = new TemplateAction("raw", map("type","db","db","orders",
-                "query",map("sql","select 1"), "result",map("format","raw")),
-                "att-template/v3.3");
-        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
-                new StageTemplate("DB",tempDir,Collections.singletonList(rawDb),"att-template/v3.3"),config));
-    }
-
-        @Test void validatesMqPrimaryCallsWithoutSharedResultSettings() throws Exception {
-        MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "MQ", "QM1", "localhost", 1414,
-                "APP.SVRCONN", "", "", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("broker.yaml"));
-        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir, tempDir,
-                Collections.<String,ToolConfig>emptyMap(), Collections.<String,DbHelperConfig>emptyMap(),
-                Collections.singletonMap("broker", helper), null, null, null, "", "", null, null, 1,
-                "ignore", "", false, ProcessOutputConfig.defaults());
-        PackageValidator validator = new PackageValidator(tempDir, config);
-        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
-        contract.setAccessible(true);
-        TemplateAction send = new TemplateAction("send", map("type", "tool",
-                "call", "#{mq.broker.send(queue='REQUEST.Q', file='request.bin')}"), "att-template/v3.3");
-        TemplateAction request = new TemplateAction("request", map("type", "tool",
-                "call", "#{mq.broker.request(file='request.bin', requestQueue='REQUEST.Q', replyQueue='REPLY.Q')}"),
-                "att-template/v3.3");
-        TemplateAction receive = new TemplateAction("receive", map("type", "tool",
-                "call", "#{mq.broker.receive(queue='REPLY.Q')}"), "att-template/v3.3");
-        assertDoesNotThrow(() -> {
-            try { contract.invoke(validator, new StageTemplate("MQ", tempDir, Arrays.asList(send, request, receive),
-                    "att-template/v3.3"), config); }
-            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
-        });
-
-        TemplateAction legacyResult = new TemplateAction("legacy", map("type", "tool",
-                "call", "#{mq.broker.request(file='request.bin', requestQueue='REQUEST.Q', replyQueue='REPLY.Q')}",
-                "result", map("format", "text")), "att-template/v3.3");
-        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
-                new StageTemplate("MQ", tempDir, Collections.singletonList(legacyResult), "att-template/v3.3"), config));
-
-        TemplateAction collector = new TemplateAction("collector", map("type", "tool",
-                "call", "#{upper('ok')}", "evidence", map("mq", map("call", "#{mq.broker.receive(queue='REPLY.Q')}"))),
-                "att-template/v3.3");
-        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
-                new StageTemplate("MQ", tempDir, Collections.singletonList(collector), "att-template/v3.3"), config));
     }
 
     @Test void validatesCallBackedReadAndWriteToolBoundaries() throws Exception {

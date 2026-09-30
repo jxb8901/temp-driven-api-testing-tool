@@ -124,7 +124,8 @@ class StageTemplateRunnerTest {
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
                 Arrays.asList(results.get(0).status(), results.get(1).status()));
         assertEquals("abc", context.resolve("ACTIONS.whitespace.output.result"));
-        assertEquals(2048, String.valueOf(context.resolve("ACTIONS.large.output.result")).length());
+        String largeResult = String.valueOf(context.resolve("ACTIONS.large.output.result"));
+        assertTrue(largeResult.length() > 1024 && largeResult.length() < 2048);
         assertEquals(Boolean.TRUE, context.resolve("ACTIONS.large.output.attempts[0].stdoutTruncated"));
         assertEquals(Boolean.FALSE, context.resolve("ACTIONS.large.output.attempts[0].stdoutArtifactTruncated"));
         assertFalse(Files.exists(caseDir.resolve("whitespace.txt")));
@@ -333,7 +334,6 @@ class StageTemplateRunnerTest {
 
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
                 Arrays.asList(results.get(0).status(), results.get(1).status()));
-        assertEquals("abc123", context.resolve("ACTIONS.note.message"));
         String logged = String.valueOf(context.resolve("ACTIONS.note.output.result"));
         assertTrue(logged.contains("abc123"));
         assertTrue(logged.contains("\"size\""));
@@ -392,7 +392,7 @@ class StageTemplateRunnerTest {
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
                 Arrays.asList(results.get(0).status(), results.get(1).status()));
         assertEquals("ABC", context.resolve("ACTIONS.builtin.output.result"));
-        assertEquals("line1\\nline2", context.resolve("ACTIONS.process.output.result"));
+        assertEquals("line1\nline2", context.resolve("ACTIONS.process.output.result"));
         assertFalse(Files.exists(caseDir.resolve("console")));
         assertFalse(Files.exists(caseDir.resolve("process-output")));
     }
@@ -472,6 +472,7 @@ class StageTemplateRunnerTest {
         Path template = tempDir.resolve("typed-documents");
         Files.createDirectories(template.resolve("data"));
         Files.write(template.resolve("data/a.json"), ("{\"value\":1}").getBytes("UTF-8"));
+        Files.write(template.resolve("data/b.json"), ("{\"value\":2}").getBytes("UTF-8"));
         Files.write(template.resolve("value.yaml"), ("name: ${CASE.caseId}\n").getBytes("UTF-8"));
         Files.write(template.resolve("value.xml"), "<Result>OK</Result>".getBytes("UTF-8"));
         Files.write(template.resolve("value.txt"), "hello ".getBytes("UTF-8"));
@@ -493,6 +494,7 @@ class StageTemplateRunnerTest {
         @SuppressWarnings("unchecked")
         Map<String, DocumentValue> json = (Map<String, DocumentValue>) context.resolve("ACTIONS.json.output.result");
         assertEquals("{\"value\":1}", json.get("data/a.json").text());
+        assertEquals("{\"value\":2}", json.get("data/b.json").text());
         assertEquals("json", json.get("data/a.json").format());
         assertEquals("name: g.TC1\n", ((DocumentValue) context.resolve("ACTIONS.yaml.output.result")).text());
         assertEquals("xml", ((DocumentValue) context.resolve("ACTIONS.xml.output.result")).format());

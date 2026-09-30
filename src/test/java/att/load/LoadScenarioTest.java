@@ -136,7 +136,7 @@ class LoadScenarioTest {
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: invalid, overloadPolicy: drop}\n");
         DiagnosticException maxConcurrentError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidMaxConcurrent));
-        assertEquals("load.maxConcurrent", maxConcurrentError.field());
+        assertEquals("workloads[0].load.maxConcurrent", maxConcurrentError.field());
     }
 
     @Test void iterationExecutorIsolatesLoadAndCaseStateForClosedAndArrivalIterations() throws Exception {
@@ -512,12 +512,13 @@ class LoadScenarioTest {
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.singletonMap("slow", new ToolConfig("slow", "Slow", "Slow", slowScript.toString(), "text", Collections.emptyMap())), null, null);
         LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
-        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        LoadScenario workloadScenario = scenario.forWorkload(scenario.workload());
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(workloadScenario);
         Path outputRoot = temp.resolve("cancel-output");
         LoadRunResources resources = new LoadRunResources(project, config);
         LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
                 LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10));
-        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario,
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(workloadScenario,
                 new IterationExecutor(project, config, target, resources, outputRoot), "cancel-run", evidence);
         ExecutorService runner = Executors.newSingleThreadExecutor();
         try {

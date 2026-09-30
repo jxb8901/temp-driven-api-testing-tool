@@ -154,7 +154,8 @@ class LoadMqPoolingTest {
                 + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 10ms}\n"
                 + "evidence: {mode: metrics}\n");
         LoadScenario metricsScenario = new LoadScenarioLoader(project).load(metricsScenarioFile);
-        LoadTarget metricsTarget = new LoadTargetResolver(project, config).resolve(metricsScenario);
+        LoadScenario metricsWorkload = metricsScenario.forWorkload(metricsScenario.workload());
+        LoadTarget metricsTarget = new LoadTargetResolver(project, config).resolve(metricsWorkload);
         Path outputRoot = tempDir.resolve("scheduler-output");
         BlockingFactory metricsFactory = new BlockingFactory();
         metricsFactory.releaseGet.countDown();
@@ -162,7 +163,7 @@ class LoadMqPoolingTest {
         LoadEvidenceStore metricsEvidence = new LoadEvidenceStore(LoadEvidencePolicy.from(metricsScenario));
         try (LoadRunResources resources = new LoadRunResources(project, config, metricsFactory)) {
             IterationExecutor executor = new IterationExecutor(project, config, metricsTarget, resources, outputRoot);
-            ClosedVuScheduler scheduler = new ClosedVuScheduler(metricsScenario, executor, "mq-metrics", event -> {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(metricsWorkload, executor, "mq-metrics", event -> {
                 metricEvents.add(event);
                 metricsEvidence.onEvent(event);
             }, LoadSchedulerTiming.system(), metricsEvidence, outputRoot, null);
@@ -179,7 +180,8 @@ class LoadMqPoolingTest {
                 + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 10ms}\n"
                 + "evidence: {mode: failures, maxSamples: 1}\n");
         LoadScenario failureScenario = new LoadScenarioLoader(project).load(failureScenarioFile);
-        LoadTarget failureTarget = new LoadTargetResolver(project, config).resolve(failureScenario);
+        LoadScenario failureWorkload = failureScenario.forWorkload(failureScenario.workload());
+        LoadTarget failureTarget = new LoadTargetResolver(project, config).resolve(failureWorkload);
         BlockingFactory failureFactory = new BlockingFactory();
         failureFactory.failGet = true;
         failureFactory.releaseGet.countDown();
@@ -187,7 +189,7 @@ class LoadMqPoolingTest {
         LoadEvidenceStore failureEvidence = new LoadEvidenceStore(LoadEvidencePolicy.from(failureScenario));
         try (LoadRunResources resources = new LoadRunResources(project, config, failureFactory)) {
             IterationExecutor executor = new IterationExecutor(project, config, failureTarget, resources, outputRoot);
-            ClosedVuScheduler scheduler = new ClosedVuScheduler(failureScenario, executor, "mq-failures", event -> {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(failureWorkload, executor, "mq-failures", event -> {
                 failureEvents.add(event);
                 failureEvidence.onEvent(event);
             }, LoadSchedulerTiming.system(), failureEvidence, outputRoot, null);
