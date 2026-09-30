@@ -414,6 +414,9 @@ Evidence</a>
 directory</a></li>
 <li><a href="#human-html-report" id="toc-human-html-report">Human HTML
 report</a></li>
+<li><a href="#tool-evidence-collector-failures"
+id="toc-tool-evidence-collector-failures">Tool evidence collector
+failures</a></li>
 <li><a href="#result-workbook" id="toc-result-workbook">Result
 workbook</a></li>
 <li><a href="#junit-xml" id="toc-junit-xml">JUnit XML</a></li>
@@ -1173,6 +1176,17 @@ its assertion.</td>
 Action is active.</td>
 </tr>
 <tr class="even">
+<td><code>output.evidence.collectors.&lt;id&gt;.error</code></td>
+<td>Bounded failure summary with a non-blank <code>message</code> when
+the collector fails.</td>
+</tr>
+<tr class="odd">
+<td><code>output.evidence.collectors.&lt;id&gt;.evidence</code></td>
+<td>Preserved bounded/redacted underlying Tool/resource evidence,
+including resource identity and native failure fields when
+supplied.</td>
+</tr>
+<tr class="even">
 <td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.result</code></td>
 <td>Published primary typed result after the Action completes.</td>
 </tr>
@@ -1185,9 +1199,19 @@ Action is active.</td>
 <td>Published final/winning collector status.</td>
 </tr>
 <tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.error/evidence</code></td>
+<td>Published collector failure summary and preserved operation
+evidence.</td>
+</tr>
+<tr class="even">
 <td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;id&gt;.result/status</code></td>
 <td>Collector result/status for a specific retry attempt; earlier
 attempts remain after a later success.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;id&gt;.error/evidence</code></td>
+<td>Failure summary and underlying evidence for that specific collector
+attempt.</td>
 </tr>
 </tbody>
 </table>
@@ -4290,6 +4314,46 @@ grouping.</p>
 <p><code>report/junit.html</code> is a human-readable JUnit projection.
 It displays counts and one row per testcase with status, duration, and
 embedded case-log content or a relative artifact link.</p>
+<h3 id="tool-evidence-collector-failures">Tool evidence collector
+failures</h3>
+<p>An evidence collector is post-operation observability, not the
+primary Tool result. With <code>onFailure: continue</code>, the primary
+Action may remain <code>PASS</code> while the collector is independently
+recorded as <code>ERROR</code>:</p>
+<div class="sourceCode" id="cb67"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a>      #{ssh.app.execute(command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;)}</span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span></code></pre></div>
+<p>Inspect
+<code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;collectorId&gt;</code>
+(or the equivalent <code>ACTIONS</code> compatibility view). The record
+contains <code>status</code>, <code>success</code>,
+<code>invocationId</code>, <code>result</code>, <code>error</code>, and
+the bounded/redacted underlying operation <code>evidence</code>; when an
+operation supplies structured diagnostics, <code>diagnostic</code> is
+retained as well. <code>error.message</code> is populated from the
+underlying exception, operation status/exit code, or a safe fallback.
+Resource identity and fields such as SSH helper/instance, command, exit
+code, bounded stderr, MQ reason codes, HTTP status, parser diagnostics,
+and timeout details remain under <code>evidence</code> when provided by
+the executor.</p>
+<p>For retries, inspect
+<code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
+Earlier failed collector records remain available after a later
+successful attempt; the top-level collector record follows the
+final/winning attempt. With <code>onFailure: stop</code>, the Action can
+fail, but its diagnostic still includes the collector's root-cause
+message and preserved evidence. The same structured record is written to
+the
+<code>EVIDENCE &lt;action&gt; attempt=&lt;n&gt; collector=&lt;id&gt;</code>
+block in <code>case.log</code>, so the basic resource, category,
+message, exit code, and bounded stderr can be diagnosed without opening
+internal exception traces. Existing capture limits and secret redaction
+continue to apply; collector wrapping does not enable unbounded raw
+output.</p>
 <h3 id="result-workbook">Result workbook</h3>
 <p>ATT copies the source workbook and appends configured result columns
 using <code>report.mode: append-to-copy</code>. Set
@@ -4407,8 +4471,8 @@ Diagnostics</h2>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, helper, or tool
 change:</p>
-<div class="sourceCode" id="cb67"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb68"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>For one environment, use
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>.
 ATT 3.6.0 validates changed descriptor families against their active
@@ -4667,11 +4731,11 @@ Operations</h2>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb68"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb69"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
 Reference Manual, builds the application jar and release/source
 archives, and verifies the packaged launcher. It requires Java/Maven
@@ -4812,11 +4876,11 @@ expression results remain typed while they move through ATT.</p>
 <h3 id="render-and-documentvalue">Render and DocumentValue</h3>
 <p>Render returns a represented document. DocumentValue carries a format
 and the exact rendered text:</p>
-<div class="sourceCode" id="cb69"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
+<div class="sourceCode" id="cb70"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
 <p>One source produces output.result as a DocumentValue. Multiple
 sources produce an ordered map keyed by template-root-relative source
 paths. templateFormat accepts auto, text, json, yaml or xml. auto
@@ -4828,15 +4892,15 @@ transport. Render creates no file and exposes no output.targetFiles. Use
 the original typed Context value for structured access, such as
 EXEC.INPUT.amount or a prior action's output.result.amount.</p>
 <p>Pass Render output directly to HTTP or MQ:</p>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb70-5"><a href="#cb70-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb70-6"><a href="#cb70-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
-<span id="cb70-7"><a href="#cb70-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb70-8"><a href="#cb70-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb71"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb71-6"><a href="#cb71-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
+<span id="cb71-7"><a href="#cb71-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb71-8"><a href="#cb71-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
 <p>For MQ, pass the DocumentValue as payload. Do not add requestFormat
 to a DocumentValue. A resource encodes its exact text with its
 configured charset/CCSID. DocumentValue.format does not set MQMD.Format
@@ -4850,11 +4914,11 @@ file argument; Render does not create a handoff file.</p>
 <h3 id="tool-db-and-flow-results">Tool, DB and Flow results</h3>
 <p>A command-backed Tool declares stdoutFormat in its Tool
 descriptor:</p>
-<div class="sourceCode" id="cb71"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">getOrder</span><span class="kw">:</span></span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">getOrder</span><span class="kw">:</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
 <p>stdoutFormat parses external stdout once into output.result; it is
 not output serialization. Call-backed Tools and DB/HTTP/MQ operations
 keep their native return types.</p>
@@ -4876,24 +4940,24 @@ lifecycle is:</p>
 <p>Collectors are diagnostic operations, not replacement Actions. Each
 collector has its own typed result and does not replace or mutate the
 primary <code>output.result</code>:</p>
-<div class="sourceCode" id="cb73"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
-<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
-<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
-<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
-<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
-<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb73-11"><a href="#cb73-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
-<span id="cb73-12"><a href="#cb73-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
-<span id="cb73-13"><a href="#cb73-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
-<span id="cb73-14"><a href="#cb73-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
-<span id="cb73-15"><a href="#cb73-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
-<span id="cb73-16"><a href="#cb73-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb73-17"><a href="#cb73-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
+<div class="sourceCode" id="cb74"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
+<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
+<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb74-6"><a href="#cb74-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
+<span id="cb74-7"><a href="#cb74-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb74-8"><a href="#cb74-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb74-9"><a href="#cb74-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb74-10"><a href="#cb74-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb74-11"><a href="#cb74-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
+<span id="cb74-12"><a href="#cb74-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
+<span id="cb74-13"><a href="#cb74-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
+<span id="cb74-14"><a href="#cb74-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb74-15"><a href="#cb74-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
+<span id="cb74-16"><a href="#cb74-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb74-17"><a href="#cb74-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
 <p>While the containing Action, including its assertion, is active, use
 these paths:</p>
 <pre class="text"><code>${output.result}
@@ -4948,13 +5012,13 @@ collector.</p>
 <h3 id="log-typed-value-to-case-log">Log: typed value to Case log</h3>
 <p>Log is a presentation action and therefore has its own format
 field:</p>
-<div class="sourceCode" id="cb77"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
-<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
-<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
-<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
-<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
-<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb78"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
+<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
+<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
+<span id="cb78-5"><a href="#cb78-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
+<span id="cb78-6"><a href="#cb78-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
 <p>level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR.
 At least one of message or value is required. message is rendered as
 text. value accepts any typed value, including nested maps/lists. Exact
@@ -4985,11 +5049,11 @@ needs them after the Flow returns.</p>
 <h3 id="resource-output-evidence">Resource output evidence</h3>
 <p>Resource evidence is separate from the logical result. A helper may
 configure an optional evidence.output presentation policy:</p>
-<div class="sourceCode" id="cb78"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<div class="sourceCode" id="cb79"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>This adds a bounded human-readable snapshot beside operation
 metadata; it does not change output.result or response parsing. In Load,
 evidence.resources.output accepts inherit (default) or none. none skips
@@ -5198,19 +5262,19 @@ active runtime contracts.</td>
 </tbody>
 </table>
 <p>A Render-to-HTTP example:</p>
-<div class="sourceCode" id="cb79"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb79-7"><a href="#cb79-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
-<p>For an abstract value, use requestFormat explicitly:</p>
 <div class="sourceCode" id="cb80"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb80-5"><a href="#cb80-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb80-6"><a href="#cb80-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-7"><a href="#cb80-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<p>For an abstract value, use requestFormat explicitly:</p>
+<div class="sourceCode" id="cb81"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb81-3"><a href="#cb81-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
 <p>For Load, migrate old single-target or v1.1 scenarios to
 att-load/v1.2 workloads form. Put pacing under each workload and set the
 optional top-level execution.execIdFormat when a custom EXEC.ID is

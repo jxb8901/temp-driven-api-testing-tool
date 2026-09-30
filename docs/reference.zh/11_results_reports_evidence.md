@@ -22,6 +22,23 @@ Run ID 和 Case ID 在校验后保持原样。只有 `run.yaml` 状态为 `COMPL
 
 展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log`/`case.yaml` 的显式链接。Action Results 每行独立显示最终渲染的 Description，并写入 `run.yaml` 与 CI JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 description 与 `expected` 的有序 LF 联接；Actual 是所有非空运行时 `actual` 的有序 LF 联接。
 
+### Tool evidence collector 失败
+
+Evidence collector 是 operation 完成后的 observability，不是 primary Tool result。使用 `onFailure: continue` 时，primary Action 可以维持 `PASS`，而 collector 会独立记录为 `ERROR`：
+
+```yaml
+evidence:
+  appLog:
+    call: >-
+      #{ssh.app.execute(command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100')}
+    timeoutMs: 5000
+    onFailure: continue
+```
+
+请查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等价的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 时也会保留 `diagnostic`。`error.message` 会从 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、command、exit code、bounded stderr、MQ reason code、HTTP status、parser diagnostic 和 timeout detail 等 resource identity/field 会留在 `evidence`。
+
+有 retry 时，请查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使后一个 attempt 成功，较早的 failed collector record 仍会保留；top-level collector record 代表最后／胜出的 attempt。使用 `onFailure: stop` 时，Action 可以失败，但其 diagnostic 仍会包含 collector root-cause message 和保留的 evidence。同一 structured record 也会写入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打开 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 与 secret redaction 仍然有效；collector wrapper 不会开放无上限 raw output。
+
 ### 结果工作簿
 
 ATT 会复制源工作簿，并使用 `report.mode: append-to-copy` 追加配置的结果列。全局 `report.fileNamePattern` 控制文件名。侧车 `report.columns` 只修改工作簿标签。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 单元格保留 LF 字符并以换行文本显示。结果回填使用与 testcase loader 相同的 Excel 显示格式和空白规范化规则读取 Case ID，因此带前导零等数字格式的 ID 在执行与报表写入时会匹配同一 Case。

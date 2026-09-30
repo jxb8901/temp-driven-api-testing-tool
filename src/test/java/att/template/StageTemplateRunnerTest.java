@@ -317,8 +317,75 @@ class StageTemplateRunnerTest {
             assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
             assertEquals("ok", context.resolve("ACTIONS.call.output.result"));
             assertEquals("ERROR", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.broken.status"));
-            if ("stop".equals(mode)) assertNull(context.resolve("ACTIONS.call.output.assertion"));
+            assertFalse(String.valueOf(context.resolve("ACTIONS.call.output.evidence.collectors.broken.error.message")).trim().isEmpty());
+            if ("stop".equals(mode)) {
+                assertNull(context.resolve("ACTIONS.call.output.assertion"));
+                assertTrue(results.get(0).message().contains("collector failed"));
+            }
         }
+    }
+
+    @Test void failedCommandCollectorPreservesOperationEvidenceAndActionableLogMessage() throws Exception {
+        Path caseDir = tempDir.resolve("evidence-command-failure");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "text",
+                Collections.<String, ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+        TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                "assert", "${output.result} == 'OK'",
+                "evidence", map("appLog", map("call", "#{sample()}", "onFailure", "continue"))));
+        CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
+        List<ValidationResult> results = new StageTemplateRunner(
+                new UnifiedTemplateEngine(new ToolInvoker(tempDir, config, new FixedRunner(2, "", "missing.log: No such file"))))
+                .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+        log.close();
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals("PASS", context.resolve("ACTIONS.call.output.status"));
+        assertEquals("ERROR", context.resolve("ACTIONS.call.output.evidence.collectors.appLog.status"));
+        assertEquals("OPERATION_FAILED", context.resolve("ACTIONS.call.output.evidence.collectors.appLog.error.category"));
+        assertTrue(String.valueOf(context.resolve("ACTIONS.call.output.evidence.collectors.appLog.error.message")).contains("exitCode=2"));
+        assertEquals(Integer.valueOf(2), context.resolve("ACTIONS.call.output.evidence.collectors.appLog.error.exitCode"));
+        assertEquals("missing.log: No such file",
+                context.resolve("ACTIONS.call.output.evidence.collectors.appLog.evidence.tool.invocations[0].stderr"));
+        String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+        assertTrue(caseLog.contains("EVIDENCE call attempt=1 collector=appLog"));
+        assertTrue(caseLog.contains("missing.log: No such file"));
+    }
+
+    @Test void failedCollectorEvidenceSurvivesEarlierRetryAttempt() throws Exception {
+        Path caseDir = tempDir.resolve("evidence-collector-retry-failure");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "text",
+                Collections.<String, ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+        Map<String, Object> retry = map("maxAttempts", 2, "intervalMs", 0, "retryOn", Arrays.asList("ASSERTION"));
+        TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{sample()}",
+                "assert", "${output.result} == 'ok'", "retry", retry,
+                "evidence", map("snapshot", map("call", "#{capture(value=${output.result})}", "onFailure", "continue"))));
+        SequencedCollectorBuiltIns builtIns = new SequencedCollectorBuiltIns();
+        SequencedRunner runner = new SequencedRunner(false);
+        List<ValidationResult> results = new StageTemplateRunner(
+                new UnifiedTemplateEngine(new ToolInvoker(tempDir, config, runner), builtIns))
+                .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals("ERROR", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.status"));
+        assertTrue(String.valueOf(context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.error.message"))
+                .contains("collector first failed"));
+        assertEquals("PASS", context.resolve("ACTIONS.call.output.attempts[1].evidence.collectors.snapshot.status"));
+        assertEquals("PASS", context.resolve("ACTIONS.call.output.evidence.collectors.snapshot.status"));
     }
 
     @Test void actionTextAndTypedLogValuesSupportInlineBuiltIns() throws Exception {
@@ -674,6 +741,15 @@ class StageTemplateRunnerTest {
         @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("fail")); }
         @Override public Object invoke(String name, Map<String,Object> arguments) { throw new IllegalStateException("collector failed"); }
     }
+    private static final class SequencedCollectorBuiltIns implements BuiltInProvider {
+        int calls;
+        @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("capture")); }
+        @Override public Object invoke(String name, Map<String, Object> arguments) {
+            calls++;
+            if (calls == 1) throw new IllegalStateException("collector first failed");
+            return arguments.get("value");
+        }
+    }
     private static final class SequencedRunner extends CommandRunner {
         int calls; final boolean timeout;
         final boolean alwaysSuccess;
@@ -682,9 +758,10 @@ class StageTemplateRunnerTest {
         @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { calls++; if (timeout) return new CommandResult(-1,"","",true); return alwaysSuccess || calls > 1 ? new CommandResult(0,"ok","",false) : new CommandResult(75,"first","retry",false); }
     }
     private static final class FixedRunner extends CommandRunner {
-        private final int exitCode; private final String stdout;
-        private FixedRunner(int exitCode, String stdout) { this.exitCode=exitCode; this.stdout=stdout; }
-        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { return new CommandResult(exitCode,stdout,"",false); }
+        private final int exitCode; private final String stdout; private final String stderr;
+        private FixedRunner(int exitCode, String stdout) { this(exitCode, stdout, ""); }
+        private FixedRunner(int exitCode, String stdout, String stderr) { this.exitCode=exitCode; this.stdout=stdout; this.stderr=stderr; }
+        @Override public CommandResult run(List<String> argv, java.time.Duration duration, Path workingDirectory, Map<String,String> environment) { return new CommandResult(exitCode,stdout,stderr,false); }
     }
     private static final class CapturingRunner extends CommandRunner {
         List<String> argv;

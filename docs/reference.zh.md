@@ -268,10 +268,14 @@ EXEC.INPUT 是 canonical input map。Stage 暫時 overlay Case input，完成後
 | `output.result` | Action active（包括 assertion）期間的 primary typed result。 |
 | `output.evidence.collectors.<id>.result` | Active Tool evidence collector 的 typed result。 |
 | `output.evidence.collectors.<id>.status` | Collector 的 `PASS`／`ERROR` status。 |
+| `output.evidence.collectors.<id>.error` | Collector 失敗時的 bounded failure summary；有可用訊息時包含非空 `message`。 |
+| `output.evidence.collectors.<id>.evidence` | 保留 bounded/redacted 的 underlying Tool/resource evidence，包括 executor 提供的 resource identity 與 native failure fields。 |
 | `EXEC.ACTIONS.<actionId>.output.result` | Action 完成後發布的 primary typed result。 |
 | `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | 發布後最後／勝出的 collector result。 |
 | `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | 發布後最後／勝出的 collector status。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | 發布後的 collector failure summary 與保留的 operation evidence。 |
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | 該 collector attempt 的 failure summary 與 underlying evidence。 |
 
 String、Number、Boolean、null、Map、List、DocumentValue 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
@@ -1647,6 +1651,23 @@ Run ID 和 Case ID 在校验后保持原样。只有 `run.yaml` 状态为 `COMPL
 `report/index.html` 是主要终端用户报表。可以直接从磁盘打开。组按 `workbookId.groupId` 汇总；界面把 `groupId` 标记为 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、对 workbook/group/full Case ID/tag 的大小写不敏感搜索，以及每列标题的升序/降序排序。Duration 按数值排序。
 
 展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log`/`case.yaml` 的显式链接。Action Results 每行独立显示最终渲染的 Description，并写入 `run.yaml` 与 CI JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 description 与 `expected` 的有序 LF 联接；Actual 是所有非空运行时 `actual` 的有序 LF 联接。
+
+### Tool evidence collector 失败
+
+Evidence collector 是 operation 完成后的 observability，不是 primary Tool result。使用 `onFailure: continue` 时，primary Action 可以维持 `PASS`，而 collector 会独立记录为 `ERROR`：
+
+```yaml
+evidence:
+  appLog:
+    call: >-
+      #{ssh.app.execute(command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100')}
+    timeoutMs: 5000
+    onFailure: continue
+```
+
+请查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等价的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 时也会保留 `diagnostic`。`error.message` 会从 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、command、exit code、bounded stderr、MQ reason code、HTTP status、parser diagnostic 和 timeout detail 等 resource identity/field 会留在 `evidence`。
+
+有 retry 时，请查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使后一个 attempt 成功，较早的 failed collector record 仍会保留；top-level collector record 代表最后／胜出的 attempt。使用 `onFailure: stop` 时，Action 可以失败，但其 diagnostic 仍会包含 collector root-cause message 和保留的 evidence。同一 structured record 也会写入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打开 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 与 secret redaction 仍然有效；collector wrapper 不会开放无上限 raw output。
 
 ### 结果工作簿
 

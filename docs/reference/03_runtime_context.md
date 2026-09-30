@@ -73,10 +73,14 @@ EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs 
 | `output.result` | Primary typed Action result while the Action is active, including its assertion. |
 | `output.evidence.collectors.<id>.result` | Typed result of an active Tool evidence collector. |
 | `output.evidence.collectors.<id>.status` | Collector `PASS`/`ERROR` status while the Action is active. |
+| `output.evidence.collectors.<id>.error` | Bounded failure summary with a non-blank `message` when the collector fails. |
+| `output.evidence.collectors.<id>.evidence` | Preserved bounded/redacted underlying Tool/resource evidence, including resource identity and native failure fields when supplied. |
 | `EXEC.ACTIONS.<actionId>.output.result` | Published primary typed result after the Action completes. |
 | `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | Published final/winning collector result. |
 | `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | Published final/winning collector status. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | Published collector failure summary and preserved operation evidence. |
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | Failure summary and underlying evidence for that specific collector attempt. |
 
 Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
