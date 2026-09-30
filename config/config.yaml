@@ -31,7 +31,7 @@ dbhelpers:
 
 report:
   mode: append-to-copy
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
   html:
     caseLogInlineLimitBytes: 32768
   columns:
