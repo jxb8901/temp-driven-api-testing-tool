@@ -469,6 +469,8 @@ class StageTemplateRunnerTest {
     }
 
     @Test void callBackedHttpCollectorPreservesNativeFailureMessageForContinueAndStop() throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
         tools.put("snapshot", new ToolConfig("snapshot", "snapshot", "", "Snapshot", "HTTP collector",
                 Collections.<String>emptyList(), "#{http.missing.get()}", Collections.<String>emptyList(),
@@ -485,21 +487,19 @@ class StageTemplateRunnerTest {
                         + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: \"${output.result} == 'OK'\"\n"
                         + "    evidence:\n      snapshot:\n        call: \"#{snapshot()}\"\n        onFailure: " + mode + "\n";
                 Files.write(descriptor, templateText.getBytes("UTF-8"));
+                StageTemplate template = new StageTemplateLoader(tempDir, caseDir).load("T");
                 TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
                         Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
                 CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R-" + mode,
                         tempDir, caseDir.resolve("case.log"));
                 context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()),
                         "T", tempDir);
-                TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
-                        "assert", "${output.result} == 'OK'",
-                        "evidence", map("snapshot", map("call", "#{snapshot()}", "onFailure", mode))));
                 UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(tempDir, config),
                         null, null, http, new DefaultBuiltInProvider());
                 List<ValidationResult> results;
                 try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
                     results = new StageTemplateRunner(engine).execute("invoke",
-                            new StageTemplate("T", caseDir, Collections.singletonList(action)), context, log);
+                            template, context, log);
                 }
 
                 assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR,
