@@ -126,7 +126,7 @@ class LoadAcceptanceTest {
         return summary;
     }
 
-    private Path writeScenario(String name, String content) throws IOException {
+    private Path writeScenario(String name, String content) throws Exception {
         Path file = temp.resolve(name);
         return LoadTestSupport.writeScenario(file, content);
     }
