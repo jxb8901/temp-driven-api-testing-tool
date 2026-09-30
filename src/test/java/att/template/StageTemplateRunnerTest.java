@@ -81,6 +81,52 @@ class StageTemplateRunnerTest {
         assertTrue(results.get(0).diagnostic().detail().contains("requestedPath: output.result.missing"));
     }
 
+    @Test void toolExpectedContextFailurePointsToExpectedFieldAndExpression() throws Exception {
+        assertToolReportFieldFailure("expected");
+    }
+
+    @Test void toolActualContextFailurePointsToActualFieldAndExpression() throws Exception {
+        assertToolReportFieldFailure("actual");
+    }
+
+    private void assertToolReportFieldFailure(String field) throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        String templateId = "tool-" + field + "-source";
+        Path templateDir = tempDir.resolve("templates/" + templateId);
+        Files.createDirectories(templateDir);
+        String reference = "${output.result.missing}";
+        String templateText = "schemaVersion: att-template/v3.3\nname: Tool report source\ndescription: Report source\n"
+                + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: \"true\"\n"
+                + "    " + field + ": >-\n      " + reference + "\n";
+        Path descriptor = templateDir.resolve("template.yaml");
+        Files.write(descriptor, templateText.getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load(templateId);
+        Path caseDir = tempDir.resolve(templateId + "-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "Tool report source", Collections.<String, Object>emptyMap()),
+                "Tool report source", templateDir);
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute(
+                "invoke", template, context, new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(1, results.size());
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals("ATT-CTX-001", results.get(0).diagnostic().code());
+        assertEquals("actions.call." + field, results.get(0).diagnostic().field());
+        assertEquals(descriptor.toRealPath().toString(), results.get(0).diagnostic().file());
+        att.validation.SourceLocation source = results.get(0).diagnostic().source();
+        assertNotNull(source);
+        assertEquals(10, source.line());
+        assertEquals(templateText.split("\\n")[9].indexOf(reference) + 1, source.column());
+        assertTrue(source.excerpt().contains(field + ": >-"));
+        assertTrue(source.excerpt().contains(reference));
+        assertTrue(results.get(0).diagnostic().detail().contains("requestedPath: output.result.missing"));
+        assertEquals(Boolean.TRUE, context.resolve("ACTIONS.call.output.assertion.passed"));
+    }
+
     @Test void evidenceCollectorContextFailurePointsToCollectorCallField() throws Exception {
         StageTemplateLoader.clearForTests();
         att.TestSchemas.install(tempDir);

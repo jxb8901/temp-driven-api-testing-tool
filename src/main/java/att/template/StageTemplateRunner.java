@@ -103,12 +103,10 @@ public class StageTemplateRunner {
                 boolean assertionReport = "assert".equals(type)
                         || (("tool".equals(type) || "db".equals(type)) && !action.assertion().trim().isEmpty());
                 if ("tool".equals(type) && assertionReport) {
-                    try {
-                        expected = normalizeLines(templateEngine.render(action.expected(), context, log));
-                        actual = normalizeLines(templateEngine.render(action.actual(), context, log));
-                    } catch (Exception error) {
-                        throw phaseDiagnostic(error, template, action, "actions." + action.id() + ".assert");
-                    }
+                    executionField = "expected";
+                    expected = normalizeLines(templateEngine.render(action.expected(), context, log));
+                    executionField = "actual";
+                    actual = normalizeLines(templateEngine.render(action.actual(), context, log));
                     output.put("expected", expected);
                     output.put("actual", actual);
                 }
