@@ -1,21 +1,39 @@
 ### 14.3 遷移說明
 
-Current Reference 依產品概念描述 ATT，不再按 release chronology 組織。逐 release 變更仍保留在 `CHANGELOG.md` 與 `docs/history/`。
+ATT 3.6.0 將型別化 operation result、外部 parsing、渲染文件、outbound transport 和人類可讀 evidence 分開。
 
-目前主要 migration：
+| 舊欄位／模型 | 3.6.0 遷移方式 |
+|---|---|
+| Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
+| 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
+| Render result.format/path 或 renderAs/saveAs | 改用 templateFormat。Render 回傳含原文的 DocumentValue，不建立結果檔或 targetFiles。 |
+| 透過 targetFiles 傳遞 Render 檔案 | 直接將 DocumentValue 傳入 HTTP body 或 MQ payload。 |
+| 在 Render output 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；DocumentValue + requestFormat 會失敗。 |
+| Log file | 直接將 value 傳入 Log.value。 |
+| Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
+| HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
+| 舊 active resource/config schema | 將 schemaVersion 升至 ATT 3.6.0 現行版本，並遷移上述欄位。schemas/history 中的 schema 不是 active runtime contract。 |
 
-- 新 authoring 優先使用 `EXEC` / `META`，而非 legacy Context alias；
-- 使用 `output.result` / `EXEC.ACTIONS.<id>.output.result` 及 common evidence/attempt contract；
-- 把 Tool、DBHelper、MQHelper、HTTPHelper 視為 peer resource；
-- 若只改 DB/MQ/SSH/HTTPHelper binding，使用 environment profile；
-- 需要連線池與型別化 HTTP metadata 時，以固定的 `http.<id>.<method>` Action 取代常見 curl 呼叫；既有 curl Tool 仍然有效；
-- 舊版 descriptor 使用新欄位時，依驗證診斷更新 `schemaVersion` 與必要欄位後再驗證；歷史 schema 位於 `schemas/history/`；
-- command Tool 將 `output: txt|json|yaml|xml` 遷移為必需的 Tool-level `result: {format: text|json|yaml|xml}`；Action-level `result.format` 現在只控制序列化，`raw` 不是共用結果格式；
-- 使用 `att-config/v2.9`、`att-tool-group/v2.8`、`att-template/v3.2`／`att-flow/v3.2`；舊版已登記 schema 保留於 `schemas/history/`，package catalog 驗證會檢查所有資源；
-- HTTPHelper 按 response `Content-Type` 解析原生結果；公開 header key 統一小寫，Action 序列化不會改變型別化結果；
-- MQ 可在 `message.requestQueue` 設 send/request 預設，在 `message.replyQueue` 設 receive/request 預設；明確 call argument 優先於所選 instance 繼承設定；
-- 非預期 internal exception 會在 Case log 記錄有界且遮蔽 secret 的 stack detail；預期 transport／validation error 維持精簡；
-- 需要邏輯多實例路由時，以 `att-tool-group/v2.7` 的 `ssh: {helper: <id>}` 取代實體 group SSH；
-- 把 Run、Debug、Load 視為 peer execution mode。
+Render 直接傳到 HTTP 的例子：
 
-Pre-#42 monolithic manual 的可審核 disposition 記錄在 `docs/reference-migration-map.md`。
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+~~~
+
+抽象 typed value 必須明確使用 requestFormat：
+
+~~~yaml
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
+~~~
+
+Load scenario 請從舊 single-target/v1.1 格式遷移至 att-load/v1.2 workloads。Pacing 移入各 workload；需要自訂 EXEC.ID 時可設定頂層 execution.execIdFormat。它在初始化時使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。不要在格式中使用 seq.next() 或 external/stateful functions。
+
+Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[動作與型別化值](../14_actions.md)、[Runtime 與 Context 模型](../03_runtime_context.md)、[Load 模式](../04_execution_modes/load.md)與[Schema 矩陣](schema_matrix.md)。

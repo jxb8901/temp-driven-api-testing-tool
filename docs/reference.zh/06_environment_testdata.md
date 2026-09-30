@@ -1,40 +1,43 @@
-## 06 環境與測試數據
+## 06 環境與測試資料
 
 Environment selection 改變 resource binding，不改變 Action logic。
 
 ### Environment profiles
 
-`att-config/v2.7` 可以定義 `environment` default 與 `environments` map。`--config` 選擇 base configuration file；`--env` 在該 configuration 內選擇 named binding。明確 `--env` 優先於 configured default；未知 environment 在任何 external execution 前失敗。既有 v2.6 profile 仍可用於 DB/MQ-only package。
+`att-config/v2.10` 定義現行 `environment` default 與 `environments` map。`--config` 選擇共用 configuration；`--env` 選擇 profile 並覆蓋 default。名稱比對不區分大小寫。未知 profile 會在 external execution 前失敗。
 
-Profile 是 typed shallow binding，不是 generic recursive YAML inheritance。目前 profile 可擁有 `dbhelpers`、`mqhelpers`、`sshhelpers` list：profile 明確提供某 list 時會取代 root 的該 resource list；沒有提供的 list 則繼承 common root list。
+Profile 是 typed shallow binding，不是 generic recursive YAML inheritance。Profile 可整組替換 `dbhelpers`、`mqhelpers`、`sshhelpers` 或 `httphelpers` list；未提供的 list 會繼承 common root list。
 
 ```yaml
+schemaVersion: att-config/v2.10
 environment: SIT
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
     sshhelpers: [config/sshhelpers/sit/application.yaml]
+    httphelpers: [config/httphelpers/sit/payment.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
     sshhelpers: [config/sshhelpers/uat/application.yaml]
+    httphelpers: [config/httphelpers/uat/payment.yaml]
 ```
 
-不同 environment 的 descriptor 應暴露相同 stable logical ID（例如 `orders`、`payment`、`application`），因此 Template/Flow/Action 和 Tool-group helper binding 在 SIT/UAT/PREPROD 之間不需要修改。完整範例與 fan-out 安全說明見 [SSHHelper 章](../../docs/reference.zh/05_resources/sshhelper.md)。
+各環境應提供相同的 stable logical ID（例如 `orders`、`payment`、`application`），Template、Flow、Action 和 Tool-group binding 才能在 SIT/UAT/PREPROD 之間保持不變。SSH endpoint detail 不會公開為 `META.SSHHELPER`；見[SSHHelper 章](05_resources/sshhelper.md)及[Runtime Context 欄位清單](03_runtime_context.md)。
 
 ### Topology 與 secrets
 
-Topology 可以隨 descriptor/environment 改變。Secret 應在 descriptor 支援的位置使用 `${ENV:NAME}` 注入，不應提交到 repo，也不應出現在 effective metadata/diagnostic。缺少 required environment variable 屬 validation/configuration error；錯誤會指出 field/variable name，但不列印 resolved secret。
+Topology 可隨 descriptor/environment 改變。在 descriptor 支援處使用 `${ENV:NAME}` 注入 secret；不可提交，也不可將解析後的值公開在 META、report 或 diagnostic。缺少 required variable 時會指出 field/name，但不列印 secret。
 
 ### Cross-mode consistency
 
-Run、Validate、Debug、Load 在 mode-specific 工作前都經過相同 effective-config environment resolution。因此 `--env` 不是 Action branching，也不會產生 mode-specific helper ID。
+Run、Validate、Debug、Load 透過同一 effective configuration 解析所選 environment。`--env` 不是 Action branching，也不會產生 mode-specific helper ID。
 
-### 從獨立 config 遷移
+### 分開的 configuration files
 
-原有 `--config config/environments/sit.yaml` / `uat.yaml` 工作方式仍可使用。若 package contract 相同、只改 typed DB/MQ/SSH binding，profile 更簡潔；若整體 policy、root、Tool topology 或 configuration ownership 有重大差異，仍應使用 separate config。
+若 package roots、report policy、Tool topology 或其他 config 刻意不同，可繼續使用 `--config config/environments/sit.yaml` 與 `uat.yaml`。若 package contract 相同而只改 resource binding，使用 profiles。
 
-### Test data 擴展位置
+### Test data 擴充位置
 
-Workbook/sidecar/snapshot 仍是目前 Testcase data contract。未來 logical environment-bound fixture（#38）應擴展本章，並沿用 stable logical-name 原則，而不是把 environment branch 放入 Action。
+Workbook/sidecar/snapshot 仍是 Testcase data contract。Environment-bound business input 放在 `EXEC.INPUT`；environment selection 屬於 configuration，不是 Action expression。

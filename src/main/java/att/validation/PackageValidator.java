@@ -832,12 +832,10 @@ public final class PackageValidator {
             if (!action.runWhen().trim().isEmpty()) validateAssertionExpression(action.runWhen(), syntaxEngine, config);
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
-                require(action.resultFormat(), "result.format is required for render action " + action.id());
-                if (!java.util.Arrays.asList("text", "json", "yaml", "xml").contains(action.resultFormat().toLowerCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Render result.format must be text, json, yaml, or xml: " + action.id());
-                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
-                validateRenderResultPath(action);
+                String templateFormat = action.templateFormat().trim().toLowerCase(java.util.Locale.ROOT);
+                if (!java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(templateFormat)) throw new IllegalArgumentException("templateFormat must be auto, text, json, yaml, or xml: " + action.id());
+                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "fields", "level", "retry", "timeoutMs", "result", "render", "format", "value");
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
-                validateStaticRenderTargets(action, template, payloads);
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
@@ -851,17 +849,17 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "level", "fields"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateInlineExpressions(action.resultConfig().path(), syntaxEngine, config); validateToolCall(action.call(), config); validateToolResult(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "result", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
-                if (action.message().trim().isEmpty() && action.file().trim().isEmpty()) throw new IllegalArgumentException("message or file is required for log action " + action.id());
+                if (action.message().trim().isEmpty() && action.value() == null) throw new IllegalArgumentException("message or value is required for log action " + action.id());
+                if (action.value() == null && !action.format().trim().isEmpty()) throw new IllegalArgumentException("format requires value on Log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
-                forbid(action, "name", "payload", "result", "call", "db", "query", "update", "expression", "expected", "actual", "retry", "timeoutMs");
-                for (Object key : action.fields().keySet()) if (!(key instanceof String)) throw new IllegalArgumentException("Log fields keys must be strings: " + action.id());
+                forbid(action, "name", "payload", "result", "render", "call", "db", "query", "update", "expression", "expected", "actual", "retry", "timeoutMs", "file", "fields", "templateFormat", "assert");
                 validateInlineExpressions(action.message(), syntaxEngine, config);
-                validateInlineExpressions(action.file(), syntaxEngine, config);
-                for (Object value : action.fields().values()) validateInlineExpressions(String.valueOf(value), syntaxEngine, config);
+                validateInlineExpressions(String.valueOf(action.value() == null ? "" : action.value()), syntaxEngine, config);
+                validateValueTreeSyntax(action.value(), syntaxEngine, config);
             }
             if ("assign".equals(type)) {
                 require(action.name(), "name is required for assign action " + action.id());
@@ -878,6 +876,7 @@ public final class PackageValidator {
             }
             if ("flow".equals(type)) {
                 if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())
+                        && !"att-template/v3.2".equals(template.schemaVersion())
                         && !att.Version.PREVIOUS_TEMPLATE_SCHEMA.equals(template.schemaVersion())) throw new IllegalArgumentException("Flow actions require " + att.Version.PREVIOUS_TEMPLATE_SCHEMA + " or " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
                 require(action.use(), "use is required for Flow action " + action.id());
                 forbid(action, "name", "payload", "result", "call", "db", "query", "update", "expression", "assert", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
@@ -1046,6 +1045,15 @@ public final class PackageValidator {
         if (!("text".equals(format) || "json".equals(format)
                 || "yaml".equals(format) || "xml".equals(format))) {
             throw new IllegalArgumentException("Tool result.format must be text, json, yaml, or xml: " + action.id());
+        }
+    }
+
+    private void validateValueTreeSyntax(Object value, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
+        if (value instanceof String) { validateInlineExpressions((String) value, engine, config); return; }
+        if (value instanceof Map) {
+            for (Object child : ((Map<?, ?>) value).values()) validateValueTreeSyntax(child, engine, config);
+        } else if (value instanceof Iterable) {
+            for (Object child : (Iterable<?>) value) validateValueTreeSyntax(child, engine, config);
         }
     }
 

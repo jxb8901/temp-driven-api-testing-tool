@@ -94,11 +94,23 @@ public final class LoadEvidenceStore implements LoadEventListener {
             if (event.targetType() != null) link.put("targetType", event.targetType());
             if (event.targetId() != null) link.put("targetId", event.targetId());
             link.put("iterationId", event.iterationId());
+            if (event.evidence() != null && event.evidence().executionId() != null) link.put("execId", event.evidence().executionId());
+            if (event.evidence() != null && event.evidence().workspace() != null)
+                link.put("workspace", relative(runDirectory, event.evidence().workspace()));
+            if (event.evidence() != null && event.evidence().caseLog() != null)
+                link.put("caseLog", relative(runDirectory, event.evidence().caseLog()));
             link.put("status", failure ? "FAILURE" : "SAMPLE");
             link.put("path", runDirectory.relativize(file).toString().replace('\\', '/'));
             links.add(link);
         }
         result.put("count", retained.size()); result.put("items", links); return result;
+    }
+    private String relative(Path base, Path path) {
+        Path normalizedBase = base.toAbsolutePath().normalize();
+        Path normalizedPath = path.toAbsolutePath().normalize();
+        return normalizedPath.startsWith(normalizedBase)
+                ? normalizedBase.relativize(normalizedPath).toString().replace('\\', '/')
+                : normalizedPath.toString();
     }
     private static String safe(String value) { return value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
 }

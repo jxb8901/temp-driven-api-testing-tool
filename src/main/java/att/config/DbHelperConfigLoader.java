@@ -14,13 +14,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Loads the explicit list of independent att-dbhelper/v2.5 configuration files. */
+/** Loads the explicit list of active att-dbhelper/v2.6 configuration files. */
 public final class DbHelperConfigLoader {
     public Map<String, DbHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("dbhelpers must be a list of package-relative YAML paths");
         Path canonicalRoot = projectRoot.toRealPath();
-        Path schema = projectRoot.resolve("schemas/att-dbhelper-v2.5.schema.json");
+
         Set<Path> files = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
         Map<String, DbHelperConfig> result = new LinkedHashMap<String, DbHelperConfig>();
@@ -43,8 +43,11 @@ public final class DbHelperConfigLoader {
             DbHelperConfig helper;
             try {
                 Map<?, ?> map = yaml(file);
-                JsonSchemaVerifier.verify(schema, map);
-                helper = parse(map, file);
+                if (!att.Version.DBHELPER_SCHEMA.equals(map.get("schemaVersion")))
+                    throw new IllegalArgumentException("Unsupported dbhelper schemaVersion '" + map.get("schemaVersion")
+                            + "'; ATT 3.6.0 supports only " + att.Version.DBHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
+                JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion"))), map);
+                helper = parse(map, file).withEvidenceOutput(map.get("evidence"));
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
                 String field = invalid == null ? "dbhelper" : invalid.field();
@@ -70,7 +73,7 @@ public final class DbHelperConfigLoader {
     }
 
     private DbHelperConfig parse(Map<?, ?> map, Path file) {
-        SchemaSupport.requireVersion(map, "att-dbhelper/v2.5", "dbhelper");
+        SchemaSupport.requireVersion(map, att.Version.DBHELPER_SCHEMA, "dbhelper");
         SchemaSupport.rejectUnknown(map, "dbhelper", "schemaVersion", "id", "name", "description",
                 "connection", "statement", "transaction", "result", "evidence", "pool");
         String id = SchemaSupport.string(map.get("id"), "dbhelper.id", true);
@@ -116,7 +119,7 @@ public final class DbHelperConfigLoader {
         if (maxBytes < maxCellBytes) throw new IllegalArgumentException("dbhelper.result.maxBytes must be at least maxCellBytes");
 
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "dbhelper.evidence");
-        SchemaSupport.rejectUnknown(evidence, "dbhelper.evidence", "sql", "parameters");
+        SchemaSupport.rejectUnknown(evidence, "dbhelper.evidence", "sql", "parameters", "output");
         String evidenceSql = choice(evidence.get("sql"), "full", "dbhelper.evidence.sql", "full", "hash");
         String evidenceParameters = choice(evidence.get("parameters"), "values", "dbhelper.evidence.parameters", "masked", "types", "values");
         Map<?, ?> pool = optionalMap(map.get("pool"), "dbhelper.pool");

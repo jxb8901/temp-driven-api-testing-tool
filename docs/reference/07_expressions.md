@@ -2,284 +2,90 @@
 
 ### Unified expression engine
 
-V3.4 uses one engine with two deliberately separate roles:
+ATT uses one expression engine for runtime Templates, Flows, Actions and Tool calls:
 
-- `${path}` reads one Context value and interpolates it into surrounding text, for example `Reference=${EXEC.VARS.SrcRefNo}`.
-- `#{expression}` evaluates one typed expression block. The block may contain Context operands, calls, list literals, parentheses, unary operators, arithmetic, comparisons, `like`, `in`, null tests, and boolean logic.
+- ${path} reads a Context value and interpolates it into surrounding text.
+- #{expression} evaluates a typed expression. It supports Context operands, built-in calls, list literals, parentheses, unary operators, arithmetic, comparisons, like, in, null checks and boolean logic.
 
-Context references remain explicit inside a block; write `${EXEC.INPUT.amount}`, never bare `CASE.amount`. Append `?` to make the entire reference optional, for example `${EXEC.INPUT.response.body.missing?}`. If any map, list, root-owned Context value, or intermediate segment is missing, the result is the real `null`; an existing final `null` also remains `null`. `${path}` remains strict. Optional lookup does not suppress ambiguity, malformed syntax, or invalid traversal such as indexing a scalar, so those authoring errors still fail. Exact blocks preserve their Java result type, while a block embedded in surrounding text is converted to text.
+A complete expression preserves its value type. For example, an exact #{...} may return a number, boolean, map, list or DocumentValue. Embedding an expression in surrounding text produces a String. Use canonical EXEC and META paths; optional lookup uses a trailing question mark.
 
-```yaml
-assert: "#{${EXEC.INPUT.response.body.missing?} is null}"
-actual: "#{nvl(${EXEC.INPUT.response.body.missing?}, 'not supplied')}"
-description: "status=${EXEC.INPUT.response.body.status?}; fallback=#{coalesce(${EXEC.INPUT.response.body.missing?}, 'N/A')}"
-```
+~~~yaml
+assert: "#{${EXEC.INPUT.amount} > 0}"
+description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
+~~~
 
-```yaml
-assert: >-
-  #{(${EXEC.INPUT.amount} * ${EXEC.INPUT.rate}) >= 100
-    and ${EXEC.INPUT.status} in ['PENDING', 'POSTED']}
-description: "Reference length: #{length(${EXEC.VARS.SrcRefNo})}"
-expression: "#{${EXEC.ACTIONS.query.output.result.rowCount} + 1}"
-```
+Use the expression form supported by each field. Render content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](14_actions.md).
 
-Operator precedence from highest to lowest is:
+### Load execution ID initialization
 
-1. parentheses, literals, `${...}`, lists, and calls;
-2. unary `+`, unary `-`, and `not`;
-3. `*` and `/`;
-4. `+` and `-`;
-5. `== != > >= < <=`, `like`, `in`, and `is [not] null`;
-6. `and`;
-7. `or`.
+ATT does not define a separate non-runtime/configuration expression language. Load execution.execIdFormat uses the same ${...} / #{...} engine, evaluated once during iteration initialization. Its accessible values are limited by lifecycle: EXEC.RUN_ID, timestamps, EXEC.INPUT, stable EXEC.LOAD identity, and META branches already initialized.
 
-Arithmetic operands must be numeric and division by zero is an error. `in` requires a List, array, or Iterable right operand; a literal list such as `['A', 'B']` and a typed Context list such as `${EXEC.INPUT.allowedStatuses}` are valid. The legacy non-block assertion grammar also accepts literal-list `in`, but arithmetic and typed list membership should use `#{...}`.
+EXEC.ID/EXEC.OUTPUT_DIR are not yet available because the ID determines the workspace. EXEC.ACTIONS and invocation-scoped Flow/Tool/DB/MQ/HTTP metadata are absent. Arrival-rate has no EXEC.LOAD.USER_ID. Only deterministic side-effect-free built-ins are allowed; external calls, seq.next(), random/clock/filesystem functions are rejected.
 
-Call arguments may themselves be any expression. Calls can be nested directly, for example `#{upper(trim(${EXEC.INPUT.name}))}`; the older nested-block spelling `#{upper(#{trim(${EXEC.INPUT.name})})}` remains accepted. Single/double ASCII quotes and paired typographic quotes delimit strings. Numeric, boolean, and null literals retain their types. Other unquoted tokens are literal strings unless they look like reserved Context paths or a visible scoped variable, in which case ATT requires `${...}`.
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
+~~~
 
-Context interpolation within surrounding text still uses `${...}`: write `prefix-${EXEC.INPUT.caseId}` or `#{concat('prefix-', ${EXEC.INPUT.caseId})}`. Unique-suffix lookup remains available only inside `${...}`, although canonical paths such as `${EXEC.VARS.SrcRefNo}` are preferred.
+For arrival-rate, omit USER_ID:
 
-For backward compatibility, an unquoted Tool-call argument shaped like `${directory}/file.name` remains text interpolation rather than numeric division. New numeric division such as `${EXEC.INPUT.amount}/2` remains arithmetic; quote path-like values in new configuration when practical.
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
+~~~
 
-The available values and callable capabilities still depend on the location's scope:
-
-| Expression-bearing location | `${...}` scope | Built-in `#{...}` | Configured Tool `#{...}` | DB `db.*` query | Evaluation point |
-|---|---|---:|---:|---:|---|
-| render payload content | Runtime Context | Yes | Yes | Yes | Before payload parsing/writing |
-| action `description` | Runtime Context including current `output` | Yes | Yes | Yes | After normal action completion |
-| action `assert` | Runtime Context including current `output` | Yes | Yes | Yes | After the action result is published locally |
-| assert-action `expected` | Runtime Context before current output | Yes | Yes | Yes | Before the assert action |
-| assert-action `actual` | Runtime Context including current `output` | Yes | Yes | Yes | After assertion evaluation |
-| log-action `message`, `file`, and `fields` values | Runtime Context before current output | Yes | Yes | Yes | Before reading/emitting the optional file |
-| assign-action `expression` | Runtime Context before current output | Yes | Yes | Yes, typed for an exact call | Before publishing `EXEC.VARS.<name>` |
-| Tool-action `call` | Runtime Context before current output | Yes, including as the primary call | Yes | Yes inside arguments | As the action's primary invocation |
-| Tool/DB-action `result.path` | Runtime Context before current output | Yes | Yes | Yes | Before the primary Tool/JDBC invocation |
-| DB-action `query/update.params` | Runtime Context before current output | Yes | Yes | Yes | Before primary JDBC binding |
-| DB-action `query/update.sql` or `sqlFile` content | Runtime Context before current output | Pure built-ins only | No | No | Before JDBC prepare |
-| `config.report.fileNamePattern` | `${suiteName}` | Yes | No | No | When writing the result workbook |
-| Tool-definition `command` tokens | declared Tool-input `${...}` aliases | Yes | No | No | When constructing logical argv |
-| Tool-definition `call` | declared typed `${input.*}` only | Pure built-ins | No configured Tool chaining | One primary DB query/scalar/update | When invoking the façade |
-
-For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in a bounded daemon executor and publishes its value at `${output.result}`; it has `exitCode: 0`, supports timeout, Action assertion/retry, and optional `result`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
-
-```yaml
-normalizeReference:
-  type: tool
-  call: "#{upper(${EXEC.INPUT.reference})}"
-  result:
-    path: "normalized-reference.txt"
-    format: text
-  assert: "${output.result} == 'PAY-001'"
-```
-
-`#{...}` is not restricted to text replacement. An exact block retains its typed result and is evaluated before the Action consumes it. Therefore both of these are valid:
-
-```yaml
-assert: "#{length(value=${EXEC.VARS.SrcRefNo})} <= 35"
-assert: "#{${EXEC.INPUT.status} in ${EXEC.INPUT.allowedStatuses}}"
-```
-
-The first block returns a Boolean directly; ATT does not stringify and reparse it. A configured Tool or DB query called from a Case-runtime field is a real external invocation and produces evidence; do not use either merely for formatting when a built-in or existing Context value is sufficient.
-
-### Runtime Context
-
-The execution-neutral Context has two canonical roots and one Action-local binding:
-
-```text
-EXEC
-├── ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR
-├── INPUT (TestCase data or debug sidecar input)
-├── VARS (typed variables shared by later stages/templates)
-└── ACTIONS (completed/published Action results)
-META
-├── PROJECT, SOURCE, TARGET
-├── TEMPLATE, FLOW
-└── TOOL, DBHELPER, MQHELPER (curated invocation metadata)
-output
-└── current Action/attempt-local result; unavailable outside that Action scope
-```
-
-`EXEC.ID` identifies the current execution unit and `EXEC.RUN_ID` its enclosing run. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are shared runtime concepts across all modes. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win on collision and Case-level values are restored after the Stage. Framework-owned identity/input fields cannot be overwritten. Mode and scheduler state live in evidence-only `DIAG` and cannot be referenced through `${...}` or `#{...}`; in particular, `EXEC.MODE`, `EXEC.LOAD`, and `DIAG` are not expression APIs. Use `EXEC.INPUT` for business variation. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in result/evidence and legacy `CASE.STAGES`.
-
-### Load V1 Context (3.5.2)
-
-Each load iteration has an `EXEC.ID` unique across all workloads and virtual users in its ATT run; `EXEC.RUN_ID` is shared by the run. Iteration state (`EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output`) remains isolated. Scheduler-owned fields are retained only in `DIAG.load` evidence:
-
-| Path | Meaning |
-|---|---|
-| `DIAG.load.runId` | Enclosing load run identity. |
-| `DIAG.load.model` | `closed` or `arrivalRate`. |
-| `DIAG.load.userId` | Stable closed-model Virtual User identity; absent for arrival-rate. |
-| `DIAG.load.iterationId` | Scheduler iteration identity. |
-| `DIAG.load.iteration` | Scheduler sequence number. |
-| `DIAG.load.phase` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
-
-Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; scheduler identity stays in retained evidence and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
-
-`att load` validates the scenario and target before starting one of two schedulers. Closed mode keeps a stable Virtual User identity and waits for target completion before think time and the next iteration. Arrival-rate mode uses absolute planned due times; when `maxConcurrent` is full, the arrival is recorded as generator `dropped` work rather than queued or counted as a SUT failure. Both schedulers publish compact events to bounded-memory metrics, and both write isolated `output/load/<runId>/load-summary.json`, `load-summary.yaml`, and `report/index.html`. Warm-up is real traffic but is excluded from measured threshold aggregates by default. Successful iterations retain metrics only unless evidence sampling is configured; a bounded sampled success gets a physical iteration workspace with `case.log` and `case.yaml`, while a failure creates that workspace lazily when its diagnostic is retained. Evidence links are written below the load run's `samples/` or `failures/` directories and never enter ordinary functional-run artifacts.
-
-The shortest end-to-end smoke commands are:
-
-```sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
-```
-
-`examples/load/README.md` is the maintained copyable reference for Template, Flow, Tool, DB/MQ pool sizing, thresholds, evidence, CLI overrides, and invalid configurations. All six examples are schema- and dependency-validated by `LoadAcceptanceTest`; that test also launches the real `att.FrameworkRunner load` CLI for short closed and arrival-rate scenarios and checks the persisted JSON, YAML, and offline HTML report.
-
-### Load summary and HTML report contract
-
-`load-summary.json` and `load-summary.yaml` share the stable `att-load-summary/v1.0` contract. Root fields are `schemaVersion`, `status` (`PASS`, `FAIL`, or `ERROR`), `exitCode`, `runId`, `startedAt`, `endedAt`, `durationMs`, `scenario`, `timing`, `metrics`, `thresholds`, `resources`, optional `evidence`, and `report: report/index.html` relative to the run directory. The JSON schema is `schemas/att-load-summary-v1.0.schema.json`, registered in the schema catalog as `att-load-summary/v1.0`.
-
-The persisted `scenario` is a dedicated report-safe projection. It retains target type/id, workload and execution timing, threshold configuration, and evidence policy, but omits arbitrary business `inputs` and Tool `target.arguments` from JSON, YAML, and the HTML `window.ATT_LOAD_SUMMARY`. CI and offline tooling can therefore consume the summary without durable password, token, request-body, or other oversized payload values.
-
-`timing.phases` lists configured `WARMUP`, `RAMP_UP`, `STEADY`, and `RAMP_DOWN` start/end/duration windows. `metrics.phases` contains observed scheduled/started/completed/failure/drop counts, throughput, latency, scheduler lag, and concurrency aggregates per phase. Warm-up has `measured: false`: its traffic remains visible in the run history, but measured SLA aggregates exclude it. Other phases remain measured. A phase with no events still appears in `timing.phases`, so empty and edge runs have a stable machine-readable shape.
-
-`resources.db` and `resources.mq` contain only bounded pool diagnostics such as pool size, active/idle, waiting, and timeout/acquisition counts; they never contain connections, queue handles, credentials, or other live objects. Pool saturation and acquisition timeouts are separate from SUT failures. `evidence.items[].path` points to retained evidence below `<runId>/samples/` or `<runId>/failures/`; the HTML report renders each path as a relative link.
-
-`report/index.html` is self-contained and can be opened offline. It shows run identity/status, closed or arrival-rate semantics, phase and warm-up separation, aggregate metrics, threshold diagnostics, resource diagnostics, retained evidence links, and bounded one-second time-series buckets. Arrival-rate reports explicitly distinguish configured arrival rate, achieved scheduling rate, completed TPS, and generator drops; drops are not SUT errors. The report links to the adjacent JSON/YAML summaries but does not embed raw per-iteration samples or secrets; `window.ATT_LOAD_SUMMARY` exposes the same bounded summary for offline tooling.
-
-`att load --profile` keeps the existing profiling contract and writes `performance.json` beside the load summary. It records load execution/report phases, bounded load counters, and the shared schema/Template/payload/process counters, so the documented self-overhead gate is reproducible without turning ATT into a target CPU or memory benchmark.
-
-The machine-readable `metrics` object reports configured load (`configuredUsers`, `configuredArrivalRatePerSecond`, `configuredMaxConcurrent`), iteration/scheduling counts (`iterations`, `scheduled`, `measuredScheduled`, `started`, `measuredStarted`, `completed`, `success`, `failure`, `runtimeError`, `dropped`, `measuredDropped`), concurrency (`activeVus`, `maxActiveVus`, `currentInFlight`, `maxInFlight`), measured-phase results (`warmupCompleted`, `measuredCompleted`, `sutErrorRate`, `runtimeErrorRate`, `droppedRate`, `completedThroughput`), latency percentiles (`p50Ms`, `p95Ms`, `p99Ms`), scheduler lag, and grouped `errorClassifications`. Percentiles use a bounded reservoir; `latencyMinMs`, `latencyMeanMs`, `latencyMaxMs`, and `latencyObservationCount` remain exact across all measured observations. Runtime errors are separate from SUT failures, and generator drops never increase `sutErrorRate`. The `buckets` map is sorted by one-second epoch-millisecond key; each bucket includes `model`, `phase`, configured rate/concurrency, completed TPS, p95/p99, SUT/drop rates, active/in-flight counts, scheduler lag, and error classifications. Latency storage is capped at 4096 global samples and 256 samples per bucket; time-series storage is capped at 4096 buckets and evicts the oldest bucket, so memory does not grow linearly with run duration or raw latency values.
-
-Load thresholds use the common `errorRate` (`%`), `p95`/`p99` (`ms`), and `minThroughput` (`/s` or `/m`) fields for both workload models. Arrival-rate scenarios additionally support `droppedRate` (`%`) and `achievedArrivalRate` (`%`, `/s`, or `/m`). For the percentage form, achieved arrival rate is measured `measuredStarted / measuredScheduled`; warm-up is excluded, while ramp-up, steady, and ramp-down remain part of the integrated measured schedule. The rate forms compare the actual average started rate over the full phase window; `/m` thresholds are normalized to per-second before comparison. Each threshold is reported independently with expected expression, formatted actual value, PASS/FAIL status, and failure diagnostic. The load result then uses exit code `0` for PASS, `1` for a completed run with failed SLA thresholds, `2` for validation/configuration failure, and `3` for load runtime/infrastructure error. `target.arguments` is valid only for Tool targets; Template and Flow targets reject it with a field-specific diagnostic.
-
-The release gate is deliberately reproducible rather than a SUT microbenchmark:
-
-```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
-```
-
-It checks the CLI-to-report path for both schedulers, including deterministic arrival-rate cap/drop and configured-versus-achieved-versus-completed metrics; Context deep-copy and iteration isolation; lazy success/failure workspaces; bounded evidence and metric reservoirs; scheduler lag accounting; process/file artifact behavior; DB/MQ reuse, timeout, pool diagnostics, and cleanup; threshold PASS/FAIL; summary schema; report rendering; and compatibility of the existing run/debug/validation test suite. Load V1 does not claim distributed execution, Poisson/random pacing, weighted multi-scenario, rendezvous, adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory benchmarking.
-
-Common properties include:
-
-| Scope | Examples |
-|---|---|
-| EXEC.INPUT | TestCase columns, debug `case`/`inputs`, and stage input aliases |
-| EXEC.VARS | `assign` values; `CASE.VARS` remains a compatibility alias |
-| EXEC.ACTIONS | current Stage's completed/published Action results; cleared when the next Stage starts |
-| CASE.STAGES | persisted Stage/Template status, timing, and nested Action evidence; not a supported expression namespace |
-| META | safe project/source/target/component identity; never a config dump or credential store |
-| output | current Action result, assertion actual value, and final description inputs |
-| CASE / RUN / ACTIONS | generated legacy views of the canonical state; `ACTIONS` is current-scope only |
-| CASE.DB / TOOL / DB | existing finalization or transient framework scopes, kept separate from `EXEC` |
-
-Prefer canonical paths such as `${EXEC.INPUT.amount}`, `${EXEC.INPUT.channel}`, `${EXEC.VARS.txnSeq}`, `${EXEC.ACTIONS.callApi.output.result}`, and `${META.TARGET.id}`. Use `${output...}` only for the current Action and `${EXEC.ACTIONS.<id>...}` only for a completed Action in the current scope. Stage/Template/Flow history, including `${CASE.STAGES...}`, is persisted result/evidence data and is not a supported reusable expression path; direct reads produce `CONTEXT_CROSS_SCOPE`. Root `${TOOL...}` and `${DB...}` may remain only as internal or persisted historical/result compatibility views, not case-wide “latest invocation” APIs; general expressions using them produce `CONTEXT_LEGACY_PATH`. Tool and inline DB evidence is persisted below the containing Action with stable `<kind>.invocations[]` cardinality; Case-level DB finalization remains available through `${CASE.DB.<instance>}` after Case completion.
-
-The following aliases are required for existing packages. New authoring should use the right-hand canonical/local path; the left-hand forms belong in migration or compatibility material only:
-
-| Legacy path | Canonical/local path |
-|---|---|
-| `${CASE.<businessField>}` | `${EXEC.INPUT.<businessField>}` |
-| `${CASE.caseId}` / `${CASE.workbookId}` / `${CASE.groupId}` / `${CASE.rowCaseId}` | `${META.SOURCE.caseId}` / `${META.SOURCE.workbookId}` / `${META.SOURCE.groupId}` / `${META.SOURCE.rowCaseId}` |
-| `${CASE.VARS}` | `${EXEC.VARS}` |
-| `${ACTIONS}` | `${EXEC.ACTIONS}` |
-| `${RUN.id}` / `${RUN.runId}` | `${EXEC.ID}` |
-| `${CASE.outputDirectory}` | `${EXEC.OUTPUT_DIR}` |
-| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | Legacy lifecycle/result aliases; there is no corresponding canonical `EXEC` field |
-| `${CASE.STAGES.<stage>...}` | Legacy execution/evidence data only; direct expression use is rejected with `CONTEXT_CROSS_SCOPE` |
-| `${output.*}` | current Action-local `output.*` |
-
-For compatibility, a framework adapter may still write `${CASE.<businessField>}`; that write is applied to the same `EXEC.INPUT` map and does not create a second input store. New expressions should read the canonical path; only compatibility adapters should use the legacy write spelling. Framework-owned identity, lifecycle, `VARS`, `DB`, and Stage evidence fields remain protected.
-
-`META` is read-only to expressions and contains only curated safe metadata. Optional references such as `${EXEC.INPUT.maybeMissing?}` and `${output.response?}` use the same canonical/local resolver and return null only for missing values; malformed, ambiguous, or invalid traversal remains an error.
-
-V2.4.1 also accepts a case-sensitive path-segment suffix when it identifies exactly one currently readable logical Context path. For example, if `EXEC.INPUT.payment.response.resultCode` is the only readable path ending with those segments, `${payment.response.resultCode}`, `${response.resultCode}`, and `${resultCode}` resolve to the same value. Matching uses parsed map keys/list indexes, not a raw character suffix. Canonical and convenience aliases of the same logical node count once. If multiple logical paths match, ATT raises `ATT-CTX-002`, lists every canonical candidate in deterministic order, and requires a longer suffix or full path. Adding a conflicting node therefore makes an existing shorthand invalid rather than silently changing its target. Documentation continues to prefer canonical paths.
-
-`${EXEC.OUTPUT_DIR}` is a reserved, normalized absolute path and Case data cannot override it. `EXEC.VARS` and `CASE.DB` are likewise fixed framework-owned maps, so a sidecar `excel.dataColumns` alias or any other Case-root alias cannot be named `VARS` or `DB`. All three nodes exist before the first stage; `CASE.DB` remains empty until Case transaction finalization publishes used-instance outcomes. During a Stage, its caller/input values are adapted into `EXEC.INPUT` and do not create an `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.STAGE`, or `EXEC.STAGES` node. Stage status, timing, and historical selector values remain below legacy `CASE.STAGES.<stage>` evidence. During execution `outputDirectory` is already the final `<outputDirectory>/<RunID>/<CaseID>` directory, so live evidence and persisted paths are identical. Validation preserves the output-directory placeholder because no runtime Run directory exists yet.
-
-Map properties use dot navigation and lists use zero-based brackets:
-
-```text
-${EXEC.INPUT.amount}
-${EXEC.INPUT.channel}
-${EXEC.ACTIONS.callApi.output.result.items[0].status}
-```
-
-Dot notation navigates simple map keys. Lists accept bracket or numeric-dot indexes, so `${EXEC.INPUT.items[0].status}` and `${EXEC.INPUT.items.0.status}` are equivalent. Indexes are zero-based. Map keys containing dots, spaces, braces, or colons use quoted brackets, for example `${EXEC.INPUT.response['{urn:payment}Status'].text}`.
-
-#### Example: reference stage-selector data from an XML payload
-
-Suppose the Excel selector cell for stage `invoke` contains this YAML flow map:
-
-```yaml
-{name: templateName, debitAccount: "012123456", InstrAmt: "100.00"}
-```
-
-Flow-map entries use commas, not semicolons. Every selector-map key is adapted into the current Stage's `EXEC.INPUT`, so the canonical XML payload reference is:
-
-```xml
-<InstrAmt>${EXEC.INPUT.InstrAmt}</InstrAmt>
-```
-
-The old `CASE.STAGES` path remains available in persisted execution evidence and migration material only; it is not readable from a Template/Flow expression. When no other currently readable logical path creates a suffix conflict, the following forms resolve to the same current Stage input value:
-
-| Expression | Meaning | Stability |
-|---|---|---|
-| `${EXEC.INPUT.InstrAmt}` | Canonical current-Stage input | Preferred; explicit and stable |
-| `${EXEC.INPUT.InstrAmt}` | Canonical current-Stage input | Preferred; explicit and stable |
-| `${invoke.InstrAmt}` | Unique current-input suffix | Valid only while unique; migrate to canonical form |
-| `${InstrAmt}` | One-segment suffix | May be ambiguous because the value is also in `EXEC.INPUT` |
-
-If another readable path also ends in `InstrAmt`, the shortest form raises `ATT-CTX-002` instead of choosing one silently. Lengthen the suffix or use the canonical path. Bracket notation for `CASE.STAGES` remains a report/evidence selector spelling only and is rejected when used as a runtime Context expression.
-
-`InstrAmt` is current Stage input at `${EXEC.INPUT.InstrAmt}`; it is not a direct child of `TEMPLATE`. `${TEMPLATE.InstrAmt}` is invalid unless an independently mapped value actually exists at the requested path. Quote XML lexical values such as account numbers and fixed-scale amounts in the selector YAML. This preserves the leading zero in `"012123456"` and the authored decimal representation `"100.00"`; unquoted YAML numeric values are typed numbers and do not promise to retain their original text formatting.
-
-Validation resolves available static values and preserves only values that are legitimately runtime-dependent. Runtime resolves every remaining reference at its defined execution point. Canonical `EXEC`/`META` roots and supported legacy aliases are traversed strictly; `CASE.STAGES` and cross-scope Action reads are rejected as incompatible scope references. References without an explicit root use the unique-suffix rule above; when validation can identify the canonical current-scope replacement, it emits `CONTEXT_LEGACY_PATH` and should be migrated. Tool definitions have a separate rule described below. An unknown Context path is never converted silently to empty text: `ATT-CTX-001` reports the exact `requestedPath`, deepest successfully reached `currentNode`, first `missingSegment`, and source location. `ATT-CTX-002` reports the requested shorthand and all candidate paths. Neither diagnostic dumps the complete Context tree, preventing large failed Action/Tool/DB structures from being copied repeatedly into logs and reports. A declared optional Case field whose actual value is blank remains a valid empty string. An Action may read only Case data, its local `output` where supported, and Action outputs that exist in its current scope; validation rejects current/future or cross-scope Action references.
+See [Runtime and Context Model](03_runtime_context.md) for the full META inventory, lifecycle table and artifact-navigation layout. There is no general configuration-expression model in 3.6.0.
 
 ### `config.report.fileNamePattern`
 
 #### Context and legal forms
 
-`report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has one case-sensitive value reference:
+`report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has a dedicated configuration-local root, separate from EXEC:
 
 | Placeholder | Value |
 |---|---|
-| `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
+| `${SUITE_NAME}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
 
-The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. Bare `suiteName` inside a call is rejected. Legal examples include:
+The configured string must reference `${SUITE_NAME}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `SUITE_NAME` inside a call is rejected. Legal examples include:
 
 ```yaml
 report:
-  fileNamePattern: "${suiteName}.result.xlsx"
+  fileNamePattern: "${SUITE_NAME}.result.xlsx"
 ```
 
 ```yaml
-fileNamePattern: "result-${suiteName}.xlsx"
-fileNamePattern: "ATT-${suiteName}-report.xlsx"
-fileNamePattern: "${suiteName}-${suiteName}.xlsx"
-fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
+fileNamePattern: "result-${SUITE_NAME}.xlsx"
+fileNamePattern: "ATT-${SUITE_NAME}-report.xlsx"
+fileNamePattern: "${SUITE_NAME}-${SUITE_NAME}.xlsx"
+fileNamePattern: "#{upper(${SUITE_NAME})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${SUITE_NAME})})}.xlsx"
 ```
 
-For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
+For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${SUITE_NAME}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
 
 #### Illegal or unsupported forms
 
-These values fail configuration loading because they do not reference `suiteName`:
+These values fail configuration loading because they do not reference `${SUITE_NAME}`:
 
 ```yaml
 fileNamePattern: "result.xlsx"
-fileNamePattern: "${runId}.result.xlsx"
-fileNamePattern: "${workbookId}.result.xlsx"
+fileNamePattern: "${RUN_ID}.result.xlsx"
+fileNamePattern: "${WORKBOOK_ID}.result.xlsx"
 ```
 
-No other value reference or Runtime Context path is supported. Configured Tool calls are also unavailable in this scope. These forms are invalid:
+No other configuration root or Runtime Context path is supported. Configured Tool calls are also unavailable in this scope. These forms are invalid:
 
 ```text
-${runId}
-${workbookId}
-${environment}
+${RUN_ID}
+${WORKBOOK_ID}
+${ENVIRONMENT}
 ${EXEC.INPUT.caseId}
 ${EXEC.ID}
 #{configuredTool()}
-#{upper(${runId})}
+#{upper(${RUN_ID})}
 ```
 
-A pattern such as `${suiteName}-${runId}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
+A pattern such as `${SUITE_NAME}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
 ### Tool-definition `command` expressions
 
@@ -289,9 +95,9 @@ A configured Tool `command` also has its own restricted Context. It may referenc
 
 | Form | Meaning |
 |---|---|
-| `${requestFile}` | Legacy shorthand; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
-| `${input.requestFile}` | Explicit Tool-input namespace |
-| `${TOOL.input.requestFile}` | Legacy full alias; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
+| `${requestText}` | Legacy shorthand; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
+| `${input.requestText}` | Explicit Tool-input namespace |
+| `${TOOL.input.requestText}` | Legacy full alias; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
 
 For example:
 
@@ -302,11 +108,11 @@ tools:
     description: Invoke a rendered payment request
     command:
       - ./tools/invoke_payment_api.sh
-      - "${input.requestFile}"
+      - "${input.requestText}"
       - "${input.environment}"
-    result: {format: json}
+    stdoutFormat: json
     arguments:
-      requestFile:
+      requestText:
         name: Request File
         description: Rendered XML request path
         required: true
@@ -321,10 +127,10 @@ The action call is the boundary between the general Runtime Context and this res
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}"
+  call: "#{invokePaymentApi(requestText=${EXEC.ACTIONS.renderRequest.output.result}, environment=${EXEC.INPUT.environment})}"
 ```
 
-The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestFile` and `environment`. The command then substitutes `${input.requestFile}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestFile}` / `${environment}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
+The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
 
 Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
 
@@ -332,17 +138,17 @@ Each command token also accepts built-in calls through the same expression engin
 command:
   - ./tools/invoke_payment_api.sh
   - "--environment=#{upper(${input.environment})}"
-  - "--label=#{concat('ATT-', #{lower(${input.requestFile})})}"
+  - "--label=#{concat('ATT-', #{lower(${input.requestText})})}"
 ```
 
-Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestFile}` is canonical; `${TOOL.input.requestFile}` and `${requestFile}` are deprecated compatible forms and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Bare `requestFile` or `input.requestFile` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
+Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestText}` is canonical; `${TOOL.input.requestText}` and `${requestText}` are deprecated compatible forms and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Bare `requestText` or `input.requestText` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
 
 A normal argument placeholder may occupy a complete argv token, which is preferred, or be embedded in fixed text:
 
 ```yaml
 command:
   - ./tools/invoke_payment_api.sh
-  - "--request=${input.requestFile}"
+  - "--request=${input.requestText}"
   - "--environment=${input.environment}"
 ```
 
@@ -360,7 +166,7 @@ tools:
     name: Write audit
     description: Write one audit message for one source file
     command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
-    result: {format: yaml}
+    stdoutFormat: yaml
     arguments:
       message:
         name: Message
@@ -380,7 +186,7 @@ singleQuote:
   call: >-
     #{writeAudit(
         message="Customer O'Reilly",
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.INPUT.sourceFile}
     )}
 
 doubleQuote:
@@ -388,7 +194,7 @@ doubleQuote:
   call: >-
     #{writeAudit(
         message='status="READY"',
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.INPUT.sourceFile}
     )}
 
 mixedQuotesAndContext:
@@ -396,7 +202,7 @@ mixedQuotesAndContext:
   call: >-
     #{writeAudit(
         message="O'Reilly said \"READY\" for ${EXEC.INPUT.caseId}",
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.INPUT.sourceFile}
     )}
 ```
 
@@ -420,17 +226,17 @@ Tool commands cannot directly read the general Runtime Context, use unique-suffi
 ```text
 ${EXEC.INPUT.environment}
 ${EXEC.ID}
-${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+${EXEC.ID}
 ${STAGES.invoke.InstrAmt}
-${input['requestFile']}
-${TOOL.input['requestFile']}
-${requestFile.path}
+${input['requestText']}
+${TOOL.input['requestText']}
+${requestText.path}
 ```
 
 Configured Tool calls are not available inside `command`:
 
 ```text
-#{anotherConfiguredTool(value=${requestFile})}
+#{anotherConfiguredTool(value=${requestText})}
 ```
 
 This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a standalone global Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
@@ -438,16 +244,16 @@ This is rejected during configuration loading. Expanding one Tool's command cann
 If an argument declares a non-empty `argName`, its placeholder must appear exactly once and occupy one complete command token:
 
 ```yaml
-command: [./tools/invoke_payment_api.sh, "${input.requestFile}"]
+command: [./tools/invoke_payment_api.sh, "${input.requestText}"]
 arguments:
-  requestFile:
+  requestText:
     name: Request File
     description: Rendered XML request path
     required: true
     argName: --request
 ```
 
-ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${input.requestFile}` or a transformed form such as `#{str.upper(${input.requestFile})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
+ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${input.requestText}` or a transformed form such as `#{str.upper(${input.requestText})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
 
 ### Operators
 
@@ -487,11 +293,11 @@ Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`,
 | `date.systimestamp` | Return system-zone timestamp, optionally formatted | `#{date.systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
 | `date.format` | Format an ISO-8601 value | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `date.add` | Add a calendar/time amount | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `file.exists` | Test whether a regular file exists | `#{file.exists(${EXEC.INPUT.requestFile})}` |
+| `file.exists` | Test whether a regular file exists | `#{file.exists(${EXEC.INPUT.requestText})}` |
 | `file.directoryExists` | Test whether a directory exists | `#{file.directoryExists(${EXEC.OUTPUT_DIR})}` |
-| `file.size` | Return regular-file size in bytes | `#{file.size(${EXEC.INPUT.requestFile})}` |
+| `file.size` | Return regular-file size in bytes | `#{file.size(${EXEC.INPUT.requestText})}` |
 | `file.mkdirs` | Create a directory tree and return its absolute path | `#{file.mkdirs(${EXEC.INPUT.archiveDirectory})}` |
-| `file.copy` | Copy a regular file and return the target path | `#{file.copy(${EXEC.INPUT.requestFile}, ${EXEC.INPUT.backupFile}, true)}` |
+| `file.copy` | Copy a regular file and return the target path | `#{file.copy(${EXEC.INPUT.requestText}, ${EXEC.INPUT.backupFile}, true)}` |
 | `file.move` | Move a regular file and return the target path | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
 | `file.delete` | Delete a non-directory file | `#{file.delete(${EXEC.INPUT.temporaryFile}, true)}` |
 | `misc.string` | Convert a value to text | `#{misc.string(value=${EXEC.INPUT.amount})}` |
@@ -535,7 +341,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-`dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as direct DB Action `result.format: text` and has no JDBC, transaction, connection, or cache side effects.
+`dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as DB `output.result` text presentation and has no JDBC, transaction, connection, or cache side effects.
 
 `prettyPrint` accepts exactly one positional argument or named `value`. It formats Maps, Lists, Iterables, arrays, scalars, and null with two-space indentation. Linked and sorted Maps retain their iteration order; other Map keys are sorted by text. Strings are quoted and escaped, cycles and excessive depth are marked, output is bounded, and the source object is not modified.
 

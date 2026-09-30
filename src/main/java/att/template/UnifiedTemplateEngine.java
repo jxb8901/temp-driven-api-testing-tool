@@ -191,6 +191,30 @@ public class UnifiedTemplateEngine {
         return render(expression, context, log);
     }
 
+    /** Recursively evaluates an Action value while preserving exact typed expressions and literals. */
+    public Object evaluateTypedTree(Object value, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        if (value instanceof String) return evaluate((String) value, context, log);
+        if (value instanceof Map) {
+            Map<Object, Object> result = new LinkedHashMap<Object, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                result.put(entry.getKey(), evaluateTypedTree(entry.getValue(), context, log));
+            return result;
+        }
+        if (value instanceof Iterable) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) result.add(evaluateTypedTree(item, context, log));
+            return result;
+        }
+        if (value != null && value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            List<Object> result = new ArrayList<Object>(length);
+            for (int index = 0; index < length; index++)
+                result.add(evaluateTypedTree(java.lang.reflect.Array.get(value, index), context, log));
+            return result;
+        }
+        return value;
+    }
+
     public Object evaluateBlock(String expression, final CaseRuntimeContext context, final CaseExecutionLog log) throws Exception {
         return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
             @Override public Object context(String path) { return context.require(path); }
@@ -331,13 +355,20 @@ public class UnifiedTemplateEngine {
                                        CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
                                        Long timeoutMs, String saveAs, String saveFormat,
                                        boolean overwrite, boolean bypassCache) throws Exception {
+        CaseRuntimeContext.MetadataScope scope = metadataScope(name, context);
+        try { return executeResolvedCallScoped(name, input, context, log, invocationId, attempt, actionId, timeoutMs, saveAs, saveFormat, overwrite, bypassCache); }
+        finally { scope.close(); }
+    }
+
+    private Object executeResolvedCallScoped(String name, Map<String, Object> input, CaseRuntimeContext context,
+                                       CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
+                                       Long timeoutMs, String saveAs, String saveFormat,
+                                       boolean overwrite, boolean bypassCache) throws Exception {
         if (name.startsWith("db.")) {
-            context.setDbHelperMetadata(name.split("\\.", -1)[1]);
             if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
             return executeDbResolvedCall(name, input, context, log, invocationId);
         }
         if (name.startsWith("mq.")) {
-            context.setMqHelperMetadata(name.split("\\.", -1)[1]);
             if (!attempt) throw new IllegalArgumentException("An MQ operation must be the primary call of a type: tool Action");
             return executeMqResolvedCall(name, input, context, log, timeoutMs, invocationId, actionId, saveAs, saveFormat, overwrite);
         }
@@ -350,7 +381,6 @@ public class UnifiedTemplateEngine {
             return httpHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, saveFormat, log);
         }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
-            context.setToolMetadata(name);
             long started = System.nanoTime();
             long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
             Object output = attempt ? invokeBuiltInWithTimeout(name, input, effectiveTimeout, invocationId, started) : builtIns.invoke(name, input);
@@ -358,7 +388,6 @@ public class UnifiedTemplateEngine {
         }
         if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + name);
         ToolConfig configured = toolInvoker.tool(name);
-        context.setToolMetadata(name);
         if (configured != null && configured.callBacked()) {
             long effectiveTimeout = toolInvoker.effectiveTimeoutMs(configured.key(), timeoutMs);
             return executeCallBackedTool(configured, input, context, log, invocationId, attempt, effectiveTimeout, bypassCache);
@@ -370,6 +399,23 @@ public class UnifiedTemplateEngine {
                 ? toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite)
                 : toolInvoker.invokeAttempt(invocationId, name, input, context, log, null, "", false);
         return attempt ? result : result.output();
+    }
+
+
+    private CaseRuntimeContext.MetadataScope metadataScope(String name, CaseRuntimeContext context) {
+        String[] parts = name == null ? new String[0] : name.split("\\.", -1);
+        String key = "TOOL", id = name, type = "tool";
+        if (parts.length >= 2 && "db".equals(parts[0])) { key = "DBHELPER"; id = parts[1]; type = "dbhelper"; }
+        else if (parts.length >= 2 && "mq".equals(parts[0])) { key = "MQHELPER"; id = parts[1]; type = "mqhelper"; }
+        else if (parts.length >= 2 && "http".equals(parts[0])) { key = "HTTPHELPER"; id = parts[1]; type = "httphelper"; }
+        else if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) type = "builtin";
+        return helperScope(key, id, type, context);
+    }
+
+    private CaseRuntimeContext.MetadataScope helperScope(String key, String id, String type, CaseRuntimeContext context) {
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("id", id); values.put("type", type);
+        return context.pushComponentMetadata(key, values);
     }
 
     private att.exec.ToolInvocationResult executeMqResolvedCall(String name, Map<String, Object> input,
@@ -571,13 +617,19 @@ public class UnifiedTemplateEngine {
 
     private CallBackedDbResult executeCallBackedDb(ToolCallParser.ParsedCall call, Map<String, Object> input,
                                                    CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
+        String[] scopeParts = call.name().split("\\.", -1);
+        CaseRuntimeContext.MetadataScope scope = helperScope("DBHELPER", scopeParts.length > 1 ? scopeParts[1] : call.name(), "dbhelper", context);
+        try { return executeCallBackedDbScoped(call, input, context, log, timeoutMs); } finally { scope.close(); }
+    }
+
+    private CallBackedDbResult executeCallBackedDbScoped(ToolCallParser.ParsedCall call, Map<String, Object> input,
+                                                   CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
         if (dbHelperExecutor == null) throw new IllegalStateException("DB invocation is unavailable: " + call.name());
         String[] parts = call.name().split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
             throw new IllegalArgumentException("call-backed Tool DB target must be db.<instance>.query|scalar|update: " + call.name());
         }
-        context.setDbHelperMetadata(parts[1]);
         Map<String, Object> arguments = resolveDefinitionDbArguments(call, input);
         boolean hasSql = arguments.containsKey("sql");
         boolean hasFile = arguments.containsKey("sqlFile");
@@ -599,6 +651,7 @@ public class UnifiedTemplateEngine {
         String invocationId = context.nextDbInvocationId(parts[1]);
         String operation = "update".equals(parts[2]) ? "update" : "query";
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs, log);
+        dbHelperExecutor.recordResourceOutput(parts[1], result, context);
         if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         context.recordActionEvidence(result.operationResult().evidence());
@@ -689,13 +742,19 @@ public class UnifiedTemplateEngine {
 
     private Object executeDbResolvedCall(String callName, Map<String, Object> input, CaseRuntimeContext context,
                                          CaseExecutionLog log, String requestedId) throws Exception {
+        String[] scopeParts = callName.split("\\.", -1);
+        CaseRuntimeContext.MetadataScope scope = helperScope("DBHELPER", scopeParts.length > 1 ? scopeParts[1] : callName, "dbhelper", context);
+        try { return executeDbResolvedCallScoped(callName, input, context, log, requestedId); } finally { scope.close(); }
+    }
+
+    private Object executeDbResolvedCallScoped(String callName, Map<String, Object> input, CaseRuntimeContext context,
+                                         CaseExecutionLog log, String requestedId) throws Exception {
         if (dbHelperExecutor == null) throw new IllegalStateException("DB expression invocation is unavailable: " + callName);
         String[] parts = callName.split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]))) {
             throw new IllegalArgumentException("DB expression must be db.<instance>.query(...) or db.<instance>.scalar(...): " + callName);
         }
-        context.setDbHelperMetadata(parts[1]);
         boolean hasSql = input.containsKey("sql");
         boolean hasFile = input.containsKey("sqlFile");
         if (hasSql == hasFile) throw new IllegalArgumentException(callName + " requires exactly one of sql or sqlFile");
@@ -716,6 +775,7 @@ public class UnifiedTemplateEngine {
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextDbInvocationId(parts[1]) : requestedId;
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id, null, log);
+        dbHelperExecutor.recordResourceOutput(parts[1], result, context);
         if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         context.recordActionEvidence(result.operationResult().evidence());
@@ -763,7 +823,7 @@ public class UnifiedTemplateEngine {
                                                          Object output, CaseRuntimeContext context, String saveAs,
                                                          boolean overwrite, long started, long timeoutMs) throws Exception {
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
-        String rawOutput = output == null ? "" : String.valueOf(output);
+        String rawOutput = saveAs == null || saveAs.trim().isEmpty() || output == null ? "" : String.valueOf(output);
         Map<String, Object> invocation = new LinkedHashMap<String, Object>();
         invocation.put("id", id);
         invocation.put("type", "builtin");

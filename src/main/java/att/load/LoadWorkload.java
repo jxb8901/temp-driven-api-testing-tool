@@ -5,7 +5,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Immutable normalized workload used by both att-load/v1.0 and v1.1 scenarios. */
+/** Immutable normalized workload used by active att-load/v1.2 scenarios. */
 public final class LoadWorkload {
     private final String id;
     private final String targetType;

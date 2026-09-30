@@ -10,6 +10,11 @@ import java.util.Map;
 /** Encodes typed Java Tool/DB output without changing the object exposed to expressions. */
 public final class ObjectOutputCodec {
     public String encode(Object value, String format) {
+        if (value instanceof att.template.DocumentValue) {
+            att.template.DocumentValue document = (att.template.DocumentValue) value;
+            if (format == null || format.trim().isEmpty() || document.format().equalsIgnoreCase(format.trim())) return document.text();
+            throw new IllegalArgumentException("Cannot serialize DocumentValue " + document.format() + " as " + format + "; cross-format conversion is not implicit");
+        }
         if ("text".equalsIgnoreCase(format)) {
             if (value instanceof String || value == null || value instanceof Number || value instanceof Boolean) return value == null ? "" : String.valueOf(value);
             DumperOptions options = new DumperOptions();

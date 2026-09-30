@@ -312,7 +312,7 @@ class FrameworkEngineTest {
         Map<String, String> report = new LinkedHashMap<String, String>();
         report.put("result", "Test Result");
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30000,
-                Paths.get("templates"), tools, new ReportConfig(reportMode, "${suiteName}.result.xlsx", report), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
+                Paths.get("templates"), tools, new ReportConfig(reportMode, "${SUITE_NAME}.result.xlsx", report), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
     }
 
     private void writeWorkbook(Path path) throws Exception {

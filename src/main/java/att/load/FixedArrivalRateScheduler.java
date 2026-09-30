@@ -83,7 +83,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 while (scheduledCount < desired) {
                     long plannedSequence = ++scheduledCount; long dueAt = plannedDue(scenario, startedAt, plannedSequence);
                     String phase = LoadPhase.at(scenario, Math.max(0L, dueAt - startedAt)).name();
-                    String prefix = scenario.legacyV1() ? runId : runId + "-" + safe(scenario.workloadId());
+                    String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
                     String iterationId = prefix + "-arrival-" + plannedSequence;
                     if (inFlight.get() >= scenario.maxConcurrent()) {
                         LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.dropped(runId, "arrivalRate", phase, iterationId,
@@ -112,7 +112,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                             sequenceValue, dueAt, iterationStarted)));
                     IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
-                    if (!scenario.legacyV1()) request = request.withWorkloadId(scenario.workloadId());
+                    if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
                     Path evidenceRoot = evidenceOutputRoot(id);
                     if (evidenceRoot != null) {
                         request = request.withOutputDirectory(evidenceRoot)
@@ -126,6 +126,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
                         evidenceStore.releaseEvidence(id);
                     }
+                    if (result.evidenceRef() == null) result.discardTransientWorkspace();
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 } catch (RuntimeException error) {
                     if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id)) evidenceStore.releaseEvidence(id);
@@ -141,13 +142,13 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     }
 
     private LoadEvent tag(LoadEvent event) {
-        return scenario.legacyV1() ? event : event.withWorkloadIdentity(
+        return scenario.legacyV10() ? event : event.withWorkloadIdentity(
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
     }
     private Path evidenceOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
-        return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
+        return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
     }
     static long arrivalsDueAt(LoadScenario scenario, long elapsedMs) {
         if (elapsedMs < 0L) return 0L;

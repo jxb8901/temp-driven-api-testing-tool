@@ -20,7 +20,7 @@ class JsonSchemaVerifierTest {
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
     }
     @Test void v32TemplateUsesCommonResultAndRejectsLegacyFields() throws Exception {
-        Path schema = java.nio.file.Paths.get("").toAbsolutePath().resolve("schemas/att-template-v3.2.schema.json");
+        Path schema = java.nio.file.Paths.get("").toAbsolutePath().resolve("schemas/history/att-template-v3.2.schema.json");
         String valid = "{\"schemaVersion\":\"att-template/v3.2\",\"description\":\"result\",\"actions\":{" +
                 "\"render\":{\"type\":\"render\",\"payload\":\"requests/*.xml\",\"result\":{\"format\":\"text\",\"path\":\"rendered/{filename}\"}}," +
                 "\"tool\":{\"type\":\"tool\",\"call\":\"#{upper('ok')}\",\"result\":{\"format\":\"text\"}}}}";
@@ -159,8 +159,8 @@ class JsonSchemaVerifierTest {
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.0.schema.json"), issue59Mq));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.0.schema.json"), issue59Mq.replace("\"encoding\":273", "\"encoding\":999")));
         String mqV11 = "{\"schemaVersion\":\"att-mqhelper/v1.1\",\"id\":\"payment\",\"name\":\"Payment\",\"description\":\"MQ\",\"defaults\":{\"connection\":{\"queueManager\":\"QM1\",\"host\":\"localhost\",\"port\":1414,\"channel\":\"APP.SVRCONN\"}},\"instances\":[{\"id\":\"payment-a\"},{\"id\":\"payment-b\",\"message\":{\"replyQueue\":\"REPLY.B\"}}],\"selection\":{\"strategy\":\"roundRobin\"}}";
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.1.schema.json"), mqV11));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-mqhelper-v1.1.schema.json"), mqV11.replace("roundRobin", "invalid")));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.1.schema.json"), mqV11));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.1.schema.json"), mqV11.replace("roundRobin", "invalid")));
         String pathlessSave = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"reply\":{\"type\":\"tool\",\"call\":\"#{mq.broker.receive(queue='REPLY.Q')}\",\"saveAs\":{\"format\":\"json\"}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), pathlessSave));
     }

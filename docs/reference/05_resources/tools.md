@@ -1,43 +1,36 @@
 ### 5.1 Tool
 
-A Tool is a named external or framework-native capability. A Tool declares exactly one backend: **command-backed** or **call-backed**. Current config and Tool Group schemas use `result.format`; the legacy Tool `output` field is rejected by the current schema.
+A Tool is a named external or framework-native capability. A descriptor selects exactly one backend: command or call.
 
 #### Command-backed Tool
 
-Command-backed Tools execute a configured argv contract locally or through configured SSH transport. Argv-list definitions preserve item boundaries; scalar command definitions are tokenized into the same internal argv model. ATT does not implicitly invoke a shell or expand wildcards for ordinary process-backed Tools. Stdout/stderr, exit code, timeout and process diagnostics are evidence; a non-zero process exit does not by itself define assertion PASS/FAIL unless the Action contract says so.
+A command Tool declares stdoutFormat to parse external stdout into the typed result:
 
-A command-backed Tool must declare `result.format: text|json|yaml|xml`. This Tool-level format selects how stdout is parsed into the typed primary `output.result` (for example, JSON stdout becomes a map); it is not a raw-byte mode. Bounded process preview and full streamed capture remain separate evidence.
-
-```yaml
+~~~yaml
 tools:
-  queryTool:
-    name: Query tool
-    description: Parse JSON stdout as a typed result
-    command: [./tools/query.sh]
-    result: {format: json}
+  queryOrder:
+    command: [./tools/query-order.sh]
+    stdoutFormat: json
     arguments: {}
-```
+~~~
 
-Use command-backed Tools for scripts, CLIs, SSH and third-party executables.
+stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses stdout once and publishes the typed value at output.result. It does not control human-readable logging or file output. Exit code, bounded stdout/stderr preview and streamed process artifacts remain evidence.
 
 #### Call-backed Tool
 
-Call-backed Tools execute typed framework-native calls without converting typed values into process strings. Supported calls include built-ins and primary DB, MQHelper, or HTTPHelper operations; call-backed MQ/HTTP operations must run as a `type: tool` Action's primary call. The call's native return type is preserved. Optional Tool-level `result.format` is only a preferred serialization format when Action output is written to a file or Case log; it never reparses or changes the native value. A call-backed Tool does not need `result.format` when no serialization default is needed.
+A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP operation. Its native typed return value is output.result. Call-backed descriptors do not declare stdoutFormat.
 
-```yaml
+~~~yaml
 tools:
-  requestPayment:
-    name: Request payment
-    description: Invoke the selected payment HTTP helper
-    call: "#{http.paymentApi.post(path='/v1/payments', body=${input.request})}"
-    result: {format: json}
+  queryOrder:
+    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
     arguments:
-      request:
-        name: Request
-        description: Typed request body
+      orderId:
+        name: Order ID
+        description: Order key
         required: true
-```
+~~~
 
-Both backends publish the same public Action envelope. The primary value is `${output.result}` while active and `${EXEC.ACTIONS.<id>.output.result}` after publication. Final operation evidence is under `output.evidence`; retries preserve per-attempt evidence under `output.attempts[n].evidence`.
+Tool invocation has no result.format/path/overwrite contract. File persistence is explicit to an API that defines it; human-readable presentation belongs to Log or configured evidence output. HTTP/MQ parsing is owned by those transport boundaries.
 
-The Action's optional `result.format` supports only `text|json|yaml|xml` and controls file/console serialization, not the in-memory result. `result.path` is optional; omitting it creates no artifact. `path: console` writes the serialized value to the Case log. Post-operation evidence collectors execute after the primary operation and before that attempt's assertion; collector failure policy does not replace the primary `result`.
+See [Actions and Typed Values](../14_actions.md) for Action result handling and [Operation Result and Evidence](operation_result.md) for typed results versus evidence.

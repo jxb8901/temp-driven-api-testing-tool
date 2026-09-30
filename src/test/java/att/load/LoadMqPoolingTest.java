@@ -143,16 +143,16 @@ class LoadMqPoolingTest {
         Path payload = flowDirectory.resolve("request.xml");
         Files.write(payload, "<request/>\n".getBytes("UTF-8"));
         Files.write(flowDirectory.resolve("flow.yaml"), (
-                "schemaVersion: att-flow/v3.0\n"
+                "schemaVersion: att-flow/v3.3\n"
                 + "id: load.mq.request.v1\nname: Load MQ request\ndescription: scheduler MQ flow\nactions:\n"
                 + "  request:\n    type: tool\n    call: \"#{mq.broker.request(file='" + payload.toString()
                 + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}\"\n").getBytes("UTF-8"));
         FrameworkConfig config = config(2, 0, 1000L);
         Path metricsScenarioFile = project.resolve("mq-metrics.yaml");
-        Files.write(metricsScenarioFile, ("schemaVersion: att-load/v1.0\n"
+        LoadTestSupport.writeScenario(metricsScenarioFile, "schemaVersion: att-load/v1.0\n"
                 + "target: {type: flow, id: load.mq.request.v1}\n"
                 + "load: {users: 1, duration: 25ms}\nexecution: {thinkTime: 25ms}\n"
-                + "evidence: {mode: metrics}\n").getBytes("UTF-8"));
+                + "evidence: {mode: metrics}\n");
         LoadScenario metricsScenario = new LoadScenarioLoader(project).load(metricsScenarioFile);
         LoadTarget metricsTarget = new LoadTargetResolver(project, config).resolve(metricsScenario);
         Path outputRoot = tempDir.resolve("scheduler-output");
@@ -174,10 +174,10 @@ class LoadMqPoolingTest {
         }
 
         Path failureScenarioFile = project.resolve("mq-failures.yaml");
-        Files.write(failureScenarioFile, ("schemaVersion: att-load/v1.0\n"
+        LoadTestSupport.writeScenario(failureScenarioFile, "schemaVersion: att-load/v1.0\n"
                 + "target: {type: flow, id: load.mq.request.v1}\n"
                 + "load: {users: 1, duration: 25ms}\nexecution: {thinkTime: 25ms}\n"
-                + "evidence: {mode: failures, maxSamples: 1}\n").getBytes("UTF-8"));
+                + "evidence: {mode: failures, maxSamples: 1}\n");
         LoadScenario failureScenario = new LoadScenarioLoader(project).load(failureScenarioFile);
         LoadTarget failureTarget = new LoadTargetResolver(project, config).resolve(failureScenario);
         BlockingFactory failureFactory = new BlockingFactory();
@@ -226,9 +226,9 @@ class LoadMqPoolingTest {
         TemplateAction action = new TemplateAction("request", map(
                 "type", "tool",
                 "call", "#{mq.broker.request(file='" + payload.toString()
-                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.0");
+                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.3");
         StageTemplate template = new StageTemplate("MQ", directory, Collections.singletonList(action),
-                "att-template/v3.0", directory.resolve("template.yaml"));
+                "att-template/v3.3", directory.resolve("template.yaml"));
         FlowRegistry flows = new FlowRegistry(project, project.resolve("templates"), false);
         return new LoadTarget("template", "MQ", template, flows, project.resolve("templates"), project.resolve("scenario.yaml"));
     }

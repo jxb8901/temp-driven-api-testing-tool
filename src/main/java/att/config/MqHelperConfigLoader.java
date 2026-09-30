@@ -16,7 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Loads the explicit list of att-mqhelper/v1.0 and v1.1 descriptor files. */
+/** Loads the explicit list of active att-mqhelper/v1.2 descriptor files. */
 public final class MqHelperConfigLoader {
     public Map<String, MqHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
@@ -44,13 +44,13 @@ public final class MqHelperConfigLoader {
             MqHelperConfig helper;
             try {
                 Map<?, ?> map = yaml(file);
+                String currentVersion = Version.MQHELPER_SCHEMA_CURRENT;
+                if (!currentVersion.equals(map.get("schemaVersion")))
+                    throw new IllegalArgumentException("Unsupported MQ helper schemaVersion '" + map.get("schemaVersion")
+                            + "'; ATT 3.6.0 supports only " + currentVersion + ". See docs/reference/appendices/migrations.md.");
                 Path schema = schema(projectRoot, map);
                 String declared = String.valueOf(map.get("schemaVersion"));
-                if (Version.MQHELPER_SCHEMA.equals(declared) || Version.MQHELPER_SCHEMA_V1_1.equals(declared))
-                    att.validation.SchemaMigrationGuidance.verify(schema,
-                            att.validation.SchemaFiles.resolve(projectRoot, "att-mqhelper-v1.1.schema.json"),
-                            map, declared, Version.MQHELPER_SCHEMA_V1_1);
-                else JsonSchemaVerifier.verify(schema, map);
+                JsonSchemaVerifier.verify(schema, map);
                 helper = parse(map, file);
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
@@ -76,17 +76,16 @@ public final class MqHelperConfigLoader {
     }
 
     private Path schema(Path projectRoot, Map<?, ?> map) {
-        return att.validation.SchemaFiles.resolve(projectRoot, Version.MQHELPER_SCHEMA_V1_1.equals(map.get("schemaVersion"))
-                ? "att-mqhelper-v1.1.schema.json" : "att-mqhelper-v1.0.schema.json");
+        return att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion")));
     }
 
     private MqHelperConfig parse(Map<?, ?> map, Path file) {
-        if (Version.MQHELPER_SCHEMA_V1_1.equals(map.get("schemaVersion"))) return parseV11(map, file);
-        return parseV10(map, file);
+        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA_CURRENT, "mqhelper");
+        return parseV11(map, file).withEvidenceOutput(map.get("evidence"));
     }
 
     private MqHelperConfig parseV10(Map<?, ?> map, Path file) {
-        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA, "mqhelper");
+        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA_V1_0, "mqhelper");
         SchemaSupport.rejectUnknown(map, "mqhelper", "schemaVersion", "id", "name", "description", "connection", "message", "requestReply", "evidence", "pool");
         String id = SchemaSupport.string(map.get("id"), "mqhelper.id", true);
         if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("mqhelper.id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);
@@ -125,7 +124,7 @@ public final class MqHelperConfigLoader {
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.requestReply.waitMs");
         String responseFormat = responseFormat(null, "mqhelper.requestReply.responseFormat");
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
-        SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
+        SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload", "output");
         String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "none", "metadata");
         Map<?, ?> pool = optionalMap(map.get("pool"), "mqhelper.pool");
         SchemaSupport.rejectUnknown(pool, "mqhelper.pool", "maxSize", "minIdle", "borrowTimeout");
@@ -139,7 +138,7 @@ public final class MqHelperConfigLoader {
     }
 
     private MqHelperConfig parseV11(Map<?, ?> map, Path file) {
-        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA_V1_1, "mqhelper");
+        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA_CURRENT, "mqhelper");
         SchemaSupport.rejectUnknown(map, "mqhelper", "schemaVersion", "id", "name", "description", "defaults", "instances", "selection", "evidence");
         String id = SchemaSupport.string(map.get("id"), "mqhelper.id", true);
         if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("mqhelper.id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);
@@ -158,7 +157,7 @@ public final class MqHelperConfigLoader {
         validatePoolFields(defaultPool, "mqhelper.defaults.pool");
 
         Map<?, ?> evidence = optionalMap(map.get("evidence"), "mqhelper.evidence");
-        SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload");
+        SchemaSupport.rejectUnknown(evidence, "mqhelper.evidence", "payload", "output");
         String payload = choice(evidence.get("payload"), "metadata", "mqhelper.evidence.payload", "none", "metadata");
         Map<?, ?> selection = optionalMap(map.get("selection"), "mqhelper.selection");
         SchemaSupport.rejectUnknown(selection, "mqhelper.selection", "strategy");

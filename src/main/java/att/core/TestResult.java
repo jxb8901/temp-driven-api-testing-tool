@@ -55,6 +55,13 @@ public class TestResult {
     }
 
     public String caseId() { return caseId; }
+    /** Stable EXEC.ID represented by the execution directory containing case.log. */
+    public String executionId() {
+        if (caseLogPath == null || caseLogPath.getParent() == null || caseLogPath.getParent().getFileName() == null) return caseId;
+        Path parent = caseLogPath.getParent();
+        return "executions".equals(parent.getParent() == null ? "" : String.valueOf(parent.getParent().getFileName()))
+                ? parent.getFileName().toString() : caseId;
+    }
     public String caseName() { return caseName; }
     public ResultStatus status() { return status; }
     public Duration duration() { return duration; }

@@ -169,23 +169,22 @@ public final class FlowRegistry {
         rejectLegacyResultFields(map, descriptor);
         Object configuredVersion = map.get("schemaVersion");
         String flowVersion = configuredVersion == null ? "" : String.valueOf(configuredVersion);
-        boolean currentVersion = Version.FLOW_SCHEMA.equals(flowVersion);
-        boolean previousVersion = Version.PREVIOUS_FLOW_SCHEMA.equals(flowVersion);
-        boolean olderVersion = Version.OLDER_FLOW_SCHEMA.equals(flowVersion);
-        if (!currentVersion && !previousVersion && !olderVersion) throw new IllegalArgumentException("Unsupported Flow schemaVersion: " + flowVersion);
-        String suffix = currentVersion ? "v3.2" : (previousVersion ? "v3.1" : "v3.0");
-        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-" + suffix + ".schema.json");
-        att.validation.SchemaMigrationGuidance.verify(schema,
-                att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.2.schema.json"), map, flowVersion, Version.FLOW_SCHEMA);
+        boolean typed = Version.FLOW_SCHEMA.equals(flowVersion);
+        if (typed) rejectRemovedActionContract(map, descriptor);
+        if (!typed) throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
+                + "'; ATT 3.6.0 supports only " + Version.FLOW_SCHEMA
+                + ". Migrate nested Actions to the 3.6.0 typed-result contract and see docs/reference/appendices/migrations.md.");
+        boolean currentVersion = true;
+        boolean previousVersion = false;
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.3.schema.json");
+        att.validation.SchemaMigrationGuidance.verify(schema, schema, map, flowVersion, Version.FLOW_SCHEMA);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
-        String templateVersion = currentVersion ? Version.TEMPLATE_SCHEMA
-                : (previousVersion ? Version.PREVIOUS_TEMPLATE_SCHEMA : Version.PREVIOUS2_TEMPLATE_SCHEMA);
+        String templateVersion = Version.TEMPLATE_SCHEMA;
         actionContract.put("schemaVersion", templateVersion);
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
-        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot,
-                "att-template-" + (currentVersion ? "v3.2" : (previousVersion ? "v3.1" : "v3.0")) + ".schema.json");
+        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.3.schema.json");
         att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
         SchemaSupport.requireVersion(map, flowVersion, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");
@@ -195,6 +194,20 @@ public final class FlowRegistry {
         SchemaSupport.string(map.get("description"), "flow.description", true);
         return new FlowDefinition(id, text(map.get("name")), text(map.get("description")), descriptor.getParent(),
                 actions(map.get("actions"), id, templateVersion));
+    }
+
+    private void rejectRemovedActionContract(Map<String, Object> flow, Path descriptor) {
+        Object configured = flow.get("actions");
+        if (!(configured instanceof Map)) return;
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (!(entry.getValue() instanceof Map)) continue;
+            Map<?, ?> action = (Map<?, ?>) entry.getValue();
+            String id = String.valueOf(entry.getKey());
+            for (String field : new String[]{"result", "render", "file", "fields"}) if (action.containsKey(field)) {
+                String guidance = "Remove the common Action result block. Keep the typed value in output.result; helper evidence uses helper evidence.output. Render uses templateFormat; Log uses value and format.";
+                throw migrationError(descriptor, id, field, guidance);
+            }
+        }
     }
 
     private void rejectLegacyResultFields(Map<String, Object> flow, Path descriptor) {

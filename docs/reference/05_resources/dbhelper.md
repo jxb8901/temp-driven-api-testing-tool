@@ -1,9 +1,9 @@
 ### 5.2 DBHelper
 
-DBHelper is a first-class JDBC resource, configured independently from Tools. Each descriptor uses `schemaVersion: att-dbhelper/v2.5` and a stable logical `id`; global `dbhelpers` references descriptor files.
+DBHelper is a first-class JDBC resource, configured independently from Tools. Each descriptor uses `schemaVersion: att-dbhelper/v2.6` and a stable logical `id`; global `dbhelpers` references descriptor files.
 
 ```yaml
-schemaVersion: att-dbhelper/v2.5
+schemaVersion: att-dbhelper/v2.6
 id: orders
 driverClass: oracle.jdbc.OracleDriver
 url: ${ENV:ORDERS_DB_URL}

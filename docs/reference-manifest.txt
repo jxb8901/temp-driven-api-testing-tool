@@ -20,6 +20,7 @@
 11_results_reports_evidence.md
 12_validation_diagnostics.md
 13_ci_packaging_operations.md
+14_actions.md
 appendices/index.md
 appendices/schema_matrix.md
 appendices/compatibility.md

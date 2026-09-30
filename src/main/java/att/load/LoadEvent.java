@@ -111,6 +111,7 @@ public final class LoadEvent {
         if (targetType != null) result.put("targetType", targetType);
         if (targetId != null) result.put("targetId", targetId);
         result.put("model", model); result.put("phase", phase); result.put("iterationId", iterationId);
+        if (evidence != null && evidence.executionId() != null) result.put("execId", evidence.executionId());
         if (userId != null) result.put("userId", userId);
         result.put("sequence", sequence); result.put("scheduledAt", Instant.ofEpochMilli(scheduledAtEpochMs).toString());
         if (started) result.put("startedAt", Instant.ofEpochMilli(startedAtEpochMs).toString());

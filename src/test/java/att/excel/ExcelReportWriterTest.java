@@ -42,7 +42,7 @@ class ExcelReportWriterTest {
         columns.put("durationMs", "耗時毫秒");
         columns.put("expectedResult", "預期結果");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", columns),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", columns),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList());
         TestResult result = new TestResult("payment.TC001", "付款", ResultStatus.PASS, Duration.ofMillis(37), "line1\r\nline2", "", null, Collections.emptyList());
@@ -68,7 +68,7 @@ class ExcelReportWriterTest {
         Path source = tempDir.resolve("payment.xlsx");
         writeSource(source);
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "#{upper(${suiteName})}.result.xlsx", Collections.<String,String>emptyMap()),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "#{upper(${SUITE_NAME})}.result.xlsx", Collections.<String,String>emptyMap()),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList());
 
@@ -96,7 +96,7 @@ class ExcelReportWriterTest {
         columns.put("result", "測試結果");
         columns.put("durationMs", "耗時毫秒");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", columns),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", columns),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList(), 2);
         TestResult result = new TestResult("payment.TC001", "付款", ResultStatus.PASS, Duration.ofMillis(37), "", "", null, Collections.emptyList());
@@ -129,7 +129,7 @@ class ExcelReportWriterTest {
         Map<String,String> columns = new LinkedHashMap<String,String>();
         columns.put("result", "測試結果");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", columns),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", columns),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList());
         TestResult result = new TestResult("payment.0007", "付款", ResultStatus.PASS, Duration.ZERO, "", "", null, Collections.emptyList());
@@ -151,7 +151,7 @@ class ExcelReportWriterTest {
             workbook.write(output);
         }
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 1000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", Collections.<String,String>emptyMap()),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", Collections.<String,String>emptyMap()),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "案例")),
                 "案例編號", "", Collections.emptyList(), Collections.emptyList());
 

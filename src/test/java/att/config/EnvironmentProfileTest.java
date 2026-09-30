@@ -88,7 +88,7 @@ class EnvironmentProfileTest {
 
     @Test
     void explicitSelectorOverridesDefaultAndReplacesOnlyTypedResourceLists() throws Exception {
-        Path config = write("config.yaml", "schemaVersion: att-config/v2.6\n"
+        Path config = write("config.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "templates: {root: templates}\n"
                 + "dbhelpers: [db/common.yaml]\n"
@@ -120,16 +120,16 @@ class EnvironmentProfileTest {
 
     @Test
     void rejectsUnknownProfilesMissingDefaultAndUnsupportedOverlayFields() throws Exception {
-        Path unknown = write("unknown.yaml", "schemaVersion: att-config/v2.6\n"
+        Path unknown = write("unknown.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "environments: {SIT: {}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(unknown, temp, "UAT"));
 
-        Path missingDefault = write("missing-default.yaml", "schemaVersion: att-config/v2.6\n"
+        Path missingDefault = write("missing-default.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environments: {SIT: {}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingDefault, temp));
 
-        Path unsupported = write("unsupported.yaml", "schemaVersion: att-config/v2.6\n"
+        Path unsupported = write("unsupported.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "environments:\n"
                 + "  SIT:\n"
@@ -139,18 +139,18 @@ class EnvironmentProfileTest {
 
     @Test
     void profileDescriptorFailuresRemainPreExecutionConfigurationErrors() throws Exception {
-        Path missing = write("missing-descriptor.yaml", "schemaVersion: att-config/v2.6\n"
+        Path missing = write("missing-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "environments: {SIT: {dbhelpers: [db/not-found.yaml]}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missing, temp));
-        Path missingMq = write("missing-mq-descriptor.yaml", "schemaVersion: att-config/v2.6\n"
+        Path missingMq = write("missing-mq-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "environments: {SIT: {mqhelpers: [mq/not-found.yaml]}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingMq, temp));
 
         write("db/one.yaml", db("orders", "jdbc:one"));
         write("db/two.yaml", db("orders", "jdbc:two"));
-        Path duplicate = write("duplicate-descriptor.yaml", "schemaVersion: att-config/v2.6\n"
+        Path duplicate = write("duplicate-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "environments:\n"
                 + "  SIT:\n"
@@ -159,7 +159,7 @@ class EnvironmentProfileTest {
 
         write("mq/one.yaml", mq("payment", "mq-one"));
         write("mq/two.yaml", mq("payment", "mq-two"));
-        Path duplicateMq = write("duplicate-mq-descriptor.yaml", "schemaVersion: att-config/v2.6\n"
+        Path duplicateMq = write("duplicate-mq-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
                 + "environment: SIT\n"
                 + "environments:\n"
                 + "  SIT:\n"
@@ -169,7 +169,7 @@ class EnvironmentProfileTest {
 
     @Test
     void legacyCompleteConfigRemainsCompatibleAndDoesNotAcceptEnvSelector() throws Exception {
-        Path config = write("legacy.yaml", "schemaVersion: att-config/v2.5\nenvironment: SIT\n");
+        Path config = write("legacy.yaml", "schemaVersion: att-config/v2.10\nenvironment: SIT\n");
         assertEquals("SIT", new FrameworkConfigLoader().load(config, temp).environment());
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, temp, "UAT"));
     }
@@ -182,13 +182,13 @@ class EnvironmentProfileTest {
     }
 
     private String db(String id, String url) {
-        return "schemaVersion: att-dbhelper/v2.5\n"
+        return "schemaVersion: att-dbhelper/v2.6\n"
                 + "id: " + id + "\nname: " + id + " DB\ndescription: " + id + " database\n"
                 + "connection: {url: '" + url + "'}\n";
     }
 
     private String mq(String id, String host) {
-        return "schemaVersion: att-mqhelper/v1.0\n"
+        return "schemaVersion: att-mqhelper/v1.2\n"
                 + "id: " + id + "\nname: " + id + " MQ\ndescription: " + id + " queue\n"
                 + "connection: {queueManager: QM1, host: " + host + ", port: 1414, channel: APP.SVRCONN}\n";
     }

@@ -20,6 +20,41 @@ import java.util.Map;
  * binding and is deliberately absent from the canonical tree.</p>
  */
 public final class CaseRuntimeContext {
+    private boolean resourceOutputEnabled = true;
+    private final java.util.List<java.util.function.Supplier<Map<String, Object>>> deferredResourceOutputs = new java.util.ArrayList<java.util.function.Supplier<Map<String, Object>>>();
+
+    public void setResourceOutputEnabled(boolean enabled) { resourceOutputEnabled = enabled; }
+
+    /** Formatting is deferred in Load until the scheduler has granted a retention slot. */
+    public synchronized void recordResourceOutput(final att.config.ResourceOutputConfig policy,
+            final Object value, final Map<String, Object> evidence) {
+        if (!resourceOutputEnabled || policy == null) return;
+        if (!"load".equals(mode)) {
+            try { evidence.put("output", policy.render(value)); }
+            catch (RuntimeException error) { evidence.put("outputError", "Resource output formatting failed"); }
+            return;
+        }
+        final Map<String, Object> metadata = new LinkedHashMap<String, Object>(evidence);
+        deferredResourceOutputs.add(() -> {
+            Map<String, Object> record = new LinkedHashMap<String, Object>();
+            record.put("metadata", metadata);
+            try { record.put("output", policy.render(value)); }
+            catch (RuntimeException error) { record.put("outputError", "Resource output formatting failed"); }
+            return record;
+        });
+    }
+
+    /** Called only after a completed iteration is accepted for durable evidence. */
+    public synchronized void materializeResourceOutputs(Path directory) throws java.io.IOException {
+        if (deferredResourceOutputs.isEmpty()) return;
+        java.util.List<Map<String, Object>> records = new java.util.ArrayList<Map<String, Object>>();
+        for (java.util.function.Supplier<Map<String, Object>> pending : deferredResourceOutputs) records.add(pending.get());
+        java.nio.file.Files.createDirectories(directory);
+        java.nio.file.Files.write(directory.resolve("resource-output.yaml"),
+                new org.yaml.snakeyaml.Yaml().dump(records).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        deferredResourceOutputs.clear();
+    }
+
     /** Marker used only by validation/documentation contexts for values whose runtime shape is unknown. */
     private static final Object DEFERRED_VALIDATION_VALUE = new Object();
     /** Transient legacy TOOL/DB views; these are not promoted into EXEC. */
@@ -49,8 +84,9 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> activeStageInputPrevious = new LinkedHashMap<String, Object>();
     private final java.util.Set<String> activeStageInputKeys = new java.util.LinkedHashSet<String>();
     private final java.util.Set<String> activeStageInputHadPrevious = new java.util.LinkedHashSet<String>();
-    private final Path caseOutputDir;
-    private final Path caseLogPath;
+    private Path caseOutputDir;
+    private Path caseLogPath;
+    private Path commandWorkingDirectory;
     private final String mode;
     private String currentStage;
     private Map<String, Object> currentActions;
@@ -63,6 +99,8 @@ public final class CaseRuntimeContext {
     private int dbSequence;
     private final Map<String, Object> callToolCache = new LinkedHashMap<String, Object>();
     private final java.util.Deque<FlowFrame> flowScopes = new java.util.ArrayDeque<FlowFrame>();
+    private final java.util.Deque<Map<String, Object>> priorTemplates = new java.util.ArrayDeque<Map<String, Object>>();
+    private boolean executionIdInitializing;
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this(testCase, caseOutputDir, runId, runDirectory, caseLog, "testcase");
@@ -87,6 +125,7 @@ public final class CaseRuntimeContext {
                               Path runDirectory, Path caseLog, String mode, String startedAtOverride,
                               String runStartedAtOverride) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
+        this.commandWorkingDirectory = this.caseOutputDir;
         this.caseLogPath = caseLog.toAbsolutePath().normalize();
         this.mode = normalizeMode(mode);
         String startedAt = startedAtOverride == null ? java.time.Instant.now().toString() : startedAtOverride;
@@ -100,6 +139,7 @@ public final class CaseRuntimeContext {
         execNode.put("INPUT", inputNode);
         execNode.put("VARS", varsNode);
         execNode.put("ACTIONS", actionsView);
+        execNode.put("LOAD", loadNode);
         Map<String, Object> executionDiagnostics = new LinkedHashMap<String, Object>();
         executionDiagnostics.put("mode", this.mode);
         executionDiagnostics.put("id", executionId);
@@ -177,7 +217,9 @@ public final class CaseRuntimeContext {
         template.put("ACTIONS", currentActions);
         stageNode.put("TEMPLATE", template);
         stagesNode.put(stage.key(), stageNode);
-        setComponentMetadata("TEMPLATE", templateMetadata(templateName, templatePath));
+        priorTemplates.push(metaNode.get("TEMPLATE") instanceof Map
+                ? new LinkedHashMap<String, Object>((Map<String, Object>) metaNode.get("TEMPLATE")) : null);
+        setTemplateMetadata(templateName, templatePath);
         actionsView.clear();
     }
 
@@ -194,6 +236,10 @@ public final class CaseRuntimeContext {
             template.put("durationMs", durationMs);
         } finally {
             clearActiveStageInput();
+            if (!priorTemplates.isEmpty()) {
+                Map<String, Object> previous = priorTemplates.pop();
+                if (previous == null) metaNode.remove("TEMPLATE"); else metaNode.put("TEMPLATE", previous);
+            }
             currentStage = null;
             currentActions = null;
             clearActionOutput();
@@ -342,7 +388,6 @@ public final class CaseRuntimeContext {
         catch (Exception error) { return Resolution.invalidPath("<root>", error.getMessage()); }
         if (requested.isEmpty()) return Resolution.missing("<root>", "<empty>");
         String first = requested.get(0).key;
-        if ("LOAD".equals(first)) return Resolution.missing("<root>", first);
         if (first != null && ContextPathPolicy.isExplicitRoot(first)) return traverse(logicalRoot(), requested);
 
         java.util.Map<String, Object> candidates = readablePaths();
@@ -471,7 +516,7 @@ public final class CaseRuntimeContext {
         }
         if (!ContextPathPolicy.isCanonicalExecField(first)) {
             throw new IllegalArgumentException("Unknown EXEC field: EXEC." + first
-                    + "; the public tree exposes ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR, INPUT, VARS, and ACTIONS");
+                    + "; the public tree exposes ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR, INPUT, VARS, ACTIONS, and LOAD");
         }
         if ("INPUT".equals(first)) putPath(inputNode, suffix(path, first), value);
         else if ("VARS".equals(first)) putPath(varsNode, suffix(path, first), value);
@@ -604,41 +649,119 @@ public final class CaseRuntimeContext {
         if (key == null || values == null) throw new IllegalArgumentException("META component cannot be null");
         Map<String, Object> safe = new LinkedHashMap<String, Object>();
         for (Map.Entry<String, Object> entry : values.entrySet()) {
-            String name = entry.getKey().toLowerCase(java.util.Locale.ROOT);
-            if (name.contains("password") || name.contains("credential") || name.contains("secret") || name.contains("token")) continue;
-            if (entry.getValue() instanceof Map || entry.getValue() instanceof Iterable || entry.getValue() == null
-                    || entry.getValue() instanceof String || entry.getValue() instanceof Number || entry.getValue() instanceof Boolean)
-                safe.put(entry.getKey(), entry.getValue());
+            if (secretMetaKey(entry.getKey())) continue;
+            Object value = safeMetaValue(entry.getValue());
+            if (value != OMIT_META_VALUE) safe.put(entry.getKey(), value);
         }
         metaNode.put(key, safe);
     }
 
-    public void setToolMetadata(String id) { setComponentMetadata("TOOL", mapOf("id", id, "type", "tool")); }
+    private static final Object OMIT_META_VALUE = new Object();
+
+    private static boolean secretMetaKey(Object key) {
+        String name = String.valueOf(key).toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return name.contains("password") || name.contains("credential") || name.contains("secret")
+                || name.contains("token") || name.contains("authorization") || name.contains("cookie")
+                || name.contains("apikey") || name.contains("privatekey");
+    }
+
+    private Object safeMetaValue(Object value) {
+        if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean) return value;
+        if (value instanceof Map) {
+            Map<String, Object> safe = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> item : ((Map<?, ?>) value).entrySet()) {
+                if (secretMetaKey(item.getKey())) continue;
+                Object child = safeMetaValue(item.getValue());
+                if (child != OMIT_META_VALUE) safe.put(String.valueOf(item.getKey()), child);
+            }
+            return safe;
+        }
+        if (value instanceof Iterable) {
+            java.util.List<Object> safe = new java.util.ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) {
+                Object child = safeMetaValue(item);
+                if (child != OMIT_META_VALUE) safe.add(child);
+            }
+            return safe;
+        }
+        return OMIT_META_VALUE;
+    }
+
+    public void setToolMetadata(String id) { setToolMetadata(id, "tool"); }
+    public void setToolMetadata(String id, String type) { setComponentMetadata("TOOL", mapOf("id", id, "type", type)); }
     public void setDbHelperMetadata(String id) { setComponentMetadata("DBHELPER", mapOf("id", id, "type", "dbhelper")); }
     public void setMqHelperMetadata(String id) { setComponentMetadata("MQHELPER", mapOf("id", id, "type", "mqhelper")); }
+    public void setHttpHelperMetadata(String id) { setComponentMetadata("HTTPHELPER", mapOf("id", id, "type", "httphelper")); }
 
     /** Publishes one load iteration and its enclosing load-run identity. */
     public void setLoad(String runId, String model, String iterationId, long iteration, String phase,
                         String startedAt, String userId, String runStartedAt) {
         if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
         loadNode.clear();
-        loadNode.put("runId", runId);
-        loadNode.put("model", model);
-        if (userId != null) loadNode.put("userId", userId);
-        loadNode.put("iterationId", iterationId);
-        loadNode.put("iteration", Long.valueOf(iteration));
-        loadNode.put("phase", phase);
-        if (runStartedAt != null) loadNode.put("runStartedAt", runStartedAt);
+        loadNode.put("MODEL", model);
+        if (userId != null) loadNode.put("USER_ID", userId);
+        loadNode.put("ITERATION", Long.valueOf(iteration));
+        loadNode.put("PHASE", phase);
         diagnosticsNode.put("load", loadNode);
     }
 
-    /** Adds v1.1 workload and fixed-target identity to the existing EXEC.LOAD node. */
+    /** Adds the configured workload identity to the public EXEC.LOAD node. */
     public void setLoadWorkload(String workloadId, String targetType, String targetId) {
         if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
-        if (workloadId != null) loadNode.put("workloadId", workloadId);
-        if (targetType != null) loadNode.put("targetType", targetType);
-        if (targetId != null) loadNode.put("targetId", targetId);
+        if (workloadId != null) loadNode.put("WORKLOAD_ID", workloadId);
         diagnosticsNode.put("load", loadNode);
+    }
+
+    /** Removes circular/output paths until the configured Load EXEC.ID is resolved. */
+    public void beginExecutionIdInitialization() {
+        executionIdInitializing = true;
+        execNode.remove("ID");
+        execNode.remove("OUTPUT_DIR");
+    }
+
+    /** Publishes the resolved ID and its planned or retained workspace. */
+    public void finishExecutionIdInitialization(String executionId, Path outputDirectory, Path logPath) {
+        if (executionId == null || executionId.trim().isEmpty()) throw new IllegalArgumentException("EXEC.ID must not be blank");
+        this.caseOutputDir = outputDirectory.toAbsolutePath().normalize();
+        this.caseLogPath = logPath.toAbsolutePath().normalize();
+        execNode.put("ID", executionId);
+        execNode.put("OUTPUT_DIR", this.caseOutputDir.toString());
+        caseNode.put("outputDirectory", this.caseOutputDir.toString());
+        Map<String, Object> executionDiagnostics = castMap(diagnosticsNode.get("execution"));
+        executionDiagnostics.put("id", executionId);
+        executionIdInitializing = false;
+        runNode.put("caseLog", this.caseLogPath.toString());
+    }
+
+    public void setTemplateMetadata(String id, Path path) {
+        setComponentMetadata("TEMPLATE", templateMetadata(id, path));
+    }
+
+    /** Temporarily exposes one curated META component and restores its prior scope on close. */
+    public MetadataScope pushComponentMetadata(String key, Map<String, Object> values) {
+        Object prior = metaNode.get(key);
+        Map<String, Object> saved = prior instanceof Map ? new LinkedHashMap<String, Object>((Map<String, Object>) prior) : null;
+        boolean existed = metaNode.containsKey(key);
+        setComponentMetadata(key, values);
+        return new MetadataScope(key, saved, existed);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Object value) { return (Map<String, Object>) value; }
+
+    public final class MetadataScope implements AutoCloseable {
+        private final String key;
+        private final Map<String, Object> previous;
+        private final boolean existed;
+        private boolean closed;
+        private MetadataScope(String key, Map<String, Object> previous, boolean existed) {
+            this.key = key; this.previous = previous; this.existed = existed;
+        }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (!existed) metaNode.remove(key); else metaNode.put(key, previous);
+        }
     }
 
     /** Compatibility overload for scheduler adapters that do not expose run start time. */
@@ -725,9 +848,58 @@ public final class CaseRuntimeContext {
     public Map<String, Object> caseTree() {
         Map<String, Object> result = legacyCaseView();
         result.put("DIAG", diagnosticsTree());
-        return result;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> serializable = (Map<String, Object>) evidenceValue(result,
+                new java.util.IdentityHashMap<Object, Object>(), new java.util.IdentityHashMap<Object, Boolean>());
+        return serializable;
+    }
+
+    private Object evidenceValue(Object value, java.util.IdentityHashMap<Object, Object> copies,
+                                 java.util.IdentityHashMap<Object, Boolean> active) {
+        if (value instanceof att.template.DocumentValue) {
+            att.template.DocumentValue document = (att.template.DocumentValue) value;
+            Map<String, Object> represented = new LinkedHashMap<String, Object>();
+            represented.put("type", "DocumentValue");
+            represented.put("format", document.format());
+            represented.put("text", document.text());
+            return represented;
+        }
+        if (value instanceof Map) {
+            if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to Case evidence");
+            Object prior = copies.get(value);
+            if (prior != null) return prior;
+            Map<Object, Object> copy = new LinkedHashMap<Object, Object>();
+            copies.put(value, copy); active.put(value, Boolean.TRUE);
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                copy.put(evidenceValue(entry.getKey(), copies, active), evidenceValue(entry.getValue(), copies, active));
+            active.remove(value);
+            return copy;
+        }
+        if (value instanceof Iterable || value != null && value.getClass().isArray()) {
+            if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to Case evidence");
+            Object prior = copies.get(value);
+            if (prior != null) return prior;
+            java.util.List<Object> copy = new java.util.ArrayList<Object>();
+            copies.put(value, copy); active.put(value, Boolean.TRUE);
+            if (value instanceof Iterable) {
+                for (Object item : (Iterable<?>) value) copy.add(evidenceValue(item, copies, active));
+            } else {
+                int length = java.lang.reflect.Array.getLength(value);
+                for (int index = 0; index < length; index++) copy.add(evidenceValue(java.lang.reflect.Array.get(value, index), copies, active));
+            }
+            active.remove(value);
+            return copy;
+        }
+        return value;
     }
     public Path caseOutputDirectory() { return caseOutputDir; }
+    /** Process cwd; Load uses a temporary staging directory while EXEC.OUTPUT_DIR remains lazy. */
+    public Path commandWorkingDirectory() { return commandWorkingDirectory; }
+    public void setCommandWorkingDirectory(Path path) {
+        if (path == null) throw new IllegalArgumentException("Command working directory is required");
+        commandWorkingDirectory = path.toAbsolutePath().normalize();
+    }
+    public boolean isLoadMode() { return "load".equals(mode); }
 
     public void setActionOutput(Map<String, Object> output) { actionOutput = output; }
     public void clearActionOutput() { actionOutput = null; }
@@ -845,7 +1017,9 @@ public final class CaseRuntimeContext {
         flowScopes.push(frame);
         actionsView.clear();
         currentActions = frame.actions;
-        setComponentMetadata("FLOW", mapOf("id", flowId, "invocationId", invocationId));
+        Map<String, Object> flowMetadata = mapOf("id", flowId, "invocationId", invocationId);
+        flowMetadata.put("depth", Integer.valueOf(flowScopes.size()));
+        setComponentMetadata("FLOW", flowMetadata);
     }
 
     public FlowEvidence finishFlow() {

@@ -8,6 +8,12 @@ import java.util.Map;
 
 /** Immutable invocation-scoped IBM MQ client configuration. */
 public final class MqHelperConfig {
+    private ResourceOutputConfig evidenceOutput;
+    public ResourceOutputConfig evidenceOutput() { return evidenceOutput; }
+    MqHelperConfig withEvidenceOutput(Object evidence) {
+        this.evidenceOutput = ResourceOutputConfig.from(evidence);
+        return this;
+    }
     private final String id;
     private final String name;
     private final String description;

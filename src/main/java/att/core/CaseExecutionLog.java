@@ -108,7 +108,7 @@ public class CaseExecutionLog implements AutoCloseable {
         } else if (data instanceof String) {
             text.append(data).append("\n\n");
         } else {
-            Object serializable = yamlAnchors ? data : detached(data, new IdentityHashMap<Object, Boolean>());
+            Object serializable = serializable(data, new IdentityHashMap<Object, Object>(), new IdentityHashMap<Object, Boolean>());
             text.append(yaml.dump(serializable)).append("\n");
         }
         write(text.toString());
@@ -361,26 +361,38 @@ public class CaseExecutionLog implements AutoCloseable {
         return "ERROR".equalsIgnoreCase(value) || "FAIL".equalsIgnoreCase(value) || "INVALID".equalsIgnoreCase(value);
     }
 
-    /** Copies every occurrence so SnakeYAML never emits anchors for shared references. */
-    private Object detached(Object value, IdentityHashMap<Object, Boolean> active) {
+    /** Converts represented runtime values to evidence maps and applies the configured YAML alias policy. */
+    private Object serializable(Object value, IdentityHashMap<Object, Object> copies,
+                                IdentityHashMap<Object, Boolean> active) {
         if (value == null) return null;
+        if (value instanceof att.template.DocumentValue) {
+            att.template.DocumentValue document = (att.template.DocumentValue) value;
+            Map<String, Object> represented = new LinkedHashMap<String, Object>();
+            represented.put("type", "DocumentValue"); represented.put("format", document.format());
+            represented.put("text", document.text());
+            return represented;
+        }
         boolean container = value instanceof Map || value instanceof Iterable || value.getClass().isArray();
         if (!container) return value;
-        if (active.put(value, Boolean.TRUE) != null) throw new IllegalArgumentException("Cyclic data cannot be written to the case log");
+        if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to the case log");
+        if (yamlAnchors && copies.containsKey(value)) return copies.get(value);
+        active.put(value, Boolean.TRUE);
         try {
             if (value instanceof Map) {
                 Map<Object, Object> copy = new LinkedHashMap<Object, Object>();
+                if (yamlAnchors) copies.put(value, copy);
                 for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                    copy.put(detached(entry.getKey(), active), detached(entry.getValue(), active));
+                    copy.put(serializable(entry.getKey(), copies, active), serializable(entry.getValue(), copies, active));
                 }
                 return copy;
             }
             ArrayList<Object> copy = new ArrayList<Object>();
+            if (yamlAnchors) copies.put(value, copy);
             if (value instanceof Iterable) {
-                for (Object item : (Iterable<?>) value) copy.add(detached(item, active));
+                for (Object item : (Iterable<?>) value) copy.add(serializable(item, copies, active));
             } else {
                 int length = java.lang.reflect.Array.getLength(value);
-                for (int index = 0; index < length; index++) copy.add(detached(java.lang.reflect.Array.get(value, index), active));
+                for (int index = 0; index < length; index++) copy.add(serializable(java.lang.reflect.Array.get(value, index), copies, active));
             }
             return copy;
         } finally {

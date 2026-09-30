@@ -88,7 +88,7 @@ class LoadAcceptanceTest {
         Path performance = output.resolve("load/issue17-profile/performance.json");
         assertTrue(Files.isRegularFile(performance), "load --profile must write performance.json");
         @SuppressWarnings("unchecked") Map<String, Object> profile = JsonSupport.mapper().readValue(performance.toFile(), Map.class);
-        assertEquals("3.5.3", profile.get("attVersion"));
+        assertEquals(att.Version.PRODUCT, profile.get("attVersion"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadExecutionMs"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadReportMs"));
         assertEquals(1L, ((Number) ((Map<?, ?>) profile.get("counters")).get("loadCompleted")).longValue());
@@ -128,8 +128,7 @@ class LoadAcceptanceTest {
 
     private Path writeScenario(String name, String content) throws IOException {
         Path file = temp.resolve(name);
-        Files.write(file, content.getBytes(StandardCharsets.UTF_8));
-        return file;
+        return LoadTestSupport.writeScenario(file, content);
     }
 
     private static Path projectRoot() {

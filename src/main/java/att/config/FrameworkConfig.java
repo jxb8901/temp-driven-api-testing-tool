@@ -248,6 +248,6 @@ public final class FrameworkConfig {
         columns.put("actualResult", "Actual Result");
         columns.put("caseLog", "Case Log");
         columns.put("runTime", "Run Time");
-        return new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", columns);
+        return new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", columns);
     }
 }

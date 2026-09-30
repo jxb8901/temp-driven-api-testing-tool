@@ -18,8 +18,8 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
-        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: broker\nname: Broker\ndescription: Test broker\n" +
                 "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN, username: att, password: secret}\n" +
                 "requestReply: {waitMs: 2500}\n").getBytes("UTF-8"));
@@ -38,12 +38,12 @@ class MqHelperConfigLoaderTest {
 
     @Test void rejectsDuplicateMqHelperIdsIgnoringCase() throws Exception {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
-        String content = "schemaVersion: att-mqhelper/v1.0\nid: %s\nname: Broker\ndescription: Test broker\n" +
+        String content = "schemaVersion: att-mqhelper/v1.2\nid: %s\nname: Broker\ndescription: Test broker\n" +
                 "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n";
         Files.write(directory.resolve("one.yaml"), String.format(content, "broker").getBytes("UTF-8"));
         Files.write(directory.resolve("two.yaml"), String.format(content, "BROKER").getBytes("UTF-8"));
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/one.yaml, config/mqhelpers/two.yaml]\n").getBytes("UTF-8"));
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/one.yaml, config/mqhelpers/two.yaml]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config));
     }
 
@@ -51,8 +51,8 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
-        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: broker\nname: Broker\ndescription: Test broker\n" +
                 "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n" +
                 "message: {charset: 1208, encoding: 273, format: \"\", persistence: 0, expiry: -1, requestQueue: REQUEST.Q, replyQueue: REPLY.Q}\n").getBytes("UTF-8"));
@@ -71,14 +71,14 @@ class MqHelperConfigLoaderTest {
     @Test void loadsTransportAndResponseFormatForV11Instances() throws Exception {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path group = directory.resolve("group.yaml");
-        Files.write(group, ("schemaVersion: att-mqhelper/v1.1\n" +
+        Files.write(group, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: group\nname: Group\ndescription: Group MQ\n" +
                 "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.CH, transport: 'MQSeries Bindings'}\n" +
                 "  requestReply: {responseFormat: json}\n" +
                 "instances:\n  - id: a\n  - id: b\n    connection: {transport: MQSeries}\n    requestReply: {responseFormat: xml}\n" +
                 "selection: {strategy: roundRobin}\n").getBytes("UTF-8"));
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/group.yaml]\n").getBytes("UTF-8"));
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/group.yaml]\n").getBytes("UTF-8"));
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
         assertEquals("MQSeries Bindings", loaded.mqHelper("group").instance("a").transport());
@@ -106,8 +106,8 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
-        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: broker\nname: Broker\ndescription: Test broker\n" +
                 "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n" +
                 "message: {charset: 1208, ccsid: 819}\n").getBytes("UTF-8"));
@@ -119,8 +119,8 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
-        Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: broker\nname: Broker\ndescription: Test broker\n" +
                 "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN}\n" +
                 "message: {encoding: 999}\n").getBytes("UTF-8"));
@@ -135,8 +135,8 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("payment.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/payment.yaml]\n").getBytes("UTF-8"));
-        Files.write(helper, ("schemaVersion: att-mqhelper/v1.1\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/payment.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: payment\nname: Payment MQ\ndescription: Payment endpoints\n" +
                 "defaults:\n" +
                 "  connection: {queueManager: QM1, host: mq.default, port: 1414, channel: APP.SVRCONN, username: att, password: secret}\n" +
@@ -171,8 +171,8 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("payment.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/payment.yaml]\n").getBytes("UTF-8"));
-        Files.write(helper, ("schemaVersion: att-mqhelper/v1.1\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/payment.yaml]\n").getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: payment\nname: Payment\ndescription: Payment\n" +
                 "defaults: {connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}}\n" +
                 "instances: [{id: a}, {id: b}]\n").getBytes("UTF-8"));
@@ -183,14 +183,14 @@ class MqHelperConfigLoaderTest {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");
         Path config = tempDir.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.6\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(config, ("schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
         Files.write(helper, ("schemaVersion: att-mqhelper/v1.0\nid: broker\nname: Broker\ndescription: Test broker\n"
                 + "connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.CH}\n"
                 + "selection: {strategy: random}\n").getBytes("UTF-8"));
         att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
                 () -> new FrameworkConfigLoader().load(config));
         assertTrue(error.detail().contains("att-mqhelper/v1.0"));
-        assertTrue(error.detail().contains("att-mqhelper/v1.1"));
+        assertTrue(error.detail().contains("att-mqhelper/v1.2"));
         assertTrue(error.detail().contains("selection"));
         assertFalse(error.schemaViolations().isEmpty());
     }

@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.3
+schemaVersion: att-template/v3.3
 name: PAYMENT_ROLLBACK
 description: Failure-only compensation example used by cases that opt in to rollback.
 actions:
@@ -6,5 +6,5 @@ actions:
     type: log
     level: WARN
     message: "Rollback requested for ${CASE.caseId}"
-    fields:
+    value:
       previousStatus: "${CASE.status}"

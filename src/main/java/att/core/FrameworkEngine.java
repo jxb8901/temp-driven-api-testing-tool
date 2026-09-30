@@ -182,9 +182,11 @@ public class FrameworkEngine {
         }
         Instant started = Instant.now();
         String validatedCaseId = IdentifierValidator.caseId(testCase.workbookId(), testCase.groupId(), testCase.rowCaseId());
-        Path caseOutputDir = IdentifierValidator.strictChild(runDirectory, validatedCaseId, "Case directory");
+        Path executionsDirectory = runDirectory.resolve("executions");
+        Files.createDirectories(executionsDirectory);
+        Path caseOutputDir = IdentifierValidator.strictChild(executionsDirectory, validatedCaseId, "Execution directory");
         Files.createDirectories(caseOutputDir);
-        Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
+        Path caseLogPath = caseOutputDir.resolve("case.log");
         java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
         if (options.verbose() && !options.quiet()) {
             synchronized (console) {
@@ -196,7 +198,7 @@ public class FrameworkEngine {
                 options.verbose() && !options.quiet()
                         ? new CaseLogConsoleMirror(testCase.caseId(), console)
                         : null);
-        CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, testCase.caseId(), runId,
+        CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, validatedCaseId, runId,
                 runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
         context.setProject(projectRoot);
         context.put("CASE.environment", suiteConfig.environment());
@@ -440,6 +442,7 @@ public class FrameworkEngine {
         for (TestResult result : results) {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("caseId", result.caseId());
+            item.put("execId", result.executionId());
             item.put("caseName", result.caseName());
             item.put("workbookId", result.workbookId());
             item.put("groupId", result.groupId());

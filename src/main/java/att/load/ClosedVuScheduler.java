@@ -94,11 +94,11 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 long sequenceValue = LoadSchedulerSupport.next(sequence);
                 long scheduledAt = timing.now();
                 long iteration = ++userIteration;
-                String prefix = scenario.legacyV1() ? runId : runId + "-" + safe(scenario.workloadId());
+                String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
                 String iterationId = prefix + "-" + userId + "-" + iteration;
                 IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
-                if (!scenario.legacyV1()) request = request.withWorkloadId(scenario.workloadId());
+                if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
                 Path evidenceRoot = evidenceOutputRoot(iterationId);
                 if (evidenceRoot != null) {
                     request = request.withOutputDirectory(evidenceRoot)
@@ -119,6 +119,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                     } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
                         evidenceStore.releaseEvidence(iterationId);
                     }
+                    if (result.evidenceRef() == null) result.discardTransientWorkspace();
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 }
                 catch (RuntimeException failure) {
@@ -137,7 +138,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
     }
 
     private LoadEvent tag(LoadEvent event) {
-        return scenario.legacyV1() ? event : event.withWorkloadIdentity(
+        return scenario.legacyV10() ? event : event.withWorkloadIdentity(
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
     }
 
@@ -156,7 +157,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
     private Path evidenceOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
-        return scenario.legacyV1() ? root : root.resolve(safe(scenario.workloadId()));
+        return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
     }
     int activeUsers(long elapsedMs) { return activeUsers(scenario, elapsedMs); }
     static int activeUsers(LoadScenario scenario, long elapsedMs) {

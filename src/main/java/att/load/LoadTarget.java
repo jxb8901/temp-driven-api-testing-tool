@@ -11,6 +11,15 @@ import java.util.Map;
 /** Resolved load target backed by the ordinary ATT Template/Flow/Tool runtime model. */
 public final class LoadTarget {
     private final String type, id;
+    private String execIdFormat = "";
+    private boolean resourceOutputEnabled = true;
+    LoadTarget withScenario(LoadScenario scenario) {
+        execIdFormat = scenario.execIdFormat();
+        resourceOutputEnabled = scenario.resourceOutputEnabled();
+        return this;
+    }
+    public String execIdFormat() { return execIdFormat; }
+    public boolean resourceOutputEnabled() { return resourceOutputEnabled; }
     private final StageTemplate template;
     private final FlowRegistry flows;
     private final Path templatesRoot;

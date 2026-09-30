@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.3
+schemaVersion: att-template/v3.3
 name: PAYMENT_VERIFY
 description: Verify payment API response, CT records and application logs.
 
@@ -48,6 +48,6 @@ actions:
     type: log
     level: INFO
     message: "Verified payment result for ${CASE.caseId}"
-    fields:
+    value:
       apiStatus: "${EXEC.VARS.lastApiStatus?}"
       txnStatus: "${ACTIONS.selectTxn.output.result.record.status}"

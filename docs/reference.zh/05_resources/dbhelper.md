@@ -1,9 +1,9 @@
 ### 5.2 DBHelper
 
-DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用 `schemaVersion: att-dbhelper/v2.5` 和穩定 logical `id`；global `dbhelpers` 只引用 descriptor file。
+DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用 `schemaVersion: att-dbhelper/v2.6` 和穩定 logical `id`；global `dbhelpers` 只引用 descriptor file。
 
 ```yaml
-schemaVersion: att-dbhelper/v2.5
+schemaVersion: att-dbhelper/v2.6
 id: orders
 driverClass: oracle.jdbc.OracleDriver
 url: ${ENV:ORDERS_DB_URL}

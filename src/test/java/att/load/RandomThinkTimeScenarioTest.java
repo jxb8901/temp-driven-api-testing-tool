@@ -133,7 +133,6 @@ class RandomThinkTimeScenarioTest {
 
     private Path write(Path project, String name, String content) throws Exception {
         Path file = project.resolve(name);
-        Files.write(file, content.getBytes(StandardCharsets.UTF_8));
-        return file;
+        return LoadTestSupport.writeScenario(file, content);
     }
 }

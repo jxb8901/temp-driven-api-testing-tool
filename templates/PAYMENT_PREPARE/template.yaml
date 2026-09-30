@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.3
+schemaVersion: att-template/v3.3
 name: PAYMENT_PREPARE
 description: Prepare payment request identifiers.
 
@@ -19,7 +19,7 @@ actions:
     type: log
     level: INFO
     message: "Prepared IDs for ${CASE.caseId}"
-    fields:
+    value:
       acDate: "${ACTIONS.getAcDate.output.result}"
       sequence: "${ACTIONS.getSeq.output.result}"
       endToEndId: "${ACTIONS.genEndToEndId.output.result}"

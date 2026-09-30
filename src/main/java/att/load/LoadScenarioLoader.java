@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Loads and semantically validates att-load/v1.0 and att-load/v1.1 YAML scenarios. */
+/** Loads and semantically validates active att-load/v1.2 YAML scenarios. */
 public final class LoadScenarioLoader {
     private static final Pattern DURATION = Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern RATE = Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
@@ -41,24 +41,18 @@ public final class LoadScenarioLoader {
             String version = string(map.get("schemaVersion"), "schemaVersion");
             LoadOverrides effectiveOverrides = overrides == null ? LoadOverrides.none() : overrides;
             Path schema;
-            if (Version.LOAD_SCHEMA.equals(version)) {
-                applyLegacyOverrides(map, effectiveOverrides);
-                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.0.schema.json");
-            } else if (Version.LOAD_SCHEMA_V1_1.equals(version)) {
-                applyV11Overrides(map, effectiveOverrides);
-                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.1.schema.json");
+            if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
+                applyCurrentOverrides(map, effectiveOverrides);
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.2.schema.json");
             } else {
-                throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; expected "
-                        + Version.LOAD_SCHEMA + " or " + Version.LOAD_SCHEMA_V1_1);
+                throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; ATT 3.6.0 supports only "
+                        + Version.LOAD_SCHEMA_CURRENT + ". Update to workloads-based syntax and use execution.execIdFormat; see docs/reference/appendices/migrations.md.");
             }
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.1.schema.json"), map,
+                    att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.2.schema.json"), map,
                     version, Version.LOAD_SCHEMA_CURRENT);
-            if (Version.LOAD_SCHEMA.equals(version)) {
-                SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA, "load scenario");
-                return semanticV10(source, map);
-            }
-            return semanticV11(source, map);
+            SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_CURRENT, "load scenario");
+            return semanticCurrent(source, map);
         } catch (DiagnosticException e) {
             throw e;
         } catch (SemanticFailure e) {
@@ -88,18 +82,7 @@ public final class LoadScenarioLoader {
         }
     }
 
-    private LoadScenario semanticV10(Path source, Map<String, Object> root) {
-        Map<String, Object> thresholds = mapOptional(root.get("thresholds"), "thresholds");
-        LoadWorkload workload = parseWorkload("default", root, "", thresholds);
-        Map<String, Object> evidence = mapOptional(root.get("evidence"), "evidence");
-        Long seed = longInteger(root.get("seed"), "seed");
-        return new LoadScenario(source, workload.targetType(), workload.targetId(), workload.targetArguments(),
-                workload.inputs(), workload.model(), workload.users(), workload.arrivalRatePerSecond(),
-                workload.arrivalRate(), workload.warmup(), workload.rampUp(), workload.duration(), workload.rampDown(),
-                workload.thinkTimePolicy(), seed, workload.maxConcurrent(), workload.overloadPolicy(), thresholds, evidence);
-    }
-
-    private LoadScenario semanticV11(Path source, Map<String, Object> root) {
+    private LoadScenario semanticCurrent(Path source, Map<String, Object> root) {
         List<Object> raw = list(root.get("workloads"), "workloads");
         if (raw.isEmpty()) throw failure("workloads", "workloads must contain at least one workload");
         List<LoadWorkload> workloads = new ArrayList<LoadWorkload>();
@@ -115,7 +98,7 @@ public final class LoadScenarioLoader {
             Map<String, Object> thresholds = mapOptional(map.get("thresholds"), prefix + ".thresholds");
             LoadWorkload workload = parseWorkload(id, map, prefix + ".", thresholds);
             if (model == null) model = workload.model();
-            else if (model != workload.model()) throw failure(prefix + ".load", "mixed closed and arrivalRate workload models are not supported in att-load/v1.1");
+            else if (model != workload.model()) throw failure(prefix + ".load", "mixed closed and arrivalRate workload models are not supported in att-load/v1.2");
             if (warmup == null) {
                 warmup = workload.warmup(); rampUp = workload.rampUp(); duration = workload.duration(); rampDown = workload.rampDown();
             } else if (!warmup.equals(workload.warmup()) || !rampUp.equals(workload.rampUp())
@@ -128,7 +111,12 @@ public final class LoadScenarioLoader {
         validateThresholds(model, thresholds, "thresholds");
         Map<String, Object> evidence = mapOptional(root.get("evidence"), "evidence");
         Long seed = longInteger(root.get("seed"), "seed");
-        return new LoadScenario(source, Version.LOAD_SCHEMA_V1_1, workloads, seed, thresholds, evidence);
+        Map<String, Object> execution = mapOptional(root.get("execution"), "execution");
+        String format = execution.containsKey("execIdFormat") ? string(execution.get("execIdFormat"), "execution.execIdFormat") : "";
+        try { LoadExecutionIdPattern.validate(format, model); }
+        catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
+        return new LoadScenario(source, String.valueOf(root.get("schemaVersion")), workloads, seed, thresholds, evidence)
+                .withExecIdFormat(format);
     }
 
     private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix, Map<String, Object> thresholds) {
@@ -186,14 +174,7 @@ public final class LoadScenarioLoader {
         return ThinkTimePolicy.uniform(min, max);
     }
 
-    private void applyLegacyOverrides(Map<String, Object> root, LoadOverrides overrides) {
-        Map<String, Object> load = copyMap(root.get("load"));
-        Map<String, Object> execution = copyMap(root.get("execution"));
-        applyOverrideMaps(load, execution, overrides);
-        root.put("load", load); if (!execution.isEmpty()) root.put("execution", execution);
-    }
-
-    private void applyV11Overrides(Map<String, Object> root, LoadOverrides overrides) {
+    private void applyCurrentOverrides(Map<String, Object> root, LoadOverrides overrides) {
         if (!overrides.any()) return;
         List<Object> values = list(root.get("workloads"), "workloads");
         if (values.size() != 1) throw failure("workloads", "load-model CLI overrides are ambiguous for multi-workload scenarios; configure each workload in YAML");

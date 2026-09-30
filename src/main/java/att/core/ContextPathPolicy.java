@@ -33,13 +33,14 @@ public final class ContextPathPolicy {
         return "ID".equals(field) || "RUN_ID".equals(field) || "STARTED_AT".equals(field)
                 || "RUN_STARTED_AT".equals(field)
                 || "OUTPUT_DIR".equals(field) || "INPUT".equals(field) || "VARS".equals(field)
-                || "ACTIONS".equals(field);
+                || "ACTIONS".equals(field) || "LOAD".equals(field);
     }
     public static boolean isCanonicalExecField(String field) { return isFrameworkOwnedExecField(field); }
     public static boolean isCanonicalMetaField(String field) {
         return "PROJECT".equals(field) || "SOURCE".equals(field) || "TARGET".equals(field)
                 || "TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
-                || "DBHELPER".equals(field) || "MQHELPER".equals(field);
+                || "DBHELPER".equals(field) || "MQHELPER".equals(field)
+                || "HTTPHELPER".equals(field);
     }
     public static Scope classify(String path) {
         if (path == null || path.isEmpty()) return Scope.OTHER;
@@ -67,9 +68,11 @@ public final class ContextPathPolicy {
         if (scope == Scope.LEGACY_STAGE_EVIDENCE || scope == Scope.CANONICAL_ACTIONS
                 || scope == Scope.TRANSIENT_TOOL || scope == Scope.TRANSIENT_DB || scope == Scope.ACTION_OUTPUT) return true;
         if (scope == Scope.LEGACY_ALIAS && path.startsWith("ACTIONS.")) return true;
-        return "CASE.outputDirectory".equals(path)
+        return "CASE.outputDirectory".equals(path) || "EXEC.LOAD".equals(path)
+                || (path != null && path.startsWith("EXEC.LOAD."))
                 || (path != null && (path.startsWith("META.TEMPLATE.") || path.startsWith("META.FLOW.")
-                || path.startsWith("META.TOOL.") || path.startsWith("META.DBHELPER.") || path.startsWith("META.MQHELPER.")));
+                || path.startsWith("META.TOOL.") || path.startsWith("META.DBHELPER.") || path.startsWith("META.MQHELPER.")
+                || path.startsWith("META.HTTPHELPER.")));
     }
     public static boolean isLegacyStageEvidence(String path) { return classify(path) == Scope.LEGACY_STAGE_EVIDENCE; }
     public static String firstSegment(String path) {

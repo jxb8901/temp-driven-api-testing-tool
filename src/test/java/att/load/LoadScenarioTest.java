@@ -35,30 +35,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScenarioTest {
     @TempDir Path temp;
 
-    @Test void explicitFullSuccessPolicyIsCurrentSchemaOnly() throws Exception {
+    @Test void rejectsHistoricalLoadSchemaAndAcceptsCurrentEvidencePolicy() throws Exception {
         Path project = project();
-        Path v10File = write(project, "full-v10.yaml", "schemaVersion: att-load/v1.0\n"
+        Path legacy = project.resolve("legacy-v10.yaml");
+        Files.write(legacy, ("schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
-                + "load: {users: 1, duration: 1s}\n"
-                + "evidence: {success: full, failure: full}\n");
-        DiagnosticException v10Error = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(v10File));
-        assertTrue(v10Error.getMessage().contains("success"), v10Error.getMessage());
+                + "load: {users: 1, duration: 1s}\n").getBytes(StandardCharsets.UTF_8));
+        DiagnosticException unsupported = assertThrows(DiagnosticException.class,
+                () -> new LoadScenarioLoader(project).load(legacy));
+        assertTrue(unsupported.getMessage().contains("att-load/v1.2"), unsupported.getMessage());
 
-        Path v10ModeAllFile = write(project, "all-v10.yaml", "schemaVersion: att-load/v1.0\n"
-                + "target: {type: template, id: LOAD_TEMPLATE}\n"
-                + "load: {users: 1, duration: 1s}\n"
-                + "evidence: {mode: all, failure: full}\n");
-        LoadScenario v10ModeAll = new LoadScenarioLoader(project).load(v10ModeAllFile);
-        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(v10ModeAll).success(),
-                "v1.0 mode: all remains valid and retains full success evidence");
-
-        Path v11File = write(project, "full-v11.yaml", "schemaVersion: att-load/v1.1\nworkloads:\n"
+        Path current = write(project, "full-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
                 + "  - id: default\n"
                 + "    target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "    load: {users: 1, duration: 1s}\n"
                 + "evidence: {success: full, failure: full}\n");
-        LoadScenario v11 = new LoadScenarioLoader(project).load(v11File);
-        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(v11).success());
+        LoadScenario scenario = new LoadScenarioLoader(project).load(current);
+        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(scenario).success());
+        assertEquals(LoadEvidencePolicy.Failure.FULL, LoadEvidencePolicy.from(scenario).failure());
     }
 
     @Test void validatesBothWorkloadModelsAndExplicitOverridesWin() throws Exception {
@@ -206,7 +200,7 @@ class LoadScenarioTest {
     @Test void iterationWorkspaceAndFailureEvidenceUseResolvedLoadOutputRoot() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/FAIL_TEMPLATE"));
-        write(project, "templates/FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: FAIL_TEMPLATE\ndescription: retained failure\nactions:\n"
                 + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
         Path scenarioFile = write(project, "failure.yaml", "schemaVersion: att-load/v1.0\n"
@@ -252,7 +246,7 @@ class LoadScenarioTest {
         Path project = project();
         Files.createDirectories(project.resolve("templates/FILE_TEMPLATE"));
         write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
-        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.1\n"
+        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
                 + "  render: {type: render, payload: payload.txt, result: {format: text, path: 'rendered/{filename}'}}\n");
         Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.0\n"
@@ -276,7 +270,7 @@ class LoadScenarioTest {
     @Test void metricsOnlyFailureDoesNotMaterializeOrLinkEvidence() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/METRICS_FAIL_TEMPLATE"));
-        write(project, "templates/METRICS_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/METRICS_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: METRICS_FAIL_TEMPLATE\ndescription: metrics-only failure\nactions:\n"
                 + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
         Path scenarioFile = write(project, "metrics-failure.yaml", "schemaVersion: att-load/v1.0\n"
@@ -311,7 +305,7 @@ class LoadScenarioTest {
     @Test void reservedSuccessFailureDoesNotOverrideFailureNone() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/RESERVED_FAIL_TEMPLATE"));
-        write(project, "templates/RESERVED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/RESERVED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: RESERVED_FAIL_TEMPLATE\ndescription: reserved sample failure\nactions:\n"
                 + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
         Path scenarioFile = write(project, "reserved-failure.yaml", "schemaVersion: att-load/v1.0\n"
@@ -349,7 +343,7 @@ class LoadScenarioTest {
     @Test void concurrentFailureEvidenceReservationsBoundWorkspacesAndRetainedLinks() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/CAPPED_FAIL_TEMPLATE"));
-        write(project, "templates/CAPPED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/CAPPED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: CAPPED_FAIL_TEMPLATE\ndescription: capped concurrent failures\nactions:\n"
                 + "  verify: {type: assert, assert: \"'actual' == 'expected'\", expected: expected, actual: actual}\n");
         Path scenarioFile = write(project, "capped-failures.yaml", "schemaVersion: att-load/v1.0\n"
@@ -385,7 +379,7 @@ class LoadScenarioTest {
     @Test void sampledSuccessRetainsBoundedEvidenceWithoutChangingResult() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/SAMPLE_TEMPLATE"));
-        write(project, "templates/SAMPLE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/SAMPLE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: SAMPLE_TEMPLATE\ndescription: sampled success\nactions:\n"
                 + "  record: {type: log, message: sampled}\n");
         Path scenarioFile = write(project, "sample.yaml", "schemaVersion: att-load/v1.0\n"
@@ -427,7 +421,7 @@ class LoadScenarioTest {
     @Test void concurrentIterationsIsolateNestedMapAndListInputMutation() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/NESTED_TEMPLATE"));
-        write(project, "templates/NESTED_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/NESTED_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: NESTED_TEMPLATE\ndescription: nested input isolation\nactions:\n"
                 + "  mapValue: {type: log, message: \"${EXEC.INPUT.payload.value}\"}\n"
                 + "  listValue: {type: log, message: \"${EXEC.INPUT.payload.items[0].value}\"}\n");
@@ -485,7 +479,7 @@ class LoadScenarioTest {
         Path started = temp.resolve("slow-started");
         Path completed = temp.resolve("slow-completed");
         String command = "/bin/sh -c 'touch " + started + "; sleep 1; touch " + completed + "'";
-        write(project, "templates/SLOW_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/SLOW_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: SLOW_TEMPLATE\ndescription: cancellable load action\nactions:\n"
                 + "  run: {type: tool, call: \"#{slow()}\"}\n");
         Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.0\n"
@@ -589,10 +583,10 @@ class LoadScenarioTest {
                 Paths.get("templates"), Collections.emptyMap(), null, null);
         Files.createDirectories(project.resolve("templates/STRICT_TEMPLATE"));
         Files.createDirectories(project.resolve("templates/OPTIONAL_TEMPLATE"));
-        write(project, "templates/STRICT_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/STRICT_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: STRICT_TEMPLATE\ndescription: strict load context\nactions:\n"
                 + "  strict:\n    type: log\n    message: \"${EXEC.MODE}\"\n");
-        write(project, "templates/OPTIONAL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.0\n"
+        write(project, "templates/OPTIONAL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: OPTIONAL_TEMPLATE\ndescription: optional load context\nactions:\n"
                 + "  optional:\n    type: log\n    message: \"${EXEC.INPUT.input}\"\n");
 
@@ -668,18 +662,18 @@ class LoadScenarioTest {
         Files.createDirectories(project.resolve("templates/flows/load/echo"));
         Files.createDirectories(project.resolve("output"));
         Files.write(project.resolve("templates/LOAD_TEMPLATE/template.yaml"), (
-                "schemaVersion: att-template/v3.2\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
+                "schemaVersion: att-template/v3.3\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
                 + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.INPUT.input}\"\n"
                 + "  phase:\n    type: log\n    message: \"${EXEC.INPUT.input}\"\n"
                 + "  nested:\n    type: flow\n    use: load.echo.v1\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/load/echo/flow.yaml"), (
-                "schemaVersion: att-flow/v3.0\nid: load.echo.v1\nname: Load Echo\ndescription: load flow\nactions:\n"
+                "schemaVersion: att-flow/v3.3\nid: load.echo.v1\nname: Load Echo\ndescription: load flow\nactions:\n"
                 + "  echo:\n    type: assign\n    name: flowInput\n    expression: \"${EXEC.INPUT.input}\"\n").getBytes(StandardCharsets.UTF_8));
         return project;
     }
 
     private Path write(Path project, String name, String content) throws Exception {
-        Path file = project.resolve(name); Files.write(file, content.getBytes(StandardCharsets.UTF_8)); return file;
+        Path file = project.resolve(name); return LoadTestSupport.writeScenario(file, content);
     }
 
     private IterationResult deferredResult(Path outputRoot, IterationRequest request, ResultStatus status) {

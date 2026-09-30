@@ -73,6 +73,14 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
 
     @Override public Set<String> names() { return NAMES; }
 
+    /** Pure deterministic built-ins allowed while ATT resolves an execution identity. */
+    public static boolean isSafeForExecutionIdentity(String name) {
+        String function = name == null ? null : ALIASES.get(name.toLowerCase(Locale.ROOT));
+        if (function == null) return false;
+        return !"seq.next".equals(function) && !"randomchoice".equals(function) && !"sysdate".equals(function)
+                && !"systimestamp".equals(function) && !function.startsWith("file");
+    }
+
     @Override public Object invoke(String name, Map<String, Object> input) {
         String function = resolve(name);
 
@@ -86,6 +94,11 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         }
         if ("dbtext".equals(function)) {
             return new DbTextResultFormatter().format(singleValue(input, "dbText"));
+        }
+        if ("format".equals(function)) {
+            require(input, "format", 2, 2, "format", "obj");
+            return new TypedValueFormatter().format(argument(input, "obj", "arg1"),
+                    text(argument(input, "format", "arg0")));
         }
         if ("seq.next".equals(function)) return nextSequence(input);
         if ("prettyprint".equals(function)) return prettyPrint(singleValue(input, "prettyPrint"));
@@ -147,8 +160,9 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
     }
 
     /** Validates call names/counts/styles without evaluating runtime argument values. */
-    public void validateInvocation(String name, Map<String, Object> input) {
+    public static void validateInvocation(String name, Map<String, Object> input) {
         String function = resolve(name);
+        if ("format".equals(function)) { require(input, "format", 2, 2, "format", "obj"); return; }
         if ("seq.next".equals(function)) { require(input, "seq.next", 0, 2, "name", "width"); return; }
         if ("sysdate".equals(function) || "systimestamp".equals(function)) { require(input, function, 0, 1, "format"); return; }
         if ("dbtext".equals(function)) { singleValue(input, "dbText"); return; }
@@ -192,6 +206,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
                 "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories", "copyfile",
                 "movefile", "deletefile", "randomchoice", "dbtext", "prettyprint"};
         for (String name : legacy) result.put(name, name);
+        alias(result, "format", "format");
         alias(result, "seq.next", "seq.next");
 
         alias(result, "str.upper", "upper"); alias(result, "str.lower", "lower");

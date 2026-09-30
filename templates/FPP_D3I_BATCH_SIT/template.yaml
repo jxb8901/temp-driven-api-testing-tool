@@ -1,4 +1,4 @@
-schemaVersion: att-template/v2.6
+schemaVersion: att-template/v3.3
 name: FPP_D3I_BATCH_SIT
 description: SIT D3I batch end-to-end flow covering D3I, RLT012, DVO, DRR, and DSR processing.
 
@@ -465,7 +465,7 @@ actions:
     type: log
     level: INFO
     message: "D3I batch end-to-end flow completed for ${CASE.caseId}"
-    fields:
+    value:
       d3iFiles: "${ACTIONS.moveD3iFiles.output.result.count}"
       drrFiles: "${ACTIONS.moveDrrFiles.output.result.count}"
       dsrFiles: "${ACTIONS.moveDsrFiles.output.result.count}"

@@ -15,7 +15,7 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper or MQHelper used by Actions or permitted expression calls.
+A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
 
 ### Execution modes are peers
 
@@ -25,18 +25,20 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ |
 | Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.0` scenario | one Template, Flow or Tool target repeatedly |
+| Load | `att-load/v1.2` scenario | one Template, Flow or Tool target repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
 ### Resources are peers
 
-Tool, DBHelper and MQHelper are independent resource types. They differ in configuration and lifecycle but publish operation data into one common Action envelope. Public expressions should consume Action results/evidence rather than resource-internal connection/process state.
+Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are independent resource types. They differ in configuration and lifecycle, while Actions publish native typed results through `output.result` and keep optional presentation evidence separate. Public expressions should consume Action results/evidence rather than resource-internal connection/process state.
 
 ```text
-Tool ----\
-DBHelper --+--> operation result/evidence --> Action output
-MQHelper -/
+Tool ------\
+DBHelper ---+
+MQHelper ---+--> typed operation result --> Action output
+HTTPHelper -+
+SSHHelper --/
 ```
 
 ### Package boundaries

@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.9
+schemaVersion: att-config/v2.10
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -25,16 +25,17 @@ toolGroups:
   - config/tools/fpp.yaml
   - config/tools/orders-db.yaml
 
-# Each referenced file declares one independent att-dbhelper/v2.5 instance.
+# Each referenced file declares one independent att-dbhelper/v2.6 instance.
 dbhelpers:
   - config/dbhelpers/orders.yaml
 
 report:
   mode: append-to-copy
-  fileNamePattern: "${suiteName}.result.xlsx"
+  fileNamePattern: "${SUITE_NAME}.result.xlsx"
   html:
     caseLogInlineLimitBytes: 32768
   columns:
+    execId: Execution ID
     result: Test Result
     durationMs: Duration(ms)
     expectedResult: Expected Result
@@ -45,13 +46,13 @@ report:
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke the payment API with a rendered request file
-    command: [./tools/invoke_payment_api.sh, "${input.requestFile}", "${input.environment}"]
-    result: {format: xml}
+    description: Invoke the payment API with a rendered request document
+    command: [./tools/invoke_payment_api.sh, "${input.requestText}", "${input.environment}"]
+    stdoutFormat: xml
     arguments:
-      requestFile:
-        name: Request File
-        description: Rendered payment request XML file
+      requestText:
+        name: Request Text
+        description: Rendered payment request document text
         required: true
       environment:
         name: Environment
@@ -61,7 +62,7 @@ tools:
     name: Select CT records
     description: Query transaction records
     command: [./tools/select_ct_txn.sh, "${input.caseId}", "${input.txnRef}"]
-    result: {format: yaml}
+    stdoutFormat: yaml
     arguments:
       caseId:
         name: Case ID
@@ -75,7 +76,7 @@ tools:
     name: Grep application logs
     description: Find one or more keywords in application logs
     command: [./tools/grep_from_app_logs.sh, "${input.logText}", "${input.keywords}"]
-    result: {format: yaml}
+    stdoutFormat: yaml
     arguments:
       logText:
         name: Log Text
@@ -89,7 +90,7 @@ tools:
     name: Get application logs
     description: Collect application logs for a case
     command: [./tools/get_app_logs.sh, "${input.caseId}"]
-    result: {format: text}
+    stdoutFormat: text
     arguments:
       caseId:
         name: Case ID
@@ -99,7 +100,7 @@ tools:
     name: Generate end-to-end ID
     description: Generate a unique end-to-end identifier
     command: [./tools/gen_e2e_id.sh, "${input.caseId}"]
-    result: {format: text}
+    stdoutFormat: text
     arguments:
       caseId:
         name: Case ID
@@ -109,20 +110,20 @@ tools:
     name: Get account date
     description: Return the current account date
     command: [./tools/get_ac_date.sh]
-    result: {format: text}
+    stdoutFormat: text
     arguments: {}
   getSeq:
     name: Get sequence
     description: Generate a new sequence value
     command: [./tools/get_seq.sh, "${input.caseId}"]
-    result: {format: text}
+    stdoutFormat: text
     arguments:
       caseId:
         name: Case ID
         description: Full V2 Case ID
         required: true
 
-# V3.5.3 profile example. Common settings and logical helper IDs stay stable;
+# ATT 3.6.0 profile example. Common settings and logical helper IDs stay stable;
 # each profile replaces only the resource descriptor lists it declares.
 environments:
   SIT:

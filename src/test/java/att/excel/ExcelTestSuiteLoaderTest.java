@@ -160,7 +160,7 @@ class ExcelTestSuiteLoaderTest {
         List<StageConfig> stages = Collections.singletonList(new StageConfig("invoke", "執行模板",
                 Collections.singletonList(new DataColumnConfig("params", "執行參數", true)), true, "stop", "normal"));
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", new LinkedHashMap<String, String>()),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", new LinkedHashMap<String, String>()),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), includeBatch
                 ? Arrays.asList(new SheetGroupConfig("payment", "支付測試案例集"), new SheetGroupConfig("batch", "批量測試案例集"))
                 : Collections.singletonList(new SheetGroupConfig("payment", "支付測試案例集")),

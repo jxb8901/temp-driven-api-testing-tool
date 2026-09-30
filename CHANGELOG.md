@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.6.0 - 2026-09-30
+
+- Implement Issues #87 and #88: replace common result representation settings with typed `DocumentValue` results, preserve rendered documents through HTTP/MQ requests, add explicit log/resource evidence formatting, and configure Load `EXEC.ID` with runtime expressions.
+- Document curated `META` fields and invocation lifecycles, and expose `EXEC.RUN_ID` / `EXEC.ID` navigation for reports and retained evidence.
+- Advance active schemas and migrate shipped configuration/examples to the 3.6.0 contracts.
+
 ## 3.5.3 - 2026-09-29
 
 - Complete Issues #70–#74: harden HTTPHelper result/header contracts and schema-catalog enforcement; unify typed Action and Tool results; add bounded, secret-redacted internal exception stacks to Case logs; and allow MQ send/receive/request queue defaults with explicit argument precedence.

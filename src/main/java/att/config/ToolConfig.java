@@ -108,7 +108,9 @@ public final class ToolConfig {
     public String sshHelper() { return sshHelper; }
     public String sshSelectionStrategy() { return sshSelectionStrategy; }
     public Path sourceFile() { return sourceFile; }
-    public String resultFormat() { return resultFormat; }
+    public String stdoutFormat() { return resultFormat; }
+    /** @deprecated Historical representation accessor. Use stdoutFormat for command ingress. */
+    @Deprecated public String resultFormat() { return resultFormat; }
     /** @deprecated Use {@link #resultFormat()}; retained for source compatibility. */
     @Deprecated public String output() { return resultFormat; }
     public Long timeoutMs() { return timeoutMs; }
