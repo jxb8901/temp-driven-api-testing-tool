@@ -15,6 +15,7 @@
 | multi-closed.yaml | 多個獨立 closed VU workload。 |
 | multi-arrival.yaml | 多個獨立 arrival-rate workload。 |
 | tool.yaml | 呼叫包內 deterministic Tool 的短範例。 |
+| quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
 
 ## 最小 closed workload
 
@@ -29,6 +30,10 @@ workloads:
 ~~~
 
 每個 Virtual User 重複執行固定 target。Think time 可設一個 duration，也可設定 min/max range。
+
+## Quick Load policy profile
+
+`quick-profile.yaml` 不包含 target 或 business data。複製到專案的 `load/load.yaml` 後，執行 `./att.sh load --debug template <id>`、`flow <id>` 或 `tool <id>`，即可將 sidecar inputs/vars/arguments 與此 policy 合併，再進入正常 Load runtime。CLI intensity options 會覆蓋 profile；若沒有 profile，命令列需提供完整 pacing policy。
 
 ## 每次 execution 的 typed vars
 

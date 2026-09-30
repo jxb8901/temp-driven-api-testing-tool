@@ -101,6 +101,26 @@ class LoadCrossModeTest {
         }
     }
 
+    @Test void loadDebugPromotesTypedToolArgumentsIntoTheNormalLoadRuntime() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        write(project, "config/tools/echo.debug.yaml", "schemaVersion: att-debug/v1.1\narguments: {value: sidecar}\n");
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "echo",
+                "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
+        Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
+                options.debugTargetType(), options.debugTargetId(), map(promoted.get("inputs")), map(promoted.get("vars")),
+                map(promoted.get("arguments")), null, options);
+        assertEquals("typed-load", scenario.targetArguments().get("value"));
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("tool-debug-load", "tool-debug-load-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+        assertEquals(ResultStatus.PASS, result.status());
+        assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.loadTool.output.result")).contains("typed-load"));
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> map(Object value) {
         return value instanceof Map ? (Map<String, Object>) value : Collections.<String, Object>emptyMap();

@@ -171,29 +171,35 @@ public final class ExecutionOptions {
         String debugTargetType = "";
         String debugTargetId = "";
         if ("debug".equals(command)) {
-            if (args.length < 3) throw new IllegalArgumentException("debug requires template|flow|tool and a target id");
-            debugTargetType = args[1].toLowerCase(java.util.Locale.ROOT);
-            if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
-                throw new IllegalArgumentException("debug target must be template, flow, or tool");
-            debugTargetId = args[2];
-            if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("debug target id must not be blank");
-            start = 3;
+            if (args.length == 2 && "--help".equals(args[1])) return empty("help");
+            if (args.length == 1 || args[1].startsWith("--")) start = 1;
+            else {
+                if (args.length < 3) throw new IllegalArgumentException("debug requires template|flow|tool and a target id, or no target for discovery");
+                debugTargetType = args[1].toLowerCase(java.util.Locale.ROOT);
+                if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
+                    throw new IllegalArgumentException("debug target must be template, flow, or tool");
+                debugTargetId = args[2];
+                if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("debug target id must not be blank");
+                start = 3;
+            }
         }
         Path loadScenario = null;
         if ("load".equals(command)) {
-            if (args.length >= 2 && "--debug".equals(args[1])) {
-                if (args.length < 4) throw new IllegalArgumentException("load --debug requires template|flow and a target id");
+            if (args.length == 2 && "--help".equals(args[1])) return empty("help");
+            if (args.length == 1) start = 1;
+            else if ("--debug".equals(args[1])) {
+                if (args.length < 4) throw new IllegalArgumentException("load --debug requires template|flow|tool and a target id");
                 debugTargetType = args[2].toLowerCase(java.util.Locale.ROOT);
-                if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType)))
-                    throw new IllegalArgumentException("load --debug target must be template or flow");
+                if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
+                    throw new IllegalArgumentException("load --debug target must be template, flow, or tool");
                 debugTargetId = args[3];
                 if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("load --debug target id must not be blank");
                 start = 4;
             } else {
-                if (args.length < 2 || args[1].startsWith("--") || args[1].trim().isEmpty())
-                    throw new IllegalArgumentException("load requires a scenario path or --debug template|flow <id>");
-                loadScenario = Paths.get(args[1]);
-                start = 2;
+                if (args.length < 2 || args[1].trim().isEmpty())
+                    throw new IllegalArgumentException("load requires a scenario path, --debug template|flow|tool <id>, or no target for discovery");
+                if (args[1].startsWith("--")) start = 1;
+                else { loadScenario = Paths.get(args[1]); start = 2; }
             }
         }
         Path config = Paths.get("config/config.yaml");
@@ -265,6 +271,12 @@ public final class ExecutionOptions {
         if (packageScope && selectedScope) throw new IllegalArgumentException("--package and --selected are mutually exclusive");
         if ("debug".equals(command) && (packageScope || selectedScope)) throw new IllegalArgumentException("--package/--selected are not valid for debug");
         if ("load".equals(command) && loadScenario != null && debugInput != null) throw new IllegalArgumentException("--input is valid only for load --debug");
+        if ("debug".equals(command) && debugTargetType.isEmpty()
+                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose").contains(option)))
+            throw new IllegalArgumentException("Debug discovery accepts only --config, --env, --format, --quiet, and --verbose");
+        if ("load".equals(command) && loadScenario == null && debugTargetType.isEmpty()
+                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose").contains(option)))
+            throw new IllegalArgumentException("Load discovery accepts only --config, --env, --format, --quiet, and --verbose");
         if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
         String validationScope = "debug".equals(command) ? "debug" : packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
         if ("run".equals(command) && !rerun && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) {
@@ -279,7 +291,10 @@ public final class ExecutionOptions {
         if (seenOptions.contains("--parallel") && seenOptions.contains("--allow-parallel-runs")) throw new IllegalArgumentException("Use only one of --allow-parallel-runs or its deprecated --parallel alias");
         if (quiet && explicitVerbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
         if (quiet) verbose = false;
+        if ("load".equals(command) && loadUsers != null && loadArrivalRate != null)
+            throw new IllegalArgumentException("--users and --arrival-rate are mutually exclusive");
         validateAllowed(command, seenOptions);
+        CliSetOverrides.validate(variableOverrides);
         return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all,
                 rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
                 updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
@@ -333,6 +348,7 @@ public final class ExecutionOptions {
     public String debugTargetId() { return debugTargetId; }
     public Path debugInput() { return debugInput; }
     public List<String> variableOverrides() { return variableOverrides; }
+    public List<String> setOverrides() { return variableOverrides; }
     public boolean loadDebug() { return "load".equals(command) && !debugTargetType.isEmpty(); }
     public Path loadScenario() { return loadScenario; }
     public String loadUsers() { return loadUsers; }

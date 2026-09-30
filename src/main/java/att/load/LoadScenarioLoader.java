@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -88,36 +89,49 @@ public final class LoadScenarioLoader {
     public LoadScenario fromDebugInput(Path source, String targetType, String targetId,
                                        Map<String, Object> inputs, Map<String, Object> vars,
                                        att.core.ExecutionOptions options) {
-        if (!("template".equals(targetType) || "flow".equals(targetType)))
-            throw failure("target.type", "load --debug currently promotes Template or Flow targets only");
-        if (options.loadUsers() == null && options.loadArrivalRate() == null)
-            throw failure("load", "load --debug requires --users or --arrival-rate");
-        if (options.loadDuration() == null) throw failure("load.duration", "load --debug requires --duration");
-        if (options.loadUsers() != null && options.loadArrivalRate() != null)
-            throw failure("load", "choose only one of --users or --arrival-rate");
+        return fromDebugInput(source, targetType, targetId, inputs, vars, Collections.<String, Object>emptyMap(), null, options);
+    }
+
+    public LoadScenario fromDebugInput(Path source, String targetType, String targetId,
+                                       Map<String, Object> inputs, Map<String, Object> vars,
+                                       Map<String, Object> arguments, Map<String, Object> profile,
+                                       att.core.ExecutionOptions options) {
+        if (!("template".equals(targetType) || "flow".equals(targetType) || "tool".equals(targetType)))
+            throw failure("target.type", "load --debug target must be Template, Flow, or Tool");
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
+        if (profile != null) {
+            for (String field : new String[]{"seed", "thresholds", "evidence"}) if (profile.containsKey(field)) root.put(field, profile.get(field));
+        }
         Map<String, Object> workload = new LinkedHashMap<String, Object>();
         workload.put("id", "debug-" + targetId.replaceAll("[^A-Za-z0-9._-]", "-"));
-        workload.put("target", mapOf("type", targetType, "id", targetId));
+        Map<String, Object> target = mapOf("type", targetType, "id", targetId);
+        if ("tool".equals(targetType) && arguments != null && !arguments.isEmpty()) target.put("arguments", LoadIsolation.deepCopyMap(arguments));
+        workload.put("target", target);
         if (inputs != null && !inputs.isEmpty()) workload.put("inputs", LoadIsolation.deepCopyMap(inputs));
         if (vars != null && !vars.isEmpty()) workload.put("vars", LoadIsolation.deepCopyMap(vars));
-        Map<String, Object> load = new LinkedHashMap<String, Object>();
-        if (options.loadUsers() != null) {
-            try { load.put("users", Integer.valueOf(options.loadUsers())); }
-            catch (NumberFormatException error) { throw failure("load.users", "--users must be a positive integer"); }
-        } else load.put("arrivalRate", options.loadArrivalRate());
-        put(load, "warmup", options.loadWarmup()); put(load, "rampUp", options.loadRampUp());
-        put(load, "duration", options.loadDuration()); put(load, "rampDown", options.loadRampDown());
-        if (options.loadArrivalRate() != null) {
-            try { if (options.loadMaxConcurrent() != null) load.put("maxConcurrent", Integer.valueOf(options.loadMaxConcurrent())); }
-            catch (NumberFormatException error) { throw failure("load.maxConcurrent", "--max-concurrent must be a positive integer"); }
-            put(load, "overloadPolicy", options.loadOverloadPolicy());
-        }
+        Map<String, Object> load = profile == null ? new LinkedHashMap<String, Object>() : copyMap(profile.get("load"));
+        Map<String, Object> execution = profile == null ? new LinkedHashMap<String, Object>() : copyMap(profile.get("execution"));
+        LoadOverrides intensity = new LoadOverrides(options.loadUsers(), options.loadArrivalRate(), options.loadWarmup(),
+                options.loadRampUp(), options.loadDuration(), options.loadRampDown(), options.loadThinkTime(),
+                options.loadMaxConcurrent(), options.loadOverloadPolicy());
+        applyOverrideMaps(load, execution, intensity);
+        if (load.get("users") == null && load.get("arrivalRate") == null)
+            throw quickLoadFailure(source, "load", "Quick Load needs a policy: add load/load.yaml or provide --users/--arrival-rate with the required --duration (arrival rate also needs --max-concurrent and --overload-policy)");
+        if (load.get("duration") == null)
+            throw quickLoadFailure(source, "load.duration", "Quick Load needs duration from load/load.yaml or --duration");
         workload.put("load", load);
-        if (options.loadThinkTime() != null) workload.put("execution", mapOf("thinkTime", options.loadThinkTime()));
+        if (!execution.isEmpty()) workload.put("execution", execution);
         root.put("workloads", java.util.Collections.<Object>singletonList(workload));
+        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.3.schema.json"), root); }
+        catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
         return semanticCurrent(source, root);
+    }
+
+    private DiagnosticException quickLoadFailure(Path source, String field, String detail) {
+        return new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Invalid Quick Load policy", detail,
+                source == null ? null : source.toString(), field, null, null, null, null, null,
+                "Add a valid load/load.yaml policy or provide compatible CLI pacing options, then retry.", null);
     }
 
     private static Map<String, Object> mapOf(String key1, Object value1, String key2, Object value2) {
@@ -229,20 +243,42 @@ public final class LoadScenarioLoader {
         Map<String, Object> workload = map(values.get(0), "workloads[0]");
         Map<String, Object> load = copyMap(workload.get("load"));
         Map<String, Object> execution = copyMap(workload.get("execution"));
+        Map<String, Object> inputs = copyMap(workload.get("inputs"));
         Map<String, Object> vars = copyMap(workload.get("vars"));
+        Map<String, Object> target = copyMap(workload.get("target"));
+        String targetType = String.valueOf(target.get("type"));
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "arg") && !"tool".equals(targetType))
+            throw failure("target.arguments", "--set arg.* is valid only for a Tool workload");
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "vars") && "tool".equals(targetType))
+            throw failure("vars", "--set vars.* is not supported for Tool workloads; use --set arg.* for Tool arguments");
+        inputs = att.core.CliSetOverrides.apply(inputs, overrides.setOverrides(), "input");
+        vars = att.core.CliSetOverrides.apply(vars, overrides.setOverrides(), "vars");
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "input") || workload.containsKey("inputs")) workload.put("inputs", inputs);
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "vars") || workload.containsKey("vars")) workload.put("vars", vars);
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "arg")) {
+            Map<String, Object> arguments = copyMap(target.get("arguments"));
+            target.put("arguments", att.core.CliSetOverrides.apply(arguments, overrides.setOverrides(), "arg"));
+            workload.put("target", target);
+        }
         applyOverrideMaps(load, execution, overrides);
-        if (overrides.hasVariableOverrides()) vars = att.core.BootstrapVariableOverrides.apply(vars, overrides.variableOverrides());
         workload.put("load", load); if (!execution.isEmpty()) workload.put("execution", execution);
-        if (!vars.isEmpty()) workload.put("vars", vars);
         List<Object> replaced = new ArrayList<Object>(); replaced.add(workload); root.put("workloads", replaced);
     }
 
     private void applyOverrideMaps(Map<String, Object> load, Map<String, Object> execution, LoadOverrides overrides) {
-        putInteger(load, "users", overrides.users()); put(load, "arrivalRate", overrides.arrivalRate());
+        if (overrides.users() != null) {
+            load.remove("arrivalRate"); load.remove("maxConcurrent"); load.remove("overloadPolicy");
+            putInteger(load, "users", overrides.users());
+        }
+        if (overrides.arrivalRate() != null) {
+            load.remove("users");
+            put(load, "arrivalRate", overrides.arrivalRate());
+        }
         put(load, "warmup", overrides.warmup()); put(load, "rampUp", overrides.rampUp());
         put(load, "duration", overrides.duration()); put(load, "rampDown", overrides.rampDown());
         putInteger(load, "maxConcurrent", overrides.maxConcurrent()); put(load, "overloadPolicy", overrides.overloadPolicy());
-        put(execution, "thinkTime", overrides.thinkTime());
+        if (overrides.arrivalRate() != null && overrides.thinkTime() == null) execution.remove("thinkTime");
+        else put(execution, "thinkTime", overrides.thinkTime());
     }
 
     private static void put(Map<String, Object> map, String key, String value) { if (value != null) map.put(key, value); }

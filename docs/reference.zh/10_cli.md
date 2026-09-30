@@ -10,6 +10,7 @@
 | `snapshot` | 生成同名规范 testcase XML | 否 |
 | `run` | 校验并执行已选 Case | 是，dry-run 除外 |
 | `debug` | 使用 debug sidecar 执行一个 Template、Flow 或 Tool | 是 |
+| `load` | 执行已声明的 scenario，或将 Debug sidecar promotion 为 Quick Load | 是 |
 | `docs` | 生成可搜索的包文档 | 否 |
 | `report` | 为已完成 run 重新生成报表 | 否 |
 | `build` | 归档最新已完成 run | 否 |
@@ -46,15 +47,24 @@
 | `./att.sh run <selection> --format json` | 输出机器可读摘要 |
 | `./att.sh run <selection> --quiet` | 抑制详细实时进度；保留最终摘要和错误 |
 | `./att.sh run <selection> --verbose` | 为兼容性保留；详细实时进度已是默认行为 |
+| `./att.sh debug` | 发现可运行的 Tool、Template 和 Flow；只显示实际存在的默认 sidecar |
 | `./att.sh debug template <id>` | 执行一个 Template；自动发现 `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | 执行一个规范 Flow；自动发现 `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | 执行一个 Tool；自动发现 `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | 覆盖目标自动发现的 debug 输入 |
+| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆盖 typed `EXEC.INPUT` 值；可重复使用 |
+| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆盖一个 Tool argument；可重复使用 |
+| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆盖 Template/Flow bootstrap `EXEC.VARS` |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 将 debug 输出隔离到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 输出紧凑机器可读摘要；完整证据仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制详细实时进度；保留最终摘要和错误 |
+| `./att.sh load` | 发现 `load/` 下有效的 `att-load/*` scenario；报告无效的已声明 scenario |
 | `./att.sh load <scenario.yaml> --quiet` | 抑制定期实时进度；保留最终摘要和错误 |
 | `./att.sh load <scenario.yaml> --verbose` | 为兼容性保留；有界实时进度已是默认行为 |
+| `./att.sh load --debug <type> <id>` | 使用 `load/load.yaml` policy，将 Debug sidecar promotion 为普通单 workload Load run |
+| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | 覆盖单 workload `EXEC.INPUT`；多 workload scenario 不支持未限定覆盖 |
+| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | 覆盖单 workload Tool scenario 的 argument |
+| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | 覆盖单 workload Template/Flow bootstrap vars |
 | `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中归档最新完成 run |
@@ -198,7 +208,28 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
   --max-concurrent 4 --overload-policy drop --format json
 ```
 
-重複的 `--set vars.path=value` 會用 safe-YAML typed value 覆寫原始 bootstrap definition，並在 expression evaluation 前生效。`debug` 及 Load scenario 都支援；`load --debug template|flow <id>` 會將 Debug sidecar promotion 為暫存的單一 workload Load run，並要求明確 pacing。例如：
+無 target 的 `debug` 和 `load` 是唯讀 discovery。Debug 會驗證可執行 target，但不呼叫 Tool，也不建立 output。Load 只掃描宣告 `att-load/*` 的 YAML、驗證 target，並回報無效的已宣告 descriptor；其他 YAML 會忽略。Discovery 模式支援 `--config`、`--env`、`--format`、`--quiet` 和 `--verbose`。
+
+`--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
+
+可選的 `load/load.yaml` 使用 `att-load-profile/v1.0`，只放 policy，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 profile。沒有 profile 時，請在命令列提供完整 policy：
+
+```yaml
+schemaVersion: att-load-profile/v1.0
+load: {users: 2, duration: 10s}
+execution: {thinkTime: 250ms}
+evidence: {mode: failures}
+```
+
+```sh
+./att.sh debug
+./att.sh load
+./att.sh load --debug template PAYMENT_INVOKE
+./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
+./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
+```
+
+重複的 `--set <input|arg|vars>.<path>=<yaml-value>` 會在 expression evaluation 前以安全 YAML 型別覆寫 definition。`debug`、單 workload Load scenario，以及 `load --debug template|flow|tool <id>` 都支援。Quick Load 會使用可選的 `load/load.yaml`；若沒有 profile，請在 command line 提供完整 policy。例如：
 
 ```sh
 ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'

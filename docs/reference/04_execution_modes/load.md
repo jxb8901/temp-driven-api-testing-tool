@@ -2,6 +2,8 @@
 
 ATT accepts att-load/v1.3 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target, its inputs, bootstrap vars and pacing policy. ATT validates the scenario and all targets before a scheduler starts.
 
+Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
+
 #### Scenario shape
 
 ~~~yaml
@@ -95,7 +97,18 @@ Top-level thresholds apply to the aggregate run; workload thresholds apply to on
 
 For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
-Repeatable `--set vars.path=value` overrides the workload's raw bootstrap definition before expression evaluation. Values use safe YAML scalar parsing, so quote expressions to pass them literally. Debug accepts the same override; `load --debug template|flow <id>` promotes the selected Debug sidecar's inputs and vars into an in-memory single-workload Load scenario. It requires explicit pacing such as `--users 2 --duration 10s`.
+Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
+
+`load/load.yaml` is an optional `att-load-profile/v1.0` policy file with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence` and `seed`. Explicit CLI pacing values override the profile. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no profile, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+
+Example policy profile (copy to `load/load.yaml`):
+
+~~~yaml
+schemaVersion: att-load-profile/v1.0
+load: {users: 2, duration: 10s}
+execution: {thinkTime: 250ms}
+evidence: {mode: failures}
+~~~
 
 ~~~sh
 ./att.sh load examples/load/closed-smoke.yaml
@@ -104,6 +117,9 @@ Repeatable `--set vars.path=value` overrides the workload's raw bootstrap defini
 ./att.sh load examples/load/multi-arrival.yaml
 ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh debug
+./att.sh load
+./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
 ~~~
 
 Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). The previous v1.2 schema is retained for migration diagnostics; upgrade its schemaVersion to v1.3 to use workload vars. Historical v1.0/v1.1 schemas are also not accepted as active versions. See [Migrations](../appendices/migrations.md).

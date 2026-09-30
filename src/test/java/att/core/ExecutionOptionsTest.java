@@ -66,8 +66,25 @@ class ExecutionOptionsTest {
         assertEquals("PAYMENT", load.debugTargetId());
         assertEquals("debug.yaml", load.debugInput().toString());
         assertEquals("2", load.loadUsers());
+        ExecutionOptions tool = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "sample.echo"});
+        assertTrue(tool.loadDebug());
+        assertEquals("tool", tool.debugTargetType());
+    }
+
+    @Test void parsesNoTargetDiscoveryAndValidatesSetNamespaces() {
+        assertEquals("debug", ExecutionOptions.parse(new String[]{"debug"}).command());
+        assertEquals("json", ExecutionOptions.parse(new String[]{"debug", "--format", "json"}).format());
+        assertNull(ExecutionOptions.parse(new String[]{"load"}).loadScenario());
+        assertEquals("json", ExecutionOptions.parse(new String[]{"load", "--format", "json"}).format());
         assertThrows(IllegalArgumentException.class,
-                () -> ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "sample.echo"}));
+                () -> ExecutionOptions.parse(new String[]{"debug", "template", "X", "--set", "other.value=1"}));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionOptions.parse(new String[]{"debug", "template", "X", "--set", "input.value="}));
+    }
+
+    @Test void rejectsConflictingLoadModels() {
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"load", "scenario.yaml",
+                "--users", "2", "--arrival-rate", "5/s"}));
     }
 
     @Test void defaultsInteractiveCommandsToVerboseAndQuietRetainsAnOptOut() {

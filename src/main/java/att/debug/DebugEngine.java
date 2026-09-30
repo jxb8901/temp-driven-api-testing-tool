@@ -58,7 +58,32 @@ public final class DebugEngine {
         promoted.put("source", input.path);
         promoted.put("inputs", input.inputs);
         promoted.put("vars", input.vars);
+        promoted.put("arguments", input.arguments);
         return promoted;
+    }
+
+    /** Validates one discovery candidate without creating output or executing a resource call. */
+    public Path validateDiscoverableTarget(String type, String id) throws Exception {
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"debug", type, id});
+        Path sidecar = autoInput(type, id);
+        DebugInput input;
+        if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) input = loadInput(options, type, id);
+        else {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("schemaVersion", Version.DEBUG_SCHEMA);
+            input = new DebugInput(sidecar, empty, type, id, config);
+        }
+        ResolvedTarget resolved = resolveTarget(type, id, input);
+        StageCaseData stage = input.stage(resolved.template.name());
+        TestCase testCase = syntheticCase(type, id, input, stage);
+        if ("template".equals(type) || "flow".equals(type)) {
+            UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine);
+        }
+        new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
+                resolved.flows, input.path, "debug", input.inputs, input.vars);
+        return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
     }
 
     public Result run(ExecutionOptions options) throws Exception {
@@ -275,8 +300,21 @@ public final class DebugEngine {
                         "Upgrade schemaVersion to " + Version.DEBUG_SCHEMA + "; use top-level vars for initial EXEC.VARS values.", null);
             }
             SchemaSupport.requireVersion(map, Version.DEBUG_SCHEMA, "debug input");
-            if (!options.variableOverrides().isEmpty())
-                map.put("vars", att.core.BootstrapVariableOverrides.apply(DebugInput.map(map.get("vars")), options.variableOverrides()));
+            List<String> overrides = options.setOverrides();
+            if (att.core.CliSetOverrides.hasNamespace(overrides, "arg") && !"tool".equals(type))
+                throw debugError("--set arg.* is valid only for a Tool target", "Use --set input.* for EXEC.INPUT or select a Tool target for arg.* overrides.");
+            if (att.core.CliSetOverrides.hasNamespace(overrides, "vars") && "tool".equals(type))
+                throw debugError("--set vars.* is not supported for Tool targets", "Tool Debug uses its explicit arguments contract.");
+            Map<String, Object> inputs = DebugInput.map(map.get("inputs"));
+            Map<String, Object> vars = DebugInput.map(map.get("vars"));
+            inputs = att.core.CliSetOverrides.apply(inputs, overrides, "input");
+            vars = att.core.CliSetOverrides.apply(vars, overrides, "vars");
+            if (map.containsKey("inputs") || att.core.CliSetOverrides.hasNamespace(overrides, "input")) map.put("inputs", inputs);
+            if (map.containsKey("vars") || att.core.CliSetOverrides.hasNamespace(overrides, "vars")) map.put("vars", vars);
+            if ("tool".equals(type) && att.core.CliSetOverrides.hasNamespace(overrides, "arg")) {
+                Map<String, Object> arguments = new DebugInput(path, map, type, id, config).arguments;
+                map.put("arguments", att.core.CliSetOverrides.apply(arguments, overrides, "arg"));
+            }
             validateDebugVariables(map.get("vars"), type, path);
             return new DebugInput(path, map, type, id, config);
         } catch (DiagnosticException e) {

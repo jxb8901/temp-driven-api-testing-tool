@@ -60,6 +60,73 @@ class DebugEngineTest {
         assertTrue(new String(Files.readAllBytes(result.resultPath()), StandardCharsets.UTF_8).contains("input: " + explicit));
     }
 
+    @Test void namespacedSetOverridesTypedDebugInputAndToolArguments() throws Exception {
+        Path project = fixture();
+        java.util.Map<String, ToolArgumentConfig> echoArguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("echo", new ToolConfig("echo", "Echo", "Echo", "/bin/echo ${value}", "txt", echoArguments)), null, null);
+
+        Files.createDirectories(project.resolve("templates/INPUT"));
+        Files.write(project.resolve("templates/INPUT/template.yaml"), (
+                "schemaVersion: att-template/v3.3\nname: INPUT\ndescription: input override\nactions:\n"
+                        + "  show: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/INPUT/debug.yaml"),
+                "schemaVersion: att-debug/v1.1\ninputs: {amount: 7}\n".getBytes(StandardCharsets.UTF_8));
+        DebugEngine.Result template = run(project, config, "template", "INPUT", "--set", "input.amount=42");
+        assertEquals(ResultStatus.PASS, template.status(), template.diagnostic() == null ? "" : template.diagnostic().format());
+        assertTrue(new String(Files.readAllBytes(template.logPath()), StandardCharsets.UTF_8).contains("amount=42"));
+
+        DebugEngine.Result tool = run(project, config, "tool", "echo", "--set", "arg.value=typed");
+        assertEquals(ResultStatus.PASS, tool.status(), tool.diagnostic() == null ? "" : tool.diagnostic().format());
+        assertTrue(new String(Files.readAllBytes(tool.logPath()), StandardCharsets.UTF_8).contains("typed"));
+    }
+
+    @Test void standaloneAndNestedFlowBootstrapPreservesExplicitNull() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Files.createDirectories(project.resolve("templates/WRAPPER"));
+        Files.write(project.resolve("templates/WRAPPER/template.yaml"), (
+                "schemaVersion: att-template/v3.3\nname: WRAPPER\ndescription: nested flow bootstrap\nactions:\n"
+                        + "  nested: {type: flow, use: debug.echo.v1}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/flows/debug/echo/flow.yaml"), (
+                "schemaVersion: att-flow/v3.3\nid: debug.echo.v1\nname: Debug Echo\ndescription: vars flow\nactions:\n"
+                        + "  echo: {type: log, message: 'seed=${EXEC.VARS.seed}|amount=${EXEC.INPUT.amount}'}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/WRAPPER/debug.yaml"),
+                "schemaVersion: att-debug/v1.1\ninputs: {amount: 11}\nvars: {seed: nested}\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/flows/debug/echo/debug.yaml"),
+                "schemaVersion: att-debug/v1.1\ninputs: {amount: 12}\nvars: {seed: null}\n".getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+
+        DebugEngine.Result nested = run(project, config, "template", "WRAPPER");
+        assertEquals(ResultStatus.PASS, nested.status(), nested.diagnostic() == null ? "" : nested.diagnostic().format());
+        assertTrue(new String(Files.readAllBytes(nested.logPath()), StandardCharsets.UTF_8).contains("seed=nested|amount=11"));
+        DebugEngine.Result standalone = run(project, config, "flow", "debug.echo.v1");
+        assertEquals(ResultStatus.PASS, standalone.status(), standalone.diagnostic() == null ? "" : standalone.diagnostic().format());
+        String log = new String(Files.readAllBytes(standalone.logPath()), StandardCharsets.UTF_8);
+        assertTrue(log.contains("seed=|amount=12"), log);
+        assertTrue(new String(Files.readAllBytes(standalone.resultPath()), StandardCharsets.UTF_8).contains("seed: null"));
+    }
+
+    @Test void rejectsInvalidVarsShapeAndToolBootstrapVarsBeforeInvocation() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>singletonMap("echo",
+                new ToolConfig("echo", "Echo", "Echo", "/bin/echo ${value}", "txt", Collections.<String, ToolArgumentConfig>emptyMap())), null, null);
+        Path invalidShape = temp.resolve("invalid-vars-shape.yaml");
+        Files.write(invalidShape, "schemaVersion: att-debug/v1.1\nvars: [not, a, map]\n".getBytes(StandardCharsets.UTF_8));
+        DebugEngine.Result invalid = run(project, config, "template", "SIMPLE", "--input", invalidShape.toString());
+        assertEquals(ResultStatus.INVALID, invalid.status());
+
+        Path toolVars = temp.resolve("tool-vars.yaml");
+        Files.write(toolVars, "schemaVersion: att-debug/v1.1\nvars: {notArguments: value}\n".getBytes(StandardCharsets.UTF_8));
+        DebugEngine.Result rejected = run(project, config, "tool", "echo", "--input", toolVars.toString());
+        assertEquals(ResultStatus.INVALID, rejected.status());
+        assertNotNull(rejected.diagnostic());
+        assertTrue(rejected.diagnostic().detail().contains("supported only for standalone Template and Flow targets"), rejected.diagnostic().format());
+    }
+
     @Test void debugVarsSeedTypedCanonicalContextAndCanBeReplacedByAssign() throws Exception {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/VARS"));
