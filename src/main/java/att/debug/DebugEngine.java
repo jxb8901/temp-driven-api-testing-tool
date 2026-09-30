@@ -51,6 +51,16 @@ public final class DebugEngine {
         this.config = config;
     }
 
+    /** Reads and validates a Debug sidecar for in-memory Load promotion without executing the target. */
+    public Map<String, Object> loadBootstrapInputForLoad(ExecutionOptions options) throws Exception {
+        DebugInput input = loadInput(options, options.debugTargetType(), options.debugTargetId());
+        Map<String, Object> promoted = new LinkedHashMap<String, Object>();
+        promoted.put("source", input.path);
+        promoted.put("inputs", input.inputs);
+        promoted.put("vars", input.vars);
+        return promoted;
+    }
+
     public Result run(ExecutionOptions options) throws Exception {
         java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
@@ -109,6 +119,9 @@ public final class DebugEngine {
             ResolvedTarget resolved = resolveTarget(targetType, targetId, input);
             StageCaseData stage = input.stage(resolved.template.name());
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
+            UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine);
             if (options.verbose() && !options.quiet())
                 consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
                         + " case=" + testCase.caseId() + " resolved=" + input.path);
@@ -120,9 +133,10 @@ public final class DebugEngine {
             context.setProject(projectRoot);
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
+            context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
             context.setLegacyInputsView(input.inputs);
             if ("template".equals(targetType) || "flow".equals(targetType))
-                context.seedDebugVariables(input.vars);
+                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine);
             context.put("CASE.environment", config.environment());
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
@@ -261,6 +275,8 @@ public final class DebugEngine {
                         "Upgrade schemaVersion to " + Version.DEBUG_SCHEMA + "; use top-level vars for initial EXEC.VARS values.", null);
             }
             SchemaSupport.requireVersion(map, Version.DEBUG_SCHEMA, "debug input");
+            if (!options.variableOverrides().isEmpty())
+                map.put("vars", att.core.BootstrapVariableOverrides.apply(DebugInput.map(map.get("vars")), options.variableOverrides()));
             validateDebugVariables(map.get("vars"), type, path);
             return new DebugInput(path, map, type, id, config);
         } catch (DiagnosticException e) {

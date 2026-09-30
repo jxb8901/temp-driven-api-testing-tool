@@ -54,6 +54,22 @@ class ExecutionOptionsTest {
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"debug", "template", "X", "--all"}));
     }
 
+    @Test void parsesBootstrapOverridesAndLoadDebugPromotion() {
+        ExecutionOptions debug = ExecutionOptions.parse(new String[]{"debug", "flow", "common.compose.v1",
+                "--set", "vars.refNo=R001", "--set", "vars.copy=${EXEC.INPUT.refNo}"});
+        assertEquals(2, debug.variableOverrides().size());
+        assertEquals("vars.refNo=R001", debug.variableOverrides().get(0));
+        ExecutionOptions load = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "PAYMENT",
+                "--input", "debug.yaml", "--users", "2", "--duration", "1s", "--set", "vars.refNo=R002"});
+        assertTrue(load.loadDebug());
+        assertEquals("template", load.debugTargetType());
+        assertEquals("PAYMENT", load.debugTargetId());
+        assertEquals("debug.yaml", load.debugInput().toString());
+        assertEquals("2", load.loadUsers());
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "sample.echo"}));
+    }
+
     @Test void defaultsInteractiveCommandsToVerboseAndQuietRetainsAnOptOut() {
         ExecutionOptions run = ExecutionOptions.parse(new String[]{"run", "--all"});
         ExecutionOptions debug = ExecutionOptions.parse(new String[]{"debug", "template", "SIMPLE"});

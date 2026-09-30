@@ -34,6 +34,6 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-Load scenario 請從舊 single-target/v1.1 格式遷移至 att-load/v1.2 workloads。Pacing 移入各 workload；需要自訂 EXEC.ID 時可設定頂層 execution.execIdFormat。它在初始化時使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。不要在格式中使用 seq.next() 或 external/stateful functions。
+Load scenario 請將舊 single-target/v1.1 格式遷移為 att-load/v1.2 workloads，再把 schemaVersion 升至 att-load/v1.3 以啟用 workload vars。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
 
 Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[動作與型別化值](../14_actions.md)、[Runtime 與 Context 模型](../03_runtime_context.md)、[Load 模式](../04_execution_modes/load.md)與[Schema 矩陣](schema_matrix.md)。

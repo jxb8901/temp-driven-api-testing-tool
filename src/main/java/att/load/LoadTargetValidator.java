@@ -16,8 +16,11 @@ public final class LoadTargetValidator {
         att.core.TestCase testCase = adapter.testCase("iteration-validation", scenario.inputs());
         att.core.StageCaseData stage = adapter.stage();
         try {
+            att.template.UnifiedTemplateEngine bootstrapEngine = new att.template.UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine);
             new PackageValidator(projectRoot, config).validateDebugTarget(target.template(), testCase, stage, target.flows(),
-                    scenario.source(), "load", scenario.inputs());
+                    scenario.source(), "load", scenario.inputs(), scenario.vars());
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed != null) throw typed;

@@ -69,7 +69,7 @@ Options are command-specific. Unknown commands/options and missing option values
 
 ### Standalone debug inputs and outputs
 
-Debug input files use the current `att-debug/v1.1` schema. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, `inputs` is adapted directly into canonical `EXEC.INPUT.*`, and `vars` seeds initial `EXEC.VARS.*` for Template/Flow Debug. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`; Tool Debug does not support `vars`. An explicit `--input` always wins over auto-discovery. Historical `att-debug/v1.0` inputs must be migrated.
+Debug input files use the current `att-debug/v1.1` schema. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, `inputs` is adapted directly into canonical `EXEC.INPUT.*`, and Template/Flow `vars` is evaluated as a typed initial `EXEC.VARS.*` tree. Exact `${...}` references retain their type; interpolated strings and `#{...}` use the shared ATT expression engine. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`; Tool Debug does not support `vars`. An explicit `--input` always wins over auto-discovery. Historical `att-debug/v1.0` inputs must be migrated.
 
 Before execution ATT validates only the selected Template or Flow dependency closure, or the selected Tool definition. It does not require unrelated workbook snapshots or unrelated malformed Template descriptors to pass. The selected target still uses the normal Template/Flow/Tool runner, including Context resolution, Flow nesting, Tool retry/timeout, evidence, Action result persistence, DB finalization, and Case-log behavior.
 
@@ -185,4 +185,11 @@ Load uses the scenario as the base and explicit workload options override the co
   --max-concurrent 4 --overload-policy drop --format json
 ```
 
-The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
+Repeatable `--set vars.path=value` applies safe-YAML typed overrides to raw bootstrap definitions before expression evaluation. The same option works for `debug` and Load scenarios; `load --debug template|flow <id>` promotes a Debug sidecar into a transient single-workload Load run and requires explicit pacing. For example:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
+```
+
+The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.

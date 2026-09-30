@@ -82,9 +82,17 @@ EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs 
 
 Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
+### Execution bootstrap variables
+
+Debug sidecars and current Load workloads can seed a canonical initial `EXEC.VARS` tree for Template/Flow execution. The order is: resolve and validate the target and definitions; initialize `EXEC.RUN_ID`, `EXEC.INPUT`, `EXEC.LOAD`, stable META and execution timestamps; generate and publish `EXEC.ID`; establish `EXEC.OUTPUT_DIR`; evaluate vars; then start the Template/Flow. Debug follows the same rule with its initialized identity and output paths.
+
+Values use the ordinary ATT expression parser. An exact `${...}` retains the referenced type (including null, numbers, lists and maps); interpolation into surrounding text produces a string; `#{...}` preserves its typed result. Maps and lists recurse while keys remain literal. Vars dependencies are resolved independent of declaration order; missing bootstrap vars and direct/indirect cycles are errors. Each Load execution evaluates an isolated copy, so concurrent users/workloads do not share mutable values. The first regular `assign` may replace an initial value.
+
+The available roots are initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other named `EXEC.VARS` entries, and stable META project/source/target/template metadata. Actions, action-local `output`, invocation-scoped META, and external or stateful calls are unavailable. Only safe pure built-ins are allowed; normal expression syntax and type rules are reused. `--set vars.path=value` changes the raw definition before evaluation.
+
 ### Load execution ID initialization
 
-Load uses schema att-load/v1.2. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect.
+Load uses schema att-load/v1.3. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
 Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
 

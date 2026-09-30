@@ -102,6 +102,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             // mkdir and temporary-workspace cleanup I/O.
             context.setCommandWorkingDirectory(executionWorkspace);
             log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
+            att.core.ExecutionBootstrapVariables.evaluate(context.bootstrapVariables(), context, identityEngine);
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();

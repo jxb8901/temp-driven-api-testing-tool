@@ -1,15 +1,19 @@
 ### 4.3 Load Mode
 
-ATT 3.6.0 accepts att-load/v1.2 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target and its pacing policy. ATT validates the scenario and all targets before a scheduler starts.
+ATT accepts att-load/v1.3 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target, its inputs, bootstrap vars and pacing policy. ATT validates the scenario and all targets before a scheduler starts.
 
 #### Scenario shape
 
 ~~~yaml
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.3
 workloads:
   - id: payment
     target: {type: template, id: PAYMENT_INVOKE}
-    inputs: {region: HK}
+    inputs: {region: HK, amount: 100}
+    vars:
+      baseAmount: "${EXEC.INPUT.amount}"
+      total: "#{${EXEC.INPUT.amount} * 2}"
+      reference: "REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
     load:
       users: 20
       warmup: 10s
@@ -31,7 +35,19 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
-A target accepts template, flow or tool; Tool targets may provide named arguments. Workload inputs become EXEC.INPUT for each iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
+A target accepts template, flow or tool; Tool targets may provide named arguments but cannot declare bootstrap vars. Workload inputs become EXEC.INPUT for each iteration; Template/Flow workload vars become a fresh initial EXEC.VARS tree for every started iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
+
+| Workload field | Runtime destination | Contract |
+|---|---|---|
+| `inputs` | `EXEC.INPUT` | Business input values; not bootstrap variables |
+| `vars` | initial `EXEC.VARS` | Typed expression tree for Template/Flow; independently evaluated per execution |
+| `target.arguments` | Tool arguments | Tool-only call arguments; separate from `EXEC.INPUT` and `EXEC.VARS` |
+
+#### Per-execution bootstrap vars
+
+After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable.
+
+Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 
 #### Workload models
 
@@ -43,7 +59,7 @@ duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends
 
 #### Load identity and output layout
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Runtime and Context Model](../03_runtime_context.md) for field availability and function restrictions.
+Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Runtime and Context Model](../03_runtime_context.md) for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -79,11 +95,15 @@ Top-level thresholds apply to the aggregate run; workload thresholds apply to on
 
 For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
+Repeatable `--set vars.path=value` overrides the workload's raw bootstrap definition before expression evaluation. Values use safe YAML scalar parsing, so quote expressions to pass them literally. Debug accepts the same override; `load --debug template|flow <id>` promotes the selected Debug sidecar's inputs and vars into an in-memory single-workload Load scenario. It requires explicit pacing such as `--users 2 --duration 10s`.
+
 ~~~sh
 ./att.sh load examples/load/closed-smoke.yaml
 ./att.sh load examples/load/arrival-smoke.yaml --format json
 ./att.sh load examples/load/multi-closed.yaml
 ./att.sh load examples/load/multi-arrival.yaml
+./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ~~~
 
-Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). Historical v1.0/v1.1 schemas are archived and are not accepted as active versions. Migrate to v1.2 workloads syntax; see [Migrations](../appendices/migrations.md).
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). The previous v1.2 schema is retained for migration diagnostics; upgrade its schemaVersion to v1.3 to use workload vars. Historical v1.0/v1.1 schemas are also not accepted as active versions. See [Migrations](../appendices/migrations.md).

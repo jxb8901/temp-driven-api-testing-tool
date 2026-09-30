@@ -85,6 +85,35 @@ class DebugEngineTest {
         assertTrue(caseYaml.contains("tags: [SIT, PAYMENT]"), caseYaml);
     }
 
+    @Test void debugBootstrapUsesTypedExpressionsAndCliOverridesBeforeEvaluation() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Files.createDirectories(project.resolve("templates/BOOTSTRAP"));
+        Files.write(project.resolve("templates/BOOTSTRAP/template.yaml"), (
+                "schemaVersion: att-template/v3.3\nname: BOOTSTRAP\ndescription: typed bootstrap\nactions:\n"
+                        + "  before:\n    type: log\n    message: 'before=${EXEC.VARS.amount}|${EXEC.VARS.twice}|${EXEC.VARS.label}|${EXEC.VARS.cli}|${EXEC.VARS.templateName}'\n"
+                        + "  nested:\n    type: flow\n    use: debug.echo.v1\n"
+                        + "  replace:\n    type: assign\n    name: amount\n    expression: ${EXEC.INPUT.amount}\n"
+                        + "  after:\n    type: log\n    message: 'after=${EXEC.VARS.amount}'\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/flows/debug/echo/flow.yaml"), (
+                "schemaVersion: att-flow/v3.3\nid: debug.echo.v1\nname: Debug Echo\ndescription: bootstrap flow\nactions:\n"
+                        + "  echo:\n    type: log\n    message: 'nested=${EXEC.VARS.cli}'\n").getBytes(StandardCharsets.UTF_8));
+        Path input = project.resolve("templates/BOOTSTRAP/debug.yaml");
+        Files.write(input, ("schemaVersion: att-debug/v1.1\ninputs: {amount: 21}\nvars:\n"
+                + "  amount: 5\n  twice: '#{${EXEC.INPUT.amount} * 2}'\n"
+                + "  label: 'REQ-${EXEC.ID}'\n  cli: from-sidecar\n  templateName: '${META.TEMPLATE.id}'\n").getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+
+        DebugEngine.Result result = run(project, config, "template", "BOOTSTRAP", "--set", "vars.cli=${EXEC.INPUT.amount}");
+
+        assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().format());
+        String log = new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8);
+        assertTrue(log.contains("before=5|42|REQ-"), log);
+        assertTrue(log.contains("|21|BOOTSTRAP"), log);
+        assertTrue(log.contains("nested=21"), log);
+        assertTrue(log.contains("after=21"), log);
+    }
+
     @Test void historicalDebugSchemaReportsMigrationToV11() throws Exception {
         Path project = fixtureWithoutSidecars();
         Path input = temp.resolve("historical-debug.yaml");

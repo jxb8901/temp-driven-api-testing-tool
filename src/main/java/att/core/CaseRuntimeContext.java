@@ -62,8 +62,9 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> execNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> inputNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> varsNode = new LinkedHashMap<String, Object>();
-    /** Debug bootstrap names may be replaced by the first normal assign. */
-    private final java.util.Set<String> debugSeededVariableNames = new java.util.LinkedHashSet<String>();
+    private Map<String, Object> bootstrapVariableDefinitions = Collections.emptyMap();
+    /** Bootstrap names may be replaced by the first normal assign. */
+    private final java.util.Set<String> bootstrapSeededVariableNames = new java.util.LinkedHashSet<String>();
     /** ATT-owned diagnostics, deliberately excluded from the expression Context. */
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
     /** Public uppercase load identity published below EXEC.LOAD. */
@@ -835,16 +836,35 @@ public final class CaseRuntimeContext {
                 : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(inputs));
     }
 
-    /** Seeds entries in the canonical EXEC.VARS map for standalone Debug only. */
+    /** Stores an immutable definition snapshot to be evaluated per execution after ID publication. */
+    public void setBootstrapVariables(Map<String, Object> variables) {
+        bootstrapVariableDefinitions = variables == null || variables.isEmpty()
+                ? Collections.<String, Object>emptyMap() : Collections.unmodifiableMap(debugCopyMap(variables));
+    }
+
+    public Map<String, Object> bootstrapVariables() { return bootstrapVariableDefinitions; }
+
+    /** Seeds evaluated entries in canonical EXEC.VARS for Debug or each Load execution. */
+    public void seedExecutionBootstrapVariable(String name, Object value) {
+        validateCaseVariableName(name);
+        if (varsNode.containsKey(name)) throw new IllegalArgumentException("Duplicate EXEC.VARS bootstrap name '" + name + "'");
+        varsNode.put(name, debugCopy(value));
+        bootstrapSeededVariableNames.add(name);
+    }
+
+    /** Compatibility wrapper for validation contexts that only need declared names and raw shapes. */
     public void seedDebugVariables(Map<String, Object> variables) {
         if (variables == null || variables.isEmpty()) return;
         for (Map.Entry<String, Object> entry : variables.entrySet()) {
-            validateCaseVariableName(entry.getKey());
-            if (varsNode.containsKey(entry.getKey())) {
-                throw new IllegalArgumentException("Duplicate EXEC.VARS bootstrap name '" + entry.getKey() + "'");
-            }
-            varsNode.put(entry.getKey(), debugCopy(entry.getValue()));
-            debugSeededVariableNames.add(entry.getKey());
+            seedExecutionBootstrapVariable(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /** Rolls back a failed pre-action bootstrap transaction. */
+    public void clearExecutionBootstrapVariables(java.util.Set<String> names) {
+        if (names == null) return;
+        for (String name : names) {
+            if (bootstrapSeededVariableNames.remove(name)) varsNode.remove(name);
         }
     }
 
@@ -852,7 +872,7 @@ public final class CaseRuntimeContext {
     public void requireCaseVariableAvailable(String name) {
         validateCaseVariableName(name);
         Map<String, Object> variables = varsNode;
-        if (variables.containsKey(name) && !debugSeededVariableNames.contains(name)) {
+        if (variables.containsKey(name) && !bootstrapSeededVariableNames.contains(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
                     "Duplicate EXEC.VARS assignment '${EXEC.VARS." + name + "}'",
                     "The variable was already assigned earlier in this Test Case.", null, "name",
@@ -875,7 +895,7 @@ public final class CaseRuntimeContext {
         requireCaseVariableAvailable(name);
         Map<String, Object> variables = varsNode;
         variables.put(name, value);
-        debugSeededVariableNames.remove(name);
+        bootstrapSeededVariableNames.remove(name);
     }
 
     @SuppressWarnings("unchecked")
@@ -892,6 +912,12 @@ public final class CaseRuntimeContext {
             return copy;
         }
         return value;
+    }
+
+    private static Map<String, Object> debugCopyMap(Map<String, Object> value) {
+        Map<String, Object> copy = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : value.entrySet()) copy.put(entry.getKey(), debugCopy(entry.getValue()));
+        return copy;
     }
 
     /** Expression-visible roots, including legacy aliases and current local bindings. */

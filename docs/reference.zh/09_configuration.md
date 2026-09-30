@@ -137,7 +137,7 @@ ATT 3.6.0 使用以下現行 resource/config schema。現行 JSON Schema 位於 
 | Workbook sidecar | att-sidecar/v2.2 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Load scenario | att-load/v1.2 |
+| Load scenario | att-load/v1.3 |
 
 schemas/catalog.yaml 是 authoritative catalog。Package validation 會檢查 catalog registrations；這不會令封存 schema 成為可執行 contract。Unsupported active schema version 會失敗並提供 migration guidance。
 

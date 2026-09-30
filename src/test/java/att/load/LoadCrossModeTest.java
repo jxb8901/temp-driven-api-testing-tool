@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Regression proof that one canonical component is portable across execution modes. */
@@ -64,6 +65,45 @@ class LoadCrossModeTest {
         IterationResult load = new IterationExecutor(project, config, target).execute(
                 IterationRequest.closed("cross-mode", "cross-mode-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
         assertPortableResult(load.context(), load.validations());
+    }
+
+    @Test void loadDebugPromotionEvaluatesOverridesPerExecutionWithoutSharingValues() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.3\n"
+                + "name: SHARED\ndescription: bootstrap fixture\nactions:\n"
+                + "  check:\n    type: log\n    message: 'value=${EXEC.VARS.refNo}|id=${EXEC.VARS.executionId}'\n");
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {amount: 17}\n"
+                + "vars: {refNo: sidecar, executionId: '${EXEC.ID}'}\n");
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "SHARED",
+                "--input", "templates/SHARED/debug.yaml", "--users", "1", "--duration", "1s",
+                "--run-id", "bootstrap-load", "--output-dir", temp.resolve("load-output").toString(),
+                "--set", "vars.refNo=${EXEC.INPUT.amount}"});
+        Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
+                options.debugTargetType(), options.debugTargetId(), map(promoted.get("inputs")), map(promoted.get("vars")), options);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources, temp.resolve("load-output"));
+            IterationResult first = executor.execute(IterationRequest.closed("bootstrap-load", "i-1", 1,
+                    "STEADY", Instant.now(), "VU-1", scenario.inputs()).withWorkloadId(scenario.workloadId()));
+            IterationResult second = executor.execute(IterationRequest.closed("bootstrap-load", "i-2", 2,
+                    "STEADY", Instant.now(), "VU-1", scenario.inputs()).withWorkloadId(scenario.workloadId()));
+            assertEquals(ResultStatus.PASS, first.status());
+            assertEquals(ResultStatus.PASS, second.status());
+            assertEquals(17L, ((Number) first.context().require("EXEC.VARS.refNo")).longValue());
+            assertEquals(first.context().resolve("EXEC.ID"), first.context().resolve("EXEC.VARS.executionId"));
+            assertEquals(second.context().resolve("EXEC.ID"), second.context().resolve("EXEC.VARS.executionId"));
+            assertNotEquals(first.context().resolve("EXEC.VARS.executionId"), second.context().resolve("EXEC.VARS.executionId"));
+            assertTrue(String.valueOf(first.context().resolve("EXEC.ACTIONS.check.output.result")).contains("value=17|id="));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Collections.<String, Object>emptyMap();
     }
 
     private List<att.core.ValidationResult> execute(Path project, FrameworkConfig config, StageTemplate template,

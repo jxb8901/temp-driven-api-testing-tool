@@ -273,6 +273,9 @@ id="toc-invocation-and-scope-rules">Invocation and scope rules</a></li>
 <li><a href="#action-output-and-evidence-paths"
 id="toc-action-output-and-evidence-paths">Action output and evidence
 paths</a></li>
+<li><a href="#execution-bootstrap-variables"
+id="toc-execution-bootstrap-variables">Execution bootstrap
+variables</a></li>
 <li><a href="#load-execution-id-initialization"
 id="toc-load-execution-id-initialization">Load execution ID
 initialization</a></li>
@@ -542,7 +545,7 @@ execution-neutral Context and reusable components:</p>
 </tr>
 <tr class="odd">
 <td>Load</td>
-<td><code>att-load/v1.2</code> scenario</td>
+<td><code>att-load/v1.3</code> scenario</td>
 <td>one Template, Flow or Tool target repeatedly</td>
 </tr>
 </tbody>
@@ -1199,12 +1202,44 @@ attempts remain after a later success.</td>
 </table>
 <p>Strings, numbers, booleans, null, maps, lists and DocumentValue
 remain typed across Action/Template/Flow boundaries.</p>
+<h3 id="execution-bootstrap-variables">Execution bootstrap
+variables</h3>
+<p>Debug sidecars and current Load workloads can seed a canonical
+initial <code>EXEC.VARS</code> tree for Template/Flow execution. The
+order is: resolve and validate the target and definitions; initialize
+<code>EXEC.RUN_ID</code>, <code>EXEC.INPUT</code>,
+<code>EXEC.LOAD</code>, stable META and execution timestamps; generate
+and publish <code>EXEC.ID</code>; establish
+<code>EXEC.OUTPUT_DIR</code>; evaluate vars; then start the
+Template/Flow. Debug follows the same rule with its initialized identity
+and output paths.</p>
+<p>Values use the ordinary ATT expression parser. An exact
+<code>${...}</code> retains the referenced type (including null,
+numbers, lists and maps); interpolation into surrounding text produces a
+string; <code>#{...}</code> preserves its typed result. Maps and lists
+recurse while keys remain literal. Vars dependencies are resolved
+independent of declaration order; missing bootstrap vars and
+direct/indirect cycles are errors. Each Load execution evaluates an
+isolated copy, so concurrent users/workloads do not share mutable
+values. The first regular <code>assign</code> may replace an initial
+value.</p>
+<p>The available roots are initialized <code>EXEC.RUN_ID</code>,
+<code>EXEC.ID</code>, <code>EXEC.OUTPUT_DIR</code>,
+<code>EXEC.INPUT</code>, <code>EXEC.LOAD</code>, other named
+<code>EXEC.VARS</code> entries, and stable META
+project/source/target/template metadata. Actions, action-local
+<code>output</code>, invocation-scoped META, and external or stateful
+calls are unavailable. Only safe pure built-ins are allowed; normal
+expression syntax and type rules are reused.
+<code>--set vars.path=value</code> changes the raw definition before
+evaluation.</p>
 <h3 id="load-execution-id-initialization">Load execution ID
 initialization</h3>
-<p>Load uses schema att-load/v1.2. If execution.execIdFormat is present,
+<p>Load uses schema att-load/v1.3. If execution.execIdFormat is present,
 ATT evaluates it once per started iteration with the normal ${...} /
 #{...} engine during initialization; otherwise the default run-scoped ID
-remains in effect.</p>
+remains in effect. Bootstrap vars are evaluated after the generated ID
+and output path are published.</p>
 <p>Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT,
 EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only
 EXEC.LOAD.USER_ID and the already curated
@@ -1358,14 +1393,14 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb11-1"><a href="#
 <code>case</code>, optional <code>stage</code>, <code>inputs</code>,
 <code>vars</code>, <code>arguments</code>, and grouped
 <code>tools.&lt;localKey&gt;.arguments</code>. <code>inputs</code> is
-adapted into canonical <code>EXEC.INPUT</code>; <code>vars</code> seeds
-entries in canonical <code>EXEC.VARS</code> before a Template or Flow
-starts. <code>vars</code> is literal-only in v1.1 and preserves YAML
-scalar, map, and list types. Tool Debug uses <code>arguments</code> and
-does not support <code>vars</code>. Framework-owned identity, output,
-Actions, resource metadata and compatibility views cannot be overwritten
-by user input. Historical <code>att-debug/v1.0</code> remains archived
-and must be migrated to v1.1.</p>
+adapted into canonical <code>EXEC.INPUT</code>; Template/Flow
+<code>vars</code> is evaluated as a typed bootstrap tree and seeds
+canonical <code>EXEC.VARS</code> before a target starts. Tool Debug uses
+<code>arguments</code> and does not support <code>vars</code>.
+Framework-owned identity, output, Actions, resource metadata and
+compatibility views cannot be overwritten by user input. Historical
+<code>att-debug/v1.0</code> remains archived and must be migrated to
+v1.1.</p>
 <h4 id="standalone-debug-bootstrap-data">Standalone Debug bootstrap
 data</h4>
 <p>The three input contracts are intentionally separate:</p>
@@ -1413,15 +1448,28 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb12-1"><a href=
 <span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span></span></code></pre></div>
 <div class="sourceCode" id="cb13"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug flow common.payment <span class="at">--input</span> common.payment.debug.yaml</span></code></pre></div>
-<p><code>vars</code> values are copied literally; v1.1 does not evaluate
-<code>${...}</code> or <code>#{...}</code> inside bootstrap values. The
-first normal <code>assign</code> may replace a Debug-seeded variable,
-after which normal duplicate-assignment rules apply. This is a Debug
-bootstrap only: normal Run/Load authoring still publishes variables
-through ordinary <code>assign</code> Actions. Final values appear
-through the normal <code>EXEC.VARS</code>/<code>CASE.VARS</code> context
-and result artifacts, subject to existing redaction rules; no second
-Debug-only namespace is created.</p>
+<p><code>vars</code> values use the shared expression engine: an exact
+<code>${EXEC.INPUT.amount}</code> preserves its native type,
+interpolated text becomes a string, and <code>#{...}</code> preserves
+the expression result type. Maps and lists recurse; map keys remain
+literal. Vars may reference other vars regardless of declaration order;
+cycles, missing vars, unavailable roots, and side-effecting calls fail
+before the target starts. The first normal <code>assign</code> may
+replace a bootstrapped variable, after which normal duplicate-assignment
+rules apply. Final values appear through the normal
+<code>EXEC.VARS</code>/<code>CASE.VARS</code> context and result
+artifacts, subject to existing redaction rules; no second Debug-only
+namespace is created.</p>
+<p>Bootstrap values may use initialized execution identity,
+<code>EXEC.INPUT</code>, <code>EXEC.LOAD</code> when present, other
+<code>EXEC.VARS.&lt;name&gt;</code> entries, and stable
+project/source/target/template metadata. <code>EXEC.ACTIONS</code>,
+action-local <code>output</code>, and invocation-scoped metadata are not
+available. Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are
+blocked; safe pure built-ins use the normal ATT parser. Use repeatable
+<code>--set vars.path=value</code> to override raw definitions before
+evaluation, for example
+<code>--set 'vars.refNo=${EXEC.INPUT.refNo}'</code>.</p>
 <p>Without <code>--input</code>, ATT looks for <code>debug.yaml</code>
 beside a selected Template or Flow and for
 <code>config/tools/&lt;group&gt;.debug.yaml</code> for a grouped Tool.
@@ -1513,41 +1561,95 @@ invocation result and artifacts under its own debug directory; see the
 Load evidence retention section in Chapter 4 when the same target is
 exercised by a load run.</p>
 <h3 id="43-load-mode">4.3 Load Mode</h3>
-<p>ATT 3.6.0 accepts att-load/v1.2 scenarios. A scenario has one or more
-workloads; each workload owns a fixed Template, Flow or Tool target and
-its pacing policy. ATT validates the scenario and all targets before a
-scheduler starts.</p>
+<p>ATT accepts att-load/v1.3 scenarios. A scenario has one or more
+workloads; each workload owns a fixed Template, Flow or Tool target, its
+inputs, bootstrap vars and pacing policy. ATT validates the scenario and
+all targets before a scheduler starts.</p>
 <h4 id="scenario-shape">Scenario shape</h4>
 <div class="sourceCode" id="cb15"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.2</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.3</span></span>
 <span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="fu">workloads</span><span class="kw">:</span></span>
 <span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> payment</span></span>
 <span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">target</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">type</span><span class="kw">:</span><span class="at"> template</span><span class="kw">,</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> PAYMENT_INVOKE</span><span class="kw">}</span></span>
-<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">inputs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">region</span><span class="kw">:</span><span class="at"> HK</span><span class="kw">}</span></span>
-<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">load</span><span class="kw">:</span></span>
-<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
-<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">warmup</span><span class="kw">:</span><span class="at"> 10s</span></span>
-<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">rampUp</span><span class="kw">:</span><span class="at"> 5s</span></span>
-<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 1m</span></span>
-<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">rampDown</span><span class="kw">:</span><span class="at"> 5s</span></span>
-<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">execution</span><span class="kw">:</span></span>
-<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 500ms</span></span>
-<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">thresholds</span><span class="kw">:</span></span>
-<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">p95</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&lt; 800ms&quot;</span></span>
-<span id="cb15-16"><a href="#cb15-16" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">errorRate</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&lt; 1%&quot;</span></span>
-<span id="cb15-17"><a href="#cb15-17" aria-hidden="true" tabindex="-1"></a><span class="fu">thresholds</span><span class="kw">:</span></span>
-<span id="cb15-18"><a href="#cb15-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">minThroughput</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&gt;= 10/s&quot;</span></span>
-<span id="cb15-19"><a href="#cb15-19" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb15-20"><a href="#cb15-20" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span></span>
-<span id="cb15-21"><a href="#cb15-21" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resources</span><span class="kw">:</span></span>
-<span id="cb15-22"><a href="#cb15-22" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> none</span></span>
-<span id="cb15-23"><a href="#cb15-23" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span></span>
-<span id="cb15-24"><a href="#cb15-24" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">execIdFormat</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}&quot;</span></span></code></pre></div>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">inputs</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">region</span><span class="kw">:</span><span class="at"> HK</span><span class="kw">,</span><span class="at"> </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span><span class="kw">}</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">vars</span><span class="kw">:</span></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">baseAmount</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.amount}&quot;</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">total</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{${EXEC.INPUT.amount} * 2}&quot;</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">reference</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}&quot;</span></span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">load</span><span class="kw">:</span></span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
+<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">warmup</span><span class="kw">:</span><span class="at"> 10s</span></span>
+<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">rampUp</span><span class="kw">:</span><span class="at"> 5s</span></span>
+<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 1m</span></span>
+<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">rampDown</span><span class="kw">:</span><span class="at"> 5s</span></span>
+<span id="cb15-16"><a href="#cb15-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">execution</span><span class="kw">:</span></span>
+<span id="cb15-17"><a href="#cb15-17" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 500ms</span></span>
+<span id="cb15-18"><a href="#cb15-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">thresholds</span><span class="kw">:</span></span>
+<span id="cb15-19"><a href="#cb15-19" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">p95</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&lt; 800ms&quot;</span></span>
+<span id="cb15-20"><a href="#cb15-20" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">errorRate</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&lt; 1%&quot;</span></span>
+<span id="cb15-21"><a href="#cb15-21" aria-hidden="true" tabindex="-1"></a><span class="fu">thresholds</span><span class="kw">:</span></span>
+<span id="cb15-22"><a href="#cb15-22" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">minThroughput</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&gt;= 10/s&quot;</span></span>
+<span id="cb15-23"><a href="#cb15-23" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb15-24"><a href="#cb15-24" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span></span>
+<span id="cb15-25"><a href="#cb15-25" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resources</span><span class="kw">:</span></span>
+<span id="cb15-26"><a href="#cb15-26" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> none</span></span>
+<span id="cb15-27"><a href="#cb15-27" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span></span>
+<span id="cb15-28"><a href="#cb15-28" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">execIdFormat</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}&quot;</span></span></code></pre></div>
 <p>A target accepts template, flow or tool; Tool targets may provide
-named arguments. Workload inputs become EXEC.INPUT for each iteration.
-Workloads must share one model (closed users or arrivalRate) and one
+named arguments but cannot declare bootstrap vars. Workload inputs
+become EXEC.INPUT for each iteration; Template/Flow workload vars become
+a fresh initial EXEC.VARS tree for every started iteration. Workloads
+must share one model (closed users or arrivalRate) and one
 warmup/rampUp/duration/rampDown envelope. They are independently paced
 fixed targets, not a transaction mix.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Workload field</th>
+<th>Runtime destination</th>
+<th>Contract</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>inputs</code></td>
+<td><code>EXEC.INPUT</code></td>
+<td>Business input values; not bootstrap variables</td>
+</tr>
+<tr class="even">
+<td><code>vars</code></td>
+<td>initial <code>EXEC.VARS</code></td>
+<td>Typed expression tree for Template/Flow; independently evaluated per
+execution</td>
+</tr>
+<tr class="odd">
+<td><code>target.arguments</code></td>
+<td>Tool arguments</td>
+<td>Tool-only call arguments; separate from <code>EXEC.INPUT</code> and
+<code>EXEC.VARS</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="per-execution-bootstrap-vars">Per-execution bootstrap vars</h4>
+<p>After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are
+ready, ATT evaluates each workload's <code>vars</code> tree before
+starting its Template or Flow. Exact <code>${...}</code> references
+preserve native types, mixed text becomes a string, <code>#{...}</code>
+uses the ordinary typed expression parser, and nested maps/lists are
+evaluated recursively. References between vars are declaration-order
+independent; missing vars and dependency cycles fail before the target
+starts. Each iteration owns its evaluated maps/lists, so concurrent
+users and workloads cannot share mutations. The first normal
+<code>assign</code> may replace a bootstrapped variable.</p>
+<p>Bootstrap expressions may use initialized <code>EXEC.RUN_ID</code>,
+<code>EXEC.ID</code>, <code>EXEC.OUTPUT_DIR</code>,
+<code>EXEC.INPUT</code>, <code>EXEC.LOAD</code>, other
+<code>EXEC.VARS.&lt;name&gt;</code> values, and stable
+project/source/target/template metadata. <code>EXEC.ACTIONS</code>,
+action-local <code>output</code>, invocation-scoped metadata, and
+Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are
+unavailable. Only safe pure built-ins are permitted. Tool arguments
+remain separate from <code>vars</code>.</p>
 <h4 id="workload-models">Workload models</h4>
 <p>Closed workloads use positive load.users. Each stable virtual user
 repeatedly executes its target and observes execution.thinkTime before
@@ -1568,8 +1670,10 @@ layout</h4>
 <p>Each started iteration has a unique EXEC.ID across the Load run and
 shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its
 default run-scoped ID. Otherwise, ATT evaluates it once during
-initialization with the ordinary ${...} / #{...} engine. Closed
-workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See <a
+initialization with the ordinary ${...} / #{...} engine. Bootstrap vars
+are evaluated after that identity is published, so they can use EXEC.ID
+and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID;
+arrival-rate cannot. See <a
 href="reference/03_runtime_context.md">Runtime and Context Model</a> for
 field availability and function restrictions.</p>
 <p>Generated IDs must be non-empty, path-safe segments. Duplicate IDs
@@ -1624,15 +1728,26 @@ ERROR/exit 3. Generator drops are not SUT errors.</p>
 --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent
 can override matching YAML values. Unscoped load-model overrides fail
 for multi-workload scenarios.</p>
+<p>Repeatable <code>--set vars.path=value</code> overrides the
+workload's raw bootstrap definition before expression evaluation. Values
+use safe YAML scalar parsing, so quote expressions to pass them
+literally. Debug accepts the same override;
+<code>load --debug template|flow &lt;id&gt;</code> promotes the selected
+Debug sidecar's inputs and vars into an in-memory single-workload Load
+scenario. It requires explicit pacing such as
+<code>--users 2 --duration 10s</code>.</p>
 <div class="sourceCode" id="cb17"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml</span>
 <span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--format</span> json</span>
 <span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/multi-closed.yaml</span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/multi-arrival.yaml</span></code></pre></div>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/multi-arrival.yaml</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 2 <span class="at">--duration</span> 10s <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span></code></pre></div>
 <p>Copyable examples and field descriptions are maintained in <a
-href="../examples/load/README.md">examples/load/README.md</a>.
-Historical v1.0/v1.1 schemas are archived and are not accepted as active
-versions. Migrate to v1.2 workloads syntax; see <a
+href="../examples/load/README.md">examples/load/README.md</a>. The
+previous v1.2 schema is retained for migration diagnostics; upgrade its
+schemaVersion to v1.3 to use workload vars. Historical v1.0/v1.1 schemas
+are also not accepted as active versions. See <a
 href="reference/appendices/migrations.md">Migrations</a>.</p>
 <h2 id="05-resources-and-integrations">05 Resources and
 Integrations</h2>
@@ -3174,7 +3289,7 @@ compatibility.</p>
 </tr>
 <tr class="even">
 <td>Load scenario</td>
-<td>att-load/v1.2</td>
+<td>att-load/v1.3</td>
 </tr>
 </tbody>
 </table>
@@ -4130,12 +4245,11 @@ outputs</h3>
 <code>case</code> values become synthetic <code>CASE</code> data,
 <code>stage.key</code> and <code>stage.values</code> declare the one
 debug stage, <code>inputs</code> is adapted directly into canonical
-<code>EXEC.INPUT.*</code>, and <code>vars</code> seeds initial
-<code>EXEC.VARS.*</code> for Template/Flow Debug. For compatibility,
-<code>${CASE.inputs.&lt;field&gt;}</code> remains a read-only view when
-no business field is literally named <code>inputs</code>; it is not
-duplicated below <code>EXEC.INPUT</code>. Tool arguments come from the
-root <code>arguments</code> map or
+<code>EXEC.INPUT.*</code>, and Template/Flow <code>vars</code> is
+evaluated as a typed initial <code>EXEC.VARS.*</code> tree. Exact
+<code>${...}</code> references retain their type; interpolated strings
+and <code>#{...}</code> use the shared ATT expression engine. Tool
+arguments come from the root <code>arguments</code> map or
 <code>tools.&lt;localKey&gt;.arguments</code>; Tool Debug does not
 support <code>vars</code>. An explicit <code>--input</code> always wins
 over auto-discovery. Historical <code>att-debug/v1.0</code> inputs must
@@ -4301,6 +4415,15 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb67-1"><a href="#
 <span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
 <span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
 <span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
+<p>Repeatable <code>--set vars.path=value</code> applies safe-YAML typed
+overrides to raw bootstrap definitions before expression evaluation. The
+same option works for <code>debug</code> and Load scenarios;
+<code>load --debug template|flow &lt;id&gt;</code> promotes a Debug
+sidecar into a transient single-workload Load run and requires explicit
+pacing. For example:</p>
+<div class="sourceCode" id="cb68"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span>
+<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 2 <span class="at">--duration</span> 10s <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span></code></pre></div>
 <p>The complete workload override set is <code>--users</code>,
 <code>--arrival-rate</code>, <code>--warmup</code>,
 <code>--ramp-up</code>, <code>--duration</code>,
@@ -4315,7 +4438,7 @@ options remain command-specific: <code>--suite</code>,
 <code>--dry-run</code>, <code>--fail-fast</code>,
 <code>--rerun-failed</code>, <code>--update-snapshot</code>,
 <code>--package</code>, <code>--selected</code>, <code>--input</code>,
-<code>--queue</code>, <code>--parallel</code>,
+<code>--set</code>, <code>--queue</code>, <code>--parallel</code>,
 <code>--allow-parallel-runs</code>, <code>--profile</code>,
 <code>--config</code>, <code>--env</code>, and <code>--help</code> are
 accepted only where the command contract permits them.</p>
@@ -4484,8 +4607,8 @@ Diagnostics</h2>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, helper, or tool
 change:</p>
-<div class="sourceCode" id="cb69"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb70"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>For one environment, use
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>.
 ATT 3.6.0 validates changed descriptor families against their active
@@ -4744,11 +4867,11 @@ Operations</h2>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb71"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
 Reference Manual, builds the application jar and release/source
 archives, and verifies the packaged launcher. It requires Java/Maven
@@ -4889,11 +5012,11 @@ expression results remain typed while they move through ATT.</p>
 <h3 id="render-and-documentvalue">Render and DocumentValue</h3>
 <p>Render returns a represented document. DocumentValue carries a format
 and the exact rendered text:</p>
-<div class="sourceCode" id="cb71"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
 <p>One source produces output.result as a DocumentValue. Multiple
 sources produce an ordered map keyed by template-root-relative source
 paths. templateFormat accepts auto, text, json, yaml or xml. auto
@@ -4905,15 +5028,15 @@ transport. Render creates no file and exposes no output.targetFiles. Use
 the original typed Context value for structured access, such as
 EXEC.INPUT.amount or a prior action's output.result.amount.</p>
 <p>Pass Render output directly to HTTP or MQ:</p>
-<div class="sourceCode" id="cb72"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb72-5"><a href="#cb72-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb72-6"><a href="#cb72-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
-<span id="cb72-7"><a href="#cb72-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb72-8"><a href="#cb72-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
 <p>For MQ, pass the DocumentValue as payload. Do not add requestFormat
 to a DocumentValue. A resource encodes its exact text with its
 configured charset/CCSID. DocumentValue.format does not set MQMD.Format
@@ -4927,11 +5050,11 @@ file argument; Render does not create a handoff file.</p>
 <h3 id="tool-db-and-flow-results">Tool, DB and Flow results</h3>
 <p>A command-backed Tool declares stdoutFormat in its Tool
 descriptor:</p>
-<div class="sourceCode" id="cb73"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">getOrder</span><span class="kw">:</span></span>
-<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
-<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
+<div class="sourceCode" id="cb74"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">getOrder</span><span class="kw">:</span></span>
+<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
+<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
 <p>stdoutFormat parses external stdout once into output.result; it is
 not output serialization. Call-backed Tools and DB/HTTP/MQ operations
 keep their native return types.</p>
@@ -4953,24 +5076,24 @@ lifecycle is:</p>
 <p>Collectors are diagnostic operations, not replacement Actions. Each
 collector has its own typed result and does not replace or mutate the
 primary <code>output.result</code>:</p>
-<div class="sourceCode" id="cb75"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
-<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
-<span id="cb75-5"><a href="#cb75-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
-<span id="cb75-6"><a href="#cb75-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
-<span id="cb75-7"><a href="#cb75-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb75-8"><a href="#cb75-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb75-9"><a href="#cb75-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
-<span id="cb75-10"><a href="#cb75-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb75-11"><a href="#cb75-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
-<span id="cb75-12"><a href="#cb75-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
-<span id="cb75-13"><a href="#cb75-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
-<span id="cb75-14"><a href="#cb75-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
-<span id="cb75-15"><a href="#cb75-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
-<span id="cb75-16"><a href="#cb75-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb75-17"><a href="#cb75-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
+<div class="sourceCode" id="cb76"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
+<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
+<span id="cb76-5"><a href="#cb76-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb76-6"><a href="#cb76-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
+<span id="cb76-7"><a href="#cb76-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb76-8"><a href="#cb76-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb76-9"><a href="#cb76-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb76-10"><a href="#cb76-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb76-11"><a href="#cb76-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
+<span id="cb76-12"><a href="#cb76-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
+<span id="cb76-13"><a href="#cb76-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
+<span id="cb76-14"><a href="#cb76-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb76-15"><a href="#cb76-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
+<span id="cb76-16"><a href="#cb76-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb76-17"><a href="#cb76-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
 <p>While the containing Action, including its assertion, is active, use
 these paths:</p>
 <pre class="text"><code>${output.result}
@@ -5025,13 +5148,13 @@ collector.</p>
 <h3 id="log-typed-value-to-case-log">Log: typed value to Case log</h3>
 <p>Log is a presentation action and therefore has its own format
 field:</p>
-<div class="sourceCode" id="cb79"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
-<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
-<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
-<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
-<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
-<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb80"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
+<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
+<span id="cb80-5"><a href="#cb80-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
+<span id="cb80-6"><a href="#cb80-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
 <p>level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR.
 At least one of message or value is required. message is rendered as
 text. value accepts any typed value, including nested maps/lists. Exact
@@ -5062,11 +5185,11 @@ needs them after the Flow returns.</p>
 <h3 id="resource-output-evidence">Resource output evidence</h3>
 <p>Resource evidence is separate from the logical result. A helper may
 configure an optional evidence.output presentation policy:</p>
-<div class="sourceCode" id="cb80"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<div class="sourceCode" id="cb81"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb81-3"><a href="#cb81-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb81-4"><a href="#cb81-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>This adds a bounded human-readable snapshot beside operation
 metadata; it does not change output.result or response parsing. In Load,
 evidence.resources.output accepts inherit (default) or none. none skips
@@ -5181,7 +5304,7 @@ Matrix</h3>
 </tr>
 <tr class="even">
 <td>Load scenario</td>
-<td>att-load/v1.2</td>
+<td>att-load/v1.3</td>
 </tr>
 <tr class="odd">
 <td>Load summary</td>
@@ -5275,26 +5398,30 @@ active runtime contracts.</td>
 </tbody>
 </table>
 <p>A Render-to-HTTP example:</p>
-<div class="sourceCode" id="cb81"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb81-3"><a href="#cb81-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb81-4"><a href="#cb81-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb81-5"><a href="#cb81-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb81-6"><a href="#cb81-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb81-7"><a href="#cb81-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
-<p>For an abstract value, use requestFormat explicitly:</p>
 <div class="sourceCode" id="cb82"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb82-1"><a href="#cb82-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb82-2"><a href="#cb82-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb82-3"><a href="#cb82-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb82-1"><a href="#cb82-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb82-2"><a href="#cb82-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb82-3"><a href="#cb82-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb82-4"><a href="#cb82-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb82-5"><a href="#cb82-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb82-6"><a href="#cb82-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb82-7"><a href="#cb82-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<p>For an abstract value, use requestFormat explicitly:</p>
+<div class="sourceCode" id="cb83"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb83-2"><a href="#cb83-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb83-3"><a href="#cb83-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
 <p>For Load, migrate old single-target or v1.1 scenarios to
-att-load/v1.2 workloads form. Put pacing under each workload and set the
-optional top-level execution.execIdFormat when a custom EXEC.ID is
-required. That field uses the ordinary expression engine once during
-initialization; closed workloads may use EXEC.LOAD.USER_ID, while
-arrival-rate workloads do not have it. Do not use seq.next() or
-external/stateful functions in the format.</p>
+att-load/v1.2 workloads form, then change the schemaVersion to
+att-load/v1.3 to enable workload-level vars. <code>inputs</code> remains
+EXEC.INPUT; <code>vars</code> is evaluated after each execution's
+EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target
+starts. Exact references preserve native values, dependencies are
+order-independent, and cycles or external/stateful calls fail
+validation. The optional top-level execution.execIdFormat still uses the
+ordinary expression engine once during initialization; closed workloads
+may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have
+it.</p>
 <p>Unsupported schema versions fail before execution and include
 migration guidance. ATT does not auto-upgrade package files or invoke
 external resources to build the diagnostic. See <a

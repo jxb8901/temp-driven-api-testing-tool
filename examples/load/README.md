@@ -1,6 +1,6 @@
 # ATT Load Scenario Examples
 
-本目錄的範例均使用 ATT 3.6.0 現行 schema att-load/v1.2。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
+本目錄的範例均使用 ATT 3.6.0 現行 schema att-load/v1.3。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
 
 ## 範例索引
 
@@ -19,7 +19,7 @@
 ## 最小 closed workload
 
 ~~~yaml
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.3
 workloads:
   - id: default
     target: {type: template, id: V3_FLOW_EXAMPLE}
@@ -29,6 +29,25 @@ workloads:
 ~~~
 
 每個 Virtual User 重複執行固定 target。Think time 可設一個 duration，也可設定 min/max range。
+
+## 每次 execution 的 typed vars
+
+Template/Flow workload 可設定 bootstrap `vars`。完整 reference 保留原生型別；expression 在每次 Load execution 的 EXEC.ID/EXEC.OUTPUT_DIR 初始化後評估：
+
+~~~yaml
+schemaVersion: att-load/v1.3
+workloads:
+  - id: payments
+    target: {type: template, id: PAYMENT_INVOKE}
+    inputs: {amount: 100}
+    vars:
+      amount: "${EXEC.INPUT.amount}"
+      total: "#{${EXEC.INPUT.amount} * 2}"
+      requestId: "REQ-${EXEC.ID}"
+    load: {users: 2, duration: 10s}
+~~~
+
+各 execution 的 map/list 相互獨立。Vars 可以引用其他 vars（不受宣告順序影響）；循環、缺少變數或外部/stateful calls 會在 target action 執行前失敗。第一次一般 `assign` 可取代 bootstrap variable。CLI 的 `--set vars.path=value` 會先修改 definition，再評估 expression。
 
 ## 自訂 Load execution ID
 

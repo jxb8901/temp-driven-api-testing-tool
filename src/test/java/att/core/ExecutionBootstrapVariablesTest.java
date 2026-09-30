@@ -1,0 +1,101 @@
+package att.core;
+
+import att.template.DefaultBuiltInProvider;
+import att.template.UnifiedTemplateEngine;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class ExecutionBootstrapVariablesTest {
+    @TempDir Path temp;
+
+    @Test void evaluatesTypedTreesAndOrderIndependentDependenciesAgainstInitializedContext() throws Exception {
+        CaseRuntimeContext context = context("EXEC-12");
+        Map<String, Object> definitions = new LinkedHashMap<String, Object>();
+        definitions.put("derived", "${EXEC.VARS.base}");
+        definitions.put("rendered", "REQ-${EXEC.ID}");
+        definitions.put("arithmetic", "#{${EXEC.INPUT.amount} * 2}");
+        definitions.put("nested", mapOf("amount", "${EXEC.INPUT.amount}", "list", Arrays.asList("${EXEC.INPUT.amount}", "item-${EXEC.ID}")));
+        definitions.put("base", "${EXEC.INPUT.amount}");
+        definitions.put("pure", "#{upper('att')}");
+        ExecutionBootstrapVariables.evaluate(definitions, context, engine());
+
+        assertEquals(12L, ((Number) context.require("EXEC.VARS.base")).longValue());
+        assertEquals(12L, ((Number) context.require("EXEC.VARS.derived")).longValue());
+        assertEquals("REQ-EXEC-12", context.require("EXEC.VARS.rendered"));
+        assertEquals(24L, ((Number) context.require("EXEC.VARS.arithmetic")).longValue());
+        Map<?, ?> nested = (Map<?, ?>) context.require("EXEC.VARS.nested");
+        assertEquals(12L, ((Number) nested.get("amount")).longValue());
+        assertEquals(12L, ((Number) ((List<?>) nested.get("list")).get(0)).longValue());
+        assertEquals("item-EXEC-12", ((List<?>) nested.get("list")).get(1));
+        assertEquals("ATT", context.require("EXEC.VARS.pure"));
+        context.assignCaseVariable("base", "replaced");
+        assertEquals("replaced", context.require("EXEC.VARS.base"));
+    }
+
+    @Test void permitsExplicitNullAndMakesEachEvaluationOwnItsMutableTree() throws Exception {
+        Map<String, Object> definitions = new LinkedHashMap<String, Object>();
+        definitions.put("nullable", "${EXEC.INPUT.explicitNull}");
+        definitions.put("payload", mapOf("items", Arrays.asList("one", "two")));
+        CaseRuntimeContext first = context("EXEC-1");
+        CaseRuntimeContext second = context("EXEC-2");
+        ExecutionBootstrapVariables.evaluate(definitions, first, engine());
+        ExecutionBootstrapVariables.evaluate(definitions, second, engine());
+        assertNull(first.require("EXEC.VARS.nullable"));
+        ((List<Object>) ((Map<String, Object>) first.require("EXEC.VARS.payload")).get("items")).set(0, "mutated");
+        assertEquals("one", ((List<?>) ((Map<?, ?>) second.require("EXEC.VARS.payload")).get("items")).get(0));
+    }
+
+    @Test void rejectsCyclesMissingDependenciesUnavailableRootsAndSideEffectingCalls() {
+        Map<String, Object> cycle = mapOf("first", "${EXEC.VARS.second}", "second", "${EXEC.VARS.first}");
+        IllegalArgumentException cyclic = assertThrows(IllegalArgumentException.class,
+                () -> ExecutionBootstrapVariables.validate(cycle, engine()));
+        assertTrue(cyclic.getMessage().contains("cycle"), cyclic.getMessage());
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionBootstrapVariables.validate(mapOf("value", "${EXEC.VARS.missing}"), engine()));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionBootstrapVariables.validate(mapOf("value", "${EXEC.ACTIONS.previous.output}"), engine()));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionBootstrapVariables.validate(mapOf("value", "#{file.delete(path='x')}"), engine()));
+    }
+
+    @Test void failedEvaluationRollsBackPreviouslyResolvedEntries() {
+        CaseRuntimeContext context = context("EXEC-9");
+        Map<String, Object> definitions = mapOf("first", "ready", "broken", "#{1 / 0}");
+        assertThrows(Exception.class, () -> ExecutionBootstrapVariables.evaluate(definitions, context, engine()));
+        assertNull(context.resolve("EXEC.VARS.first"));
+        assertNull(context.resolve("EXEC.VARS.broken"));
+    }
+
+    private CaseRuntimeContext context(String executionId) {
+        Map<String, Object> inputs = mapOf("amount", Integer.valueOf(12), "explicitNull", null);
+        TestCase testCase = new TestCase(1, "debug", "template", "row", Collections.<String>emptyList(),
+                inputs, Collections.<String, StageCaseData>emptyMap(), "");
+        Path output = temp.resolve(executionId);
+        CaseRuntimeContext context = new CaseRuntimeContext(testCase, output, executionId, "RUN-1", output,
+                output.resolve("case.log"), "debug", "2026-09-30T12:00:00Z", "2026-09-30T11:00:00Z");
+        context.setProject(temp);
+        context.setSourceMetadata("debug", temp.resolve("debug.yaml"), "debug");
+        context.setTargetMetadata("template", "SIMPLE");
+        context.setTemplateMetadata("SIMPLE", temp.resolve("templates/SIMPLE"));
+        return context;
+    }
+
+    private UnifiedTemplateEngine engine() {
+        return new UnifiedTemplateEngine(null, null, null, null, new DefaultBuiltInProvider());
+    }
+
+    private static Map<String, Object> mapOf(Object... values) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (int i = 0; i < values.length; i += 2) result.put(String.valueOf(values[i]), values[i + 1]);
+        return result;
+    }
+}

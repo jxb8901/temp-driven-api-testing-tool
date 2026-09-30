@@ -1,15 +1,19 @@
 ### 4.3 Load 模式
 
-ATT 3.6.0 接受 att-load/v1.2 scenario。Scenario 有一個或多個 workload；每個 workload 固定一個 Template、Flow 或 Tool target，並配置自己的 pacing。Scheduler 啟動前會驗證 scenario 與所有 target。
+ATT 接受 att-load/v1.3 scenario。Scenario 有一個或多個 workload；每個 workload 固定一個 Template、Flow 或 Tool target，並配置自己的 inputs、bootstrap vars 與 pacing。Scheduler 啟動前會驗證 scenario 與所有 target。
 
 #### Scenario 結構
 
 ~~~yaml
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.3
 workloads:
   - id: payment
     target: {type: template, id: PAYMENT_INVOKE}
-    inputs: {region: HK}
+    inputs: {region: HK, amount: 100}
+    vars:
+      baseAmount: "${EXEC.INPUT.amount}"
+      total: "#{${EXEC.INPUT.amount} * 2}"
+      reference: "REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
     load:
       users: 20
       warmup: 10s
@@ -31,7 +35,19 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
-Target 支援 template、flow 或 tool；Tool target 可有 named arguments。Workload inputs 會成為每個 iteration 的 EXEC.INPUT。同一 scenario 的 workloads 必須使用相同 model（closed users 或 arrivalRate）與相同 warmup/rampUp/duration/rampDown 時間窗口。它們是獨立 pacing 的固定 target，不是 transaction mix。
+Target 支援 template、flow 或 tool；Tool target 可有 named arguments，但不能宣告 bootstrap vars。Workload inputs 會成為每個 iteration 的 EXEC.INPUT；Template/Flow 的 workload vars 則在每個開始的 iteration 建立全新的初始 EXEC.VARS tree。同一 scenario 的 workloads 必須使用相同 model（closed users 或 arrivalRate）與相同 warmup/rampUp/duration/rampDown 時間窗口。它們是獨立 pacing 的固定 target，不是 transaction mix。
+
+| Workload 欄位 | Runtime destination | Contract |
+|---|---|---|
+| `inputs` | `EXEC.INPUT` | Business input；不作為 bootstrap variables |
+| `vars` | initial `EXEC.VARS` | Template/Flow typed expression tree；每個 execution 獨立評估 |
+| `target.arguments` | Tool arguments | 僅供 Tool call；與 `EXEC.INPUT`、`EXEC.VARS` 分開 |
+
+#### 每次執行的 bootstrap vars
+
+Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整 `${...}` reference 保留原生型別，混合文字會轉成字串，`#{...}` 使用一般 typed expression parser，巢狀 map/list 會遞迴評估。Vars 之間的依賴不受宣告順序影響；缺少變數或循環會在 target 開始前失敗。每個 iteration 都有獨立 map/list，因此併發 user/workload 不會共用可變值。第一次一般 `assign` 可取代 bootstrap variable。
+
+Bootstrap expression 可使用已初始化的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定的 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata，以及 Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 不可用。只允許安全的純 built-in。Tool arguments 與 vars 是不同 contract。
 
 #### Workload 模型
 
@@ -43,7 +59,7 @@ duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實
 
 #### Load identity 與輸出路徑
 
-每個開始的 iteration 在 Load run 內有唯一 EXEC.ID，並共用 EXEC.RUN_ID。省略 execution.execIdFormat 時 ATT 使用預設 run-scoped ID；有設定時，在 initialization 使用一般 ${...} / #{...} engine 求值一次。Closed workload 可讀 EXEC.LOAD.USER_ID；arrival-rate 沒有此欄位。欄位可用時機及 function 限制見[Runtime and Context Model](../03_runtime_context.md)。
+每個開始的 iteration 在 Load run 內有唯一 EXEC.ID，並共用 EXEC.RUN_ID。省略 execution.execIdFormat 時 ATT 使用預設 run-scoped ID；有設定時，在 initialization 使用一般 ${...} / #{...} engine 求值一次。Bootstrap vars 在 ID 發布後才評估，因此可讀 EXEC.ID 與 EXEC.OUTPUT_DIR。Closed workload 可讀 EXEC.LOAD.USER_ID；arrival-rate 沒有此欄位。欄位可用時機及 function 限制見[Runtime and Context Model](../03_runtime_context.md)。
 
 產生的 ID 必須非空且是安全的 path segment。重複 ID 會在 target 啟動前失敗；ATT 不會靜默附加 suffix。
 
@@ -79,11 +95,15 @@ Root thresholds 套用於 aggregate run；workload thresholds 套用於個別 wo
 
 單一 workload 可用 --users、--arrival-rate、--warmup、--ramp-up、--duration、--ramp-down、--think-time、--max-concurrent 等 option 覆蓋對應 YAML。多 workload 使用未指定 workload 的 load-model override 會失敗。
 
+重複的 `--set vars.path=value` 會在 expression evaluation 前覆寫 workload 的原始 bootstrap definition。值使用 safe YAML scalar parser；若要把 expression 當字面值傳入，請加引號。Debug 支援相同 override；`load --debug template|flow <id>` 會把選取 Debug sidecar 的 inputs/vars 暫存在單一 workload Load scenario，並要求明確 pacing，例如 `--users 2 --duration 10s`。
+
 ~~~sh
 ./att.sh load examples/load/closed-smoke.yaml
 ./att.sh load examples/load/arrival-smoke.yaml --format json
 ./att.sh load examples/load/multi-closed.yaml
 ./att.sh load examples/load/multi-arrival.yaml
+./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ~~~
 
-可複製範例與欄位說明維護於 [examples/load/README.md](../../../examples/load/README.md)。歷史 v1.0/v1.1 schema 已封存，不接受為 active version。請遷移至 v1.2 workloads syntax；見[Migrations](../appendices/migrations.md)。
+可複製範例與欄位說明維護於 [examples/load/README.md](../../../examples/load/README.md)。前一版 v1.2 schema 保留供 migration diagnostic；若要使用 workload vars，請將 schemaVersion 升至 v1.3。歷史 v1.0/v1.1 亦不能作為 active version。詳見[Migrations](../appendices/migrations.md)。

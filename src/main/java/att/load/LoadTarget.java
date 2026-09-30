@@ -12,12 +12,15 @@ import java.util.Map;
 public final class LoadTarget {
     private final String type, id;
     private String execIdFormat = "";
+    private Map<String, Object> bootstrapVars = Collections.emptyMap();
     private boolean resourceOutputEnabled = true;
     LoadTarget withScenario(LoadScenario scenario) {
         execIdFormat = scenario.execIdFormat();
+        bootstrapVars = LoadIsolation.deepImmutableMap(scenario.vars());
         resourceOutputEnabled = scenario.resourceOutputEnabled();
         return this;
     }
+    public Map<String, Object> bootstrapVars() { return bootstrapVars; }
     public String execIdFormat() { return execIdFormat; }
     public boolean resourceOutputEnabled() { return resourceOutputEnabled; }
     private final StageTemplate template;
