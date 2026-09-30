@@ -533,6 +533,93 @@ class StageTemplateRunnerTest {
         }
     }
 
+    @Test void thrownCollectorEvidenceOmitsPrivateInputsAndBoundsPublicFailureDetails() throws Exception {
+        String secret = "collector-secret-literal-791";
+        String large = String.join("", Collections.nCopies(20000, "x"));
+        for (String failure : Arrays.asList("block", "fail")) {
+            for (String mode : Arrays.asList("continue", "stop")) {
+                Path caseDir = tempDir.resolve("private-collector-" + failure + "-" + mode);
+                Files.createDirectories(caseDir);
+                TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+                CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+                context.beginStage(new StageCaseData("invoke", "T", map("password", secret, "payload", large)), "T", tempDir);
+                TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                        "assert", "${output.result} == 'OK'",
+                        "evidence", map("private", map("call", "#{" + failure
+                                + "(password=${EXEC.INPUT.password}, payload=${EXEC.INPUT.payload})}",
+                                "timeoutMs", 50, "onFailure", mode))));
+                List<ValidationResult> results;
+                try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                    results = new StageTemplateRunner(new UnifiedTemplateEngine(null, new PrivateCollectorBuiltIns()))
+                            .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                }
+                assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+                String collector = "ACTIONS.call.output.evidence.collectors.private";
+                String evidence = collector + ".evidence.tool.invocations[0]";
+                assertEquals("TIMEOUT", context.resolve(collector + ".status"));
+                assertEquals("TIMEOUT", context.resolve(collector + ".error.category"));
+                assertEquals(failure, context.resolve(evidence + ".name"));
+                assertEquals(50L, ((Number) context.resolve(evidence + ".timeoutMs")).longValue());
+                assertEquals(Boolean.TRUE, context.resolve(evidence + ".inputOmitted"));
+                assertNull(context.resolve(evidence + ".input"));
+                assertNull(context.resolve(evidence + ".payload"));
+                assertNull(context.resolve(evidence + ".argv"));
+                if ("fail".equals(failure)) {
+                    assertEquals("app", context.resolve(evidence + ".sshHelper"));
+                    assertEquals(Boolean.TRUE, context.resolve(evidence + ".stderrTruncated"));
+                    assertEquals(Boolean.TRUE, context.resolve(evidence + ".evidenceTruncated"));
+                    assertTrue(String.valueOf(context.resolve(evidence + ".stderr")).length() <= CollectorExceptionEvidence.TEXT_LIMIT);
+                    assertTrue(String.valueOf(context.resolve(evidence + ".stderr")).contains("[REDACTED_SECRET]"));
+                }
+                String published = att.validation.JsonSupport.write(context.resolve(collector));
+                assertFalse(published.contains(secret));
+                assertFalse(published.contains(large));
+                assertTrue(published.length() < 12000, "collector evidence must stay bounded");
+                assertTrue(String.valueOf(context.resolve(collector + ".error.message")).length() <= CollectorExceptionEvidence.TEXT_LIMIT);
+                assertFalse(results.get(0).message().contains(secret));
+                String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+                assertFalse(caseLog.contains(secret));
+                assertFalse(caseLog.contains(large));
+                assertTrue(caseLog.contains("EVIDENCE call attempt=1 collector=private"));
+            }
+        }
+    }
+
+    @Test void nonzeroCollectorExitUsesStatusAndExitCodeInsteadOfStdout() throws Exception {
+        for (String mode : Arrays.asList("continue", "stop")) {
+            Path caseDir = tempDir.resolve("collector-stdout-" + mode);
+            Files.createDirectories(caseDir);
+            TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                    Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+            CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+            context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+            Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+            tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "text",
+                    Collections.<String, ToolArgumentConfig>emptyMap()));
+            FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "evidence", map("snapshot", map("call", "#{sample()}", "onFailure", mode))));
+            List<ValidationResult> results;
+            try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config,
+                        new FixedRunner(2, "partial-data", "stderr detail"))))
+                        .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+            }
+            assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+            String collector = "ACTIONS.call.output.evidence.collectors.snapshot";
+            assertEquals("partial-data", context.resolve(collector + ".result"));
+            String message = String.valueOf(context.resolve(collector + ".error.message"));
+            assertTrue(message.contains("status ERROR"), message);
+            assertTrue(message.contains("exitCode=2"), message);
+            assertFalse(message.contains("partial-data"));
+            if ("stop".equals(mode)) {
+                assertTrue(results.get(0).message().contains("exitCode=2"));
+                assertFalse(results.get(0).message().contains("partial-data"));
+            }
+        }
+    }
+
     @Test void failedCommandCollectorPreservesOperationEvidenceAndActionableLogMessage() throws Exception {
         Path caseDir = tempDir.resolve("evidence-command-failure");
         Files.createDirectories(caseDir);
@@ -949,6 +1036,24 @@ class StageTemplateRunnerTest {
             return arguments.get("value");
         }
     }
+    private static final class PrivateCollectorBuiltIns implements BuiltInProvider {
+        @Override public Set<String> names() { return new LinkedHashSet<String>(Arrays.asList("upper", "block", "fail")); }
+        @Override public Object invoke(String name, Map<String, Object> arguments) throws Exception {
+            if ("upper".equals(name)) return String.valueOf(arguments.get("value")).toUpperCase(Locale.ROOT);
+            if ("block".equals(name)) {
+                Thread.sleep(10000);
+                return "unexpected completion";
+            }
+            String secret = String.valueOf(arguments.get("password"));
+            String detail = secret + String.join("", Collections.nCopies(10000, "z"));
+            throw new ToolExecutionException("TIMEOUT", "Collector timed out: " + detail,
+                    map("name", name, "status", "TIMEOUT", "timeoutMs", 50L,
+                            "input", arguments, "payload", arguments.get("payload"),
+                            "argv", Arrays.asList(secret), "stderr", detail, "sshHelper", "app", "instance", "one"),
+                    null, new IllegalStateException(secret));
+        }
+    }
+
     private static final class FailingBuiltIns implements BuiltInProvider {
         @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("fail")); }
         @Override public Object invoke(String name, Map<String,Object> arguments) { throw new IllegalStateException("collector failed"); }

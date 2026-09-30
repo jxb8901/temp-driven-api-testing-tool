@@ -4333,13 +4333,19 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href=
 contains <code>status</code>, <code>success</code>,
 <code>invocationId</code>, <code>result</code>, <code>error</code>, and
 the bounded/redacted underlying operation <code>evidence</code>; when an
-operation supplies structured diagnostics, <code>diagnostic</code> is
-retained as well. <code>error.message</code> is populated from the
+operation supplies structured diagnostics,
+<code>operationDiagnostic</code> retains the native operation
+diagnostic. <code>diagnostic</code> identifies the collector failure and
+its source file/field. <code>error.message</code> is populated from the
 underlying exception, operation status/exit code, or a safe fallback.
 Resource identity and fields such as SSH helper/instance, command, exit
 code, bounded stderr, MQ reason codes, HTTP status, parser diagnostics,
 and timeout details remain under <code>evidence</code> when provided by
-the executor.</p>
+the executor. For thrown Tool exceptions, the public projection omits
+raw input, payload, argv, and output fields, redacts input values from
+retained text, and limits each retained text field to 1024 characters.
+<code>inputOmitted</code> and truncation flags identify omitted or
+bounded evidence.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
 Earlier failed collector records remain available after a later

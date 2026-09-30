@@ -3606,13 +3606,18 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb62-1"><a href=
 <code>ACTIONS</code> compatibility view）。Record 包含
 <code>status</code>、<code>success</code>、<code>invocationId</code>、<code>result</code>、<code>error</code>，以及
 bounded/redacted 的 underlying operation
-<code>evidence</code>；operation 有提供 structured diagnostics
-时也会保留 <code>diagnostic</code>。<code>error.message</code> 会从
-underlying exception、operation status/exit code 或安全 fallback
-填入。若 executor 有提供，SSH helper/instance、command、exit
-code、bounded stderr、MQ reason code、HTTP status、parser diagnostic 和
-timeout detail 等 resource identity/field 会留在
-<code>evidence</code>。</p>
+<code>evidence</code>；operation 有提供 structured diagnostics 时会在
+<code>operationDiagnostic</code> 保留 native operation
+diagnostic。<code>diagnostic</code> 则记录 collector failure 及其 source
+file/field。<code>error.message</code> 会从 underlying
+exception、operation status/exit code 或安全 fallback 填入。若 executor
+有提供，SSH helper/instance、command、exit code、bounded stderr、MQ
+reason code、HTTP status、parser diagnostic 和 timeout detail 等
+resource identity/field 会留在 <code>evidence</code>。 Tool exception 的
+public projection 会省略 raw input、payload、argv 和 output
+field，并从保留文字中 redact input value；每个保留的 text field 限制为
+1024 字元。<code>inputOmitted</code> 和 truncation flag 表示省略或截断的
+evidence。</p>
 <p>有 retry 时，请查看
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>。即使后一个
 attempt 成功，较早的 failed collector record 仍会保留；top-level

@@ -682,6 +682,9 @@ public class StageTemplateRunner {
                 appendEvidenceLog(log, action, attempt, collector, record);
                 if ("stop".equals(collector.onFailure())) throw failure;
             } catch (Exception error) {
+                if (error instanceof att.exec.ToolExecutionException) {
+                    error = CollectorExceptionEvidence.project((att.exec.ToolExecutionException) error);
+                }
                 record.put("status", error instanceof att.exec.ToolExecutionException
                         ? ((att.exec.ToolExecutionException) error).category() : "ERROR");
                 record.put("success", false);
@@ -727,7 +730,7 @@ public class StageTemplateRunner {
         // Defer the fallback until the native operation diagnostic/result has been consulted.
         Map<String, Object> error = collectorError(result.invocation(), "");
         Map<String, Object> diagnostic = result.operationResult().diagnostic();
-        String message = firstMessage(diagnostic, result.operationResult().result());
+        String message = firstMessage(diagnostic);
         if (isBlank(String.valueOf(error.get("message"))) && !isBlank(message)) error.put("message", message);
         if (error.get("category") == null && !result.executionSuccess()) error.put("category", "OPERATION_FAILED");
         if (error.get("category") == null && "ERROR".equalsIgnoreCase(String.valueOf(result.invocation().get("status")))) {
@@ -774,7 +777,7 @@ public class StageTemplateRunner {
     private Map<String, Object> collectorFailureEvidence(Exception error) {
         if (error instanceof att.exec.ToolExecutionException) {
             att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
-            return ActionExecutionResult.evidence("tool", tool.evidence());
+            return ActionExecutionResult.evidence("tool", CollectorExceptionEvidence.project(tool).evidence());
         }
         att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.find(error);
         if (diagnostic == null) return Collections.emptyMap();
