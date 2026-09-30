@@ -1058,7 +1058,7 @@ class StageTemplateRunnerTest {
     private static final class PrivateCollectorBuiltIns implements BuiltInProvider {
         @Override public Set<String> names() { return new LinkedHashSet<String>(Arrays.asList("upper", "block")); }
         @Override public Object invoke(String name, Map<String, Object> arguments) {
-            if ("upper".equals(name)) return String.valueOf(arguments.get("value")).toUpperCase(Locale.ROOT);
+            if ("upper".equals(name)) return new DefaultBuiltInProvider().invoke(name, arguments);
             try {
                 Thread.sleep(10000);
                 return "unexpected completion";
