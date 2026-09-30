@@ -1,4 +1,4 @@
-# ATT 3.6.0 - Automated Testing Tool
+# ATT 3.6.1 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 
@@ -67,7 +67,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-ATT 3.6.0 uses `att-config/v2.10`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.3`, `att-flow/v3.3`, and `att-load/v1.2`. Current schemas live under `schemas/`; superseded definitions under `schemas/history/` are historical references, not runtime contracts.
+ATT 3.6.1 uses `att-config/v2.10`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.3`, `att-flow/v3.3`, and `att-load/v1.2`. Current schemas live under `schemas/`; superseded definitions under `schemas/history/` are historical references, not runtime contracts.
 
 ## Build and validation
 

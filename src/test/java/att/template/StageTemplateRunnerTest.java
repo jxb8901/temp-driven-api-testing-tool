@@ -4,6 +4,7 @@ package att.template;
 import att.core.*;
 import att.config.*;
 import att.exec.*;
+import att.flow.FlowRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
@@ -38,12 +39,154 @@ class StageTemplateRunnerTest {
 
         assertEquals(ResultStatus.ERROR, results.get(0).status());
         assertEquals("ATT-CTX-001", results.get(0).diagnostic().code());
+        assertEquals("actions.invoke.call", results.get(0).diagnostic().field());
         att.validation.SourceLocation source = results.get(0).diagnostic().source();
         assertNotNull(source);
         assertEquals(8, source.line());
         assertEquals(templateText.split("\\n")[7].indexOf(reference) + 1, source.column());
         assertTrue(source.excerpt().contains("call: >-"));
         assertTrue(source.excerpt().contains(reference));
+    }
+
+    @Test void toolAssertionContextFailurePointsToAssertFieldAndExpression() throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        Path templateDir = tempDir.resolve("templates/tool-assert-source");
+        Files.createDirectories(templateDir);
+        String templateText = "schemaVersion: att-template/v3.3\nname: Tool assert source\ndescription: Assertion source\n"
+                + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: >-\n"
+                + "      ${output.result.missing} == 'OK'\n";
+        Path descriptor = templateDir.resolve("template.yaml");
+        Files.write(descriptor, templateText.getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load("tool-assert-source");
+        Path caseDir = tempDir.resolve("tool-assert-source-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "Tool assert source", Collections.<String, Object>emptyMap()),
+                "Tool assert source", templateDir);
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute(
+                "invoke", template, context, new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals("ATT-CTX-001", results.get(0).diagnostic().code());
+        assertEquals("actions.call.assert", results.get(0).diagnostic().field());
+        att.validation.SourceLocation source = results.get(0).diagnostic().source();
+        assertNotNull(source);
+        assertEquals(9, source.line());
+        assertEquals(templateText.split("\\n")[8].indexOf("${output.result.missing}") + 1, source.column());
+        assertTrue(source.excerpt().contains("assert: >-"));
+        assertTrue(source.excerpt().contains("output.result.missing"));
+        assertTrue(results.get(0).diagnostic().detail().contains("requestedPath: output.result.missing"));
+    }
+
+    @Test void toolExpectedContextFailurePointsToExpectedFieldAndExpression() throws Exception {
+        assertToolReportFieldFailure("expected");
+    }
+
+    @Test void toolActualContextFailurePointsToActualFieldAndExpression() throws Exception {
+        assertToolReportFieldFailure("actual");
+    }
+
+    private void assertToolReportFieldFailure(String field) throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        String templateId = "tool-" + field + "-source";
+        Path templateDir = tempDir.resolve("templates/" + templateId);
+        Files.createDirectories(templateDir);
+        String reference = "${output.result.missing}";
+        String templateText = "schemaVersion: att-template/v3.3\nname: Tool report source\ndescription: Report source\n"
+                + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: \"true\"\n"
+                + "    " + field + ": >-\n      " + reference + "\n";
+        Path descriptor = templateDir.resolve("template.yaml");
+        Files.write(descriptor, templateText.getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load(templateId);
+        Path caseDir = tempDir.resolve(templateId + "-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "Tool report source", Collections.<String, Object>emptyMap()),
+                "Tool report source", templateDir);
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute(
+                "invoke", template, context, new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(1, results.size());
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals("ATT-CTX-001", results.get(0).diagnostic().code());
+        assertEquals("actions.call." + field, results.get(0).diagnostic().field());
+        assertEquals(descriptor.toRealPath().toString(), results.get(0).diagnostic().file());
+        att.validation.SourceLocation source = results.get(0).diagnostic().source();
+        assertNotNull(source);
+        assertEquals(10, source.line());
+        assertEquals(templateText.split("\\n")[9].indexOf(reference) + 1, source.column());
+        assertTrue(source.excerpt().contains(field + ": >-"));
+        assertTrue(source.excerpt().contains(reference));
+        assertTrue(results.get(0).diagnostic().detail().contains("requestedPath: output.result.missing"));
+        assertEquals(Boolean.TRUE, context.resolve("ACTIONS.call.output.assertion.passed"));
+    }
+
+    @Test void evidenceCollectorContextFailurePointsToCollectorCallField() throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        Path templateDir = tempDir.resolve("templates/collector-source");
+        Files.createDirectories(templateDir);
+        String templateText = "schemaVersion: att-template/v3.3\nname: Collector source\ndescription: Collector source\n"
+                + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    evidence:\n"
+                + "      broken:\n        call: >-\n          #{capture(value=${output.result.missing})}\n        onFailure: stop\n";
+        Path descriptor = templateDir.resolve("template.yaml");
+        Files.write(descriptor, templateText.getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load("collector-source");
+        Path caseDir = tempDir.resolve("collector-source-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "Collector source", Collections.<String, Object>emptyMap()),
+                "Collector source", templateDir);
+        List<ValidationResult> results = new StageTemplateRunner(
+                new UnifiedTemplateEngine(null, new CaptureBuiltIns())).execute(
+                        "invoke", template, context, new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals("actions.call.evidence.broken.call", results.get(0).diagnostic().field());
+        att.validation.SourceLocation source = results.get(0).diagnostic().source();
+        assertNotNull(source);
+        assertEquals(11, source.line());
+        assertEquals(templateText.split("\\n")[10].indexOf("${output.result.missing}") + 1, source.column());
+        assertTrue(source.excerpt().contains("call: >-"));
+        assertTrue(source.excerpt().contains("output.result.missing"));
+        assertTrue(results.get(0).diagnostic().detail().contains("requestedPath: output.result.missing"));
+    }
+
+    @Test void flowNestedToolDiagnosticKeepsFlowSourceAndNestedActionField() throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        Path flowDir = tempDir.resolve("templates/flows/diagnostic/source");
+        Files.createDirectories(flowDir);
+        String flowText = "schemaVersion: att-flow/v3.3\nid: diagnostic.source.v1\nname: Diagnostic source\n"
+                + "description: Flow diagnostic source\nactions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: >-\n"
+                + "      ${output.result.missing} == 'OK'\n";
+        Files.write(flowDir.resolve("flow.yaml"), flowText.getBytes("UTF-8"));
+        FlowRegistry registry = new FlowRegistry(tempDir, Paths.get("templates"), false);
+        TemplateAction invoke = new TemplateAction("nested", map("type", "flow", "use", "diagnostic.source.v1"));
+        Path caseDir = tempDir.resolve("flow-source-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", "Wrapper", Collections.<String, Object>emptyMap()), "Wrapper", tempDir);
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null), registry).execute(
+                "invoke", new StageTemplate("Wrapper", tempDir, Collections.singletonList(invoke)), context,
+                new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertNotNull(results.get(0).diagnostic());
+        assertEquals("actions.call.assert", results.get(0).diagnostic().field());
+        assertEquals(flowDir.resolve("flow.yaml").toRealPath().toString(), results.get(0).diagnostic().file());
+        assertEquals(10, results.get(0).diagnostic().source().line());
+        assertTrue(results.get(0).diagnostic().source().excerpt().contains("output.result.missing"));
     }
 
     @Test void toolOutputsStayNativeWithoutSharedResultPersistence() throws Exception {
@@ -337,6 +480,11 @@ class StageTemplateRunnerTest {
             for (String mode : Arrays.asList("continue", "stop")) {
                 Path caseDir = tempDir.resolve("http-collector-failure-" + mode);
                 Files.createDirectories(caseDir);
+                Path descriptor = caseDir.resolve("template.yaml");
+                String templateText = "schemaVersion: att-template/v3.3\nname: T\ndescription: HTTP collector source\n"
+                        + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: \"${output.result} == 'OK'\"\n"
+                        + "    evidence:\n      snapshot:\n        call: \"#{snapshot()}\"\n        onFailure: " + mode + "\n";
+                Files.write(descriptor, templateText.getBytes("UTF-8"));
                 TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
                         Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
                 CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R-" + mode,
@@ -351,7 +499,7 @@ class StageTemplateRunnerTest {
                 List<ValidationResult> results;
                 try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
                     results = new StageTemplateRunner(engine).execute("invoke",
-                            new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                            new StageTemplate("T", caseDir, Collections.singletonList(action)), context, log);
                 }
 
                 assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR,
@@ -360,7 +508,9 @@ class StageTemplateRunnerTest {
                 String collector = "ACTIONS.call.output.evidence.collectors.snapshot";
                 assertEquals("ERROR", context.resolve(collector + ".status"));
                 assertEquals(message, context.resolve(collector + ".error.message"));
-                assertEquals(message, context.resolve(collector + ".diagnostic.message"));
+                assertEquals(message, context.resolve(collector + ".operationDiagnostic.message"));
+                assertEquals("actions.call.evidence.snapshot.call", context.resolve(collector + ".diagnostic.field"));
+                assertEquals(message, context.resolve(collector + ".diagnostic.detail"));
                 assertEquals(message, context.resolve(collector + ".evidence.http.invocations[0].error.message"));
                 assertEquals("HTTP_CONFIG", context.resolve(collector + ".evidence.http.invocations[0].error.type"));
                 assertEquals(message, context.resolve(
@@ -368,6 +518,10 @@ class StageTemplateRunnerTest {
                 if ("stop".equals(mode)) {
                     assertNull(context.resolve("ACTIONS.call.output.assertion"));
                     assertTrue(results.get(0).message().contains(message), results.get(0).message());
+                    assertEquals("actions.call.evidence.snapshot.call", results.get(0).diagnostic().field());
+                    assertTrue(results.get(0).diagnostic().detail().contains(message));
+                    assertEquals(descriptor.toRealPath().toString(), results.get(0).diagnostic().file());
+                    assertEquals(11, results.get(0).diagnostic().source().line());
                 } else {
                     assertNotNull(context.resolve("ACTIONS.call.output.assertion"));
                 }
@@ -788,8 +942,12 @@ class StageTemplateRunnerTest {
     private static final class CaptureBuiltIns implements BuiltInProvider {
         int calls;
         Map<String,Object> last;
-        @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("capture")); }
-        @Override public Object invoke(String name, Map<String,Object> arguments) { calls++; last = new LinkedHashMap<String,Object>(arguments); return arguments.get("value"); }
+        @Override public Set<String> names() { return new LinkedHashSet<String>(Arrays.asList("capture", "upper")); }
+        @Override public Object invoke(String name, Map<String,Object> arguments) {
+            calls++; last = new LinkedHashMap<String,Object>(arguments);
+            if ("upper".equals(name)) return String.valueOf(arguments.get("value")).toUpperCase(Locale.ROOT);
+            return arguments.get("value");
+        }
     }
     private static final class FailingBuiltIns implements BuiltInProvider {
         @Override public Set<String> names() { return new LinkedHashSet<String>(Collections.singletonList("fail")); }
