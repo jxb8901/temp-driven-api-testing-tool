@@ -171,8 +171,13 @@ public final class MqHelperExecutor {
                         if (!isNoMessage(noReply)) throw noReply;
                         result.put("replyReceived", false); evidence.put("replyReceived", false);
                         addReason(result, evidence, noReply);
-                        success = !deadlineExceeded(deadlineNanos);
-                        if (!success) addDeadlineError(result, evidence);
+                        if (deadlineExceeded(deadlineNanos)) {
+                            success = false;
+                            addDeadlineError(result, evidence);
+                        } else {
+                            success = false;
+                            addNoReplyError(result, evidence);
+                        }
                         received = null;
                     }
                     if (received != null) {
@@ -451,6 +456,13 @@ public final class MqHelperExecutor {
 
     private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence) {
         addDeadlineError(result, evidence, "Action timeout expired while waiting for an MQ message");
+    }
+
+    private void addNoReplyError(Map<String, Object> result, Map<String, Object> evidence) {
+        Map<String, Object> error = new LinkedHashMap<String, Object>();
+        error.put("type", "MQ_NO_REPLY");
+        error.put("message", "MQ request completed without a correlated reply");
+        result.put("error", error); evidence.put("error", error);
     }
 
     private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence, String message) {

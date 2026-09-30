@@ -69,7 +69,8 @@ class MqHelperExecutorTest {
                 map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
                 context(lazyIterationDirectory), null, "lazy-load-request");
 
-        assertTrue(result.success(), result.result().toString());
+        assertFalse(result.success(), result.result().toString());
+        assertEquals("MQ_NO_REPLY", ((Map<?, ?>) result.result().get("error")).get("type"));
         assertFalse(Files.exists(lazyIterationDirectory), "payload validation must not materialize a successful Load workspace");
         assertEquals(1, factory.connectedInstances.size(), "MQ connect must be reached after payload validation");
     }
@@ -227,6 +228,29 @@ class MqHelperExecutorTest {
         }
     }
 
+    @Test void requestNoReplyDoesNotRetryOrPutTheBusinessRequestAgain() throws Exception {
+        Path caseDir = tempDir.resolve("request-no-reply-retry");
+        Files.createDirectories(caseDir);
+        Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
+        FakeFactory factory = new FakeFactory();
+        factory.noMessage = true;
+        TemplateAction action = new TemplateAction("mqRequest", map("type", "tool",
+                "call", "#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', file='payload.bin')}",
+                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))));
+        CaseRuntimeContext context = context(caseDir);
+        context.beginStage(new StageCaseData("mq", "MQ", Collections.<String, Object>emptyMap()), "MQ", tempDir);
+
+        List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                null, null, new MqHelperExecutor(tempDir, config(), factory)))
+                .execute("mq", new StageTemplate("MQ", tempDir, Collections.singletonList(action)), context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals(1, ((List<?>) context.resolve("ACTIONS.mqRequest.output.attempts")).size());
+        assertEquals(1, factory.putCalls);
+        assertEquals("MQ_NO_REPLY", context.resolve("ACTIONS.mqRequest.output.attempts[0].evidence.mq.invocations[0].error.type"));
+    }
+
     @Test void receiveRecalculatesGetWaitAfterQueueOpenConsumesDeadline() throws Exception {
         Path caseDir = tempDir.resolve("remaining-mq-deadline"); Files.createDirectories(caseDir);
         FakeFactory factory = new FakeFactory();
@@ -363,7 +387,7 @@ class MqHelperExecutorTest {
         }
     }
 
-    @Test void requestNoReplyPreservesEffectiveWaitMsAndScopesBindNotFixedToRequestOutput() throws Exception {
+    @Test void requestNoReplyIsErrorNotTimeoutAndPreservesNativeReasonMetadata() throws Exception {
         Path caseDir = tempDir.resolve("request-timeout-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
         FakeFactory factory = new FakeFactory(); factory.noMessage = true;
@@ -371,9 +395,15 @@ class MqHelperExecutorTest {
                 map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString(), "waitMs", 321),
                 context(caseDir), null, "request-2033");
 
-        assertTrue(result.success());
+        assertFalse(result.success());
         assertEquals(Boolean.FALSE, result.result().get("replyReceived"));
         assertEquals(321, result.result().get("waitMs"));
+        assertEquals(Boolean.TRUE, result.result().get("sent"));
+        assertEquals(2, result.result().get("completionCode"));
+        assertEquals(2033, result.result().get("reasonCode"));
+        assertEquals("MQRC_NO_MSG_AVAILABLE", result.result().get("reason"));
+        assertEquals("MQ_NO_REPLY", ((Map<?, ?>) result.result().get("error")).get("type"));
+        assertEquals("ERROR", result.evidence().get("status"));
         assertEquals(java.util.Arrays.asList(Boolean.TRUE, Boolean.FALSE), factory.bindNotFixed);
     }
 

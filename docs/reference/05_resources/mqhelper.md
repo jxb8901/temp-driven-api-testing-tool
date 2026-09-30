@@ -56,4 +56,10 @@ MQ evidence may contain bounded transport metadata such as helper/instance ident
 
 Call-level responseFormat may override requestReply.responseFormat for receive/request; send does not parse a reply. Instance selection and pool limits belong to the descriptor. Historical v1.0/v1.1 schemas are archived; migrate descriptors to v1.2 before validation.
 
+#### Request/reply no-message semantics
+
+`mq.<id>.request(...)` is complete only when the correlated reply is received. A successful PUT followed by MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) therefore publishes `sent: true`, `replyReceived: false`, the native completion/reason metadata, and an `MQ_NO_REPLY` error with status `ERROR`. It is not a generic `TIMEOUT`, so `retryOn: TIMEOUT` does not PUT the business request again. Use `mq.<id>.send(...)` followed by `mq.<id>.receive(correlationId=...)` when repeated reply polling is required.
+
+Standalone `mq.<id>.receive(...)` retains its polling contract: a 2033 no-message result may remain a completed PASS with `received: false`, subject to the configured receive semantics. An actual outer Action deadline remains `MQ_TIMEOUT` and follows the normal timeout/retry policy.
+
 See [Actions and Typed Values](../14_actions.md) for the shared DocumentValue and typed-result contract.

@@ -56,4 +56,10 @@ MQ evidence 可包含有界 transport metadata，例如 helper/instance identity
 
 Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。歷史 v1.0/v1.1 schema 已封存；validation 前請遷移至 v1.2。
 
+#### Request/reply 無訊息語義
+
+`mq.<id>.request(...)` 只有在收到 correlated reply 時才算完成。PUT 成功後若 GET 收到 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`），會發布 `sent: true`、`replyReceived: false`、原生 completion/reason metadata，以及 status 為 `ERROR` 的 `MQ_NO_REPLY` error；它不是 generic `TIMEOUT`，因此 `retryOn: TIMEOUT` 不會再次 PUT business request。若要反覆輪詢 reply，請使用 `mq.<id>.send(...)` 後再以 `mq.<id>.receive(correlationId=...)` 讀取。
+
+獨立 `mq.<id>.receive(...)` 保留 polling 契約：2033 無訊息結果可依既有 receive 語義以 `received: false` 完成並維持 PASS。真正的 outer Action deadline 仍是 `MQ_TIMEOUT`，並依正常 timeout/retry policy 處理。
+
 共用 DocumentValue 與 typed-result 契約見[動作與型別化值](../14_actions.md)。
