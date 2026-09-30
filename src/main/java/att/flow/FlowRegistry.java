@@ -171,9 +171,15 @@ public final class FlowRegistry {
         String flowVersion = configuredVersion == null ? "" : String.valueOf(configuredVersion);
         boolean typed = Version.FLOW_SCHEMA.equals(flowVersion);
         if (typed) rejectRemovedActionContract(map, descriptor);
-        if (!typed) throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
-                + "'; ATT 3.6.0 supports only " + Version.FLOW_SCHEMA
-                + ". Migrate nested Actions to the 3.6.0 typed-result contract and see docs/reference/appendices/migrations.md.");
+        if (!typed) {
+            Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, flowVersion);
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.3.schema.json");
+            att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
+                    flowVersion, Version.FLOW_SCHEMA);
+            throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
+                    + "'; ATT 3.6.0 supports only " + Version.FLOW_SCHEMA
+                    + ". Migrate nested Actions to the 3.6.0 typed-result contract and see docs/reference/appendices/migrations.md.");
+        }
         boolean currentVersion = true;
         boolean previousVersion = false;
         Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.3.schema.json");

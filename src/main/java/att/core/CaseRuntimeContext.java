@@ -64,8 +64,10 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> varsNode = new LinkedHashMap<String, Object>();
     /** ATT-owned diagnostics, deliberately excluded from the expression Context. */
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
-    /** Load-only scheduler state published below diagnosticsNode.load. */
+    /** Public uppercase load identity published below EXEC.LOAD. */
     private final Map<String, Object> loadNode = new LinkedHashMap<String, Object>();
+    /** ATT-owned load diagnostics, kept separate from the expression Context. */
+    private final Map<String, Object> loadDiagnosticsNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> metaNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> caseNode = new LinkedHashMap<String, Object>();
@@ -708,18 +710,32 @@ public final class CaseRuntimeContext {
                         String startedAt, String userId, String runStartedAt) {
         if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
         loadNode.clear();
+        loadNode.put("RUN_ID", runId);
+        loadNode.put("ITERATION_ID", iterationId);
         loadNode.put("MODEL", model);
         if (userId != null) loadNode.put("USER_ID", userId);
         loadNode.put("ITERATION", Long.valueOf(iteration));
         loadNode.put("PHASE", phase);
-        diagnosticsNode.put("load", loadNode);
+        loadDiagnosticsNode.clear();
+        loadDiagnosticsNode.put("runId", runId);
+        loadDiagnosticsNode.put("model", model);
+        if (userId != null) loadDiagnosticsNode.put("userId", userId);
+        loadDiagnosticsNode.put("iterationId", iterationId);
+        loadDiagnosticsNode.put("iteration", Long.valueOf(iteration));
+        loadDiagnosticsNode.put("phase", phase);
+        loadDiagnosticsNode.put("startedAt", startedAt);
+        loadDiagnosticsNode.put("runStartedAt", runStartedAt);
+        diagnosticsNode.put("load", loadDiagnosticsNode);
     }
 
     /** Adds the configured workload identity to the public EXEC.LOAD node. */
     public void setLoadWorkload(String workloadId, String targetType, String targetId) {
         if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
         if (workloadId != null) loadNode.put("WORKLOAD_ID", workloadId);
-        diagnosticsNode.put("load", loadNode);
+        if (workloadId != null) loadDiagnosticsNode.put("workloadId", workloadId);
+        if (targetType != null) loadDiagnosticsNode.put("targetType", targetType);
+        if (targetId != null) loadDiagnosticsNode.put("targetId", targetId);
+        diagnosticsNode.put("load", loadDiagnosticsNode);
     }
 
     /** Removes circular/output paths until the configured Load EXEC.ID is resolved. */

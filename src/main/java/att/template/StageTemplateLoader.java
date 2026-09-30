@@ -151,9 +151,15 @@ public final class StageTemplateLoader {
         rejectLegacyResultFields(map, descriptor);
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
         boolean typed = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
-        if (!typed) throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
-                + "'; ATT 3.6.0 supports only " + Version.TEMPLATE_SCHEMA
-                + ". Migrate Render to templateFormat and DocumentValue, command Tool parsing to stdoutFormat, and Log file/fields to value. See docs/reference/appendices/migrations.md.");
+        if (!typed) {
+            Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.3.schema.json");
+            att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
+                    schemaVersion, Version.TEMPLATE_SCHEMA);
+            throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
+                    + "'; ATT 3.6.0 supports only " + Version.TEMPLATE_SCHEMA
+                    + ". Migrate Render to templateFormat and DocumentValue, command Tool parsing to stdoutFormat, and Log file/fields to value. See docs/reference/appendices/migrations.md.");
+        }
         boolean current = true;
         boolean previousVersion = false;
         boolean modern = true;

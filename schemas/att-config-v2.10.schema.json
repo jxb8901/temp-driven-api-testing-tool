@@ -370,6 +370,10 @@
             "once",
             "repeat"
           ]
+        },
+        "delimit": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "patternProperties": {

@@ -39,9 +39,16 @@ public final class FrameworkConfigLoader {
             Map<?, ?> rawMap = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
             boolean v210 = Version.CONFIG_SCHEMA.equals(schemaVersion);
-            if (!v210) throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
-                    + "'; ATT 3.6.0 supports only " + Version.CONFIG_SCHEMA
-                    + ". Migrate command Tool result.format to stdoutFormat and update referenced descriptors. See docs/reference/appendices/migrations.md.");
+            if (!v210) {
+                projectRoot = projectRoot.toAbsolutePath().normalize();
+                Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
+                Path currentSchema = schema(projectRoot, "att-config-v2.10.schema.json");
+                att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
+                        schemaVersion, Version.CONFIG_SCHEMA);
+                throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
+                        + "'; ATT 3.6.0 supports only " + Version.CONFIG_SCHEMA
+                        + ". Migrate command Tool result.format to stdoutFormat and update referenced descriptors. See docs/reference/appendices/migrations.md.");
+            }
             boolean v29 = v210;
             boolean v28 = false;
             boolean v27 = false;
@@ -717,7 +724,7 @@ public final class FrameworkConfigLoader {
     }
     private static Map<String, String> reportColumns(Object value) {
         Map<String, String> result = stringMap(value);
-        java.util.Set<String> allowed = new java.util.LinkedHashSet<String>(java.util.Arrays.asList("result", "durationMs", "expectedResult", "actualResult", "caseLog", "reportLink", "runTime"));
+        java.util.Set<String> allowed = new java.util.LinkedHashSet<String>(java.util.Arrays.asList("result", "durationMs", "expectedResult", "actualResult", "caseLog", "reportLink", "runTime", "execId"));
         for (Map.Entry<String, String> entry : result.entrySet()) {
             if (!allowed.contains(entry.getKey())) throw new IllegalArgumentException("Unknown report column key: " + entry.getKey());
             if (entry.getValue().trim().isEmpty()) throw new IllegalArgumentException("Report column header must not be blank: " + entry.getKey());
