@@ -82,7 +82,7 @@ class StageTemplateRunnerTest {
         TemplateAction action = new TemplateAction("typed", map("type", "tool", "call", "#{sample()}"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
-                new ToolInvoker(tempDir, config, new FixedRunner(0, "{\"ok\":true}))))
+                new ToolInvoker(tempDir, config, new FixedRunner(0, "{\"ok\":true}"))))
                 .execute("prepare", new StageTemplate("T", tempDir, Collections.singletonList(action)), context,
                         new CaseExecutionLog(caseDir.resolve("case.log")));
 
