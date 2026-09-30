@@ -693,8 +693,9 @@ public class StageTemplateRunner {
     }
 
     private Map<String, Object> collectorResultError(att.exec.ToolInvocationResult result, String fallback) {
-        Map<String, Object> error = collectorError(result == null ? null : result.invocation(), fallback);
-        if (result == null) return error;
+        if (result == null) return collectorError((Object) null, fallback);
+        // Defer the fallback until the native operation diagnostic/result has been consulted.
+        Map<String, Object> error = collectorError(result.invocation(), "");
         Map<String, Object> diagnostic = result.operationResult().diagnostic();
         String message = firstMessage(diagnostic, result.operationResult().result());
         if (isBlank(String.valueOf(error.get("message"))) && !isBlank(message)) error.put("message", message);

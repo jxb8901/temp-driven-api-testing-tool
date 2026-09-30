@@ -325,6 +325,60 @@ class StageTemplateRunnerTest {
         }
     }
 
+    @Test void callBackedHttpCollectorPreservesNativeFailureMessageForContinueAndStop() throws Exception {
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("snapshot", new ToolConfig("snapshot", "snapshot", "", "Snapshot", "HTTP collector",
+                Collections.<String>emptyList(), "#{http.missing.get()}", Collections.<String>emptyList(),
+                "", Collections.<String, ToolArgumentConfig>emptyMap(), null, null));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                tools, null, null);
+        String message = "Unknown HTTP helper: missing";
+        try (HttpHelperExecutor http = new HttpHelperExecutor(tempDir, config)) {
+            for (String mode : Arrays.asList("continue", "stop")) {
+                Path caseDir = tempDir.resolve("http-collector-failure-" + mode);
+                Files.createDirectories(caseDir);
+                TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+                CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R-" + mode,
+                        tempDir, caseDir.resolve("case.log"));
+                context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()),
+                        "T", tempDir);
+                TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                        "assert", "${output.result} == 'OK'",
+                        "evidence", map("snapshot", map("call", "#{snapshot()}", "onFailure", mode))));
+                UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(tempDir, config),
+                        null, null, http, new DefaultBuiltInProvider());
+                List<ValidationResult> results;
+                try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                    results = new StageTemplateRunner(engine).execute("invoke",
+                            new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                }
+
+                assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR,
+                        results.get(0).status(), results.get(0).message());
+                assertEquals("OK", context.resolve("ACTIONS.call.output.result"));
+                String collector = "ACTIONS.call.output.evidence.collectors.snapshot";
+                assertEquals("ERROR", context.resolve(collector + ".status"));
+                assertEquals(message, context.resolve(collector + ".error.message"));
+                assertEquals(message, context.resolve(collector + ".diagnostic.message"));
+                assertEquals(message, context.resolve(collector + ".evidence.http.invocations[0].error.message"));
+                assertEquals("HTTP_CONFIG", context.resolve(collector + ".evidence.http.invocations[0].error.type"));
+                assertEquals(message, context.resolve(
+                        "ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.error.message"));
+                if ("stop".equals(mode)) {
+                    assertNull(context.resolve("ACTIONS.call.output.assertion"));
+                    assertTrue(results.get(0).message().contains(message), results.get(0).message());
+                } else {
+                    assertNotNull(context.resolve("ACTIONS.call.output.assertion"));
+                }
+                String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+                assertTrue(caseLog.contains("EVIDENCE call attempt=1 collector=snapshot"));
+                assertTrue(caseLog.contains(message));
+                assertFalse(caseLog.contains("Evidence collector operation failed with status ERROR"));
+            }
+        }
+    }
+
     @Test void failedCommandCollectorPreservesOperationEvidenceAndActionableLogMessage() throws Exception {
         Path caseDir = tempDir.resolve("evidence-command-failure");
         Files.createDirectories(caseDir);
