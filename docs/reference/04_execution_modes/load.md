@@ -61,7 +61,7 @@ output/load/<RUN_ID>/
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-A metrics-only iteration still has EXEC.ID but its temporary workspace is removed when the scheduler declines retention. EXEC.OUTPUT_DIR remains at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes also receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Process/API output stays in temporary staging until a retention slot is granted.
+A metrics-only iteration still has EXEC.ID but does not create a per-iteration execution directory unless an operation writes an artifact or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains the logical planned path at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Helper resource-output formatting is deferred until retention; explicit Tool evidence collectors still execute because they are author-requested diagnostic operations.
 
 #### Evidence and resource output
 

@@ -263,6 +263,18 @@ Entering a Template, Flow, Tool or helper invocation publishes metadata for that
 
 EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs and restores them after completion. EXEC.VARS is shared across later Stages in a Case. EXEC.ACTIONS is scoped to the active Template or Flow. An Action reads local output while running and publishes its envelope at EXEC.ACTIONS.<id>.output.
 
+### Action output and evidence paths
+
+| Path | Meaning and availability |
+|---|---|
+| `output.result` | Primary typed Action result while the Action is active, including its assertion. |
+| `output.evidence.collectors.<id>.result` | Typed result of an active Tool evidence collector. |
+| `output.evidence.collectors.<id>.status` | Collector `PASS`/`ERROR` status while the Action is active. |
+| `EXEC.ACTIONS.<actionId>.output.result` | Published primary typed result after the Action completes. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | Published final/winning collector result. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | Published final/winning collector status. |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
+
 Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
 ### Load execution ID initialization
@@ -446,7 +458,7 @@ output/load/<RUN_ID>/
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-A metrics-only iteration still has EXEC.ID but its temporary workspace is removed when the scheduler declines retention. EXEC.OUTPUT_DIR remains at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes also receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Process/API output stays in temporary staging until a retention slot is granted.
+A metrics-only iteration still has EXEC.ID but does not create a per-iteration execution directory unless an operation writes an artifact or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains the logical planned path at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Helper resource-output formatting is deferred until retention; explicit Tool evidence collectors still execute because they are author-requested diagnostic operations.
 
 #### Evidence and resource output
 
@@ -1197,7 +1209,9 @@ Where retry is supported, one logical Action owns multiple attempts. Retry polic
 
 ### Evidence collectors
 
-Tool evidence collectors run after the primary operation and before that attempt's assertion. Collectors have independent timeout and `onFailure: continue|stop`. Collector output belongs to the attempt's evidence and never replaces the primary operation result.
+Tool evidence collectors run after the primary operation has published its typed `output.result` and before that attempt's assertion. While the Action is active, `${output.evidence.collectors.<id>.result}` and `${output.evidence.collectors.<id>.status}` are available; after publication the canonical paths are `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` and `.status`. Collectors have independent `timeoutMs` and `onFailure: continue|stop`. Collector output belongs to the attempt's evidence and never replaces or mutates the primary operation result.
+
+Collectors run once per primary attempt. The top-level collector node represents the final/winning attempt, while `output.attempts[n].evidence.collectors.<id>` retains each attempt. `continue` keeps the primary/assertion outcome visible when diagnostic collection fails; `stop` makes the collector failure an Action error. Use an ordinary Tool/Log/Assign Action when the collected value is business/test data rather than pre-assertion diagnostics.
 
 ### Transaction/resource lifecycle
 
@@ -2028,6 +2042,80 @@ stdoutFormat parses external stdout once into output.result; it is not output se
 A DB action uses db and exactly one query or update block. SQL, bind parameters, transaction controls and DB evidence follow the DB action and DBHelper contracts.
 
 A Flow action uses use with a canonical Flow ID. It runs in a fresh EXEC.ACTIONS scope and publishes its result/evidence to the caller when it returns. META.FLOW exists only while that invocation is active.
+
+### Tool evidence collectors
+
+A Tool Action may define first-class `evidence` collectors for diagnostics that must be gathered before the Action assertion. The lifecycle is:
+
+```text
+primary Tool call
+    -> typed primary output.result
+    -> evidence collector call(s)
+    -> Action assertion
+    -> PASS / FAIL / ERROR
+```
+
+Collectors are diagnostic operations, not replacement Actions. Each collector has its own typed result and does not replace or mutate the primary `output.result`:
+
+```yaml
+callPayment:
+  type: tool
+  call: >-
+    #{mq.payment.request(
+      payload=${EXEC.ACTIONS.renderRequest.output.result},
+      responseFormat='xml'
+    )}
+  evidence:
+    appLog:
+      call: >-
+        #{ssh.app.execute(
+          command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100'
+        )}
+      timeoutMs: 10000
+      onFailure: continue
+  assert: >-
+    ${output.replyReceived} == true
+```
+
+While the containing Action, including its assertion, is active, use these paths:
+
+```text
+${output.result}
+${output.evidence.collectors.<collectorId>.result}
+${output.evidence.collectors.<collectorId>.status}
+```
+
+After publication, the same values are available below `EXEC.ACTIONS`:
+
+```text
+${EXEC.ACTIONS.callPayment.output.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}
+```
+
+The public shape keeps primary resource evidence and collector evidence separate:
+
+```text
+output
+├── result                         # primary Tool logical result
+├── evidence
+│   ├── <resource-kind>            # primary operation evidence
+│   └── collectors
+│       └── <collectorId>
+│           ├── result             # typed collector result
+│           ├── status
+│           ├── invocationId
+│           └── durationMs
+└── attempts
+    └── [n]
+        └── evidence.collectors.<collectorId>.result/status
+```
+
+When a Tool retries, collectors run for every primary attempt before that attempt's assertion. The top-level `output.evidence.collectors.<id>` is the final/winning attempt; `output.attempts[n].evidence.collectors.<id>` retains each attempt, including earlier failures. After publication, the corresponding history path is `${EXEC.ACTIONS.<actionId>.output.attempts[0].evidence.collectors.<id>.result}`.
+
+`call` is required. `timeoutMs` is independent of the primary Tool timeout. `onFailure: continue` is the normal application-log pattern so a diagnostic collection failure does not hide the original business or assertion failure; `stop` makes the collector failure an Action error. Collector status and diagnostic remain observable, and collector failure never changes the primary logical result. Distinguish an evidence collector from an ordinary Tool/Log/Assign Action: use a collector for diagnostic data needed before the containing Tool assertion, and an ordinary Action when the collected value is normal business/test data for later assertions.
+
+Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or `DocumentValue`; matching-format presentation preserves a `DocumentValue`'s authoritative text. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
 
 ### Log: typed value to Case log
 

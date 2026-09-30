@@ -20,7 +20,9 @@ Timeout 依 backend 支援能力終止或放棄 operation，並記錄 diagnostic
 
 ### Evidence collectors
 
-Tool evidence collector 在 primary operation 後、該 attempt assertion 前執行。Collector 有獨立 timeout 與 `onFailure: continue|stop`；collector output 屬於該 attempt evidence，不會取代 primary operation result。
+Tool evidence collector 在 primary operation 發布 typed `output.result` 後、該 attempt assertion 前執行。Action active 時可使用 `${output.evidence.collectors.<id>.result}` 與 `${output.evidence.collectors.<id>.status}`；發布後的 canonical path 是 `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` 和 `.status`。Collector 有獨立 `timeoutMs` 與 `onFailure: continue|stop`；collector output 屬於該 attempt evidence，不會取代或修改 primary operation result。
+
+每個 primary attempt 都會執行 collector。Top-level collector node 代表最後／勝出的 attempt，`output.attempts[n].evidence.collectors.<id>` 則保留各 attempt。`continue` 讓 primary/assertion outcome 在診斷收集失敗時仍可觀察；`stop` 令 collector failure 成為 Action error。若收集的值是 business/test data，而不是 pre-assertion 診斷資料，應使用普通 Tool/Log/Assign Action。
 
 ### Transaction/resource lifecycle
 

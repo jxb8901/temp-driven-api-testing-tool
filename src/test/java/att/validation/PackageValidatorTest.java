@@ -373,6 +373,13 @@ class PackageValidatorTest {
             catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
             catch (Exception e) { throw new RuntimeException(e); }
         });
+        Map<String,Object> explicitNullLog = map("type", "log", "value", null, "format", "json");
+        assertDoesNotThrow(() -> {
+            try { method.invoke(validator, new StageTemplate("T", tempDir,
+                    Collections.singletonList(new TemplateAction("nullLog", explicitNullLog))), config); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,
                 new StageTemplate("T", tempDir, Collections.singletonList(new TemplateAction("emptyLog",
                         Collections.<String,Object>singletonMap("type", "log"))), "att-template/v3.3"), config));

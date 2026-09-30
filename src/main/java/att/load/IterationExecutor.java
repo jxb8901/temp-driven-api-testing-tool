@@ -57,7 +57,6 @@ public final class IterationExecutor implements LoadIterationRunner {
     @Override public IterationResult execute(IterationRequest request) {
         resources.ensureOpen();
         Instant started = Instant.now();
-        Path iterationDirectory = null;
         Path executionWorkspace = null;
         Path transientWorkspace = null;
         Path evidenceDirectory = null;
@@ -96,12 +95,13 @@ public final class IterationExecutor implements LoadIterationRunner {
                 throw invalidId;
             }
             executionWorkspace = executionWorkspace(request, executionId);
-            Files.createDirectories(executionWorkspace);
             context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
-            transientWorkspace = Files.createTempDirectory("att-load-execution-");
-            context.setCommandWorkingDirectory(transientWorkspace);
+            // EXEC.OUTPUT_DIR is a logical/planned path in Load. A local
+            // command-backed Tool creates it on demand when it needs a cwd;
+            // metrics-only/helper iterations therefore do not pay per-iteration
+            // mkdir and temporary-workspace cleanup I/O.
+            context.setCommandWorkingDirectory(executionWorkspace);
             log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
-            iterationDirectory = executionWorkspace;
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();

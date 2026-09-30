@@ -290,8 +290,8 @@ public class StageTemplateRunner {
 
     private void executeLog(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output) throws Exception {
         String message = normalizeLines(templateEngine.render(action.message(), context, log));
-        Object value = action.value() == null ? null : templateEngine.evaluateTypedTree(action.value(), context, log);
-        String formatted = action.value() == null ? "" : new TypedValueFormatter().format(value, action.format());
+        Object value = action.valuePresent() ? templateEngine.evaluateTypedTree(action.value(), context, log) : null;
+        String formatted = action.valuePresent() ? new TypedValueFormatter().format(value, action.format()) : "";
         output.put("result", message.isEmpty() ? formatted : formatted.isEmpty() ? message : message + "\n" + formatted);
         output.put("level", action.level());
         try { log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result"))); }

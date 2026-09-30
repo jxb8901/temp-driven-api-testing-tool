@@ -26,6 +26,7 @@ public class TemplateAction {
     private final String call;
     private final String message;
     private final Object value;
+    private final boolean valuePresent;
     private final String format;
     private final String file;
     private final ActionResultConfig result;
@@ -65,6 +66,7 @@ public class TemplateAction {
         this.expression = text(data.get("expression"), "");
         this.call = text(data.get("call"), "");
         this.message = text(data.get("message"), "");
+        this.valuePresent = data.containsKey("value");
         this.value = data.get("value");
         this.format = text(data.get("format"), "");
         this.file = "";
@@ -110,6 +112,7 @@ public class TemplateAction {
     public String call() { return call; }
     public String message() { return message; }
     public Object value() { return value; }
+    public boolean valuePresent() { return valuePresent; }
     public String format() { return format; }
     public String file() { return file; }
     public ActionResultConfig resultConfig() { return result; }

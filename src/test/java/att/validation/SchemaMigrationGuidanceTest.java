@@ -102,6 +102,21 @@ class SchemaMigrationGuidanceTest {
         assertEquals(5, error.source().line());
     }
 
+    @Test void flowRenderMigrationDoesNotSuggestRemovedResultPersistenceFields() throws Exception {
+        Path file = root.resolve("templates/flows/render-migration/flow.yaml");
+        Files.createDirectories(file.getParent());
+        Files.write(file, ("schemaVersion: att-flow/v3.0\nid: render.migration.v1\nname: Render migration\n"
+                + "description: Render migration\nactions:\n"
+                + "  render: {type: render, payload: request.xml, renderAs: file}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        DiagnosticException error = assertThrows(DiagnosticException.class,
+                () -> new FlowRegistry(root, root.resolve("templates")));
+        assertTrue(error.suggestion().contains("templateFormat"), error.suggestion());
+        assertTrue(error.suggestion().contains("DocumentValue"), error.suggestion());
+        assertFalse(error.suggestion().contains("result:"), error.suggestion());
+        assertFalse(error.suggestion().contains("path:"), error.suggestion());
+    }
+
     @Test void missingRegisteredHistoricalSchemaFailsWithoutFallbackAndCatalogScanFindsUnusedGaps() throws Exception {
         Path historical = root.resolve("schemas/history/att-flow-v3.0.schema.json");
         Files.delete(historical);

@@ -266,6 +266,9 @@ roots</a></li>
 id="toc-meta-欄位清單與生命週期">META 欄位清單與生命週期</a></li>
 <li><a href="#invocation-與-scope-規則"
 id="toc-invocation-與-scope-規則">Invocation 與 scope 規則</a></li>
+<li><a href="#action-output-與-evidence-path"
+id="toc-action-output-與-evidence-path">Action output 與 evidence
+path</a></li>
 <li><a href="#load-execution-id-initialization"
 id="toc-load-execution-id-initialization">Load execution ID
 initialization</a></li>
@@ -425,6 +428,8 @@ id="toc-區分邏輯值與表示方式">區分邏輯值與表示方式</a></li>
 id="toc-render-與-documentvalue">Render 與 DocumentValue</a></li>
 <li><a href="#tooldb-與-flow-結果" id="toc-tooldb-與-flow-結果">Tool、DB
 與 Flow 結果</a></li>
+<li><a href="#tool-evidence-collector"
+id="toc-tool-evidence-collector">Tool evidence collector</a></li>
 <li><a href="#log將型別化值轉成人類可讀日誌"
 id="toc-log將型別化值轉成人類可讀日誌">Log：將型別化值轉成人類可讀日誌</a></li>
 <li><a href="#expressions-與變數-scope"
@@ -1053,6 +1058,47 @@ active invocation 時，其 branch 缺席。請勿依賴「最後一次呼叫」
 input，完成後還原。EXEC.VARS 可供同一 Case 後續 Stages
 共用。EXEC.ACTIONS 屬於 active Template/Flow。Action 執行期間讀 local
 output，完成後發布到 EXEC.ACTIONS.<id>.output。</p>
+<h3 id="action-output-與-evidence-path">Action output 與 evidence
+path</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>意義與可用時機</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>output.result</code></td>
+<td>Action active（包括 assertion）期間的 primary typed result。</td>
+</tr>
+<tr class="even">
+<td><code>output.evidence.collectors.&lt;id&gt;.result</code></td>
+<td>Active Tool evidence collector 的 typed result。</td>
+</tr>
+<tr class="odd">
+<td><code>output.evidence.collectors.&lt;id&gt;.status</code></td>
+<td>Collector 的 <code>PASS</code>／<code>ERROR</code> status。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.result</code></td>
+<td>Action 完成後發布的 primary typed result。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.result</code></td>
+<td>發布後最後／勝出的 collector result。</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.status</code></td>
+<td>發布後最後／勝出的 collector status。</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;id&gt;.result/status</code></td>
+<td>指定 retry attempt 的 collector result/status；後續成功後仍保留較早
+attempt。</td>
+</tr>
+</tbody>
+</table>
 <p>String、Number、Boolean、null、Map、List、DocumentValue 等值跨越
 Action/Template/Flow boundary 時都保留原型別。</p>
 <h3 id="load-execution-id-initialization">Load execution ID
@@ -1357,13 +1403,15 @@ Model</a>。</p>
 ├── failures/&lt;EXEC.ID&gt;/case.yaml
 ├── samples/&lt;EXEC.ID&gt;/case.log
 └── samples/&lt;EXEC.ID&gt;/case.yaml</code></pre>
-<p>Metrics-only iteration 雖有 EXEC.ID，但 scheduler
-拒絕保留時會刪除暫存 workspace。iteration 執行期間 EXEC.OUTPUT_DIR
-固定指向 executions/&lt;EXEC.ID&gt;。保留的 failure 或 sampled success
-也會將 evidence 複製到 failures/&lt;EXEC.ID&gt;/ 或
+<p>Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact
+或 retention decision 要求 materialize evidence，否則不會建立
+per-iteration execution directory。iteration 執行期間 EXEC.OUTPUT_DIR
+維持 executions/&lt;EXEC.ID&gt; 的 logical planned path。保留的 failure
+或 sampled success 會將 evidence 複製到 failures/&lt;EXEC.ID&gt;/ 或
 samples/&lt;EXEC.ID&gt;/。Report/evidence summary 顯示 EXEC.ID；有保留
-case.log 時提供連結。Process/API output 暫存在 staging，取得 retention
-slot 後才複製。</p>
+case.log 時提供連結。Helper resource-output formatting 會延遲至
+retention；明確要求的 Tool evidence collector 仍會執行，因為它是
+author-requested diagnostic operation。</p>
 <h4 id="evidence-與-resource-output">Evidence 與 resource output</h4>
 <p>evidence.mode 支援 metrics、failures、samples、all；預設
 failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival
@@ -2338,10 +2386,23 @@ top-level <code>output.result</code> /
 <code>output.attempts[n]</code>。後續成功不會抹掉較早 attempt
 evidence。</p>
 <h3 id="evidence-collectors">Evidence collectors</h3>
-<p>Tool evidence collector 在 primary operation 後、該 attempt assertion
-前執行。Collector 有獨立 timeout 與
+<p>Tool evidence collector 在 primary operation 發布 typed
+<code>output.result</code> 後、該 attempt assertion 前執行。Action
+active 時可使用
+<code>${output.evidence.collectors.&lt;id&gt;.result}</code> 與
+<code>${output.evidence.collectors.&lt;id&gt;.status}</code>；發布後的
+canonical path 是
+<code>${EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.result}</code>
+和 <code>.status</code>。Collector 有獨立 <code>timeoutMs</code> 與
 <code>onFailure: continue|stop</code>；collector output 屬於該 attempt
-evidence，不會取代 primary operation result。</p>
+evidence，不會取代或修改 primary operation result。</p>
+<p>每個 primary attempt 都會執行 collector。Top-level collector node
+代表最後／勝出的
+attempt，<code>output.attempts[n].evidence.collectors.&lt;id&gt;</code>
+則保留各 attempt。<code>continue</code> 讓 primary/assertion outcome
+在診斷收集失敗時仍可觀察；<code>stop</code> 令 collector failure 成為
+Action error。若收集的值是 business/test data，而不是 pre-assertion
+診斷資料，應使用普通 Tool/Log/Assign Action。</p>
 <h3 id="transactionresource-lifecycle">Transaction/resource
 lifecycle</h3>
 <p>DB transaction finalization 與 DB/MQ resource cleanup 在相應
@@ -3995,16 +4056,89 @@ parameters、transaction controls 和 DB evidence 依 DB action 與 DBHelper
 <p>Flow action 使用 canonical Flow ID 的 use。Flow 在新的 EXEC.ACTIONS
 scope 執行，返回時將結果/evidence 發布給 caller。META.FLOW 只在該次
 invocation 執行期間存在。</p>
+<h3 id="tool-evidence-collector">Tool evidence collector</h3>
+<p>Tool Action 可定義第一級 <code>evidence</code> collector，用來在
+Action assertion 前收集診斷資料。執行順序是：</p>
+<pre class="text"><code>primary Tool call
+    -&gt; typed primary output.result
+    -&gt; evidence collector call(s)
+    -&gt; Action assertion
+    -&gt; PASS / FAIL / ERROR</code></pre>
+<p>Collector 是診斷 operation，不是替代 Action。每個 collector
+有自己的型別化 result，不會取代或修改 primary
+<code>output.result</code>：</p>
+<div class="sourceCode" id="cb68"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
+<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
+<span id="cb68-5"><a href="#cb68-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb68-6"><a href="#cb68-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
+<span id="cb68-7"><a href="#cb68-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb68-8"><a href="#cb68-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb68-9"><a href="#cb68-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb68-10"><a href="#cb68-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb68-11"><a href="#cb68-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
+<span id="cb68-12"><a href="#cb68-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
+<span id="cb68-13"><a href="#cb68-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
+<span id="cb68-14"><a href="#cb68-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb68-15"><a href="#cb68-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
+<span id="cb68-16"><a href="#cb68-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb68-17"><a href="#cb68-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
+<p>包含 assertion 在內，Action active 時可使用：</p>
+<pre class="text"><code>${output.result}
+${output.evidence.collectors.&lt;collectorId&gt;.result}
+${output.evidence.collectors.&lt;collectorId&gt;.status}</code></pre>
+<p>Action 發布後，對應值位於 <code>EXEC.ACTIONS</code>：</p>
+<pre class="text"><code>${EXEC.ACTIONS.callPayment.output.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}</code></pre>
+<p>Public shape 會將 primary resource evidence 與 collector evidence
+分開：</p>
+<pre class="text"><code>output
+├── result                         # primary Tool logical result
+├── evidence
+│   ├── &lt;resource-kind&gt;            # primary operation evidence
+│   └── collectors
+│       └── &lt;collectorId&gt;
+│           ├── result             # typed collector result
+│           ├── status
+│           ├── invocationId
+│           └── durationMs
+└── attempts
+    └── [n]
+        └── evidence.collectors.&lt;collectorId&gt;.result/status</code></pre>
+<p>Tool retry 時，每個 primary attempt 都會在該 attempt assertion 前執行
+collector。Top-level <code>output.evidence.collectors.&lt;id&gt;</code>
+是最後／勝出的
+attempt；<code>output.attempts[n].evidence.collectors.&lt;id&gt;</code>
+保留每個 attempt，包括較早的 failure。發布後的歷史路徑是
+<code>${EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[0].evidence.collectors.&lt;id&gt;.result}</code>。</p>
+<p><code>call</code> 必填。<code>timeoutMs</code> 與 primary Tool
+timeout 獨立。應用程式 log 的一般診斷模式使用
+<code>onFailure: continue</code>，避免收集 log 失敗掩蓋原本的 business
+或 assertion failure；<code>stop</code> 則令 collector failure 成為
+Action error。Collector 的 status 與 diagnostic 仍可觀察，且 collector
+failure 不會改變 primary logical result。若資料是後續 assertion
+要使用的正常 business/test value，應使用普通 Tool/Log/Assign
+Action，而非 evidence collector。</p>
+<p>Collector result 遵守一般 typed-result 規則。放在 evidence
+下不代表會轉成 String；Map、List 和 <code>DocumentValue</code>
+均保留型別，匹配格式時保留 <code>DocumentValue</code> 的權威原文。在
+Load 中，明確要求的 collector execution 與 helper
+<code>evidence.output</code> serialization 是兩件事；resource-output
+格式化仍由 Load evidence policy 控制，不會靜默取代或刪除
+author-requested collector。</p>
 <h3
 id="log將型別化值轉成人類可讀日誌">Log：將型別化值轉成人類可讀日誌</h3>
 <p>Log 是 presentation Action，因此有自己的 format 欄位：</p>
-<div class="sourceCode" id="cb67"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
-<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
-<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
-<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
-<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
-<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
+<span id="cb72-5"><a href="#cb72-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
+<span id="cb72-6"><a href="#cb72-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
 <p>level 預設 INFO，可設 TRACE、DEBUG、INFO、WARN、ERROR。message 或
 value 至少要有一項。message 以文字求值。value
 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...}
@@ -4030,11 +4164,11 @@ Flow 返回後仍需要該值，請發布到 EXEC.VARS。</p>
 <h3 id="resource-output-evidence">Resource output evidence</h3>
 <p>Resource evidence 與邏輯 result 分離。Helper 可設定可選的
 evidence.output presentation policy：</p>
-<div class="sourceCode" id="cb68"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>此設定會在 operation metadata
 旁加入有長度上限的人類可讀快照，不會改變 output.result 或 response
 parsing。Load 的 evidence.resources.output 可設 inherit（預設）或
@@ -4237,19 +4371,19 @@ runtime contract。</td>
 </tbody>
 </table>
 <p>Render 直接傳到 HTTP 的例子：</p>
-<div class="sourceCode" id="cb69"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb69-5"><a href="#cb69-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb69-6"><a href="#cb69-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb69-7"><a href="#cb69-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb74"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb74-6"><a href="#cb74-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb74-7"><a href="#cb74-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
 <p>抽象 typed value 必須明確使用 requestFormat：</p>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb75"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
 <p>Load scenario 請從舊 single-target/v1.1 格式遷移至 att-load/v1.2
 workloads。Pacing 移入各 workload；需要自訂 EXEC.ID 時可設定頂層
 execution.execIdFormat。它在初始化時使用一般 expression engine

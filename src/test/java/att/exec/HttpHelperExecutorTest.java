@@ -204,6 +204,23 @@ class HttpHelperExecutorTest {
         }
     }
 
+    @Test void structuredRequestRejectsBlankOrNullRequestFormatBeforeNetworkCall() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null);
+        CaseRuntimeContext context = context();
+        int before = hits.get();
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            for (Object format : Arrays.<Object>asList("", null)) {
+                ToolInvocationResult invalid = http.execute("paymentApi", "post",
+                        args("path", "/echo", "body", args("ok", true), "requestFormat", format),
+                        context, 1000L, "blank-request-format", "text");
+                assertFalse(invalid.executionSuccess());
+                assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) invalid.operationResult().outputMetadata().get("error")).get("type"));
+            }
+        }
+        assertEquals(before, hits.get(), "invalid requestFormat must fail before opening an HTTP connection");
+    }
+
     private CaseRuntimeContext context() throws Exception {
         Path caseDir = root.resolve("case-output"); Files.createDirectories(caseDir);
         TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),

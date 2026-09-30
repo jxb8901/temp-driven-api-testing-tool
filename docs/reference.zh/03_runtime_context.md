@@ -66,6 +66,18 @@ ATT 會遞迴過濾 password、secret、token、authorization/cookie、API key�
 
 EXEC.INPUT 是 canonical input map。Stage 暫時 overlay Case input，完成後還原。EXEC.VARS 可供同一 Case 後續 Stages 共用。EXEC.ACTIONS 屬於 active Template/Flow。Action 執行期間讀 local output，完成後發布到 EXEC.ACTIONS.<id>.output。
 
+### Action output 與 evidence path
+
+| Path | 意義與可用時機 |
+|---|---|
+| `output.result` | Action active（包括 assertion）期間的 primary typed result。 |
+| `output.evidence.collectors.<id>.result` | Active Tool evidence collector 的 typed result。 |
+| `output.evidence.collectors.<id>.status` | Collector 的 `PASS`／`ERROR` status。 |
+| `EXEC.ACTIONS.<actionId>.output.result` | Action 完成後發布的 primary typed result。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | 發布後最後／勝出的 collector result。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | 發布後最後／勝出的 collector status。 |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
+
 String、Number、Boolean、null、Map、List、DocumentValue 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
 ### Load execution ID initialization

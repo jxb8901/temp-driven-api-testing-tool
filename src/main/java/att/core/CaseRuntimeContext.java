@@ -919,7 +919,7 @@ public final class CaseRuntimeContext {
         return value;
     }
     public Path caseOutputDirectory() { return caseOutputDir; }
-    /** Process cwd; Load uses a temporary staging directory while EXEC.OUTPUT_DIR remains lazy. */
+    /** Process cwd; Load uses its logical execution workspace and creates it on demand. */
     public Path commandWorkingDirectory() { return commandWorkingDirectory; }
     public void setCommandWorkingDirectory(Path path) {
         if (path == null) throw new IllegalArgumentException("Command working directory is required");

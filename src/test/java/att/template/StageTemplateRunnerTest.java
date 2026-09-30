@@ -212,7 +212,8 @@ class StageTemplateRunnerTest {
         tools.put("sample", new ToolConfig("sample","Sample","test","sample","text",Collections.<String,ToolArgumentConfig>emptyMap()));
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tools,null,null);
         TemplateAction action = new TemplateAction("call", map("type","tool", "call","#{sample()}",
-                "assert","${output.result} == 'ok'", "evidence", map("snapshot", map("call","#{capture(value=${output.result})}"))));
+                "assert","${output.evidence.collectors.snapshot.result} == 'ok' and ${output.evidence.collectors.snapshot.status} == 'PASS'",
+                "evidence", map("snapshot", map("call","#{capture(value=${output.result})}"))));
         assertFalse(action.evidence().isEmpty());
         CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
         CaptureBuiltIns builtIns = new CaptureBuiltIns();
@@ -226,6 +227,8 @@ class StageTemplateRunnerTest {
         assertEquals("sample", context.resolve("ACTIONS.call.output.evidence.tool.invocations[0].name"));
         assertEquals("tool", context.resolve("ACTIONS.call.output.evidence.tool.invocations[0].type"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.evidence.collectors.snapshot.result"));
+        assertEquals("ok", context.resolve("EXEC.ACTIONS.call.output.evidence.collectors.snapshot.result"));
+        assertEquals("PASS", context.resolve("EXEC.ACTIONS.call.output.evidence.collectors.snapshot.status"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.result"));
         assertEquals("PASS", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.status"));
         String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
@@ -289,6 +292,9 @@ class StageTemplateRunnerTest {
         assertEquals(2, builtIns.calls);
         assertEquals("first", context.resolve("ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.result"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.attempts[1].evidence.collectors.snapshot.result"));
+        assertEquals("first", context.resolve("EXEC.ACTIONS.call.output.attempts[0].evidence.collectors.snapshot.result"));
+        assertEquals("PASS", context.resolve("EXEC.ACTIONS.call.output.attempts[1].evidence.collectors.snapshot.status"));
+        assertEquals("ok", context.resolve("EXEC.ACTIONS.call.output.evidence.collectors.snapshot.result"));
         assertEquals("ok", context.resolve("ACTIONS.call.output.evidence.tool.invocations[0].output"));
     }
 
@@ -343,6 +349,22 @@ class StageTemplateRunnerTest {
         assertEquals("Check g.TC1", results.get(1).description());
         assertEquals("Check g.TC1\nOK", results.get(1).expected());
         assertEquals("ok", results.get(1).actual());
+    }
+
+    @Test void explicitNullLogValueIsAcceptedAndRenderedAsTypedValue() throws Exception {
+        Path caseDir = tempDir.resolve("null-log-value");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("verify", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+        TemplateAction action = new TemplateAction("note", map("type", "log", "value", null, "format", "json"));
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
+                .execute("verify", new StageTemplate("T", tempDir, Collections.singletonList(action)), context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals("null\n", context.resolve("EXEC.ACTIONS.note.output.result"));
     }
 
     @Test void recordsLogAndAssertionActions() throws Exception {

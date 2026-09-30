@@ -853,8 +853,8 @@ public final class PackageValidator {
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "result", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
-                if (action.message().trim().isEmpty() && action.value() == null) throw new IllegalArgumentException("message or value is required for log action " + action.id());
-                if (action.value() == null && !action.format().trim().isEmpty()) throw new IllegalArgumentException("format requires value on Log action " + action.id());
+                if (action.message().trim().isEmpty() && !action.valuePresent()) throw new IllegalArgumentException("message or value is required for log action " + action.id());
+                if (!action.valuePresent() && !action.format().trim().isEmpty()) throw new IllegalArgumentException("format requires value on Log action " + action.id());
                 if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
                 forbid(action, "name", "payload", "result", "render", "call", "db", "query", "update", "expression", "expected", "actual", "retry", "timeoutMs", "file", "fields", "templateFormat", "assert");
                 validateInlineExpressions(action.message(), syntaxEngine, config);

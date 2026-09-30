@@ -323,6 +323,31 @@ class LoadScenarioTest {
         } finally { resources.close(); }
     }
 
+    @Test void metricsOnlyNonFileIterationDoesNotCreateExecutionWorkspace() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/METRICS_PROBE_TEMPLATE"));
+        write(project, "templates/METRICS_PROBE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
+                + "name: METRICS_PROBE_TEMPLATE\ndescription: metrics-only workspace probe\nactions:\n"
+                + "  probe: {type: tool, call: \"#{directoryExists(path=${EXEC.OUTPUT_DIR})}\", assert: \"${output.result} == 'false'\"}\n");
+        Path scenarioFile = write(project, "metrics-probe.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: METRICS_PROBE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: metrics}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("metrics-probe-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("metrics-probe-run", "metrics-probe-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().toString());
+            assertEquals("false", result.context().resolve("ACTIONS.probe.output.result"));
+            assertFalse(Files.exists(result.outputDirectory()), "metrics-only non-file iterations must keep EXEC.OUTPUT_DIR logical");
+            assertFalse(Files.exists(outputRoot.resolve("load/metrics-probe-run")));
+        } finally { resources.close(); }
+    }
+
     @Test void reservedSuccessFailureDoesNotOverrideFailureNone() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/RESERVED_FAIL_TEMPLATE"));

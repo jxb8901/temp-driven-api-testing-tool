@@ -270,6 +270,9 @@ id="toc-meta-field-inventory-and-lifecycle">META field inventory and
 lifecycle</a></li>
 <li><a href="#invocation-and-scope-rules"
 id="toc-invocation-and-scope-rules">Invocation and scope rules</a></li>
+<li><a href="#action-output-and-evidence-paths"
+id="toc-action-output-and-evidence-paths">Action output and evidence
+paths</a></li>
 <li><a href="#load-execution-id-initialization"
 id="toc-load-execution-id-initialization">Load execution ID
 initialization</a></li>
@@ -458,6 +461,8 @@ values from representations</a></li>
 id="toc-render-and-documentvalue">Render and DocumentValue</a></li>
 <li><a href="#tool-db-and-flow-results"
 id="toc-tool-db-and-flow-results">Tool, DB and Flow results</a></li>
+<li><a href="#tool-evidence-collectors"
+id="toc-tool-evidence-collectors">Tool evidence collectors</a></li>
 <li><a href="#log-typed-value-to-case-log"
 id="toc-log-typed-value-to-case-log">Log: typed value to Case
 log</a></li>
@@ -1143,6 +1148,49 @@ Case inputs and restores them after completion. EXEC.VARS is shared
 across later Stages in a Case. EXEC.ACTIONS is scoped to the active
 Template or Flow. An Action reads local output while running and
 publishes its envelope at EXEC.ACTIONS.<id>.output.</p>
+<h3 id="action-output-and-evidence-paths">Action output and evidence
+paths</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>Meaning and availability</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>output.result</code></td>
+<td>Primary typed Action result while the Action is active, including
+its assertion.</td>
+</tr>
+<tr class="even">
+<td><code>output.evidence.collectors.&lt;id&gt;.result</code></td>
+<td>Typed result of an active Tool evidence collector.</td>
+</tr>
+<tr class="odd">
+<td><code>output.evidence.collectors.&lt;id&gt;.status</code></td>
+<td>Collector <code>PASS</code>/<code>ERROR</code> status while the
+Action is active.</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.result</code></td>
+<td>Published primary typed result after the Action completes.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.result</code></td>
+<td>Published final/winning collector result.</td>
+</tr>
+<tr class="even">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.status</code></td>
+<td>Published final/winning collector status.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;id&gt;.result/status</code></td>
+<td>Collector result/status for a specific retry attempt; earlier
+attempts remain after a later success.</td>
+</tr>
+</tbody>
+</table>
 <p>Strings, numbers, booleans, null, maps, lists and DocumentValue
 remain typed across Action/Template/Flow boundaries.</p>
 <h3 id="load-execution-id-initialization">Load execution ID
@@ -1464,14 +1512,16 @@ suffix.</p>
 ├── failures/&lt;EXEC.ID&gt;/case.yaml
 ├── samples/&lt;EXEC.ID&gt;/case.log
 └── samples/&lt;EXEC.ID&gt;/case.yaml</code></pre>
-<p>A metrics-only iteration still has EXEC.ID but its temporary
-workspace is removed when the scheduler declines retention.
-EXEC.OUTPUT_DIR remains at executions/&lt;EXEC.ID&gt; while the
-iteration runs. Retained failures and sampled successes also receive an
+<p>A metrics-only iteration still has EXEC.ID but does not create a
+per-iteration execution directory unless an operation writes an artifact
+or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains
+the logical planned path at executions/&lt;EXEC.ID&gt; while the
+iteration runs. Retained failures and sampled successes receive an
 evidence copy under failures/&lt;EXEC.ID&gt;/ or
 samples/&lt;EXEC.ID&gt;/. The report and evidence summary show EXEC.ID
-and link to case.log when it exists. Process/API output stays in
-temporary staging until a retention slot is granted.</p>
+and link to case.log when it exists. Helper resource-output formatting
+is deferred until retention; explicit Tool evidence collectors still
+execute because they are author-requested diagnostic operations.</p>
 <h4 id="evidence-and-resource-output">Evidence and resource output</h4>
 <p>evidence.mode accepts metrics, failures, samples or all; the default
 is failures. sampleRate and maxSamples bound retained evidence. Dropped
@@ -2764,10 +2814,25 @@ final/winning operation becomes top-level <code>output.result</code> /
 <code>output.attempts[n]</code>. A later success does not erase earlier
 attempt evidence.</p>
 <h3 id="evidence-collectors">Evidence collectors</h3>
-<p>Tool evidence collectors run after the primary operation and before
-that attempt's assertion. Collectors have independent timeout and
-<code>onFailure: continue|stop</code>. Collector output belongs to the
-attempt's evidence and never replaces the primary operation result.</p>
+<p>Tool evidence collectors run after the primary operation has
+published its typed <code>output.result</code> and before that attempt's
+assertion. While the Action is active,
+<code>${output.evidence.collectors.&lt;id&gt;.result}</code> and
+<code>${output.evidence.collectors.&lt;id&gt;.status}</code> are
+available; after publication the canonical paths are
+<code>${EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.result}</code>
+and <code>.status</code>. Collectors have independent
+<code>timeoutMs</code> and <code>onFailure: continue|stop</code>.
+Collector output belongs to the attempt's evidence and never replaces or
+mutates the primary operation result.</p>
+<p>Collectors run once per primary attempt. The top-level collector node
+represents the final/winning attempt, while
+<code>output.attempts[n].evidence.collectors.&lt;id&gt;</code> retains
+each attempt. <code>continue</code> keeps the primary/assertion outcome
+visible when diagnostic collection fails; <code>stop</code> makes the
+collector failure an Action error. Use an ordinary Tool/Log/Assign
+Action when the collected value is business/test data rather than
+pre-assertion diagnostics.</p>
 <h3 id="transactionresource-lifecycle">Transaction/resource
 lifecycle</h3>
 <p>DB transaction finalization and DB/MQ resource cleanup occur at the
@@ -4799,16 +4864,97 @@ and DBHelper contracts.</p>
 <p>A Flow action uses use with a canonical Flow ID. It runs in a fresh
 EXEC.ACTIONS scope and publishes its result/evidence to the caller when
 it returns. META.FLOW exists only while that invocation is active.</p>
+<h3 id="tool-evidence-collectors">Tool evidence collectors</h3>
+<p>A Tool Action may define first-class <code>evidence</code> collectors
+for diagnostics that must be gathered before the Action assertion. The
+lifecycle is:</p>
+<pre class="text"><code>primary Tool call
+    -&gt; typed primary output.result
+    -&gt; evidence collector call(s)
+    -&gt; Action assertion
+    -&gt; PASS / FAIL / ERROR</code></pre>
+<p>Collectors are diagnostic operations, not replacement Actions. Each
+collector has its own typed result and does not replace or mutate the
+primary <code>output.result</code>:</p>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb73-11"><a href="#cb73-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
+<span id="cb73-12"><a href="#cb73-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
+<span id="cb73-13"><a href="#cb73-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
+<span id="cb73-14"><a href="#cb73-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb73-15"><a href="#cb73-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
+<span id="cb73-16"><a href="#cb73-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb73-17"><a href="#cb73-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
+<p>While the containing Action, including its assertion, is active, use
+these paths:</p>
+<pre class="text"><code>${output.result}
+${output.evidence.collectors.&lt;collectorId&gt;.result}
+${output.evidence.collectors.&lt;collectorId&gt;.status}</code></pre>
+<p>After publication, the same values are available below
+<code>EXEC.ACTIONS</code>:</p>
+<pre class="text"><code>${EXEC.ACTIONS.callPayment.output.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}</code></pre>
+<p>The public shape keeps primary resource evidence and collector
+evidence separate:</p>
+<pre class="text"><code>output
+├── result                         # primary Tool logical result
+├── evidence
+│   ├── &lt;resource-kind&gt;            # primary operation evidence
+│   └── collectors
+│       └── &lt;collectorId&gt;
+│           ├── result             # typed collector result
+│           ├── status
+│           ├── invocationId
+│           └── durationMs
+└── attempts
+    └── [n]
+        └── evidence.collectors.&lt;collectorId&gt;.result/status</code></pre>
+<p>When a Tool retries, collectors run for every primary attempt before
+that attempt's assertion. The top-level
+<code>output.evidence.collectors.&lt;id&gt;</code> is the final/winning
+attempt; <code>output.attempts[n].evidence.collectors.&lt;id&gt;</code>
+retains each attempt, including earlier failures. After publication, the
+corresponding history path is
+<code>${EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[0].evidence.collectors.&lt;id&gt;.result}</code>.</p>
+<p><code>call</code> is required. <code>timeoutMs</code> is independent
+of the primary Tool timeout. <code>onFailure: continue</code> is the
+normal application-log pattern so a diagnostic collection failure does
+not hide the original business or assertion failure; <code>stop</code>
+makes the collector failure an Action error. Collector status and
+diagnostic remain observable, and collector failure never changes the
+primary logical result. Distinguish an evidence collector from an
+ordinary Tool/Log/Assign Action: use a collector for diagnostic data
+needed before the containing Tool assertion, and an ordinary Action when
+the collected value is normal business/test data for later
+assertions.</p>
+<p>Collector results follow the normal typed-result rules. Evidence
+placement does not stringify a map, list or <code>DocumentValue</code>;
+matching-format presentation preserves a <code>DocumentValue</code>'s
+authoritative text. In Load, explicit collector execution is separate
+from helper <code>evidence.output</code> serialization. Resource-output
+formatting remains controlled by the Load evidence policy and is not
+silently substituted for or dropped in place of an author-requested
+collector.</p>
 <h3 id="log-typed-value-to-case-log">Log: typed value to Case log</h3>
 <p>Log is a presentation action and therefore has its own format
 field:</p>
-<div class="sourceCode" id="cb72"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
-<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
-<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
-<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
-<span id="cb72-5"><a href="#cb72-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
-<span id="cb72-6"><a href="#cb72-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb77"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
+<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
+<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
+<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
 <p>level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR.
 At least one of message or value is required. message is rendered as
 text. value accepts any typed value, including nested maps/lists. Exact
@@ -4839,11 +4985,11 @@ needs them after the Flow returns.</p>
 <h3 id="resource-output-evidence">Resource output evidence</h3>
 <p>Resource evidence is separate from the logical result. A helper may
 configure an optional evidence.output presentation policy:</p>
-<div class="sourceCode" id="cb73"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<div class="sourceCode" id="cb78"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>This adds a bounded human-readable snapshot beside operation
 metadata; it does not change output.result or response parsing. In Load,
 evidence.resources.output accepts inherit (default) or none. none skips
@@ -5052,19 +5198,19 @@ active runtime contracts.</td>
 </tbody>
 </table>
 <p>A Render-to-HTTP example:</p>
-<div class="sourceCode" id="cb74"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb74-6"><a href="#cb74-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb74-7"><a href="#cb74-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb79"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb79-7"><a href="#cb79-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
 <p>For an abstract value, use requestFormat explicitly:</p>
-<div class="sourceCode" id="cb75"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb80"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
 <p>For Load, migrate old single-target or v1.1 scenarios to
 att-load/v1.2 workloads form. Put pacing under each workload and set the
 optional top-level execution.execIdFormat when a custom EXEC.ID is

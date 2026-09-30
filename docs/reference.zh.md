@@ -261,6 +261,18 @@ ATT 會遞迴過濾 password、secret、token、authorization/cookie、API key�
 
 EXEC.INPUT 是 canonical input map。Stage 暫時 overlay Case input，完成後還原。EXEC.VARS 可供同一 Case 後續 Stages 共用。EXEC.ACTIONS 屬於 active Template/Flow。Action 執行期間讀 local output，完成後發布到 EXEC.ACTIONS.<id>.output。
 
+### Action output 與 evidence path
+
+| Path | 意義與可用時機 |
+|---|---|
+| `output.result` | Action active（包括 assertion）期間的 primary typed result。 |
+| `output.evidence.collectors.<id>.result` | Active Tool evidence collector 的 typed result。 |
+| `output.evidence.collectors.<id>.status` | Collector 的 `PASS`／`ERROR` status。 |
+| `EXEC.ACTIONS.<actionId>.output.result` | Action 完成後發布的 primary typed result。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | 發布後最後／勝出的 collector result。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | 發布後最後／勝出的 collector status。 |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
+
 String、Number、Boolean、null、Map、List、DocumentValue 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
 ### Load execution ID initialization
@@ -444,7 +456,7 @@ output/load/<RUN_ID>/
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-Metrics-only iteration 雖有 EXEC.ID，但 scheduler 拒絕保留時會刪除暫存 workspace。iteration 執行期間 EXEC.OUTPUT_DIR 固定指向 executions/<EXEC.ID>。保留的 failure 或 sampled success 也會將 evidence 複製到 failures/<EXEC.ID>/ 或 samples/<EXEC.ID>/。Report/evidence summary 顯示 EXEC.ID；有保留 case.log 時提供連結。Process/API output 暫存在 staging，取得 retention slot 後才複製。
+Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact 或 retention decision 要求 materialize evidence，否則不會建立 per-iteration execution directory。iteration 執行期間 EXEC.OUTPUT_DIR 維持 executions/<EXEC.ID> 的 logical planned path。保留的 failure 或 sampled success 會將 evidence 複製到 failures/<EXEC.ID>/ 或 samples/<EXEC.ID>/。Report/evidence summary 顯示 EXEC.ID；有保留 case.log 時提供連結。Helper resource-output formatting 會延遲至 retention；明確要求的 Tool evidence collector 仍會執行，因為它是 author-requested diagnostic operation。
 
 #### Evidence 與 resource output
 
@@ -1086,7 +1098,9 @@ Timeout 依 backend 支援能力終止或放棄 operation，並記錄 diagnostic
 
 ### Evidence collectors
 
-Tool evidence collector 在 primary operation 後、該 attempt assertion 前執行。Collector 有獨立 timeout 與 `onFailure: continue|stop`；collector output 屬於該 attempt evidence，不會取代 primary operation result。
+Tool evidence collector 在 primary operation 發布 typed `output.result` 後、該 attempt assertion 前執行。Action active 時可使用 `${output.evidence.collectors.<id>.result}` 與 `${output.evidence.collectors.<id>.status}`；發布後的 canonical path 是 `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` 和 `.status`。Collector 有獨立 `timeoutMs` 與 `onFailure: continue|stop`；collector output 屬於該 attempt evidence，不會取代或修改 primary operation result。
+
+每個 primary attempt 都會執行 collector。Top-level collector node 代表最後／勝出的 attempt，`output.attempts[n].evidence.collectors.<id>` 則保留各 attempt。`continue` 讓 primary/assertion outcome 在診斷收集失敗時仍可觀察；`stop` 令 collector failure 成為 Action error。若收集的值是 business/test data，而不是 pre-assertion 診斷資料，應使用普通 Tool/Log/Assign Action。
 
 ### Transaction/resource lifecycle
 
@@ -1884,6 +1898,80 @@ stdoutFormat 是 ingress parser；stdout 只解析一次成為 output.result，�
 DB action 使用 db 及 query 或 update 其中一個區塊。SQL、bind parameters、transaction controls 和 DB evidence 依 DB action 與 DBHelper 契約處理。
 
 Flow action 使用 canonical Flow ID 的 use。Flow 在新的 EXEC.ACTIONS scope 執行，返回時將結果/evidence 發布給 caller。META.FLOW 只在該次 invocation 執行期間存在。
+
+### Tool evidence collector
+
+Tool Action 可定義第一級 `evidence` collector，用來在 Action assertion 前收集診斷資料。執行順序是：
+
+```text
+primary Tool call
+    -> typed primary output.result
+    -> evidence collector call(s)
+    -> Action assertion
+    -> PASS / FAIL / ERROR
+```
+
+Collector 是診斷 operation，不是替代 Action。每個 collector 有自己的型別化 result，不會取代或修改 primary `output.result`：
+
+```yaml
+callPayment:
+  type: tool
+  call: >-
+    #{mq.payment.request(
+      payload=${EXEC.ACTIONS.renderRequest.output.result},
+      responseFormat='xml'
+    )}
+  evidence:
+    appLog:
+      call: >-
+        #{ssh.app.execute(
+          command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100'
+        )}
+      timeoutMs: 10000
+      onFailure: continue
+  assert: >-
+    ${output.replyReceived} == true
+```
+
+包含 assertion 在內，Action active 時可使用：
+
+```text
+${output.result}
+${output.evidence.collectors.<collectorId>.result}
+${output.evidence.collectors.<collectorId>.status}
+```
+
+Action 發布後，對應值位於 `EXEC.ACTIONS`：
+
+```text
+${EXEC.ACTIONS.callPayment.output.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}
+```
+
+Public shape 會將 primary resource evidence 與 collector evidence 分開：
+
+```text
+output
+├── result                         # primary Tool logical result
+├── evidence
+│   ├── <resource-kind>            # primary operation evidence
+│   └── collectors
+│       └── <collectorId>
+│           ├── result             # typed collector result
+│           ├── status
+│           ├── invocationId
+│           └── durationMs
+└── attempts
+    └── [n]
+        └── evidence.collectors.<collectorId>.result/status
+```
+
+Tool retry 時，每個 primary attempt 都會在該 attempt assertion 前執行 collector。Top-level `output.evidence.collectors.<id>` 是最後／勝出的 attempt；`output.attempts[n].evidence.collectors.<id>` 保留每個 attempt，包括較早的 failure。發布後的歷史路徑是 `${EXEC.ACTIONS.<actionId>.output.attempts[0].evidence.collectors.<id>.result}`。
+
+`call` 必填。`timeoutMs` 與 primary Tool timeout 獨立。應用程式 log 的一般診斷模式使用 `onFailure: continue`，避免收集 log 失敗掩蓋原本的 business 或 assertion failure；`stop` 則令 collector failure 成為 Action error。Collector 的 status 與 diagnostic 仍可觀察，且 collector failure 不會改變 primary logical result。若資料是後續 assertion 要使用的正常 business/test value，應使用普通 Tool/Log/Assign Action，而非 evidence collector。
+
+Collector result 遵守一般 typed-result 規則。放在 evidence 下不代表會轉成 String；Map、List 和 `DocumentValue` 均保留型別，匹配格式時保留 `DocumentValue` 的權威原文。在 Load 中，明確要求的 collector execution 與 helper `evidence.output` serialization 是兩件事；resource-output 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除 author-requested collector。
 
 ### Log：將型別化值轉成人類可讀日誌
 

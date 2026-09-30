@@ -225,8 +225,8 @@ public final class FlowRegistry {
             String id = String.valueOf(entry.getKey());
             if (action.containsKey("renderAs")) {
                 String old = String.valueOf(action.get("renderAs"));
-                String suggestion = "Legacy field 'renderAs' is no longer supported. Replace it with:\n  result:\n    format: " + old;
-                if ("file".equalsIgnoreCase(old)) suggestion = "Legacy 'renderAs: file' mixed representation and persistence. Choose result.format and result.path explicitly, for example:\n  result:\n    format: text\n    path: rendered/{filename}";
+                String suggestion = "Legacy field 'renderAs' is no longer supported. Replace it with:\n  templateFormat: " + old
+                        + "\nRender returns a DocumentValue and does not create a file.";
                 throw migrationError(descriptor, id, "renderAs", suggestion);
             }
             if (action.containsKey("saveAs")) {
@@ -234,11 +234,10 @@ public final class FlowRegistry {
                 Map<?, ?> save = old instanceof Map ? (Map<?, ?>) old : Collections.emptyMap();
                 String format = save.get("format") == null ? null : String.valueOf(save.get("format"));
                 String path = save.get("path") == null ? (old instanceof String ? String.valueOf(old) : null) : String.valueOf(save.get("path"));
-                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Replace it with:\n  result:\n");
-                if (format != null && !format.trim().isEmpty()) suggestion.append("    format: ").append(format).append('\n');
-                else suggestion.append("    # Choose result.format explicitly; the legacy default depends on the Action and call target.\n");
-                if (path != null) suggestion.append("\n    path: ").append(path);
-                if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append("\n    overwrite: true");
+                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Render now returns a DocumentValue and does not create a file. Use templateFormat on a Render Action and pass its output.result directly to the consuming Tool/resource.");
+                if (format != null && !format.trim().isEmpty()) suggestion.append(" Legacy format was '").append(format).append("'.");
+                if (path != null) suggestion.append(" Legacy path '").append(path).append("' has no implicit replacement.");
+                if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append(" Legacy overwrite is not carried forward.");
                 throw migrationError(descriptor, id, "saveAs", suggestion.toString());
             }
         }

@@ -310,13 +310,19 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     || suppliedBody != null && suppliedBody.getClass().isArray();
             if (suppliedBody instanceof DocumentValue && args.containsKey("requestFormat"))
                 throw new HttpFailure("HTTP_ARGUMENT", "requestFormat cannot be combined with a Render DocumentValue");
-            if (structured && !args.containsKey("requestFormat"))
+            String requestFormat = null;
+            if (args.containsKey("requestFormat")) {
+                if (args.get("requestFormat") == null)
+                    throw new HttpFailure("HTTP_ARGUMENT", "requestFormat must be text, json, yaml, or xml");
+                requestFormat = string(args.get("requestFormat"), "requestFormat");
+                if (requestFormat.trim().isEmpty()
+                        || !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(requestFormat))
+                    throw new HttpFailure("HTTP_ARGUMENT", "requestFormat must be text, json, yaml, or xml");
+            }
+            if (structured && requestFormat == null)
                 throw new HttpFailure("HTTP_ARGUMENT", "A Map/List HTTP body requires requestFormat");
-            if (!structured && !(suppliedBody instanceof DocumentValue) && args.containsKey("requestFormat"))
+            if (!structured && !(suppliedBody instanceof DocumentValue) && requestFormat != null)
                 throw new HttpFailure("HTTP_ARGUMENT", "requestFormat is valid only for a Map/List HTTP body");
-            String requestFormat = args.get("requestFormat") == null ? "" : string(args.get("requestFormat"), "requestFormat");
-            if (!requestFormat.isEmpty() && !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(requestFormat))
-                throw new HttpFailure("HTTP_ARGUMENT", "requestFormat must be text, json, yaml, or xml");
             String contentType = header(headers, "Content-Type");
             java.nio.charset.Charset charset = contentType == null ? StandardCharsets.UTF_8 : contentCharset(contentType);
             if (structured) {

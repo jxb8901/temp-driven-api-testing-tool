@@ -66,6 +66,18 @@ Entering a Template, Flow, Tool or helper invocation publishes metadata for that
 
 EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs and restores them after completion. EXEC.VARS is shared across later Stages in a Case. EXEC.ACTIONS is scoped to the active Template or Flow. An Action reads local output while running and publishes its envelope at EXEC.ACTIONS.<id>.output.
 
+### Action output and evidence paths
+
+| Path | Meaning and availability |
+|---|---|
+| `output.result` | Primary typed Action result while the Action is active, including its assertion. |
+| `output.evidence.collectors.<id>.result` | Typed result of an active Tool evidence collector. |
+| `output.evidence.collectors.<id>.status` | Collector `PASS`/`ERROR` status while the Action is active. |
+| `EXEC.ACTIONS.<actionId>.output.result` | Published primary typed result after the Action completes. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | Published final/winning collector result. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | Published final/winning collector status. |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
+
 Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
 ### Load execution ID initialization

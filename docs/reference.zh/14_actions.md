@@ -79,6 +79,80 @@ DB action 使用 db 及 query 或 update 其中一個區塊。SQL、bind paramet
 
 Flow action 使用 canonical Flow ID 的 use。Flow 在新的 EXEC.ACTIONS scope 執行，返回時將結果/evidence 發布給 caller。META.FLOW 只在該次 invocation 執行期間存在。
 
+### Tool evidence collector
+
+Tool Action 可定義第一級 `evidence` collector，用來在 Action assertion 前收集診斷資料。執行順序是：
+
+```text
+primary Tool call
+    -> typed primary output.result
+    -> evidence collector call(s)
+    -> Action assertion
+    -> PASS / FAIL / ERROR
+```
+
+Collector 是診斷 operation，不是替代 Action。每個 collector 有自己的型別化 result，不會取代或修改 primary `output.result`：
+
+```yaml
+callPayment:
+  type: tool
+  call: >-
+    #{mq.payment.request(
+      payload=${EXEC.ACTIONS.renderRequest.output.result},
+      responseFormat='xml'
+    )}
+  evidence:
+    appLog:
+      call: >-
+        #{ssh.app.execute(
+          command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100'
+        )}
+      timeoutMs: 10000
+      onFailure: continue
+  assert: >-
+    ${output.replyReceived} == true
+```
+
+包含 assertion 在內，Action active 時可使用：
+
+```text
+${output.result}
+${output.evidence.collectors.<collectorId>.result}
+${output.evidence.collectors.<collectorId>.status}
+```
+
+Action 發布後，對應值位於 `EXEC.ACTIONS`：
+
+```text
+${EXEC.ACTIONS.callPayment.output.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}
+```
+
+Public shape 會將 primary resource evidence 與 collector evidence 分開：
+
+```text
+output
+├── result                         # primary Tool logical result
+├── evidence
+│   ├── <resource-kind>            # primary operation evidence
+│   └── collectors
+│       └── <collectorId>
+│           ├── result             # typed collector result
+│           ├── status
+│           ├── invocationId
+│           └── durationMs
+└── attempts
+    └── [n]
+        └── evidence.collectors.<collectorId>.result/status
+```
+
+Tool retry 時，每個 primary attempt 都會在該 attempt assertion 前執行 collector。Top-level `output.evidence.collectors.<id>` 是最後／勝出的 attempt；`output.attempts[n].evidence.collectors.<id>` 保留每個 attempt，包括較早的 failure。發布後的歷史路徑是 `${EXEC.ACTIONS.<actionId>.output.attempts[0].evidence.collectors.<id>.result}`。
+
+`call` 必填。`timeoutMs` 與 primary Tool timeout 獨立。應用程式 log 的一般診斷模式使用 `onFailure: continue`，避免收集 log 失敗掩蓋原本的 business 或 assertion failure；`stop` 則令 collector failure 成為 Action error。Collector 的 status 與 diagnostic 仍可觀察，且 collector failure 不會改變 primary logical result。若資料是後續 assertion 要使用的正常 business/test value，應使用普通 Tool/Log/Assign Action，而非 evidence collector。
+
+Collector result 遵守一般 typed-result 規則。放在 evidence 下不代表會轉成 String；Map、List 和 `DocumentValue` 均保留型別，匹配格式時保留 `DocumentValue` 的權威原文。在 Load 中，明確要求的 collector execution 與 helper `evidence.output` serialization 是兩件事；resource-output 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除 author-requested collector。
+
 ### Log：將型別化值轉成人類可讀日誌
 
 Log 是 presentation Action，因此有自己的 format 欄位：
