@@ -3154,7 +3154,7 @@ skips result-workbook creation</td>
 <tr class="even">
 <td><code>report.columns</code></td>
 <td><code>{}</code></td>
-<td>Arbitrary string keys and string label values</td>
+<td>Supported keys: <code>result</code>, <code>durationMs</code>, <code>expectedResult</code>, <code>actualResult</code>, <code>caseLog</code>, <code>reportLink</code>, <code>runTime</code>, <code>execId</code>; each value is a string column label</td>
 </tr>
 <tr class="odd">
 <td><code>report.html.caseLogInlineLimitBytes</code></td>
@@ -3305,7 +3305,7 @@ use <code>cache</code>; <code>x-*</code></td>
 <tr class="even">
 <td><code>arguments.&lt;key&gt;</code></td>
 <td><code>name</code>, <code>description</code>, <code>required</code>,
-<code>argName</code>, <code>argNameMode</code>, <code>x-*</code></td>
+<code>argName</code>, <code>argNameMode</code>, <code>delimit</code>, <code>x-*</code></td>
 </tr>
 </tbody>
 </table>
@@ -4227,7 +4227,7 @@ copy filename. Sidecar <code>report.columns</code> changes workbook
 labels only. Supported mappings include <code>result</code>,
 <code>durationMs</code>, <code>expectedResult</code>,
 <code>actualResult</code>, <code>caseLog</code>,
-<code>reportLink</code>, and <code>runTime</code>; Expected/Actual cells
+<code>reportLink</code>, <code>runTime</code>, and <code>execId</code>; Expected/Actual cells
 retain LF characters and use wrapped text. Row matching reads the Case
 ID with the same Excel <code>DataFormatter</code> and whitespace
 normalization as testcase loading, so displayed formats such as numeric

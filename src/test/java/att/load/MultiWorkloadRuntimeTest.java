@@ -69,7 +69,7 @@ class MultiWorkloadRuntimeTest {
         assertEquals("tool", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.targetType"));
         assertEquals("sample.getAcDate", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.targetId"));
         assertEquals("VU-1", CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.userId"));
-        assertNull(context.resolve("EXEC.LOAD.WORKLOAD_ID"));
+        assertEquals("payment", context.resolve("EXEC.LOAD.WORKLOAD_ID"));
     }
 
     @Test void aggregatePercentileComesFromCombinedObservationsRatherThanAveragingWorkloadPercentiles() {

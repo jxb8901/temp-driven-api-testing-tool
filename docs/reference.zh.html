@@ -2696,7 +2696,7 @@ exposed metadata</td>
 <tr class="even">
 <td><code>report.columns</code></td>
 <td><code>{}</code></td>
-<td>任意字符串键和字符串标签值</td>
+<td>支持键：<code>result</code>、<code>durationMs</code>、<code>expectedResult</code>、<code>actualResult</code>、<code>caseLog</code>、<code>reportLink</code>、<code>runTime</code>、<code>execId</code>；各值为字符串列标签</td>
 </tr>
 <tr class="odd">
 <td><code>report.junit.caseLogEmbedThresholdBytes</code></td>
@@ -3507,7 +3507,7 @@ JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 d
 追加配置的结果列。全局 <code>report.fileNamePattern</code>
 控制文件名。侧车 <code>report.columns</code>
 只修改工作簿标签。支持的映射包括
-<code>result</code>、<code>durationMs</code>、<code>expectedResult</code>、<code>actualResult</code>、<code>caseLog</code>、<code>reportLink</code>、<code>runTime</code>；Expected/Actual
+<code>result</code>、<code>durationMs</code>、<code>expectedResult</code>、<code>actualResult</code>、<code>caseLog</code>、<code>reportLink</code>、<code>runTime</code>、<code>execId</code>；Expected/Actual
 单元格保留 LF 字符并以换行文本显示。结果回填使用与 testcase loader
 相同的 Excel 显示格式和空白规范化规则读取 Case
 ID，因此带前导零等数字格式的 ID 在执行与报表写入时会匹配同一 Case。</p>

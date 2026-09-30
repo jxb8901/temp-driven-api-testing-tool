@@ -54,8 +54,8 @@ class MultiWorkloadReviewRegressionTest {
             assertEquals("multi-run", secondContext.resolve("EXEC.RUN_ID"));
             assertEquals("accounts", att.core.CaseRuntimeContext.getPath(firstContext.diagnosticsTree(), "load.workloadId"));
             assertEquals("payments", att.core.CaseRuntimeContext.getPath(secondContext.diagnosticsTree(), "load.workloadId"));
-            assertNull(firstContext.resolve("EXEC.LOAD"));
-            assertNull(secondContext.resolve("EXEC.LOAD"));
+            assertEquals("accounts", firstContext.resolve("EXEC.LOAD.WORKLOAD_ID"));
+            assertEquals("payments", secondContext.resolve("EXEC.LOAD.WORKLOAD_ID"));
         }
     }
 

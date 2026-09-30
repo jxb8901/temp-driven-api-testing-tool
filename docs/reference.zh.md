@@ -1288,7 +1288,7 @@ environments:
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | 非空 Java 日期/时间格式 |
 | `report.mode` | `append-to-copy` | 仅支持 `append-to-copy` |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | 结果工作簿文件名模式 |
-| `report.columns` | `{}` | 任意字符串键和字符串标签值 |
+| `report.columns` | `{}` | 支持键：`result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`、`execId`；各值为字符串列标签 |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | 整数 0–1048576 UTF-8 字节；0 始终使用链接 |
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
 | `toolGroups` | `[]` | 唯一安全且包相对的工具组 YAML 路径 |

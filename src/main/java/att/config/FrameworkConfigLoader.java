@@ -312,7 +312,7 @@ public final class FrameworkConfigLoader {
             Long timeoutMs = tool.get("timeoutMs") == null ? null : Long.valueOf(boundedInteger(tool.get("timeoutMs"), 10000, 1, 3600000, owner + "." + localKey + ".timeoutMs"));
             sourceField = "tools." + localKey + (currentResultContract ? ".result.format" : ".output");
             sourceField = "tools." + localKey + ".arguments";
-            Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"), allowLegacyDelimit);
+            Map<String, ToolArgumentConfig> arguments = arguments(key, tool.get("arguments"), allowLegacyDelimit || typedResultContract);
             sourceField = "tools." + localKey + (hasCommand ? ".command" : ".call");
             List<String> command = hasCommand ? command(tool.get("command"), "tool " + key + ".command") : Collections.<String>emptyList();
             String call = hasCall ? SchemaSupport.string(tool.get("call"), "tool " + key + ".call", true) : "";

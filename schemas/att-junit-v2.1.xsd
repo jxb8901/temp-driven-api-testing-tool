@@ -5,12 +5,26 @@
       <xs:sequence>
         <xs:element name="testcase" minOccurs="0" maxOccurs="unbounded">
           <xs:complexType mixed="false">
-            <xs:choice minOccurs="0" maxOccurs="unbounded">
+            <xs:sequence>
+              <xs:element name="properties" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="property" minOccurs="0" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:attribute name="name" type="xs:string" use="required"/>
+                        <xs:attribute name="value" type="xs:string"/>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:choice minOccurs="0" maxOccurs="unbounded">
               <xs:element name="failure" type="attMessage"/>
               <xs:element name="error" type="attMessage"/>
               <xs:element name="skipped"><xs:complexType/></xs:element>
               <xs:element name="system-out" type="xs:string"/>
-            </xs:choice>
+              </xs:choice>
+            </xs:sequence>
             <xs:attribute name="classname" type="xs:string" use="required"/>
             <xs:attribute name="name" type="xs:string" use="required"/>
             <xs:attribute name="time" type="xs:decimal" use="required"/>

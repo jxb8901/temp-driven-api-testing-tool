@@ -181,11 +181,11 @@ class FlowRuntimeTest {
 
         Map<String,Object> render = new LinkedHashMap<String,Object>();
         render.put("type", "render"); render.put("payload", "request.txt");
-        render.put("result", Collections.<String,Object>singletonMap("format", "text"));
+        render.put("templateFormat", "text");
         StageTemplate inlineTemplate = new StageTemplate("INLINE", tempDir,
-                Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.2")), "att-template/v3.2");
+                Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.3")), "att-template/v3.3");
         StageTemplate flowTemplate = new StageTemplate("FLOW", tempDir,
-                Collections.singletonList(flowAction("renderFlow", "common.render.v1", "stop")), "att-template/v3.2");
+                Collections.singletonList(flowAction("renderFlow", "common.render.v1", "stop")), "att-template/v3.3");
 
         Map<String,Object> data = new LinkedHashMap<String,Object>();
         data.put("SrcRefNo", "REF-001"); data.put("amount", "125.50"); data.put("channel", "FPS");
@@ -203,9 +203,9 @@ class FlowRuntimeTest {
                     .execute("verify", flowTemplate, flowContext, log).get(0).status());
         }
 
-        assertEquals(expected, inlineContext.resolve("ACTIONS.renderRequest.output.result"));
-        assertEquals(expected, CaseRuntimeContext.getPath(flowContext.caseTree(),
-                "STAGES.verify.TEMPLATE.ACTIONS.renderFlow.flow.actions.renderRequest.output.result"));
+        assertEquals(expected, ((att.template.DocumentValue) inlineContext.resolve("ACTIONS.renderRequest.output.result")).text());
+        assertEquals(expected, ((att.template.DocumentValue) CaseRuntimeContext.getPath(flowContext.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.renderFlow.flow.actions.renderRequest.output.result")).text());
     }
 
     private CaseRuntimeContext context() {

@@ -45,9 +45,15 @@ public final class MqHelperConfigLoader {
             try {
                 Map<?, ?> map = yaml(file);
                 String currentVersion = Version.MQHELPER_SCHEMA_CURRENT;
-                if (!currentVersion.equals(map.get("schemaVersion")))
+                if (!currentVersion.equals(map.get("schemaVersion"))) {
+                    String declaredVersion = String.valueOf(map.get("schemaVersion"));
+                    Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, declaredVersion);
+                    Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-mqhelper-v1.2.schema.json");
+                    att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
+                            declaredVersion, currentVersion);
                     throw new IllegalArgumentException("Unsupported MQ helper schemaVersion '" + map.get("schemaVersion")
                             + "'; ATT 3.6.0 supports only " + currentVersion + ". See docs/reference/appendices/migrations.md.");
+                }
                 Path schema = schema(projectRoot, map);
                 String declared = String.valueOf(map.get("schemaVersion"));
                 JsonSchemaVerifier.verify(schema, map);

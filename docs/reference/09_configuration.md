@@ -188,7 +188,7 @@ environments:
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
-| `report.columns` | `{}` | Arbitrary string keys and string label values |
+| `report.columns` | `{}` | Supported keys: `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, `runTime`, `execId`; each value is a string column label |
 | `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
@@ -220,7 +220,7 @@ Allowed global object properties are:
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 | `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
 | call-backed `tools.<key>.cache` | required `scope: case|db` |
-| `arguments.<key>` | `name`, `description`, `required`, `argName`, `argNameMode`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, optional `argName`, `argNameMode`, `delimit`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 

@@ -2,6 +2,7 @@ package att.load;
 
 import att.config.FrameworkConfig;
 import att.config.ToolConfig;
+import att.config.ToolArgumentConfig;
 import att.core.CaseExecutionLog;
 import att.core.ExecutionOptions;
 import att.core.ResultStatus;
@@ -123,7 +124,7 @@ class LoadScenarioTest {
                 + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "execution: {thinkTime: 10ms}\n");
         DiagnosticException thinkError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidThink));
-        assertEquals("execution.thinkTime", thinkError.field());
+        assertEquals("workloads[0].execution.thinkTime", thinkError.field());
 
         Path invalidArguments = write(project, "invalid-arguments.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE, arguments: {ignored: true}}\n"
@@ -168,7 +169,12 @@ class LoadScenarioTest {
             assertEquals("load", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "execution.mode"));
             assertEquals("VU-1", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.userId"));
             assertEquals("VU-2", att.core.CaseRuntimeContext.getPath(b.context().diagnosticsTree(), "load.userId"));
-            assertNull(a.context().resolve("EXEC.LOAD"));
+            assertEquals("run-29", a.context().resolve("EXEC.LOAD.RUN_ID"));
+            assertEquals("closed", a.context().resolve("EXEC.LOAD.MODEL"));
+            assertEquals("VU-1", a.context().resolve("EXEC.LOAD.USER_ID"));
+            assertEquals("i-1", a.context().resolve("EXEC.LOAD.ITERATION_ID"));
+            assertEquals(Long.valueOf(1L), a.context().resolve("EXEC.LOAD.ITERATION"));
+            assertEquals("STEADY", a.context().resolve("EXEC.LOAD.PHASE"));
             assertEquals("one", a.context().resolve("EXEC.INPUT.input"));
             assertEquals("one", a.context().resolve("EXEC.ACTIONS.phase.output.result"));
             assertEquals("two", b.context().resolve("EXEC.ACTIONS.phase.output.result"));
@@ -250,14 +256,22 @@ class LoadScenarioTest {
     @Test void fileProducingActionGetsAnIsolatedWorkspaceWithoutEvidenceRetention() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/FILE_TEMPLATE"));
-        write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
+        Path payload = write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
+        String sourcePath = payload.toAbsolutePath().toString();
+        String call = "#{fileWriter(source='" + sourcePath + "', target='${EXEC.OUTPUT_DIR}/rendered.txt')}";
         write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
-                + "  render: {type: render, payload: payload.txt, result: {format: text, path: 'rendered/{filename}'}}\n");
+                + "  write: {type: tool, call: \"" + call + "\"}\n");
         Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: FILE_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
+        Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
+        arguments.put("source", new ToolArgumentConfig("source", "Source", "Payload source", true, ""));
+        arguments.put("target", new ToolArgumentConfig("target", "Target", "Output path", true, ""));
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("fileWriter", new ToolConfig("fileWriter", "File writer", "Writes a file into the execution workspace",
+                "cp ${source} ${target}", "text", arguments));
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
-                Paths.get("templates"), Collections.emptyMap(), null, null);
+                Paths.get("templates"), tools, null, null);
         LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
         LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
         Path outputRoot = temp.resolve("file-output");
@@ -267,12 +281,11 @@ class LoadScenarioTest {
                     IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
             assertEquals(ResultStatus.PASS, result.status());
             assertEquals(result.outputDirectory().toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
-            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered/payload.txt")));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered.txt")));
             assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
                     "file-producing actions need a workspace but must not force a case log");
         } finally { resources.close(); }
     }
-
     @Test void metricsOnlyFailureDoesNotMaterializeOrLinkEvidence() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/METRICS_FAIL_TEMPLATE"));

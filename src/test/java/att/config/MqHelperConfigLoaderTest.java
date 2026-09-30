@@ -32,7 +32,7 @@ class MqHelperConfigLoaderTest {
         assertEquals(2500, broker.requestReplyWaitMs());
         assertEquals("MQSeries Client", broker.transport());
         assertEquals("text", broker.responseFormat());
-        assertTrue(broker.credentialsConfigured());
+        assertTrue(broker.instances().get("primary").credentialsConfigured());
         assertFalse(broker.metadata().toString().contains("secret"));
         assertFalse(broker.toString().contains("secret"));
     }

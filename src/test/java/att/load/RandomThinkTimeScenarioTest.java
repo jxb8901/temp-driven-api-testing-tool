@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,7 +36,7 @@ class RandomThinkTimeScenarioTest {
         assertEquals(2000L, scenario.thinkTimePolicy().maxMillis());
         assertTrue(scenario.thinkTimePolicy().randomized());
 
-        @SuppressWarnings("unchecked") Map<String, Object> execution = (Map<String, Object>) scenario.toSummaryMap().get("execution");
+        Map<?, ?> execution = firstWorkloadExecution(scenario.toSummaryMap());
         assertEquals("uniform: 0ms..2s", execution.get("thinkTimePolicy"));
         assertTrue(execution.get("thinkTime") instanceof Map);
     }
@@ -49,7 +50,7 @@ class RandomThinkTimeScenarioTest {
         LoadScenario fixed = new LoadScenarioLoader(project).load(scalar);
         assertEquals(ThinkTimePolicy.Type.FIXED, fixed.thinkTimePolicy().type());
         assertEquals(500L, fixed.thinkTimePolicy().minMillis());
-        assertEquals("fixed: 500ms", ((Map<?, ?>) fixed.toSummaryMap().get("execution")).get("thinkTimePolicy"));
+        assertEquals("fixed: 500ms", firstWorkloadExecution(fixed.toSummaryMap()).get("thinkTimePolicy"));
 
         Path range = write(project, "equal.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\nload: {users: 1, duration: 1s}\n"
@@ -62,8 +63,7 @@ class RandomThinkTimeScenarioTest {
         LoadScenario overridden = new LoadScenarioLoader(project).load(range, LoadOverrides.from(options));
         assertEquals(ThinkTimePolicy.Type.FIXED, overridden.thinkTimePolicy().type());
         assertEquals(250L, overridden.thinkTimePolicy().minMillis());
-        assertEquals("250ms", overridden.toMap().get("execution") instanceof Map
-                ? ((Map<?, ?>) overridden.toMap().get("execution")).get("thinkTime") : null);
+        assertEquals("250ms", firstWorkloadExecution(overridden.toMap()).get("thinkTime"));
     }
 
     @Test
@@ -71,7 +71,7 @@ class RandomThinkTimeScenarioTest {
         Path project = project();
         DiagnosticException reversed = invalid(project, "reversed.yaml",
                 "execution:\n  thinkTime: {min: 2s, max: 500ms}\n");
-        assertEquals("execution.thinkTime.max", reversed.field());
+        assertEquals("workloads[0].execution.thinkTime.max", reversed.field());
 
         DiagnosticException missing = invalid(project, "missing.yaml",
                 "execution:\n  thinkTime: {min: 500ms}\n");
@@ -104,14 +104,20 @@ class RandomThinkTimeScenarioTest {
                 + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "execution: {thinkTime: 10ms}\n");
         DiagnosticException fixed = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(scalar));
-        assertEquals("execution.thinkTime", fixed.field());
+        assertEquals("workloads[0].execution.thinkTime", fixed.field());
 
         Path range = write(project, "arrival-range.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "execution:\n  thinkTime: {min: 10ms, max: 20ms}\n");
         DiagnosticException ranged = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(range));
-        assertEquals("execution.thinkTime", ranged.field());
+        assertEquals("workloads[0].execution.thinkTime", ranged.field());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<?, ?> firstWorkloadExecution(Map<String, Object> scenario) {
+        List<?> workloads = (List<?>) scenario.get("workloads");
+        return (Map<?, ?>) ((Map<?, ?>) workloads.get(0)).get("execution");
     }
 
     private DiagnosticException invalid(Path project, String name, String tail) throws Exception {

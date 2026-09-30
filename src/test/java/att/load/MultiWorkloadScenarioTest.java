@@ -27,7 +27,7 @@ class MultiWorkloadScenarioTest {
                 + "  - id: customer\n"
                 + "    target: {type: tool, id: sample.getAcDate}\n"
                 + "    load: {arrivalRate: 5/s, duration: 1s, maxConcurrent: 2, overloadPolicy: drop}\n");
-        assertEquals(Version.LOAD_SCHEMA_V1_1, scenario.schemaVersion());
+        assertEquals(Version.LOAD_SCHEMA_CURRENT, scenario.schemaVersion());
         assertTrue(scenario.multiWorkload());
         assertEquals(3, scenario.workloads().size());
         assertEquals(105.0, scenario.configuredArrivalRatePerSecond(), 0.00001);

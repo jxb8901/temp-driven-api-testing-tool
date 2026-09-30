@@ -818,7 +818,7 @@
               "oneOf": [
                 {
                   "type": "string",
-                  "minLength": 1
+                  "pattern": "^[0-9]+(ms|s|m|h)$"
                 },
                 {
                   "type": "object",
@@ -829,11 +829,11 @@
                   "properties": {
                     "min": {
                       "type": "string",
-                      "minLength": 1
+                      "pattern": "^[0-9]+(ms|s|m|h)$"
                     },
                     "max": {
                       "type": "string",
-                      "minLength": 1
+                      "pattern": "^[0-9]+(ms|s|m|h)$"
                     }
                   },
                   "additionalProperties": false
@@ -862,7 +862,10 @@
       ],
       "properties": {
         "schemaVersion": {
-          "const": "att-load/v1.1"
+          "enum": [
+            "att-load/v1.1",
+            "att-load/v1.2"
+          ]
         },
         "seed": {
           "type": "integer"
@@ -884,6 +887,16 @@
         "evidence": {
           "type": "object",
           "additionalProperties": true
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "execIdFormat": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

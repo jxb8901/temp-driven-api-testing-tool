@@ -47,7 +47,7 @@ class StageTemplateLoaderTest {
         TemplateAction render = loader.load("current").actions().get(0);
         assertEquals("render", render.type());
         assertEquals("json", render.templateFormat());
-        assertNull(render.resultConfig().format());
+        assertEquals("", render.resultConfig().format());
         att.validation.DiagnosticException legacyError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy"));
         assertTrue(legacyError.getMessage().contains("renderAs"));
         assertTrue(legacyError.suggestion().contains("DocumentValue"));
