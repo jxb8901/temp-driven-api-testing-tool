@@ -250,7 +250,7 @@ public class FrameworkEngine {
             writeCaseTree(caseOutputDir, context);
             return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
-                    testCase.workbookId(), testCase.groupId(), testCase.tags());
+                    testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId);
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             String errorMessage = typed == null ? message(e) : typed.format();
@@ -272,7 +272,7 @@ public class FrameworkEngine {
                 context.put("CASE.error", errorMessage);
             }
             return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()),
-                    typed == null ? null : typed.toDiagnostic());
+                    typed == null ? null : typed.toDiagnostic(), validatedCaseId);
         } finally {
             if (!dbFinalized) dbHelperExecutor.abortCase();
             caseLog.close();
@@ -547,7 +547,12 @@ public class FrameworkEngine {
     }
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
                                     att.validation.Diagnostic diagnostic) {
-        return result(testCase, ResultStatus.ERROR, duration, "", message, outputXml, diagnostic);
+        return error(testCase, message, outputXml, duration, diagnostic, testCase.caseId());
+    }
+    private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
+                                   att.validation.Diagnostic diagnostic, String executionId) {
+        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.ERROR, duration, "", message, outputXml,
+                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(), diagnostic, executionId);
     }
     private static TestResult invalid(TestCase testCase, String message) {
         return result(testCase, ResultStatus.INVALID, Duration.ZERO, "", message, null);

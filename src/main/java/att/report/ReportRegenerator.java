@@ -58,7 +58,8 @@ public final class ReportRegenerator {
             }
             results.add(new TestResult(caseId, caseName, ResultStatus.valueOf(String.valueOf(row.get("status"))),
                     Duration.ofMillis(longValue(row.get("durationMs"))), text(row.get("expected")), text(row.get("actual")), log,
-                    validations, workbookId, groupId, strings(row.get("tags")), diagnostic(row.get("diagnostic"))));
+                    validations, workbookId, groupId, strings(row.get("tags")), diagnostic(row.get("diagnostic")),
+                    row.get("execId") == null ? caseId : String.valueOf(row.get("execId"))));
         }
         Instant ended = runNode.get("endedAt") == null ? Files.getLastModifiedTime(manifest).toInstant() : Instant.parse(String.valueOf(runNode.get("endedAt")));
         Instant started = runNode.get("startedAt") == null ? ended : Instant.parse(String.valueOf(runNode.get("startedAt")));

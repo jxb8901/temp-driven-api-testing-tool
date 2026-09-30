@@ -52,13 +52,16 @@ output/load/<RUN_ID>/
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
+├── executions/<EXEC.ID>/
+│   ├── case.log
+│   └── action outputs written under EXEC.OUTPUT_DIR
 ├── failures/<EXEC.ID>/case.log
 ├── failures/<EXEC.ID>/case.yaml
 ├── samples/<EXEC.ID>/case.log
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-A metrics-only iteration still has EXEC.ID but creates no per-execution directory. Workspaces are materialized only for retained failures or sampled successes. The report and evidence summary show EXEC.ID and link to case.log when it exists. Process/API output stays in temporary staging until a retention slot is granted.
+A metrics-only iteration still has EXEC.ID but its temporary workspace is removed when the scheduler declines retention. EXEC.OUTPUT_DIR remains at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes also receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Process/API output stays in temporary staging until a retention slot is granted.
 
 #### Evidence and resource output
 

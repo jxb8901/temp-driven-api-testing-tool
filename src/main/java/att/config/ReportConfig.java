@@ -29,7 +29,7 @@ public class ReportConfig {
     public ReportConfig(String mode, String fileNamePattern, Map<String, String> columns, int junitCaseLogEmbedThresholdBytes, int htmlCaseLogInlineLimitBytes) {
         this.mode = mode == null || mode.trim().isEmpty() ? "append-to-copy" : mode;
         if (!("append-to-copy".equals(this.mode) || "none".equals(this.mode))) throw new IllegalArgumentException("report.mode must be append-to-copy or none");
-        this.fileNamePattern = fileNamePattern == null || fileNamePattern.trim().isEmpty() ? "${SUITE_NAME}.result.xlsx" : fileNamePattern;
+        this.fileNamePattern = fileNamePattern == null || fileNamePattern.trim().isEmpty() ? "${suiteName}.result.xlsx" : fileNamePattern;
         this.columns = columns == null ? Collections.<String, String>emptyMap() : new LinkedHashMap<String, String>(columns);
         if (junitCaseLogEmbedThresholdBytes < 0 || junitCaseLogEmbedThresholdBytes > 1048576) throw new IllegalArgumentException("report.junit.caseLogEmbedThresholdBytes must be between 0 and 1048576");
         this.junitCaseLogEmbedThresholdBytes = junitCaseLogEmbedThresholdBytes;

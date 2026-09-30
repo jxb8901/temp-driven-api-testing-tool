@@ -99,7 +99,7 @@ public final class CaseRuntimeContext {
     private int dbSequence;
     private final Map<String, Object> callToolCache = new LinkedHashMap<String, Object>();
     private final java.util.Deque<FlowFrame> flowScopes = new java.util.ArrayDeque<FlowFrame>();
-    private final java.util.Deque<Map<String, Object>> priorTemplates = new java.util.ArrayDeque<Map<String, Object>>();
+    private final java.util.Deque<TemplateMetadataFrame> priorTemplates = new java.util.ArrayDeque<TemplateMetadataFrame>();
     private boolean executionIdInitializing;
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
@@ -217,8 +217,8 @@ public final class CaseRuntimeContext {
         template.put("ACTIONS", currentActions);
         stageNode.put("TEMPLATE", template);
         stagesNode.put(stage.key(), stageNode);
-        priorTemplates.push(metaNode.get("TEMPLATE") instanceof Map
-                ? new LinkedHashMap<String, Object>((Map<String, Object>) metaNode.get("TEMPLATE")) : null);
+        Object previousTemplate = metaNode.get("TEMPLATE");
+        priorTemplates.push(new TemplateMetadataFrame(metaNode.containsKey("TEMPLATE"), previousTemplate));
         setTemplateMetadata(templateName, templatePath);
         actionsView.clear();
     }
@@ -237,8 +237,8 @@ public final class CaseRuntimeContext {
         } finally {
             clearActiveStageInput();
             if (!priorTemplates.isEmpty()) {
-                Map<String, Object> previous = priorTemplates.pop();
-                if (previous == null) metaNode.remove("TEMPLATE"); else metaNode.put("TEMPLATE", previous);
+                TemplateMetadataFrame previous = priorTemplates.pop();
+                if (previous.existed) metaNode.put("TEMPLATE", previous.value); else metaNode.remove("TEMPLATE");
             }
             currentStage = null;
             currentActions = null;
@@ -247,6 +247,16 @@ public final class CaseRuntimeContext {
     }
 
     public boolean hasActiveStage() { return currentStage != null; }
+
+    private static final class TemplateMetadataFrame {
+        private final boolean existed;
+        private final Object value;
+
+        private TemplateMetadataFrame(boolean existed, Object value) {
+            this.existed = existed;
+            this.value = value;
+        }
+    }
 
     private void applyActiveStageInput(Map<String, Object> values) {
         if (values == null) return;

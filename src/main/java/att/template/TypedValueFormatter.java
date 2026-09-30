@@ -14,7 +14,7 @@ public final class TypedValueFormatter {
                 new java.util.IdentityHashMap<Object, Boolean>());
         if ("sqlplus".equals(normalized)) return new DbTextResultFormatter().format(printable);
         if (!java.util.Arrays.asList("json", "yaml", "xml", "text").contains(normalized))
-            throw new IllegalArgumentException("format must be json, yaml, xml, text, or sqlplus: " + format);
+            throw new IllegalArgumentException("format must be text, json, yaml, xml, or sqlplus: " + format);
         return new att.exec.ObjectOutputCodec().encode(printable, normalized);
     }
 

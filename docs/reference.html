@@ -1202,12 +1202,15 @@ evidence navigation</h3>
 </tbody>
 </table>
 <p>Normal Run stores functional Cases under
-output/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/. Load stores retained
-samples under output/load/&lt;RUN_ID&gt;/samples/&lt;EXEC.ID&gt;/ and
-failures under failures/&lt;EXEC.ID&gt;/. Metrics-only iterations have
-EXEC.ID but no per-iteration directory. Retained Load rows show EXEC.ID
-and link to case.log when present. Debug uses its debug ID as both
-EXEC.RUN_ID and EXEC.ID.</p>
+output/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/. In Load,
+EXEC.OUTPUT_DIR and CASE.outputDirectory remain at
+output/load/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/ throughout the
+iteration. When retained, a copy of its artifacts is also stored under
+samples/&lt;EXEC.ID&gt;/ or failures/&lt;EXEC.ID&gt;/. Metrics-only
+iterations have EXEC.ID but no per-iteration directory after the
+scheduler releases their temporary workspace. Retained Load rows show
+EXEC.ID and link to case.log when present. Debug uses its debug ID as
+both EXEC.RUN_ID and EXEC.ID.</p>
 <p>DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary
 scheduler counters in expressions; pass business variation through
 EXEC.INPUT.</p>
@@ -1451,14 +1454,20 @@ suffix.</p>
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
+├── executions/&lt;EXEC.ID&gt;/
+│   ├── case.log
+│   └── action outputs written under EXEC.OUTPUT_DIR
 ├── failures/&lt;EXEC.ID&gt;/case.log
 ├── failures/&lt;EXEC.ID&gt;/case.yaml
 ├── samples/&lt;EXEC.ID&gt;/case.log
 └── samples/&lt;EXEC.ID&gt;/case.yaml</code></pre>
-<p>A metrics-only iteration still has EXEC.ID but creates no
-per-execution directory. Workspaces are materialized only for retained
-failures or sampled successes. The report and evidence summary show
-EXEC.ID and link to case.log when it exists. Process/API output stays in
+<p>A metrics-only iteration still has EXEC.ID but its temporary
+workspace is removed when the scheduler declines retention.
+EXEC.OUTPUT_DIR remains at executions/&lt;EXEC.ID&gt; while the
+iteration runs. Retained failures and sampled successes also receive an
+evidence copy under failures/&lt;EXEC.ID&gt;/ or
+samples/&lt;EXEC.ID&gt;/. The report and evidence summary show EXEC.ID
+and link to case.log when it exists. Process/API output stays in
 temporary staging until a retention slot is granted.</p>
 <h4 id="evidence-and-resource-output">Evidence and resource output</h4>
 <p>evidence.mode accepts metrics, failures, samples or all; the default
@@ -2053,7 +2062,7 @@ configuration-local root, separate from EXEC:</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td><code>${SUITE_NAME}</code></td>
+<td><code>${suiteName}</code></td>
 <td>Source workbook basename with its final lowercase <code>.xlsx</code>
 suffix removed; for example,
 <code>testcase/payment_regression.xlsx</code> becomes
@@ -2061,23 +2070,23 @@ suffix removed; for example,
 </tr>
 </tbody>
 </table>
-<p>The configured string must reference <code>${SUITE_NAME}</code>
+<p>The configured string must reference <code>${suiteName}</code>
 explicitly, whether used as text interpolation or as a built-in
 argument. No other general non-runtime/configuration expression roots
-are defined. Bare <code>SUITE_NAME</code> inside a call is rejected.
+are defined. Bare <code>suiteName</code> inside a call is rejected.
 Legal examples include:</p>
 <div class="sourceCode" id="cb35"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${SUITE_NAME}.result.xlsx&quot;</span></span></code></pre></div>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
 <div class="sourceCode" id="cb36"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${SUITE_NAME}.xlsx&quot;</span></span>
-<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${SUITE_NAME}-report.xlsx&quot;</span></span>
-<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${SUITE_NAME}-${SUITE_NAME}.xlsx&quot;</span></span>
-<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${SUITE_NAME})}.result.xlsx&quot;</span></span>
-<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${SUITE_NAME})})}.xlsx&quot;</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
 <p>For <code>testcase/payment.xlsx</code>, the first example writes
 <code>output/&lt;RunID&gt;/workbooks/payment.result.xlsx</code>.
-<code>${SUITE_NAME}</code> is the physical workbook basename, not the
+<code>${suiteName}</code> is the physical workbook basename, not the
 sidecar <code>id</code>, Sheet/group ID, Case ID, or Run ID. Authors
 should keep the value a safe filename ending in <code>.xlsx</code>;
 avoid <code>/</code>, <code>\</code>, absolute paths, <code>..</code>,
@@ -2086,7 +2095,7 @@ directories that share the same basename resolve to the same default
 result filename, so package authors must avoid that collision.</p>
 <h4 id="illegal-or-unsupported-forms">Illegal or unsupported forms</h4>
 <p>These values fail configuration loading because they do not reference
-<code>${SUITE_NAME}</code>:</p>
+<code>${suiteName}</code>:</p>
 <div class="sourceCode" id="cb37"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result.xlsx&quot;</span></span>
 <span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${RUN_ID}.result.xlsx&quot;</span></span>
@@ -2101,7 +2110,7 @@ ${EXEC.INPUT.caseId}
 ${EXEC.ID}
 #{configuredTool()}
 #{upper(${RUN_ID})}</code></pre>
-<p>A pattern such as <code>${SUITE_NAME}-${RUN_ID}.xlsx</code> is
+<p>A pattern such as <code>${suiteName}-${RUN_ID}.xlsx</code> is
 rejected; unknown references are never retained as literal output text.
 All documented built-ins are parsed by the same engine, including nested
 calls. Because the resulting text becomes a filename, prefer
@@ -3045,7 +3054,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb57-1"><a href=
 <span id="cb57-10"><a href="#cb57-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">processOutput</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">memoryLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">65536</span><span class="kw">,</span><span class="at"> </span><span class="fu">artifactLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">104857600</span><span class="kw">}</span></span>
 <span id="cb57-11"><a href="#cb57-11" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
 <span id="cb57-12"><a href="#cb57-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> append-to-copy</span></span>
-<span id="cb57-13"><a href="#cb57-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${SUITE_NAME}.result.xlsx&quot;</span></span>
+<span id="cb57-13"><a href="#cb57-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span>
 <span id="cb57-14"><a href="#cb57-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
 <span id="cb57-15"><a href="#cb57-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">html</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogInlineLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">32768</span><span class="kw">}</span></span>
 <span id="cb57-16"><a href="#cb57-16" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">junit</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogEmbedThresholdBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10240</span><span class="kw">}</span></span>
@@ -3139,7 +3148,7 @@ skips result-workbook creation</td>
 </tr>
 <tr class="odd">
 <td><code>report.fileNamePattern</code></td>
-<td><code>${SUITE_NAME}.result.xlsx</code></td>
+<td><code>${suiteName}.result.xlsx</code></td>
 <td>Result workbook filename pattern</td>
 </tr>
 <tr class="even">
@@ -4798,8 +4807,9 @@ At least one of message or value is required. message is rendered as
 text. value accepts any typed value, including nested maps/lists. Exact
 ${...} and #{...} expressions preserve their native types; map/list
 children are evaluated recursively without converting numbers, booleans,
-nulls or nested values to strings. format accepts text, json, yaml or
-xml and controls only the emitted Case-log string.</p>
+nulls or nested values to strings. format accepts text, json, yaml, xml
+or sqlplus and controls only the emitted Case-log string. When format is
+present, value is required.</p>
 <p>When both message and value are supplied, Log emits the message, a
 newline, then the formatted value. output.result is that emitted string.
 A DocumentValue is emitted as its authoritative text when format is

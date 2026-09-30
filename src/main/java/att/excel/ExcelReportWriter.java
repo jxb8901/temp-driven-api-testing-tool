@@ -82,7 +82,7 @@ public class ExcelReportWriter {
 
     private String reportFileName(String suiteName) throws IOException {
         Map<String, Object> scope = new LinkedHashMap<String, Object>();
-        scope.put("SUITE_NAME", suiteName);
+        scope.put("suiteName", suiteName);
         try {
             return new att.template.UnifiedTemplateEngine(null).renderScoped(config.report().fileNamePattern(), scope);
         } catch (Exception e) {

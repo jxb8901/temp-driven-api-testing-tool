@@ -1109,12 +1109,14 @@ suffix。</p>
 </tbody>
 </table>
 <p>一般 Run 的功能性 Case 位於
-output/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/。Load retained samples
-位於 output/load/&lt;RUN_ID&gt;/samples/&lt;EXEC.ID&gt;/，failures 位於
-failures/&lt;EXEC.ID&gt;/。Metrics-only iteration 有 EXEC.ID 但不建立
-per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留
-case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與
-EXEC.ID。</p>
+output/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/。Load
+執行期間，EXEC.OUTPUT_DIR 與 CASE.outputDirectory 固定指向
+output/load/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/。Iteration
+被保留時，artifact 也會複製到 samples/&lt;EXEC.ID&gt;/ 或
+failures/&lt;EXEC.ID&gt;/。Metrics-only iteration 有 EXEC.ID；scheduler
+清理暫存 workspace 後不保留 per-iteration 目錄。Load report 顯示
+retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一
+debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。</p>
 <p>DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意
 scheduler counter；業務差異請透過 EXEC.INPUT 傳入。</p>
 <h3 id="optional-lookup-與相容性">Optional lookup 與相容性</h3>
@@ -1345,15 +1347,20 @@ Model</a>。</p>
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
+├── executions/&lt;EXEC.ID&gt;/
+│   ├── case.log
+│   └── 寫入 EXEC.OUTPUT_DIR 的 action outputs
 ├── failures/&lt;EXEC.ID&gt;/case.log
 ├── failures/&lt;EXEC.ID&gt;/case.yaml
 ├── samples/&lt;EXEC.ID&gt;/case.log
 └── samples/&lt;EXEC.ID&gt;/case.yaml</code></pre>
-<p>Metrics-only iteration 雖有 EXEC.ID，卻不建立 per-execution
-directory。只有 retained failure 或 sampled success 才會物化
-workspace。Report/evidence summary 顯示 EXEC.ID；有保留 case.log
-時提供連結。Process/API output 暫存在 staging，取得 retention slot
-後才複製。</p>
+<p>Metrics-only iteration 雖有 EXEC.ID，但 scheduler
+拒絕保留時會刪除暫存 workspace。iteration 執行期間 EXEC.OUTPUT_DIR
+固定指向 executions/&lt;EXEC.ID&gt;。保留的 failure 或 sampled success
+也會將 evidence 複製到 failures/&lt;EXEC.ID&gt;/ 或
+samples/&lt;EXEC.ID&gt;/。Report/evidence summary 顯示 EXEC.ID；有保留
+case.log 時提供連結。Process/API output 暫存在 staging，取得 retention
+slot 後才複製。</p>
 <h4 id="evidence-與-resource-output">Evidence 與 resource output</h4>
 <p>evidence.mode 支援 metrics、failures、samples、all；預設
 failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival
@@ -1895,7 +1902,7 @@ id="configreportfilenamepattern"><code>config.report.fileNamePattern</code></h3>
 </thead>
 <tbody>
 <tr class="odd">
-<td><code>${SUITE_NAME}</code></td>
+<td><code>${suiteName}</code></td>
 <td>源工作簿 basename，去掉结尾的小写 <code>.xlsx</code> 后缀；例如
 <code>testcase/payment_regression.xlsx</code> 变为
 <code>payment_regression</code></td>
@@ -1903,19 +1910,19 @@ id="configreportfilenamepattern"><code>config.report.fileNamePattern</code></h3>
 </tbody>
 </table>
 <p>配置字符串必须显式引用
-<code>${SUITE_NAME}</code>，无论它用于文本插值还是内建函数参数。ATT
+<code>${suiteName}</code>，无论它用于文本插值还是内建函数参数。ATT
 没有定义其他通用 non-runtime/configuration expression roots。call 内的裸
-<code>SUITE_NAME</code> 会被拒绝。合法示例包括：</p>
+<code>suiteName</code> 会被拒绝。合法示例包括：</p>
 <div class="sourceCode" id="cb35"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${SUITE_NAME}.result.xlsx&quot;</span></span></code></pre></div>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
 <p>以及：</p>
 <div class="sourceCode" id="cb36"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${SUITE_NAME}.xlsx&quot;</span></span>
-<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${SUITE_NAME}-report.xlsx&quot;</span></span>
-<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${SUITE_NAME}-${SUITE_NAME}.xlsx&quot;</span></span>
-<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${SUITE_NAME})}.result.xlsx&quot;</span></span>
-<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${SUITE_NAME})})}.xlsx&quot;</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
 <p>但不支持如
 <code>${RUN_ID}</code>、<code>${WORKBOOK_ID}</code>、<code>${ENVIRONMENT}</code>、<code>${EXEC.INPUT.caseId}</code>
 等运行时值引用。</p>
@@ -2605,7 +2612,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb48-1"><a href=
 <span id="cb48-8"><a href="#cb48-8" aria-hidden="true" tabindex="-1"></a><span class="fu">run</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">default</span><span class="kw">:</span><span class="at"> timestamp</span><span class="kw">,</span><span class="at"> </span><span class="fu">timestampFormat</span><span class="kw">:</span><span class="at"> yyyyMMdd-HHmmss</span><span class="kw">}}</span></span>
 <span id="cb48-9"><a href="#cb48-9" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
 <span id="cb48-10"><a href="#cb48-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> append-to-copy</span></span>
-<span id="cb48-11"><a href="#cb48-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${SUITE_NAME}.result.xlsx&quot;</span></span>
+<span id="cb48-11"><a href="#cb48-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span>
 <span id="cb48-12"><a href="#cb48-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
 <span id="cb48-13"><a href="#cb48-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">junit</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogEmbedThresholdBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10240</span><span class="kw">}</span></span>
 <span id="cb48-14"><a href="#cb48-14" aria-hidden="true" tabindex="-1"></a><span class="fu">xml</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">namespaceMode</span><span class="kw">:</span><span class="at"> ignore</span><span class="kw">}</span></span>
@@ -2683,7 +2690,7 @@ exposed metadata</td>
 </tr>
 <tr class="odd">
 <td><code>report.fileNamePattern</code></td>
-<td><code>${SUITE_NAME}.result.xlsx</code></td>
+<td><code>${suiteName}.result.xlsx</code></td>
 <td>结果工作簿文件名模式</td>
 </tr>
 <tr class="even">
@@ -4000,7 +4007,8 @@ value 至少要有一項。message 以文字求值。value
 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...}
 expression 保留原始型別；map/list
 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援
-text、json、yaml、xml，只控制寫入 Case 日誌的字串。</p>
+text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format
+時必須提供 value。</p>
 <p>同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化
 value。output.result 是最終字串。DocumentValue 未指定 format
 或指定相同格式時會保留權威原文；衝突格式會失敗，不會轉換。Log

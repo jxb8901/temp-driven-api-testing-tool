@@ -42,23 +42,23 @@ execution:
 
 | 占位符 | 值 |
 |---|---|
-| `${SUITE_NAME}` | 源工作簿 basename，去掉结尾的小写 `.xlsx` 后缀；例如 `testcase/payment_regression.xlsx` 变为 `payment_regression` |
+| `${suiteName}` | 源工作簿 basename，去掉结尾的小写 `.xlsx` 后缀；例如 `testcase/payment_regression.xlsx` 变为 `payment_regression` |
 
-配置字符串必须显式引用 `${SUITE_NAME}`，无论它用于文本插值还是内建函数参数。ATT 没有定义其他通用 non-runtime/configuration expression roots。call 内的裸 `SUITE_NAME` 会被拒绝。合法示例包括：
+配置字符串必须显式引用 `${suiteName}`，无论它用于文本插值还是内建函数参数。ATT 没有定义其他通用 non-runtime/configuration expression roots。call 内的裸 `suiteName` 会被拒绝。合法示例包括：
 
 ```yaml
 report:
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
 ```
 
 以及：
 
 ```yaml
-fileNamePattern: "result-${SUITE_NAME}.xlsx"
-fileNamePattern: "ATT-${SUITE_NAME}-report.xlsx"
-fileNamePattern: "${SUITE_NAME}-${SUITE_NAME}.xlsx"
-fileNamePattern: "#{upper(${SUITE_NAME})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${SUITE_NAME})})}.xlsx"
+fileNamePattern: "result-${suiteName}.xlsx"
+fileNamePattern: "ATT-${suiteName}-report.xlsx"
+fileNamePattern: "${suiteName}-${suiteName}.xlsx"
+fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
 但不支持如 `${RUN_ID}`、`${WORKBOOK_ID}`、`${ENVIRONMENT}`、`${EXEC.INPUT.caseId}` 等运行时值引用。

@@ -98,7 +98,7 @@ class TestcaseSnapshotServiceTest {
         List<DataColumnConfig> data = Arrays.asList(new DataColumnConfig("caseName", "案例名稱", false), new DataColumnConfig("note", "備註", false));
         List<StageConfig> stages = Collections.singletonList(new StageConfig("invoke", "執行模板", Collections.<DataColumnConfig>emptyList(), true, "stop", "normal"));
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
-                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${SUITE_NAME}.result.xlsx", new LinkedHashMap<String, String>()),
+                Paths.get("templates"), Collections.emptyMap(), new ReportConfig("append-to-copy", "${suiteName}.result.xlsx", new LinkedHashMap<String, String>()),
                 new RunConfig("timestamp", "yyyyMMdd-HHmmss"), Collections.singletonList(new SheetGroupConfig("payment", "付款")),
                 "案例編號", "標籤", data, stages, 1, "ignore", "payments");
     }

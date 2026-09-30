@@ -131,22 +131,26 @@ class FrameworkConfigLoaderTest {
     @Test void validatesBuiltInsInReportAndToolCommandScopes() throws Exception {
         Path valid = tempDir.resolve("expressions.yaml");
         Files.write(valid, ("schemaVersion: att-config/v2.10\n" +
-                "report: {fileNamePattern: \"#{upper(${SUITE_NAME})}.result.xlsx\"}\n" +
+                "report: {fileNamePattern: \"#{upper(${suiteName})}.result.xlsx\"}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo\n" +
                 "    command: [echo, \"#{trim(${input.value})}\"]\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfigLoader().load(valid);
-        assertEquals("#{upper(${SUITE_NAME})}.result.xlsx", config.report().fileNamePattern());
+        assertEquals("#{upper(${suiteName})}.result.xlsx", config.report().fileNamePattern());
 
         Path invalidReport = tempDir.resolve("invalid-report-expression.yaml");
-        Files.write(invalidReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"${SUITE_NAME}-#{external()}.xlsx\"}\n".getBytes("UTF-8"));
+        Files.write(invalidReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"${suiteName}-#{external()}.xlsx\"}\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidReport));
 
         Path bareReport = tempDir.resolve("bare-report-expression.yaml");
-        Files.write(bareReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"#{upper(suiteName)}-${SUITE_NAME}.xlsx\"}\n".getBytes("UTF-8"));
+        Files.write(bareReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"#{upper(suiteName)}-${suiteName}.xlsx\"}\n".getBytes("UTF-8"));
         IllegalArgumentException bareReportError = assertThrows(IllegalArgumentException.class,
                 () -> new FrameworkConfigLoader().load(bareReport));
-        assertTrue(bareReportError.getMessage().contains("${SUITE_NAME}"));
+        assertTrue(bareReportError.getMessage().contains("${suiteName}"));
+
+        Path incompatibleReport = tempDir.resolve("uppercase-report-expression.yaml");
+        Files.write(incompatibleReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"${SUITE_NAME}.result.xlsx\"}\n".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(incompatibleReport));
 
         Path invalidCommand = tempDir.resolve("invalid-command-expression.yaml");
         Files.write(invalidCommand, ("schemaVersion: att-config/v2.10\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +

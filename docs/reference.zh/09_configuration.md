@@ -154,7 +154,7 @@ templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 report:
   mode: append-to-copy
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
   columns: {}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
@@ -183,7 +183,7 @@ environments:
 | `run.id.default` | `timestamp` | 仅支持 `timestamp` |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | 非空 Java 日期/时间格式 |
 | `report.mode` | `append-to-copy` | 仅支持 `append-to-copy` |
-| `report.fileNamePattern` | `${SUITE_NAME}.result.xlsx` | 结果工作簿文件名模式 |
+| `report.fileNamePattern` | `${suiteName}.result.xlsx` | 结果工作簿文件名模式 |
 | `report.columns` | `{}` | 任意字符串键和字符串标签值 |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | 整数 0–1048576 UTF-8 字节；0 始终使用链接 |
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |

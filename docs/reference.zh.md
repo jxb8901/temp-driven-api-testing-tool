@@ -293,7 +293,7 @@ ID 必須非空、安全且為單一路徑 segment，並在 Load run 內唯一�
 | EXEC.ID | 目前 Case/Debug/Load execution。 | Execution。 | Workspace 建立時作為 log/evidence key。 |
 | EXEC.OUTPUT_DIR | 與 EXEC.ID 關聯的 workspace。 | Execution。 | Run/Debug 實體 workspace 或 Load planned lazy workspace。 |
 
-一般 Run 的功能性 Case 位於 output/<RUN_ID>/executions/<EXEC.ID>/。Load retained samples 位於 output/load/<RUN_ID>/samples/<EXEC.ID>/，failures 位於 failures/<EXEC.ID>/。Metrics-only iteration 有 EXEC.ID 但不建立 per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。
+一般 Run 的功能性 Case 位於 output/<RUN_ID>/executions/<EXEC.ID>/。Load 執行期間，EXEC.OUTPUT_DIR 與 CASE.outputDirectory 固定指向 output/load/<RUN_ID>/executions/<EXEC.ID>/。Iteration 被保留時，artifact 也會複製到 samples/<EXEC.ID>/ 或 failures/<EXEC.ID>/。Metrics-only iteration 有 EXEC.ID；scheduler 清理暫存 workspace 後不保留 per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。
 
 DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 scheduler counter；業務差異請透過 EXEC.INPUT 傳入。
 
@@ -435,13 +435,16 @@ output/load/<RUN_ID>/
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
+├── executions/<EXEC.ID>/
+│   ├── case.log
+│   └── 寫入 EXEC.OUTPUT_DIR 的 action outputs
 ├── failures/<EXEC.ID>/case.log
 ├── failures/<EXEC.ID>/case.yaml
 ├── samples/<EXEC.ID>/case.log
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-Metrics-only iteration 雖有 EXEC.ID，卻不建立 per-execution directory。只有 retained failure 或 sampled success 才會物化 workspace。Report/evidence summary 顯示 EXEC.ID；有保留 case.log 時提供連結。Process/API output 暫存在 staging，取得 retention slot 後才複製。
+Metrics-only iteration 雖有 EXEC.ID，但 scheduler 拒絕保留時會刪除暫存 workspace。iteration 執行期間 EXEC.OUTPUT_DIR 固定指向 executions/<EXEC.ID>。保留的 failure 或 sampled success 也會將 evidence 複製到 failures/<EXEC.ID>/ 或 samples/<EXEC.ID>/。Report/evidence summary 顯示 EXEC.ID；有保留 case.log 時提供連結。Process/API output 暫存在 staging，取得 retention slot 後才複製。
 
 #### Evidence 與 resource output
 
@@ -856,23 +859,23 @@ execution:
 
 | 占位符 | 值 |
 |---|---|
-| `${SUITE_NAME}` | 源工作簿 basename，去掉结尾的小写 `.xlsx` 后缀；例如 `testcase/payment_regression.xlsx` 变为 `payment_regression` |
+| `${suiteName}` | 源工作簿 basename，去掉结尾的小写 `.xlsx` 后缀；例如 `testcase/payment_regression.xlsx` 变为 `payment_regression` |
 
-配置字符串必须显式引用 `${SUITE_NAME}`，无论它用于文本插值还是内建函数参数。ATT 没有定义其他通用 non-runtime/configuration expression roots。call 内的裸 `SUITE_NAME` 会被拒绝。合法示例包括：
+配置字符串必须显式引用 `${suiteName}`，无论它用于文本插值还是内建函数参数。ATT 没有定义其他通用 non-runtime/configuration expression roots。call 内的裸 `suiteName` 会被拒绝。合法示例包括：
 
 ```yaml
 report:
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
 ```
 
 以及：
 
 ```yaml
-fileNamePattern: "result-${SUITE_NAME}.xlsx"
-fileNamePattern: "ATT-${SUITE_NAME}-report.xlsx"
-fileNamePattern: "${SUITE_NAME}-${SUITE_NAME}.xlsx"
-fileNamePattern: "#{upper(${SUITE_NAME})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${SUITE_NAME})})}.xlsx"
+fileNamePattern: "result-${suiteName}.xlsx"
+fileNamePattern: "ATT-${suiteName}-report.xlsx"
+fileNamePattern: "${suiteName}-${suiteName}.xlsx"
+fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
 但不支持如 `${RUN_ID}`、`${WORKBOOK_ID}`、`${ENVIRONMENT}`、`${EXEC.INPUT.caseId}` 等运行时值引用。
@@ -1255,7 +1258,7 @@ templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 report:
   mode: append-to-copy
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
   columns: {}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
@@ -1284,7 +1287,7 @@ environments:
 | `run.id.default` | `timestamp` | 仅支持 `timestamp` |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | 非空 Java 日期/时间格式 |
 | `report.mode` | `append-to-copy` | 仅支持 `append-to-copy` |
-| `report.fileNamePattern` | `${SUITE_NAME}.result.xlsx` | 结果工作簿文件名模式 |
+| `report.fileNamePattern` | `${suiteName}.result.xlsx` | 结果工作簿文件名模式 |
 | `report.columns` | `{}` | 任意字符串键和字符串标签值 |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | 整数 0–1048576 UTF-8 字节；0 始终使用链接 |
 | `xml.namespaceMode` | `ignore` | `ignore` 或 `preserve` |
@@ -1895,7 +1898,7 @@ logOrder:
   format: yaml
 ~~~
 
-level 預設 INFO，可設 TRACE、DEBUG、INFO、WARN、ERROR。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml，只控制寫入 Case 日誌的字串。
+level 預設 INFO，可設 TRACE、DEBUG、INFO、WARN、ERROR。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
 
 同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。DocumentValue 未指定 format 或指定相同格式時會保留權威原文；衝突格式會失敗，不會轉換。Log 不讀取檔案，也沒有 fields map。需要結構化日誌時，將 typed map/list 放到 value。
 

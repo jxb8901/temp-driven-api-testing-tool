@@ -243,7 +243,8 @@
             "text",
             "json",
             "yaml",
-            "xml"
+            "xml",
+            "sqlplus"
           ]
         }
       },
@@ -709,6 +710,11 @@
                       "templateFormat"
                     ]
                   }
+                ]
+              },
+              "dependentRequired": {
+                "format": [
+                  "value"
                 ]
               }
             },

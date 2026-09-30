@@ -27,7 +27,17 @@ class LoadExecutionIdPatternTest {
                 "${EXEC.ACTIONS.call.output.result}",
                 "${EXEC.LOAD.ITERATION}/child",
                 "#{seq.next()}",
-                "#{file.delete('x')}")) {
+                "#{formatDate(value='2020-01-01T00:00:00Z', pattern='yyyy')}",
+                "#{date.format(value='2020-01-01T00:00:00Z', pattern='yyyy')}",
+                "#{file.delete('x')}",
+                "#{deleteFile('x')}",
+                "#{file.copy(source='a', target='b')}",
+                "#{copyFile(source='a', target='b')}",
+                "#{file.move(source='a', target='b')}",
+                "#{moveFile(source='a', target='b')}",
+                "#{file.mkdirs('x')}",
+                "#{makeDirectories('x')}",
+                "#{directoryExists('x')}")) {
             assertThrows(IllegalArgumentException.class, () -> LoadExecutionIdPattern.validate(invalid, LoadScenario.Model.CLOSED), invalid);
         }
         assertThrows(IllegalArgumentException.class,

@@ -44,28 +44,28 @@ See [Runtime and Context Model](03_runtime_context.md) for the full META invento
 
 | Placeholder | Value |
 |---|---|
-| `${SUITE_NAME}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
+| `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
 
-The configured string must reference `${SUITE_NAME}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `SUITE_NAME` inside a call is rejected. Legal examples include:
+The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `suiteName` inside a call is rejected. Legal examples include:
 
 ```yaml
 report:
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
 ```
 
 ```yaml
-fileNamePattern: "result-${SUITE_NAME}.xlsx"
-fileNamePattern: "ATT-${SUITE_NAME}-report.xlsx"
-fileNamePattern: "${SUITE_NAME}-${SUITE_NAME}.xlsx"
-fileNamePattern: "#{upper(${SUITE_NAME})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${SUITE_NAME})})}.xlsx"
+fileNamePattern: "result-${suiteName}.xlsx"
+fileNamePattern: "ATT-${suiteName}-report.xlsx"
+fileNamePattern: "${suiteName}-${suiteName}.xlsx"
+fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
-For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${SUITE_NAME}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
+For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
 
 #### Illegal or unsupported forms
 
-These values fail configuration loading because they do not reference `${SUITE_NAME}`:
+These values fail configuration loading because they do not reference `${suiteName}`:
 
 ```yaml
 fileNamePattern: "result.xlsx"
@@ -85,7 +85,7 @@ ${EXEC.ID}
 #{upper(${RUN_ID})}
 ```
 
-A pattern such as `${SUITE_NAME}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
+A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
 ### Tool-definition `command` expressions
 

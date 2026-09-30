@@ -52,13 +52,16 @@ output/load/<RUN_ID>/
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
+├── executions/<EXEC.ID>/
+│   ├── case.log
+│   └── 寫入 EXEC.OUTPUT_DIR 的 action outputs
 ├── failures/<EXEC.ID>/case.log
 ├── failures/<EXEC.ID>/case.yaml
 ├── samples/<EXEC.ID>/case.log
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-Metrics-only iteration 雖有 EXEC.ID，卻不建立 per-execution directory。只有 retained failure 或 sampled success 才會物化 workspace。Report/evidence summary 顯示 EXEC.ID；有保留 case.log 時提供連結。Process/API output 暫存在 staging，取得 retention slot 後才複製。
+Metrics-only iteration 雖有 EXEC.ID，但 scheduler 拒絕保留時會刪除暫存 workspace。iteration 執行期間 EXEC.OUTPUT_DIR 固定指向 executions/<EXEC.ID>。保留的 failure 或 sampled success 也會將 evidence 複製到 failures/<EXEC.ID>/ 或 samples/<EXEC.ID>/。Report/evidence summary 顯示 EXEC.ID；有保留 case.log 時提供連結。Process/API output 暫存在 staging，取得 retention slot 後才複製。
 
 #### Evidence 與 resource output
 

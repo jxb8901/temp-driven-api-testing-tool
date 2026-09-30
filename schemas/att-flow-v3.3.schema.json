@@ -145,7 +145,8 @@
             "text",
             "json",
             "yaml",
-            "xml"
+            "xml",
+            "sqlplus"
           ]
         }
       },
@@ -220,6 +221,24 @@
                   "value"
                 ]
               }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "log"
+              }
+            },
+            "required": [
+              "type",
+              "format"
+            ]
+          },
+          "then": {
+            "required": [
+              "value"
             ]
           }
         },

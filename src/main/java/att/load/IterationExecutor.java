@@ -137,28 +137,31 @@ public final class IterationExecutor implements LoadIterationRunner {
         boolean retainEvidence = status == ResultStatus.PASS
                 ? request.retainSuccessEvidence() : request.retainFailureEvidence();
         evidenceDirectory = evidenceDirectory(request, executionId, status == ResultStatus.PASS);
-        if (context != null) context.finishExecutionIdInitialization(executionId, evidenceDirectory,
-                evidenceDirectory.resolve("case.log"));
-        if (transientWorkspace != null && executionWorkspace != null) {
-            // Execution workspaces are lazy in Load. Keep process output in
-            // the transient staging directory and copy it only if retention
-            // grants this iteration an evidence slot below samples/failures.
-            deleteWorkspace(executionWorkspace);
-        }
         if (retainEvidence && log != null) {
             try {
                 Files.createDirectories(evidenceDirectory);
                 mergeWorkspace(transientWorkspace, evidenceDirectory);
+                // Files explicitly written through EXEC.OUTPUT_DIR remain at
+                // their public executions/<EXEC.ID> location and are also
+                // included in retained sample/failure evidence.
+                mergeWorkspace(executionWorkspace, evidenceDirectory);
+                if (executionWorkspace != null) Files.createDirectories(executionWorkspace);
                 log.materialize(evidenceDirectory.resolve("case.log"));
+                log.materialize(executionWorkspace.resolve("case.log"));
             }
             catch (Exception ignored) { }
         }
         if (context != null && evidenceDirectory != null && retainEvidence) {
             try {
                 Files.createDirectories(evidenceDirectory);
-                context.materializeResourceOutputs(evidenceDirectory);
-                Files.write(evidenceDirectory.resolve("case.yaml"),
-                        new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
+                if (executionWorkspace != null) Files.createDirectories(executionWorkspace);
+                context.materializeResourceOutputs(executionWorkspace);
+                Path resourceOutput = executionWorkspace.resolve("resource-output.yaml");
+                if (Files.isRegularFile(resourceOutput)) Files.copy(resourceOutput, evidenceDirectory.resolve("resource-output.yaml"),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
+                Files.write(evidenceDirectory.resolve("case.yaml"), caseYaml);
+                Files.write(executionWorkspace.resolve("case.yaml"), caseYaml);
             } catch (Exception ignored) { }
         }
         boolean evidenceAvailable = retainEvidence && evidenceDirectory != null
@@ -168,8 +171,9 @@ public final class IterationExecutor implements LoadIterationRunner {
             deleteWorkspace(transientWorkspace);
             transientWorkspace = null;
         }
-        return new IterationResult(request.iterationId(), executionId, status, duration, context, results, evidenceDirectory, diagnostic,
-                evidenceAvailable, evidenceAvailable ? null : log, transientWorkspace);
+        return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
+                executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
+                evidenceAvailable ? null : log, transientWorkspace);
     }
 
     private void deleteWorkspace(Path directory) {

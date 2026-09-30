@@ -43,6 +43,10 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.ROOT);
     private static final Map<String, String> ALIASES = aliases();
     private static final Set<String> NAMES = Collections.unmodifiableSet(new LinkedHashSet<String>(ALIASES.keySet()));
+    private static final Set<String> EXECUTION_ID_FUNCTIONS = Collections.unmodifiableSet(new LinkedHashSet<String>(java.util.Arrays.asList(
+            "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
+            "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
+            "endswith", "replace", "padleft", "padright", "dateadd", "dbtext", "prettyprint", "format")));
 
     private final Clock clock;
     private final Random random;
@@ -76,9 +80,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
     /** Pure deterministic built-ins allowed while ATT resolves an execution identity. */
     public static boolean isSafeForExecutionIdentity(String name) {
         String function = name == null ? null : ALIASES.get(name.toLowerCase(Locale.ROOT));
-        if (function == null) return false;
-        return !"seq.next".equals(function) && !"randomchoice".equals(function) && !"sysdate".equals(function)
-                && !"systimestamp".equals(function) && !function.startsWith("file");
+        return function != null && EXECUTION_ID_FUNCTIONS.contains(function);
     }
 
     @Override public Object invoke(String name, Map<String, Object> input) {

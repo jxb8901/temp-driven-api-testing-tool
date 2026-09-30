@@ -216,12 +216,17 @@ class LoadScenarioTest {
             IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
                     IterationRequest.closed("resolved-run", "resolved-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
             assertEquals(ResultStatus.FAIL, result.status());
-            Path expectedWorkspace = outputRoot.resolve("load/resolved-run/iterations")
-                    .resolve(LoadIsolation.workspaceName("resolved-run", "resolved-iteration", 1)).toAbsolutePath().normalize();
+            Path expectedWorkspace = outputRoot.resolve("load/resolved-run/executions")
+                    .resolve(result.executionId()).toAbsolutePath().normalize();
             assertEquals(expectedWorkspace, result.outputDirectory().toAbsolutePath().normalize());
+            assertEquals(expectedWorkspace.toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
+            assertEquals(expectedWorkspace.toString(), result.context().resolve("CASE.outputDirectory"));
             assertTrue(Files.isDirectory(expectedWorkspace));
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.log")));
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.yaml")));
+            @SuppressWarnings("unchecked") Map<String, Object> caseYaml = new org.yaml.snakeyaml.Yaml().load(
+                    new String(Files.readAllBytes(expectedWorkspace.resolve("case.yaml")), "UTF-8"));
+            assertEquals(expectedWorkspace.toString(), caseYaml.get("outputDirectory"));
             assertNotNull(result.evidenceRef());
 
             LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
@@ -237,8 +242,8 @@ class LoadScenarioTest {
             Path eventFile = runDirectory.resolve(String.valueOf(items.get(0).get("path")));
             @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
-            assertEquals("iterations/" + expectedWorkspace.getFileName(), reference.get("workspace"));
-            assertEquals("iterations/" + expectedWorkspace.getFileName() + "/case.log", reference.get("caseLog"));
+            assertEquals("failures/" + result.executionId(), reference.get("workspace"));
+            assertEquals("failures/" + result.executionId() + "/case.log", reference.get("caseLog"));
         } finally { resources.close(); }
     }
 
@@ -261,6 +266,7 @@ class LoadScenarioTest {
             IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
                     IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
             assertEquals(ResultStatus.PASS, result.status());
+            assertEquals(result.outputDirectory().toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
             assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered/payload.txt")));
             assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
                     "file-producing actions need a workspace but must not force a case log");
@@ -362,9 +368,9 @@ class LoadScenarioTest {
                     new IterationExecutor(project, config, target, resources, outputRoot), "capped-run", evidence, outputRoot);
             try { scheduler.run(); } finally { scheduler.close(); }
 
-            Path iterations = outputRoot.resolve("load/capped-run/iterations");
+            Path executions = outputRoot.resolve("load/capped-run/executions");
             long workspaceCount;
-            try (java.util.stream.Stream<Path> paths = Files.list(iterations)) {
+            try (java.util.stream.Stream<Path> paths = Files.list(executions)) {
                 workspaceCount = paths.filter(Files::isDirectory).count();
             }
             assertEquals(3, evidence.events().size());
@@ -412,7 +418,7 @@ class LoadScenarioTest {
             Path eventFile = outputRoot.resolve("load/sample-run").resolve(String.valueOf(items.get(0).get("path")));
             @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
-            assertTrue(String.valueOf(reference.get("workspace")).startsWith("iterations/"));
+            assertTrue(String.valueOf(reference.get("workspace")).startsWith("samples/"));
             assertTrue(Files.isRegularFile(outputRoot.resolve("load/sample-run").resolve(String.valueOf(reference.get("caseLog")))));
         } finally { resources.close(); }
     }

@@ -14,11 +14,21 @@ import java.util.Collections;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Author: Jeffrey + ChatGPT. */
 class HtmlReportGeneratorTest {
     @TempDir Path tempDir;
+
+    @Test void keepsExplicitExecutionIdIndependentOfLogDirectoryLayout() {
+        Path log = tempDir.resolve("arbitrary/location/case.log");
+        TestResult result = new TestResult("payments.payment.TC001", "Payment", ResultStatus.PASS, Duration.ZERO,
+                "", "", log, Collections.<att.core.ValidationResult>emptyList(), "payments", "payment",
+                Collections.<String>emptyList(), null, "EXEC-42");
+        assertEquals("EXEC-42", result.executionId());
+        assertEquals("EXEC-42", result.relocate(tempDir, tempDir.resolve("moved")).executionId());
+    }
 
     @Test void producesAStandaloneSinglePageReport() throws Exception {
         Path log = tempDir.resolve("payments.payment.TC001/case.log");

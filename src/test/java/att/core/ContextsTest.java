@@ -20,6 +20,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ContextsTest {
     @TempDir Path tempDir;
 
+    @Test void firstStageCanTemporarilyPublishTemplateMetadataWhenNoneExistedBefore() {
+        StageCaseData stage = new StageCaseData("invoke", "PAYMENT", Collections.<String, Object>emptyMap());
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.<String, StageCaseData>emptyMap(), null),
+                tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
+
+        assertNull(context.resolve("META.TEMPLATE"));
+        context.beginStage(stage, "PAYMENT", tempDir.resolve("templates/PAYMENT"));
+        assertEquals("PAYMENT", context.resolve("META.TEMPLATE.id"));
+        context.finishStage("PASS", 1L);
+        assertNull(context.resolve("META.TEMPLATE"));
+    }
+
     @Test
     void buildsUppercaseConceptTreeWithCamelCaseProperties() {
         Map<String, Object> data = new LinkedHashMap<String, Object>();

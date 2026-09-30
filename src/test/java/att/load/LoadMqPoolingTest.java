@@ -198,7 +198,7 @@ class LoadMqPoolingTest {
             assertEquals(ResultStatus.ERROR, retained.status());
             assertNotNull(retained.evidence());
             assertTrue(Files.isRegularFile(retained.evidence().caseLog()));
-            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot.resolve("load/mq-failures/iterations"))) {
+            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot.resolve("load/mq-failures/executions"))) {
                 assertEquals(1L, paths.filter(Files::isDirectory)
                         .filter(path -> path.getFileName().toString().startsWith("mq-failures-"))
                         .count());

@@ -295,7 +295,7 @@ IDs must be non-empty, path-safe single segments and unique within the Load run.
 | EXEC.ID | Current Case/Debug/Load execution. | Execution. | Key for logs/evidence when a workspace exists. |
 | EXEC.OUTPUT_DIR | Workspace path associated with EXEC.ID. | Execution. | Physical Run/Debug workspace or planned lazy Load workspace. |
 
-Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. Load stores retained samples under output/load/<RUN_ID>/samples/<EXEC.ID>/ and failures under failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
+Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. In Load, EXEC.OUTPUT_DIR and CASE.outputDirectory remain at output/load/<RUN_ID>/executions/<EXEC.ID>/ throughout the iteration. When retained, a copy of its artifacts is also stored under samples/<EXEC.ID>/ or failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory after the scheduler releases their temporary workspace. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
 
 DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler counters in expressions; pass business variation through EXEC.INPUT.
 
@@ -437,13 +437,16 @@ output/load/<RUN_ID>/
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
+├── executions/<EXEC.ID>/
+│   ├── case.log
+│   └── action outputs written under EXEC.OUTPUT_DIR
 ├── failures/<EXEC.ID>/case.log
 ├── failures/<EXEC.ID>/case.yaml
 ├── samples/<EXEC.ID>/case.log
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-A metrics-only iteration still has EXEC.ID but creates no per-execution directory. Workspaces are materialized only for retained failures or sampled successes. The report and evidence summary show EXEC.ID and link to case.log when it exists. Process/API output stays in temporary staging until a retention slot is granted.
+A metrics-only iteration still has EXEC.ID but its temporary workspace is removed when the scheduler declines retention. EXEC.OUTPUT_DIR remains at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes also receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Process/API output stays in temporary staging until a retention slot is granted.
 
 #### Evidence and resource output
 
@@ -860,28 +863,28 @@ See [Runtime and Context Model](reference/03_runtime_context.md) for the full ME
 
 | Placeholder | Value |
 |---|---|
-| `${SUITE_NAME}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
+| `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
 
-The configured string must reference `${SUITE_NAME}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `SUITE_NAME` inside a call is rejected. Legal examples include:
+The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `suiteName` inside a call is rejected. Legal examples include:
 
 ```yaml
 report:
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
 ```
 
 ```yaml
-fileNamePattern: "result-${SUITE_NAME}.xlsx"
-fileNamePattern: "ATT-${SUITE_NAME}-report.xlsx"
-fileNamePattern: "${SUITE_NAME}-${SUITE_NAME}.xlsx"
-fileNamePattern: "#{upper(${SUITE_NAME})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${SUITE_NAME})})}.xlsx"
+fileNamePattern: "result-${suiteName}.xlsx"
+fileNamePattern: "ATT-${suiteName}-report.xlsx"
+fileNamePattern: "${suiteName}-${suiteName}.xlsx"
+fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
+fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
-For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${SUITE_NAME}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
+For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
 
 #### Illegal or unsupported forms
 
-These values fail configuration loading because they do not reference `${SUITE_NAME}`:
+These values fail configuration loading because they do not reference `${suiteName}`:
 
 ```yaml
 fileNamePattern: "result.xlsx"
@@ -901,7 +904,7 @@ ${EXEC.ID}
 #{upper(${RUN_ID})}
 ```
 
-A pattern such as `${SUITE_NAME}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
+A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
 ### Tool-definition `command` expressions
 
@@ -1367,7 +1370,7 @@ execution:
   processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
 report:
   mode: append-to-copy
-  fileNamePattern: "${SUITE_NAME}.result.xlsx"
+  fileNamePattern: "${suiteName}.result.xlsx"
   columns: {}
   html: {caseLogInlineLimitBytes: 32768}
   junit: {caseLogEmbedThresholdBytes: 10240}
@@ -1399,7 +1402,7 @@ environments:
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
-| `report.fileNamePattern` | `${SUITE_NAME}.result.xlsx` | Result workbook filename pattern |
+| `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
 | `report.columns` | `{}` | Arbitrary string keys and string label values |
 | `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
@@ -2039,7 +2042,7 @@ logOrder:
   format: yaml
 ~~~
 
-level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml or xml and controls only the emitted Case-log string.
+level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
 When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A DocumentValue is emitted as its authoritative text when format is omitted or matches its own format; a conflicting format fails instead of converting it. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 

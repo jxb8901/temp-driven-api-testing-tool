@@ -666,20 +666,18 @@ public final class FrameworkConfigLoader {
         if (!(value instanceof Map)) return null;
         Map<?, ?> report = (Map<?, ?>) value;
         String mode = report.get("mode") == null ? "append-to-copy" : SchemaSupport.string(report.get("mode"), "report.mode", true); if (!("append-to-copy".equals(mode) || "none".equals(mode))) throw new IllegalArgumentException("report.mode must be append-to-copy or none");
-        String pattern = report.get("fileNamePattern") == null ? "${SUITE_NAME}.result.xlsx" : SchemaSupport.string(report.get("fileNamePattern"), "report.fileNamePattern", true);
+        String pattern = report.get("fileNamePattern") == null ? "${suiteName}.result.xlsx" : SchemaSupport.string(report.get("fileNamePattern"), "report.fileNamePattern", true);
         att.template.UnifiedTemplateEngine reportExpressions = new att.template.UnifiedTemplateEngine(null);
-        if (!pattern.contains("${SUITE_NAME}")) throw new IllegalArgumentException("report.fileNamePattern must reference uppercase ${SUITE_NAME}");
-        if (pattern.contains("${suiteName}"))
-            throw new IllegalArgumentException("Use uppercase ${SUITE_NAME} in report.fileNamePattern");
+        if (!pattern.contains("${suiteName}")) throw new IllegalArgumentException("report.fileNamePattern must reference ${suiteName}");
         reportExpressions.validateValueSyntax(pattern);
         for (att.template.ToolCallParser.ParsedCall call : reportExpressions.parseCalls(pattern)) {
             reportExpressions.validateBuiltInCall(call);
             for (att.template.ToolCallParser.Argument argument : call.arguments()) {
                 rejectBareCallReference(argument.expression(), reportExpressions,
-                        java.util.Collections.<String>singleton("SUITE_NAME"), "report.fileNamePattern");
+                        java.util.Collections.<String>singleton("suiteName"), "report.fileNamePattern");
             }
         }
-        for (String path : reportExpressions.parseValuePaths(pattern)) if (!"SUITE_NAME".equals(path)) throw new IllegalArgumentException("report.fileNamePattern only supports ${SUITE_NAME}: ${" + path + "}");
+        for (String path : reportExpressions.parseValuePaths(pattern)) if (!"suiteName".equals(path)) throw new IllegalArgumentException("report.fileNamePattern only supports ${suiteName}: ${" + path + "}");
         Object junitValue = report.get("junit");
         Map<?, ?> junit = junitValue instanceof Map ? (Map<?, ?>) junitValue : java.util.Collections.emptyMap();
         Object htmlValue = report.get("html");
