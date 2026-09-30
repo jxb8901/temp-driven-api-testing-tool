@@ -1,4 +1,4 @@
-schemaVersion: att-dbhelper/v2.5
+schemaVersion: att-dbhelper/v2.6
 id: orders
 name: Orders database
 description: Example JDBC instance for order queries and updates

@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.9
+schemaVersion: att-config/v2.10
 outputDirectory: output
 environment: UAT
 timeoutMs: 10000
@@ -46,13 +46,13 @@ report:
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke the payment API with a rendered request file
-    command: [./tools/invoke_payment_api.sh, "${input.requestFile}", "${input.environment}"]
-    result: {format: xml}
+    description: Invoke the payment API with a rendered request document
+    command: [./tools/invoke_payment_api.sh, "${input.requestText}", "${input.environment}"]
+    stdoutFormat: xml
     arguments:
-      requestFile:
-        name: Request File
-        description: Rendered payment request XML file
+      requestText:
+        name: Request Text
+        description: Rendered payment request document text
         required: true
       environment:
         name: Environment
@@ -62,7 +62,7 @@ tools:
     name: Select CT records
     description: Query transaction records
     command: [./tools/select_ct_txn.sh, "${input.caseId}", "${input.txnRef}"]
-    result: {format: yaml}
+    stdoutFormat: yaml
     arguments:
       caseId:
         name: Case ID
@@ -76,7 +76,7 @@ tools:
     name: Grep application logs
     description: Find one or more keywords in application logs
     command: [./tools/grep_from_app_logs.sh, "${input.logText}", "${input.keywords}"]
-    result: {format: yaml}
+    stdoutFormat: yaml
     arguments:
       logText:
         name: Log Text
@@ -90,7 +90,7 @@ tools:
     name: Get application logs
     description: Collect application logs for a case
     command: [./tools/get_app_logs.sh, "${input.caseId}"]
-    result: {format: text}
+    stdoutFormat: text
     arguments:
       caseId:
         name: Case ID
@@ -100,7 +100,7 @@ tools:
     name: Generate end-to-end ID
     description: Generate a unique end-to-end identifier
     command: [./tools/gen_e2e_id.sh, "${input.caseId}"]
-    result: {format: text}
+    stdoutFormat: text
     arguments:
       caseId:
         name: Case ID
@@ -110,13 +110,13 @@ tools:
     name: Get account date
     description: Return the current account date
     command: [./tools/get_ac_date.sh]
-    result: {format: text}
+    stdoutFormat: text
     arguments: {}
   getSeq:
     name: Get sequence
     description: Generate a new sequence value
     command: [./tools/get_seq.sh, "${input.caseId}"]
-    result: {format: text}
+    stdoutFormat: text
     arguments:
       caseId:
         name: Case ID

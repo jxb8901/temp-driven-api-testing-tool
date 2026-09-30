@@ -1,13 +1,11 @@
-schemaVersion: att-template/v3.1
+schemaVersion: att-template/v3.3
 name: 中文本地付款
 description: 使用中文目錄及中文符號名稱演示完整模板路徑解析。
 actions:
   renderRequest:
     type: render
     payload: request.tmp.xml
-    result:
-      format: text
-      path: rendered/{filename}
+    templateFormat: auto
   callApi:
     type: tool
-    call: "#{invokePaymentApi(requestFile=${ACTIONS.renderRequest.output.targetFiles[0]}, environment=${CASE.environment})}"
+    call: "#{invokePaymentApi(requestText=${ACTIONS.renderRequest.output.result}, environment=${CASE.environment})}"

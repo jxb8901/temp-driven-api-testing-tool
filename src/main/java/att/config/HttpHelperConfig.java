@@ -8,6 +8,12 @@ import java.util.Map;
 
 /** Immutable HTTP transport configuration; credentials are never rendered as evidence. */
 public final class HttpHelperConfig {
+    private ResourceOutputConfig evidenceOutput;
+    public ResourceOutputConfig evidenceOutput() { return evidenceOutput; }
+    HttpHelperConfig withEvidenceOutput(Object evidence) {
+        this.evidenceOutput = ResourceOutputConfig.from(evidence);
+        return this;
+    }
     private final String id;
     private final URI baseUrl;
     private final Map<String, String> headers;

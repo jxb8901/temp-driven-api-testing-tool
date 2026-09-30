@@ -1,4 +1,4 @@
-# ATT 3.5.3 - Automated Testing Tool
+# ATT 3.6.0 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 
@@ -17,7 +17,7 @@ ATT has three peer execution modes over the same runtime model:
 - **Debug** — standalone Template, Flow or Tool execution;
 - **Load** — closed-VU or fixed-arrival-rate execution against a Template, Flow or Tool.
 
-All modes use canonical `EXEC` / `META` Context roots and Action-local `output`. Tool, DB and MQ operations converge on the same Action result/evidence model. Environment profiles select DB/MQ/SSHHelper bindings through stable logical IDs without changing Actions.
+All modes use canonical `EXEC` / `META` Context roots and Action-local `output`. Actions publish native typed values through `output.result`; resource-specific evidence and transport parsing remain at their boundaries. Environment profiles select DB/MQ/SSHHelper bindings through stable logical IDs without changing Actions.
 
 ## Start here
 
@@ -67,7 +67,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-The current global configuration schema is `att-config/v2.9` (older supported versions remain readable). HTTPHelper uses `att-httphelper/v1.0` and environment-bound `httphelpers`; Tool groups with logical SSH bindings use `att-tool-group/v2.8` and `att-sshhelper/v1.0`. Current schemas live under `schemas/`, with retained legacy schemas under `schemas/history/` for compatibility validation and migration guidance.
+ATT 3.6.0 uses `att-config/v2.10`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.3`, `att-flow/v3.3`, and `att-load/v1.2`. Current schemas live under `schemas/`; superseded definitions under `schemas/history/` are historical references, not runtime contracts.
 
 ## Build and validation
 

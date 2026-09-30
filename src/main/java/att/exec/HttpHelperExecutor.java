@@ -47,6 +47,8 @@ import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.config.Registry;
 import org.apache.http.config.RegistryBuilder;
 import org.apache.http.util.EntityUtils;
+import att.template.DocumentValue;
+import att.template.TypedValueFormatter;
 
 /** Run-owned, thread-safe HTTPHelper transport with bounded reusable connections. */
 public final class HttpHelperExecutor implements AutoCloseable {
@@ -168,6 +170,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     metadata.put("resolvedResponseFormat", resolvedResponseFormat);
                     evidence.put("resolvedResponseFormat", resolvedResponseFormat);
                     Object result = decode(bytes, contentType, resolvedResponseFormat);
+                    if (context != null) context.recordResourceOutput(helper.evidenceOutput(), result, evidence);
                     return result(name, invocationId, result, true, metadata, evidence, null);
                 } catch (org.apache.http.conn.ConnectionPoolTimeoutException exhausted) {
                     throw new HttpFailure("HTTP_POOL_TIMEOUT", "HTTP connection pool borrow timed out");
@@ -242,7 +245,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
                 || "headers".equals(key) || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
                 || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
                 || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)
-                || "responseFormat".equals(key)))
+                || "responseFormat".equals(key) || "requestFormat".equals(key)))
             throw new HttpFailure("HTTP_ARGUMENT", "Unknown HTTP request argument: " + key);
         Object requestedFormat = args.get("responseFormat");
         String responseFormat = requestedFormat == null ? helper.responseFormat() : string(requestedFormat, "responseFormat");
@@ -258,6 +261,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
             throw new HttpFailure("HTTP_ARGUMENT", "method is only valid for http.<id>.request");
         if (args.containsKey("body") && args.containsKey("file"))
             throw new HttpFailure("HTTP_ARGUMENT", "HTTP body and file are mutually exclusive");
+        if (args.containsKey("requestFormat") && !args.containsKey("body"))
+            throw new HttpFailure("HTTP_ARGUMENT", "requestFormat requires a structured body");
         if (("GET".equals(method) || "HEAD".equals(method)) && (args.containsKey("body") || args.containsKey("file")))
             throw new HttpFailure("HTTP_ARGUMENT", "HTTP GET/HEAD do not accept a request body");
         String path = args.get("path") == null ? "" : string(args.get("path"), "path");
@@ -301,14 +306,58 @@ public final class HttpHelperExecutor implements AutoCloseable {
         }
         else if (args.containsKey("body")) {
             Object suppliedBody = args.get("body");
-            body = suppliedBody instanceof byte[] ? ((byte[]) suppliedBody).clone()
-                    : (suppliedBody instanceof String ? (String) suppliedBody : JsonSupport.write(suppliedBody)).getBytes(StandardCharsets.UTF_8);
-            if (!(suppliedBody instanceof String) && !(suppliedBody instanceof byte[]) && !containsHeader(headers, "Content-Type"))
-                putHeader(headers, "Content-Type", "application/json; charset=UTF-8");
+            boolean structured = suppliedBody instanceof Map || suppliedBody instanceof Iterable
+                    || suppliedBody != null && suppliedBody.getClass().isArray();
+            if (suppliedBody instanceof DocumentValue && args.containsKey("requestFormat"))
+                throw new HttpFailure("HTTP_ARGUMENT", "requestFormat cannot be combined with a Render DocumentValue");
+            String requestFormat = null;
+            if (args.containsKey("requestFormat")) {
+                if (args.get("requestFormat") == null)
+                    throw new HttpFailure("HTTP_ARGUMENT", "requestFormat must be text, json, yaml, or xml");
+                requestFormat = string(args.get("requestFormat"), "requestFormat");
+                if (requestFormat.trim().isEmpty()
+                        || !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(requestFormat))
+                    throw new HttpFailure("HTTP_ARGUMENT", "requestFormat must be text, json, yaml, or xml");
+            }
+            if (structured && requestFormat == null)
+                throw new HttpFailure("HTTP_ARGUMENT", "A Map/List HTTP body requires requestFormat");
+            if (!structured && !(suppliedBody instanceof DocumentValue) && requestFormat != null)
+                throw new HttpFailure("HTTP_ARGUMENT", "requestFormat is valid only for a Map/List HTTP body");
+            String contentType = header(headers, "Content-Type");
+            java.nio.charset.Charset charset = contentType == null ? StandardCharsets.UTF_8 : contentCharset(contentType);
+            if (structured) {
+                body = new TypedValueFormatter().format(suppliedBody, requestFormat).getBytes(charset);
+                if (contentType == null) putHeader(headers, "Content-Type", mediaType(requestFormat) + "; charset=" + charset.name());
+            } else if (suppliedBody instanceof DocumentValue) {
+                DocumentValue document = (DocumentValue) suppliedBody;
+                body = document.text().getBytes(charset);
+                if (contentType == null) putHeader(headers, "Content-Type", mediaType(document.format()) + "; charset=" + charset.name());
+            } else {
+                body = suppliedBody instanceof byte[] ? ((byte[]) suppliedBody).clone()
+                        : String.valueOf(suppliedBody == null ? "" : suppliedBody).getBytes(charset);
+                if (contentType == null && !(suppliedBody instanceof byte[])) putHeader(headers, "Content-Type", "text/plain; charset=" + charset.name());
+            }
         }
         boolean redirects = args.get("followRedirects") == null ? helper.followRedirects() : bool(args.get("followRedirects"), "followRedirects");
         return new Request(method, url, headers, body, redirects, responseFormat,
                 timeout(args.get("connectionRequestTimeoutMs")), timeout(args.get("connectTimeoutMs")), timeout(args.get("readTimeoutMs")));
+    }
+
+    private static String header(Map<String, String> headers, String name) {
+        for (Map.Entry<String, String> entry : headers.entrySet()) if (entry.getKey().equalsIgnoreCase(name)) return entry.getValue();
+        return null;
+    }
+    private static java.nio.charset.Charset contentCharset(String contentType) {
+        try {
+            org.apache.http.entity.ContentType parsed = org.apache.http.entity.ContentType.parse(contentType);
+            return parsed.getCharset() == null ? StandardCharsets.UTF_8 : parsed.getCharset();
+        } catch (Exception invalid) { throw new HttpFailure("HTTP_ARGUMENT", "Invalid request Content-Type charset"); }
+    }
+    private static String mediaType(String format) {
+        if ("json".equals(format)) return "application/json";
+        if ("yaml".equals(format)) return "application/yaml";
+        if ("xml".equals(format)) return "application/xml";
+        return "text/plain";
     }
 
     private static void putHeader(Map<String, String> headers, String name, String value) {
@@ -329,9 +378,12 @@ public final class HttpHelperExecutor implements AutoCloseable {
         if (Files.isSymbolicLink(logical) || !Files.isRegularFile(logical, LinkOption.NOFOLLOW_LINKS))
             throw new IOException("HTTP request file is missing or unsafe");
         Path real = logical.toRealPath();
-        Path caseRoot = context.caseOutputDirectory().toRealPath();
         Path project = projectRoot.toRealPath();
-        if (!real.startsWith(caseRoot) && !real.startsWith(project)) throw new IOException("HTTP request file escapes ATT package");
+        boolean caseContained = false;
+        Path caseDirectory = context.caseOutputDirectory();
+        if (Files.isDirectory(caseDirectory, LinkOption.NOFOLLOW_LINKS))
+            caseContained = real.startsWith(caseDirectory.toRealPath());
+        if (!caseContained && !real.startsWith(project)) throw new IOException("HTTP request file escapes ATT package");
         return real;
     }
     private String resolveResponseFormat(String contentType, String requestedFormat) {

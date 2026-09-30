@@ -21,7 +21,7 @@ class PackageDocumentationGeneratorTest {
         Files.createDirectories(tempDir.resolve("testcase")); Files.createDirectories(tempDir.resolve("templates"));
         Files.createDirectories(tempDir.resolve("templates/flows/sample"));
         Files.write(tempDir.resolve("templates/flows/sample/flow.yaml"), (
-                "schemaVersion: att-flow/v3.0\n" +
+                "schemaVersion: att-flow/v3.3\n" +
                 "id: sample.echo.v1\nname: Sample Echo\ndescription: Documented Flow\n" +
                 "actions:\n  copy: {type: assign, name: value, expression: '${CASE.caseId}'}\n").getBytes("UTF-8"));
         LinkedHashMap<String,ToolConfig> tools = new LinkedHashMap<String,ToolConfig>();
@@ -90,7 +90,7 @@ class PackageDocumentationGeneratorTest {
         Files.createDirectories(tempDir.resolve("testcase"));
         Files.createDirectories(tempDir.resolve("templates/VERIFY"));
         Files.write(tempDir.resolve("templates/VERIFY/template.yaml"), (
-                "schemaVersion: att-template/v2.3\n" +
+                "schemaVersion: att-template/v3.3\n" +
                 "name: VERIFY\n" +
                 "description: Verify expected status\n" +
                 "actions:\n" +

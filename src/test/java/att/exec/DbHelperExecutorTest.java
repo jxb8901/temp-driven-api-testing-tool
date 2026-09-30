@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Driver;
@@ -33,6 +34,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -264,63 +266,52 @@ class DbHelperExecutorTest {
         executor.close();
     }
 
-    @Test void dbActionsAndExpressionsPreserveTypedResultsAndWriteStructuredAndTextArtifacts() throws Exception {
+        @Test void dbActionsAndExpressionsPreserveTypedResultsAndFormatLogEvidence() throws Exception {
         Map<String, DbHelperConfig> helpers = Collections.singletonMap("orders",
                 db("orders", "jdbc:att-test:actions", "case", "rollback", 12, 10));
         DbHelperExecutor executor = executor(helpers);
-        java.nio.file.Files.createDirectories(tempDir.resolve("sql"));
-        java.nio.file.Files.write(tempDir.resolve("sql/orders.sql"),
+        Files.createDirectories(tempDir.resolve("sql"));
+        Files.write(tempDir.resolve("sql/orders.sql"),
                 "select ${CASE.queryToken} where customer_id = ?".getBytes("UTF-8"));
-        Map<String, Object> caseData = new LinkedHashMap<String, Object>();
+        Map<String,Object> caseData = new LinkedHashMap<String,Object>();
         caseData.put("customerId", 42);
         caseData.put("queryToken", "ONE");
         CaseRuntimeContext context = contextWithData(caseData);
-        context.beginStage(new StageCaseData("verify", "DB", Collections.<String, Object>emptyMap()),
-                "DB", tempDir);
+        context.beginStage(new StageCaseData("verify", "DB", Collections.<String,Object>emptyMap()), "DB", tempDir);
         CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("actions.log"));
         executor.beginCase();
 
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.add(new TemplateAction("query", map("type", "db", "db", "orders",
-                "query", map("sqlFile", "sql/orders.sql", "params",
-                        Collections.<Object>singletonList("${CASE.customerId}")),
-                "result", map("path", "db/orders.json", "format", "json")), "att-template/v3.1"));
+                "query", map("sqlFile", "sql/orders.sql", "params", Collections.<Object>singletonList("${CASE.customerId}"))),
+                "att-template/v3.3"));
         actions.add(new TemplateAction("queryText", map("type", "db", "db", "orders",
-                "query", map("sql", "select ONE", "params", Collections.emptyList()),
-                "result", map("path", "db/orders.txt", "format", "text")), "att-template/v3.1"));
+                "query", map("sql", "select ONE", "params", Collections.emptyList())), "att-template/v3.3"));
         actions.add(new TemplateAction("assign", map("type", "assign", "name", "orders",
                 "expression", "#{db.orders.query(sql='select ONE', params=[${CASE.customerId}, 'OPEN'])}"),
-                "att-template/v2.5"));
+                "att-template/v3.3"));
         actions.add(new TemplateAction("scalar", map("type", "assign", "name", "orderId",
-                "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"),
-                "att-template/v2.5"));
+                "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"), "att-template/v3.3"));
         actions.add(new TemplateAction("printRows", map("type", "log",
-                "message", "${ACTIONS.queryText.output.result}"), "att-template/v3.1"));
+                "value", "${ACTIONS.queryText.output.result}", "format", "sqlplus"), "att-template/v3.3"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, executor))
-                .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v2.5"), context, log);
-        assertEquals(ResultStatus.PASS, results.get(0).status());
-        assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
+                .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v3.3"), context, log);
         assertEquals(5, results.size());
-        assertEquals(ResultStatus.PASS, results.get(2).status());
-        assertEquals(ResultStatus.PASS, results.get(3).status());
-        assertEquals(ResultStatus.PASS, results.get(4).status());
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS),
+                Arrays.asList(results.get(0).status(), results.get(1).status(), results.get(2).status(),
+                        results.get(3).status(), results.get(4).status()));
         assertTrue(context.resolve("ACTIONS.query.output.result.rows") instanceof List);
         assertEquals("orders", context.resolve("ACTIONS.query.output.evidence.db.invocations[0].db"));
         assertEquals("orders", context.resolve("ACTIONS.query.output.evidence.db.invocations[0].helperId"));
         assertEquals("query", context.resolve("ACTIONS.query.output.evidence.db.invocations[0].operation"));
         assertEquals("A100", context.resolve("CASE.VARS.orders.rows[0].ID"));
         assertEquals("A100", context.resolve("CASE.VARS.orderId"));
-        Path artifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.query.output.targetFiles[0]")));
-        assertTrue(artifact.toRealPath().startsWith(context.caseOutputDirectory().toRealPath()));
-        assertTrue(new String(java.nio.file.Files.readAllBytes(artifact), "UTF-8").contains("\"rows\""));
-        Path textArtifact = java.nio.file.Paths.get(String.valueOf(context.resolve("ACTIONS.queryText.output.targetFiles[0]")));
-        assertEquals("ID    STATUS\n----  ------\nA100  READY\n\n1 row selected.\n",
-                new String(java.nio.file.Files.readAllBytes(textArtifact), "UTF-8"));
         assertEquals("A100", context.resolve("ACTIONS.queryText.output.result.rows[0].ID"));
-        assertEquals("READY", context.resolve("ACTIONS.queryText.output.result.rows[0].STATUS"));
-        assertTrue(context.resolve("ACTIONS.assign.DB.orders") instanceof Map);
-        assertEquals("orders", context.resolve("ACTIONS.assign.output.evidence.db.invocations[0].db"));
+        String sqlplus = String.valueOf(context.resolve("ACTIONS.printRows.output.result"));
+        assertTrue(sqlplus.contains("STATUS"));
+        assertTrue(sqlplus.contains("A100"));
+        assertFalse(Files.exists(context.caseOutputDirectory().resolve("db")));
         assertTrue(executor.finishCase(context, log).isEmpty());
         assertEquals("ROLLED_BACK", context.resolve("CASE.DB.orders.state"));
         executor.close();
@@ -375,12 +366,12 @@ class DbHelperExecutorTest {
                 () -> engine.evaluate("#{orders.close(status='DONE')}", context, log));
 
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
-        actions.add(new TemplateAction("scalar", map("type", "tool", "call", "#{orders.id()}",
-                "result", map("path", "db/order-id.txt", "format", "text")), "att-template/v3.1"));
+        actions.add(new TemplateAction("scalar", map("type", "tool", "call", "#{orders.id()}"),
+                "att-template/v3.3"));
         actions.add(new TemplateAction("close", map("type", "tool", "call", "#{orders.close(status='DONE')}"),
-                "att-template/v2.5"));
+                "att-template/v3.3"));
         List<ValidationResult> results = new StageTemplateRunner(engine).execute("verify",
-                new StageTemplate("DB facade", tempDir, actions, "att-template/v2.5"), context, log);
+                new StageTemplate("DB facade", tempDir, actions, "att-template/v3.3"), context, log);
         assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
         assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
         assertEquals("A100", context.resolve("ACTIONS.scalar.output.result"));

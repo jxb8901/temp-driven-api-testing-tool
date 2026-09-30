@@ -12,6 +12,7 @@ import att.exec.ToolInvoker;
 import att.flow.FlowRegistry;
 import att.template.StageTemplateRunner;
 import att.template.UnifiedTemplateEngine;
+import att.template.DefaultBuiltInProvider;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -56,8 +57,10 @@ public final class IterationExecutor implements LoadIterationRunner {
     @Override public IterationResult execute(IterationRequest request) {
         resources.ensureOpen();
         Instant started = Instant.now();
-        Path iterationDirectory = null;
-        boolean retainedWorkspace = request.outputDirectory() != null;
+        Path executionWorkspace = null;
+        Path transientWorkspace = null;
+        Path evidenceDirectory = null;
+        String executionId = request.iterationId();
         CaseRuntimeContext context = null;
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         CaseExecutionLog log = null;
@@ -65,12 +68,40 @@ public final class IterationExecutor implements LoadIterationRunner {
         ResultStatus status = ResultStatus.ERROR;
         att.validation.Diagnostic diagnostic = null;
         try {
-            iterationDirectory = iterationDirectory(request, retainedWorkspace);
-            Path logPath = iterationDirectory.resolve("case.log");
+            Path pending = outputRoot.resolve("load").resolve(safe(request.runId())).resolve("executions")
+                    .resolve(".pending-" + LoadIsolation.shortHash(request.iterationId()));
             LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(projectRoot, config, target)
-                    .prepare(request, resources.nextExecutionId(request.runId()), iterationDirectory, logPath);
+                    .prepare(request, request.iterationId(), pending, pending.resolve("case.log"));
             context = prepared.context();
-            log = CaseExecutionLog.lightweight(logPath, config.caseLogYamlAnchors());
+            context.setResourceOutputEnabled(target.resourceOutputEnabled());
+            context.setTemplateMetadata(target.template().name(), target.template().directory());
+            context.beginExecutionIdInitialization();
+            UnifiedTemplateEngine identityEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new DefaultBuiltInProvider(resources.sequences()));
+            try {
+                executionId = target.execIdFormat().isEmpty()
+                        ? resources.nextDefaultExecutionId(request.runId())
+                        : LoadExecutionIdPattern.evaluate(target.execIdFormat(),
+                                "closed".equals(request.model()) ? LoadScenario.Model.CLOSED : LoadScenario.Model.ARRIVAL_RATE,
+                                context, identityEngine, null);
+                resources.reserveExecutionId(executionId, request);
+                ensureUnusedExecutionId(request, executionId);
+            } catch (Exception invalidId) {
+                executionId = resources.nextDefaultExecutionId(request.runId());
+                resources.reserveExecutionId(executionId, request);
+                executionWorkspace = executionWorkspace(request, executionId);
+                context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
+                log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
+                throw invalidId;
+            }
+            executionWorkspace = executionWorkspace(request, executionId);
+            context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
+            // EXEC.OUTPUT_DIR is a logical/planned path in Load. A local
+            // command-backed Tool creates it on demand when it needs a cwd;
+            // metrics-only/helper iterations therefore do not pay per-iteration
+            // mkdir and temporary-workspace cleanup I/O.
+            context.setCommandWorkingDirectory(executionWorkspace);
+            log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();
@@ -106,23 +137,59 @@ public final class IterationExecutor implements LoadIterationRunner {
         Duration duration = Duration.between(started, Instant.now());
         boolean retainEvidence = status == ResultStatus.PASS
                 ? request.retainSuccessEvidence() : request.retainFailureEvidence();
+        evidenceDirectory = evidenceDirectory(request, executionId, status == ResultStatus.PASS);
         if (retainEvidence && log != null) {
-            try { log.materialize(iterationDirectory.resolve("case.log")); }
+            try {
+                Files.createDirectories(evidenceDirectory);
+                mergeWorkspace(transientWorkspace, evidenceDirectory);
+                // Files explicitly written through EXEC.OUTPUT_DIR remain at
+                // their public executions/<EXEC.ID> location and are also
+                // included in retained sample/failure evidence.
+                mergeWorkspace(executionWorkspace, evidenceDirectory);
+                if (executionWorkspace != null) Files.createDirectories(executionWorkspace);
+                log.materialize(evidenceDirectory.resolve("case.log"));
+                log.materialize(executionWorkspace.resolve("case.log"));
+            }
             catch (Exception ignored) { }
         }
-        if (context != null && iterationDirectory != null && retainEvidence) {
+        if (context != null && evidenceDirectory != null && retainEvidence) {
             try {
-                Files.createDirectories(iterationDirectory);
-                Files.write(iterationDirectory.resolve("case.yaml"),
-                        new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
+                Files.createDirectories(evidenceDirectory);
+                if (executionWorkspace != null) Files.createDirectories(executionWorkspace);
+                context.materializeResourceOutputs(executionWorkspace);
+                Path resourceOutput = executionWorkspace.resolve("resource-output.yaml");
+                if (Files.isRegularFile(resourceOutput)) Files.copy(resourceOutput, evidenceDirectory.resolve("resource-output.yaml"),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
+                Files.write(evidenceDirectory.resolve("case.yaml"), caseYaml);
+                Files.write(executionWorkspace.resolve("case.yaml"), caseYaml);
             } catch (Exception ignored) { }
         }
-        boolean evidenceAvailable = retainEvidence && iterationDirectory != null
-                && Files.isDirectory(iterationDirectory)
-                && Files.isRegularFile(iterationDirectory.resolve("case.log"));
-        if (!evidenceAvailable && request.outputDirectory() != null) deleteWorkspace(iterationDirectory);
-        return new IterationResult(request.iterationId(), status, duration, context, results, iterationDirectory, diagnostic,
-                evidenceAvailable, evidenceAvailable ? null : log);
+        boolean evidenceAvailable = retainEvidence && evidenceDirectory != null
+                && Files.isDirectory(evidenceDirectory)
+                && Files.isRegularFile(evidenceDirectory.resolve("case.log"));
+        if (evidenceAvailable) {
+            deleteWorkspace(transientWorkspace);
+            transientWorkspace = null;
+        } else {
+            deleteEmptyWorkspace(executionWorkspace);
+        }
+        return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
+                executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
+                evidenceAvailable ? null : log, transientWorkspace);
+    }
+
+    private void deleteEmptyWorkspace(Path directory) {
+        Path boundary = outputRoot.resolve("load").toAbsolutePath().normalize();
+        Path current = directory == null ? null : directory.toAbsolutePath().normalize();
+        while (current != null && current.startsWith(boundary) && !current.equals(boundary)) {
+            if (!Files.isDirectory(current)) return;
+            try (java.nio.file.DirectoryStream<Path> contents = Files.newDirectoryStream(current)) {
+                if (contents.iterator().hasNext()) return;
+                Files.deleteIfExists(current);
+            } catch (IOException ignored) { return; }
+            current = current.getParent();
+        }
     }
 
     private void deleteWorkspace(Path directory) {
@@ -134,14 +201,41 @@ public final class IterationExecutor implements LoadIterationRunner {
         } catch (IOException ignored) { }
     }
 
-    private Path iterationDirectory(IterationRequest request, boolean retainedWorkspace) throws IOException {
-        Path base = outputRoot.resolve("load").resolve(safe(request.runId())).resolve("iterations");
-        if (request.workloadId() != null) base = base.resolve(safe(request.workloadId()));
-        if (!retainedWorkspace) return base.resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
-        Path root = request.outputDirectory().toAbsolutePath().normalize();
-        Path candidate = root.resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration())).normalize();
-        if (!candidate.startsWith(root)) throw new IllegalArgumentException("Load iteration directory escapes output root");
-        return candidate;
+    private Path executionWorkspace(IterationRequest request, String executionId) {
+        return outputRoot.resolve("load").resolve(safe(request.runId())).resolve("executions").resolve(executionId).normalize();
+    }
+
+    private Path evidenceDirectory(IterationRequest request, String executionId, boolean success) {
+        return outputRoot.resolve("load").resolve(safe(request.runId()))
+                .resolve(success ? "samples" : "failures").resolve(executionId).normalize();
+    }
+
+    private void ensureUnusedExecutionId(IterationRequest request, String executionId) {
+        Path run = outputRoot.resolve("load").resolve(safe(request.runId()));
+        if (Files.exists(run.resolve("samples").resolve(executionId))
+                || Files.exists(run.resolve("failures").resolve(executionId))
+                || Files.exists(run.resolve("executions").resolve(executionId)))
+            throw new IllegalArgumentException("EXEC.ID already has a Load workspace: " + executionId);
+    }
+
+    private void mergeWorkspace(Path source, Path destination) throws IOException {
+        if (source == null || !Files.isDirectory(source)) return;
+        Files.createDirectories(destination);
+        try (java.util.stream.Stream<Path> paths = Files.walk(source)) {
+            java.util.Iterator<Path> iterator = paths.iterator();
+            while (iterator.hasNext()) {
+                Path current = iterator.next();
+                if (current.equals(source) || Files.isSymbolicLink(current)) continue;
+                Path targetPath = destination.resolve(source.relativize(current)).normalize();
+                if (!targetPath.startsWith(destination.toAbsolutePath().normalize()))
+                    throw new IOException("Load evidence path escapes its workspace");
+                if (Files.isDirectory(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) Files.createDirectories(targetPath);
+                else if (Files.isRegularFile(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectories(targetPath.getParent());
+                    Files.copy(current, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
     }
 
     private ResultStatus aggregate(List<ValidationResult> values) {

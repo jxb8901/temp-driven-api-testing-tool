@@ -143,18 +143,19 @@ class LoadMqPoolingTest {
         Path payload = flowDirectory.resolve("request.xml");
         Files.write(payload, "<request/>\n".getBytes("UTF-8"));
         Files.write(flowDirectory.resolve("flow.yaml"), (
-                "schemaVersion: att-flow/v3.0\n"
+                "schemaVersion: att-flow/v3.3\n"
                 + "id: load.mq.request.v1\nname: Load MQ request\ndescription: scheduler MQ flow\nactions:\n"
                 + "  request:\n    type: tool\n    call: \"#{mq.broker.request(file='" + payload.toString()
                 + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}\"\n").getBytes("UTF-8"));
         FrameworkConfig config = config(2, 0, 1000L);
         Path metricsScenarioFile = project.resolve("mq-metrics.yaml");
-        Files.write(metricsScenarioFile, ("schemaVersion: att-load/v1.0\n"
-                + "target: {type: flow, id: load.mq.request.v1}\n"
-                + "load: {users: 1, duration: 25ms}\nexecution: {thinkTime: 25ms}\n"
-                + "evidence: {mode: metrics}\n").getBytes("UTF-8"));
+        LoadTestSupport.writeScenario(metricsScenarioFile, "schemaVersion: att-load/v1.2\n"
+                + "workloads:\n  - id: mq\n    target: {type: flow, id: load.mq.request.v1}\n"
+                + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 10ms}\n"
+                + "evidence: {mode: metrics}\n");
         LoadScenario metricsScenario = new LoadScenarioLoader(project).load(metricsScenarioFile);
-        LoadTarget metricsTarget = new LoadTargetResolver(project, config).resolve(metricsScenario);
+        LoadScenario metricsWorkload = metricsScenario.forWorkload(metricsScenario.workload());
+        LoadTarget metricsTarget = new LoadTargetResolver(project, config).resolve(metricsWorkload);
         Path outputRoot = tempDir.resolve("scheduler-output");
         BlockingFactory metricsFactory = new BlockingFactory();
         metricsFactory.releaseGet.countDown();
@@ -162,7 +163,7 @@ class LoadMqPoolingTest {
         LoadEvidenceStore metricsEvidence = new LoadEvidenceStore(LoadEvidencePolicy.from(metricsScenario));
         try (LoadRunResources resources = new LoadRunResources(project, config, metricsFactory)) {
             IterationExecutor executor = new IterationExecutor(project, config, metricsTarget, resources, outputRoot);
-            ClosedVuScheduler scheduler = new ClosedVuScheduler(metricsScenario, executor, "mq-metrics", event -> {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(metricsWorkload, executor, "mq-metrics", event -> {
                 metricEvents.add(event);
                 metricsEvidence.onEvent(event);
             }, LoadSchedulerTiming.system(), metricsEvidence, outputRoot, null);
@@ -174,12 +175,13 @@ class LoadMqPoolingTest {
         }
 
         Path failureScenarioFile = project.resolve("mq-failures.yaml");
-        Files.write(failureScenarioFile, ("schemaVersion: att-load/v1.0\n"
-                + "target: {type: flow, id: load.mq.request.v1}\n"
-                + "load: {users: 1, duration: 25ms}\nexecution: {thinkTime: 25ms}\n"
-                + "evidence: {mode: failures, maxSamples: 1}\n").getBytes("UTF-8"));
+        LoadTestSupport.writeScenario(failureScenarioFile, "schemaVersion: att-load/v1.2\n"
+                + "workloads:\n  - id: mq\n    target: {type: flow, id: load.mq.request.v1}\n"
+                + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 10ms}\n"
+                + "evidence: {mode: failures, maxSamples: 1}\n");
         LoadScenario failureScenario = new LoadScenarioLoader(project).load(failureScenarioFile);
-        LoadTarget failureTarget = new LoadTargetResolver(project, config).resolve(failureScenario);
+        LoadScenario failureWorkload = failureScenario.forWorkload(failureScenario.workload());
+        LoadTarget failureTarget = new LoadTargetResolver(project, config).resolve(failureWorkload);
         BlockingFactory failureFactory = new BlockingFactory();
         failureFactory.failGet = true;
         failureFactory.releaseGet.countDown();
@@ -187,7 +189,7 @@ class LoadMqPoolingTest {
         LoadEvidenceStore failureEvidence = new LoadEvidenceStore(LoadEvidencePolicy.from(failureScenario));
         try (LoadRunResources resources = new LoadRunResources(project, config, failureFactory)) {
             IterationExecutor executor = new IterationExecutor(project, config, failureTarget, resources, outputRoot);
-            ClosedVuScheduler scheduler = new ClosedVuScheduler(failureScenario, executor, "mq-failures", event -> {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(failureWorkload, executor, "mq-failures", event -> {
                 failureEvents.add(event);
                 failureEvidence.onEvent(event);
             }, LoadSchedulerTiming.system(), failureEvidence, outputRoot, null);
@@ -198,7 +200,7 @@ class LoadMqPoolingTest {
             assertEquals(ResultStatus.ERROR, retained.status());
             assertNotNull(retained.evidence());
             assertTrue(Files.isRegularFile(retained.evidence().caseLog()));
-            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot.resolve("load/mq-failures/iterations"))) {
+            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot.resolve("load/mq-failures/executions"))) {
                 assertEquals(1L, paths.filter(Files::isDirectory)
                         .filter(path -> path.getFileName().toString().startsWith("mq-failures-"))
                         .count());
@@ -226,9 +228,9 @@ class LoadMqPoolingTest {
         TemplateAction action = new TemplateAction("request", map(
                 "type", "tool",
                 "call", "#{mq.broker.request(file='" + payload.toString()
-                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.0");
+                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.3");
         StageTemplate template = new StageTemplate("MQ", directory, Collections.singletonList(action),
-                "att-template/v3.0", directory.resolve("template.yaml"));
+                "att-template/v3.3", directory.resolve("template.yaml"));
         FlowRegistry flows = new FlowRegistry(project, project.resolve("templates"), false);
         return new LoadTarget("template", "MQ", template, flows, project.resolve("templates"), project.resolve("scenario.yaml"));
     }

@@ -1,18 +1,18 @@
-schemaVersion: att-load/v1.0
+schemaVersion: att-load/v1.2
 seed: 12345
-
-target:
-  type: tool
-  id: sample.getAcDate
-
-load:
-  users: 2
-  duration: 2s
-
-execution:
-  thinkTime:
-    min: 100ms
-    max: 300ms
-
 evidence:
   mode: metrics
+workloads:
+- target:
+    type: tool
+    id: sample.getAcDate
+  load:
+    users: 2
+    duration: 2s
+  execution:
+    thinkTime:
+      min: 100ms
+      max: 300ms
+  id: closed-random-think
+execution:
+  execIdFormat: ${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}

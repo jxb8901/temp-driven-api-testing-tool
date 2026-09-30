@@ -1,9 +1,9 @@
-schemaVersion: att-template/v3.1
+schemaVersion: att-template/v3.3
 name: CTO/RTI流程模板
 description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
 
 # CASE message inputs:
-# precheckRequestId, precheckRequestType, precheckRequestFile,
+# precheckRequestId, precheckRequestType,
 # confirmRequestId, confirmRequestType, confirmRequestFile,
 # pacs004RequestId, pacs004RequestType, pacs004RequestFile, apiLogPath,
 # apiSuccessCode, transactionLogFile, precheckLogKeyword, confirmLogKeyword,
@@ -19,24 +19,22 @@ actions:
 
   renderPrecheckRequest:
     type: render
-    description: "0. Render CT001 Precheck request file with testcase amount"
+    description: "0. Render CT001 Precheck request with testcase amount"
     payload: CT001_Precheck.xml
-    result:
-      format: text
-      path: rendered/{filename}
+    templateFormat: auto
 
   log1:
     type: log
     level: INFO
     message: "====================== Starting testcase ${CASE.caseId} ======================"
-    fields:
+    value:
       precheckResult: "${ACTIONS.buildTxnSeq.output}"
-      confirmResult: "${ACTIONS.renderPrecheckRequest.output}"
+      requestFormat: xml
 
   invokePrecheck:
     type: tool
     description: "1. Send CT001 Precheck"
-    call: "#{fpp.invokeApi(requestId=${CASE.VARS.TxnSeq}, requestType='fromchannel', requestFile=${ACTIONS.renderPrecheckRequest.output.targetFiles[0]}, apiLogPath=${CASE.outputDirectory}/invokePrecheck.log)}"
+    call: "#{fpp.invokeApi(requestId=${CASE.VARS.TxnSeq}, requestType='fromchannel', requestText=${ACTIONS.renderPrecheckRequest.output.result}, apiLogPath='invokePrecheck.log')}"
 
   assertPrecheck:
     type: assert
@@ -155,7 +153,7 @@ x-staged:
     type: log
     level: INFO
     message: "CTO plus RTI success flow completed for ${CASE.caseId}"
-    fields:
+    value:
       precheckResult: "${ACTIONS.invokePrecheck.output.result.ResultCode}"
       confirmResult: "${ACTIONS.invokeConfirm.output.result.ResultCode}"
       pacs004Result: "${ACTIONS.invokePacs004.output.result.ResultCode}"

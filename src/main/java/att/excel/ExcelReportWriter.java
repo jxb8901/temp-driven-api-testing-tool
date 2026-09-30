@@ -138,6 +138,7 @@ public class ExcelReportWriter {
         if ("expectedResult".equals(field)) return normalizeLines(result.expected());
         if ("actualResult".equals(field)) return normalizeLines(result.actual());
         if ("caseLog".equals(field)) return result.caseLogPath() == null ? "" : result.caseLogPath().toString();
+        if ("execId".equals(field)) return result.executionId();
         if ("reportLink".equals(field)) return "../report/index.html#case-" + att.report.HtmlSupport.id(result.caseId());
         if ("runTime".equals(field)) return java.time.LocalDateTime.now().toString();
         return "";

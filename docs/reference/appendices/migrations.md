@@ -1,21 +1,39 @@
 ### 14.3 Migration Notes
 
-The current Reference describes ATT by product concept rather than release chronology. Release-by-release changes remain in `CHANGELOG.md` and `docs/history/`.
+ATT 3.6.0 separates typed operation results, external parsing, rendered documents, outbound transport and human-readable evidence.
 
-Key current migrations are:
+| Previous field/model | 3.6.0 migration |
+|---|---|
+| Command Tool result.format | Move the parsing choice to the Tool descriptor's stdoutFormat. |
+| Common Action result.format/path/overwrite | Remove it. output.result is the native logical typed value; no implicit file replacement exists. |
+| Render result.format/path or renderAs/saveAs | Use templateFormat. Render returns DocumentValue with exact text and creates no result file or targetFiles. |
+| Render file handoff through targetFiles | Pass the DocumentValue directly as HTTP body or MQ payload. |
+| requestFormat on rendered output | Remove it. requestFormat is only for abstract Map/List values; DocumentValue + requestFormat fails. |
+| Log file | Pass the value directly to Log.value. |
+| Log fields | Put the typed map/list in Log.value and select Log.format. |
+| HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
+| Older active resource/config schema versions | Update schemaVersion to the ATT 3.6.0 active schema and migrate the fields listed above. Archived schemas under schemas/history are not active runtime contracts. |
 
-- prefer `EXEC` / `META` over legacy Context aliases;
-- use `output.result` / `EXEC.ACTIONS.<id>.output.result` and the common evidence/attempt contract;
-- treat Tool, DBHelper, MQHelper and HTTPHelper as peer resources;
-- use environment profiles when DB/MQ/SSH/HTTPHelper bindings vary;
-- move common curl invocations to a logical `http.<id>.<method>` Action when pooled transport and typed response metadata are useful; existing curl Tools remain valid;
-- when an older descriptor uses newer fields, follow the validation diagnostic, migrate `schemaVersion` and any named legacy fields, then validate again; historical schema definitions live in `schemas/history/`;
-- migrate command Tool `output: txt|json|yaml|xml` to required Tool-level `result: {format: text|json|yaml|xml}`; Action-level `result.format` now controls serialization only, and `raw` is not a common result format;
-- use `att-config/v2.9`, `att-tool-group/v2.8`, and `att-template/v3.2` / `att-flow/v3.2`; prior registered schema resources remain in `schemas/history/` and are validated from the package catalog;
-- configure HTTPHelper results from response `Content-Type`; public header keys are lowercase, and Action serialization no longer changes the native typed result;
-- set optional MQ defaults in `message.requestQueue` for send/request and `message.replyQueue` for receive/request; explicit call arguments override the selected instance's inherited settings;
-- unexpected internal exceptions now include bounded, secret-sanitized stack detail in Case logs; expected transport and validation errors remain concise;
-- migrate physical group SSH to `ssh: {helper: <id>}` with `att-tool-group/v2.7` when logical multi-instance routing is needed;
-- treat Run, Debug and Load as peer execution modes.
+A Render-to-HTTP example:
 
-The auditable disposition of the pre-#42 monolithic manual is recorded in `docs/reference-migration-map.md`.
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+~~~
+
+For an abstract value, use requestFormat explicitly:
+
+~~~yaml
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
+~~~
+
+For Load, migrate old single-target or v1.1 scenarios to att-load/v1.2 workloads form. Put pacing under each workload and set the optional top-level execution.execIdFormat when a custom EXEC.ID is required. That field uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it. Do not use seq.next() or external/stateful functions in the format.
+
+Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../14_actions.md), [Runtime and Context Model](../03_runtime_context.md), [Load Mode](../04_execution_modes/load.md) and [Schema Matrix](schema_matrix.md).

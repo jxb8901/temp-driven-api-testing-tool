@@ -17,6 +17,8 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import att.template.DocumentValue;
+import att.template.TypedValueFormatter;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -116,15 +118,20 @@ public final class MqHelperExecutor {
         String phase = "mq.resolve";
         try {
             if ("send".equals(operation) || "request".equals(operation)) {
-                String file = string(args.get("file"), "file");
-                Path payloadFile = payloadFile(file, context);
-                byte[] payload = Files.readAllBytes(payloadFile);
+                Path payloadFile = null;
+                byte[] payload;
+                if (args.containsKey("file")) {
+                    payloadFile = payloadFile(string(args.get("file"), "file"), context);
+                    payload = Files.readAllBytes(payloadFile);
+                } else {
+                    payload = payloadBytes(args.get("payload"), args.get("requestFormat"), helper);
+                }
                 String queue = "send".equals(operation)
                         ? effectiveQueue(args.get("queue"), helper.requestQueue(),
                                 "mq." + logical.logicalId() + ".send queue (or message.requestQueue)")
                         : effectiveQueue(args.get("requestQueue"), helper.requestQueue(), "requestQueue");
-                result.put("queue", queue); result.put("payloadFile", payloadFile.toString()); result.put("bytes", payload.length);
-                evidence.put("queue", queue); evidence.put("payloadFile", portable(payloadFile)); evidence.put("bytes", payload.length);
+                result.put("queue", queue); if (payloadFile != null) result.put("payloadFile", payloadFile.toString()); result.put("bytes", payload.length);
+                evidence.put("queue", queue); if (payloadFile != null) evidence.put("payloadFile", portable(payloadFile)); evidence.put("bytes", payload.length);
                 phase = "mq.connect";
                 connection = factory.connect(helper);
                 ensureWithinDeadline(deadlineNanos, "connect");
@@ -259,6 +266,7 @@ public final class MqHelperExecutor {
         if (savePath != null && !savePath.trim().isEmpty()) evidence.put("resultPath", savePath);
         evidence.put("resultFormat", representation);
         evidence.put("status", success ? "PASS" : "ERROR");
+        if (context != null) context.recordResourceOutput(logical.evidenceOutput(), result.get("result"), evidence);
         return new MqInvocationResult(result, evidence, success);
     }
 
@@ -292,7 +300,10 @@ public final class MqHelperExecutor {
                                    MqHelperConfig helper) {
         if (!("send".equals(operation) || "receive".equals(operation) || "request".equals(operation))) throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         for (String key : args.keySet()) if (!allowed(operation, key)) throw new IllegalArgumentException("Unknown MQ " + operation + " argument '" + key + "' for mq." + instance);
-        if (("send".equals(operation) || "request".equals(operation)) && args.get("file") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires file");
+        if (("send".equals(operation) || "request".equals(operation)) && args.get("file") == null && args.get("payload") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires file or payload");
+        if (args.get("file") != null && args.get("payload") != null) throw new IllegalArgumentException("MQ file and payload are mutually exclusive");
+        if (args.containsKey("requestFormat") && args.get("payload") == null) throw new IllegalArgumentException("requestFormat requires a Map/List payload");
+        if (args.containsKey("payload")) validateRequestPayload(args.get("payload"), args.get("requestFormat"));
         if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or configured message.requestQueue on the selected instance");
         if ("request".equals(operation) && args.get("replyQueue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires replyQueue or configured message.replyQueue on the selected instance");
         if ("send".equals(operation) && args.get("queue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".send requires queue or configured message.requestQueue on the selected instance");
@@ -305,9 +316,31 @@ public final class MqHelperExecutor {
     }
 
     private boolean allowed(String operation, String key) {
-        if ("send".equals(operation)) return "queue".equals(key) || "file".equals(key) || "instance".equals(key);
+        if ("send".equals(operation)) return "queue".equals(key) || "file".equals(key) || "payload".equals(key) || "requestFormat".equals(key) || "instance".equals(key);
         if ("receive".equals(operation)) return "queue".equals(key) || "waitMs".equals(key) || "correlationId".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
-        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "waitMs".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
+        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "payload".equals(key) || "requestFormat".equals(key) || "waitMs".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
+    }
+
+    private void validateRequestPayload(Object payload, Object format) {
+        boolean structured = payload instanceof Map || payload instanceof Iterable
+                || payload != null && payload.getClass().isArray();
+        if (payload instanceof DocumentValue && format != null)
+            throw new IllegalArgumentException("requestFormat cannot be combined with a Render DocumentValue");
+        if (structured && format == null) throw new IllegalArgumentException("A Map/List MQ payload requires requestFormat");
+        if (!structured && !(payload instanceof DocumentValue) && format != null)
+            throw new IllegalArgumentException("requestFormat is valid only for a Map/List MQ payload");
+        if (format != null && !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(String.valueOf(format)))
+            throw new IllegalArgumentException("requestFormat must be text, json, yaml, or xml");
+    }
+
+    private byte[] payloadBytes(Object payload, Object format, MqHelperConfig helper) throws Exception {
+        java.nio.charset.Charset charset = MqCcsid.charset(helper.charset());
+        if (payload instanceof DocumentValue) return ((DocumentValue) payload).text().getBytes(charset);
+        if (payload instanceof byte[]) return ((byte[]) payload).clone();
+        boolean structured = payload instanceof Map || payload instanceof Iterable
+                || payload != null && payload.getClass().isArray();
+        if (structured) return new TypedValueFormatter().format(payload, String.valueOf(format)).getBytes(charset);
+        return String.valueOf(payload == null ? "" : payload).getBytes(charset);
     }
 
     private Path payloadFile(String value, CaseRuntimeContext context) throws IOException {

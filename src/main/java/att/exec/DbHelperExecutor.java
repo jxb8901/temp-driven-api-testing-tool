@@ -49,6 +49,10 @@ import java.util.concurrent.ConcurrentMap;
 
 /** First-class V2.5 JDBC executor with one connection per dbhelper instance and execution thread. */
 public final class DbHelperExecutor implements AutoCloseable {
+    public void recordResourceOutput(String helperId, DbInvocationResult result, att.core.CaseRuntimeContext context) {
+        if (context != null) context.recordResourceOutput(helper(helperId).evidenceOutput(), result.result(), result.evidence());
+    }
+
     private static final ScheduledExecutorService TIMEOUTS = Executors.newSingleThreadScheduledExecutor(
             new ThreadFactory() {
                 @Override public Thread newThread(Runnable runnable) {

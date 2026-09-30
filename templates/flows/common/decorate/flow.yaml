@@ -1,4 +1,4 @@
-schemaVersion: att-flow/v3.0
+schemaVersion: att-flow/v3.3
 id: common.decorate.v1
 name: Decorate Value
 description: V3.4.2 scope-local Flow assignment and explicit variable publication.

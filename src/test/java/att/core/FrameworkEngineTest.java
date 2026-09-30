@@ -40,14 +40,14 @@ class FrameworkEngineTest {
     @Test
     void runsNestedV31FlowThroughFullCaseLifecycle() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v3.0\nname: PAYMENT_INVOKE\ndescription: V3.2 shared Context\nactions:\n"
+                "schemaVersion: att-template/v3.3\nname: PAYMENT_INVOKE\ndescription: V3.2 shared Context\nactions:\n"
                         + "  compose: {type: flow, use: common.outer.v1}\n"
                         + "  verify: {type: assert, assert: \"${EXEC.VARS.seedReference} == '${META.SOURCE.caseId}'\"}\n");
         writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
-                "schemaVersion: att-flow/v3.0\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
+                "schemaVersion: att-flow/v3.3\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
                         + "  seed: {type: assign, name: seedReference, expression: '${META.SOURCE.caseId}'}\n");
         writeText(projectRoot.resolve("templates/flows/outer/flow.yaml"),
-                "schemaVersion: att-flow/v3.0\nid: common.outer.v1\nname: Outer\ndescription: Outer\nactions:\n"
+                "schemaVersion: att-flow/v3.3\nid: common.outer.v1\nname: Outer\ndescription: Outer\nactions:\n"
                         + "  innerFlow: {type: flow, use: common.inner.v1}\n"
                         + "  finish: {type: assign, name: finalReference, expression: '${EXEC.VARS.seedReference}-done'}\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
@@ -61,7 +61,7 @@ class FrameworkEngineTest {
         RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).run(options);
 
         assertEquals(1, summary.passed());
-        Path caseYaml = projectRoot.resolve("output/V3-FLOW/payments.payment.TC001/case.yaml");
+        Path caseYaml = summary.results().get(0).caseLogPath().getParent().resolve("case.yaml");
         String evidence = new String(Files.readAllBytes(caseYaml), "UTF-8");
         assertTrue(evidence.contains("id: compose"));
         assertTrue(evidence.contains("id: common.outer.v1"));
@@ -72,13 +72,14 @@ class FrameworkEngineTest {
 
         // Exercise the same package through the complete error/report path.
         writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
-                "schemaVersion: att-flow/v3.0\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
+                "schemaVersion: att-flow/v3.3\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
                         + "  seed: {type: assign, name: seedReference, expression: '#{1 / 0}'}\n");
         RunSummary failed = new FrameworkEngine(projectRoot, globalConfig()).run(ExecutionOptions.parse(new String[]{
                 "run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "V3-FLOW-ERROR"}));
         assertEquals(1, failed.error());
         Path failedRun = projectRoot.resolve("output/V3-FLOW-ERROR");
-        String failedCase = new String(Files.readAllBytes(failedRun.resolve("payments.payment.TC001/case.yaml")), "UTF-8");
+        Path failedCaseYaml = failed.results().get(0).caseLogPath().getParent().resolve("case.yaml");
+        String failedCase = new String(Files.readAllBytes(failedCaseYaml), "UTF-8");
         assertTrue(failedCase.contains("common.inner.v1"));
         assertTrue(failedCase.contains("diagnostic:"));
         assertTrue(failedCase.contains("callChain:"));
@@ -94,7 +95,7 @@ class FrameworkEngineTest {
     @Test
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    description: API status\n    assert: \"${ACTIONS.callApi.output.result.Status} == 'SUCCESS'\"\n    expected: SUCCESS\n    actual: \"${ACTIONS.callApi.output.result.Status}\"\n");
+                "schemaVersion: att-template/v3.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  callApi:\n    type: tool\n    call: \"#{invokePaymentApi(caseId=${CASE.caseId})}\"\n  check:\n    type: assert\n    description: API status\n    assert: \"${ACTIONS.callApi.output.result.Status} == 'SUCCESS'\"\n    expected: SUCCESS\n    actual: \"${ACTIONS.callApi.output.result.Status}\"\n");
         writeTool(projectRoot.resolve("tools/invoke.sh"), "sleep 1\nprintf '%s\\n' \"$PWD\" > tool-cwd.txt\nprintf '%s\\n%s\\n' \"$ATT_ROOT_DIR\" \"$ATT_CASE_OUTPUT_DIR\" > tool-env.txt\nprintf '<Response><Status>SUCCESS</Status></Response>\\n'\n");
         writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
         writeText(projectRoot.resolve("testcase/payment.yaml"),
@@ -168,9 +169,8 @@ class FrameworkEngineTest {
         assertEquals("API status", summary.results().get(0).validations().get(1).description());
         assertEquals("SUCCESS", summary.results().get(0).actual());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
-        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/payments.payment.TC001.TEST.V2.001.log")));
-        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/case.yaml")));
-        Path caseDirectory = projectRoot.resolve("output/TEST-V2/payments.payment.TC001").toAbsolutePath().normalize();
+        Path caseDirectory = summary.results().get(0).caseLogPath().getParent().toAbsolutePath().normalize();
+        assertTrue(Files.exists(caseDirectory.resolve("case.yaml")));
         Path cwdEvidence = caseDirectory.resolve("tool-cwd.txt");
         assertTrue(Files.exists(cwdEvidence));
         assertEquals(caseDirectory.toRealPath().toString() + "\n", new String(Files.readAllBytes(cwdEvidence), "UTF-8"));
@@ -287,7 +287,7 @@ class FrameworkEngineTest {
 
     @Test void rejectsDuplicateWorkbookIdsAcrossExcelFilesDuringPlanning() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
-                "schemaVersion: att-template/v2.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  check:\n    type: assert\n    assert: \"true == true\"\n");
+                "schemaVersion: att-template/v3.3\nname: PAYMENT_INVOKE\ndescription: test\nactions:\n  check:\n    type: assert\n    assert: \"true == true\"\n");
         for (String name : java.util.Arrays.asList("one", "two")) {
             writeWorkbook(projectRoot.resolve("testcase/" + name + ".xlsx"));
             writeText(projectRoot.resolve("testcase/" + name + ".yaml"), "schemaVersion: att-sidecar/v2.1\nid: duplicate\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");

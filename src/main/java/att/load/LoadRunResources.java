@@ -22,6 +22,7 @@ public final class LoadRunResources implements AutoCloseable {
     private final PooledMqTransportFactory mqFactory;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicLong executionSequence = new AtomicLong();
+    private final java.util.concurrent.ConcurrentMap<String, String> executionIds = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final att.template.SequenceService sequences = new att.template.SequenceService();
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
@@ -42,11 +43,21 @@ public final class LoadRunResources implements AutoCloseable {
     public MqHelperExecutor mq() { ensureOpen(); return mq; }
     public att.exec.HttpHelperExecutor http() { ensureOpen(); return http; }
     public att.template.SequenceService sequences() { ensureOpen(); return sequences; }
+    public String nextDefaultExecutionId(String runId) {
+        return nextExecutionId(runId);
+    }
     public String nextExecutionId(String runId) {
         ensureOpen();
         long sequence = executionSequence.incrementAndGet();
         if (sequence <= 0L) throw new IllegalStateException("Load execution identity sequence exhausted");
         return runId + "-execution-" + sequence;
+    }
+    /** Atomically reserves a generated identity; collisions fail instead of silently changing the ID. */
+    public void reserveExecutionId(String executionId, IterationRequest request) {
+        ensureOpen();
+        String owner = request.workloadId() + "/" + request.iterationId();
+        String existing = executionIds.putIfAbsent(executionId.toLowerCase(java.util.Locale.ROOT), owner);
+        if (existing != null) throw new IllegalArgumentException("Duplicate EXEC.ID '" + executionId + "' in Load run; it is already assigned to " + existing);
     }
     public HikariDbPool dbPool(String helperId, att.config.FrameworkConfig config) {
         ensureOpen();

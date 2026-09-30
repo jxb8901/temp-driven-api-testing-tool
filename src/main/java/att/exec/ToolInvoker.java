@@ -147,8 +147,8 @@ public class ToolInvoker {
         Map<String, Object> invocation = null;
         try {
             if (target == null) {
-                Files.createDirectories(context.caseOutputDirectory());
-                commandResult = commandRunner.runWithCapture(argv, Duration.ofMillis(timeoutMs), context.caseOutputDirectory(),
+                Files.createDirectories(context.commandWorkingDirectory());
+                commandResult = commandRunner.runWithCapture(argv, Duration.ofMillis(timeoutMs), context.commandWorkingDirectory(),
                         localToolEnvironment(context), capture);
             }
             else {
@@ -179,7 +179,7 @@ public class ToolInvoker {
         String rawOutput = commandResult.stdout().trim();
         Object parsed = rawOutput;
         Exception parseFailure = null;
-        if (!commandResult.timedOut()) try {
+        if (!commandResult.timedOut() && commandResult.exitCode() == 0) try {
             parsed = structured(tool.resultFormat()) && commandResult.stdoutArtifact() != null && !commandResult.stdoutArtifactTruncated()
                     ? parseOutput(commandResult.stdoutArtifact(), tool.resultFormat()) : parseOutput(rawOutput, tool.resultFormat());
         } catch (Exception e) {
@@ -305,7 +305,7 @@ public class ToolInvoker {
         if (commandResult.timedOut()) {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
-        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse Tool result.format " + tool.resultFormat() + " for " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
+        if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse Tool stdoutFormat " + tool.resultFormat() + " for " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation, true,
                 ActionExecutionResult.evidence("tool", toolInvocation));
         } finally {

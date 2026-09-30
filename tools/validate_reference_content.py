@@ -8,14 +8,15 @@ DOCS = ROOT / "docs"
 MANIFEST = DOCS / "reference-manifest.txt"
 
 REQUIRED = {
-    "03_runtime_context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "output", "attempts"],
+    "03_runtime_context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "execIdFormat", "META.HTTPHELPER"],
     "04_execution_modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
     "04_execution_modes/debug.md": ["att-debug/v1.0", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
-    "04_execution_modes/load.md": ["att-load/v1.0", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "threshold", "load-summary", "--profile"],
-    "05_resources/tools.md": ["command-backed", "call-backed", "output.result", "evidence"],
-    "05_resources/dbhelper.md": ["att-dbhelper/v2.5", "query", "update", "transaction", "JDBC", "evidence"],
-    "05_resources/mqhelper.md": ["att-mqhelper/v1.0", "send", "receive", "request", "IBM MQ", "correlation", "evidence"],
-    "05_resources/operation_result.md": ["result", "evidence", "diagnostic", "attempts", "durationMs"],
+    "04_execution_modes/load.md": ["att-load/v1.2", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
+    "05_resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
+    "05_resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
+    "05_resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "DocumentValue", "evidence"],
+    "05_resources/operation_result.md": ["output.result", "evidence", "diagnostic", "attempts", "DocumentValue", "responseFormat"],
+    "14_actions.md": ["output.result", "DocumentValue", "stdoutFormat", "responseFormat", "evidence.output"],
     "06_environment_testdata.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "stable logical", "run", "validate", "debug", "load"],
     "08_reliability_execution_control.md": ["assert", "runWhen", "onFailure", "timeout", "retry", "attempts", "PASS", "FAIL", "ERROR", "INVALID", "SKIPPED"],
 }

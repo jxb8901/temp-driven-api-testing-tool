@@ -16,15 +16,17 @@ import java.util.List;
 
 /** Lightweight result returned to a load scheduler for one iteration. */
 public final class IterationResult {
-    private final String iterationId;
+    private final String iterationId, executionId;
     private final ResultStatus status;
     private final Duration duration;
     private final CaseRuntimeContext context;
     private final List<ValidationResult> validations;
     private final Path outputDirectory;
+    private final Path evidenceDirectory;
     private final att.validation.Diagnostic diagnostic;
     private final boolean evidenceRetained;
     private final CaseExecutionLog evidenceLog;
+    private final Path transientWorkspace;
 
     IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
                     List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic) {
@@ -41,12 +43,35 @@ public final class IterationResult {
     IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
                     List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic,
                     boolean evidenceRetained, CaseExecutionLog evidenceLog) {
-        this.iterationId = iterationId; this.status = status; this.duration = duration; this.context = context;
+        this(iterationId, iterationId, status, duration, context, validations, outputDirectory, diagnostic, evidenceRetained, evidenceLog);
+    }
+
+    IterationResult(String iterationId, String executionId, ResultStatus status, Duration duration, CaseRuntimeContext context,
+                    List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic,
+                    boolean evidenceRetained, CaseExecutionLog evidenceLog) {
+        this(iterationId, executionId, status, duration, context, validations, outputDirectory, diagnostic,
+                evidenceRetained, evidenceLog, null);
+    }
+
+    IterationResult(String iterationId, String executionId, ResultStatus status, Duration duration, CaseRuntimeContext context,
+                    List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic,
+                    boolean evidenceRetained, CaseExecutionLog evidenceLog, Path transientWorkspace) {
+        this(iterationId, executionId, status, duration, context, validations, outputDirectory, outputDirectory,
+                diagnostic, evidenceRetained, evidenceLog, transientWorkspace);
+    }
+
+    IterationResult(String iterationId, String executionId, ResultStatus status, Duration duration, CaseRuntimeContext context,
+                    List<ValidationResult> validations, Path outputDirectory, Path evidenceDirectory,
+                    att.validation.Diagnostic diagnostic, boolean evidenceRetained, CaseExecutionLog evidenceLog,
+                    Path transientWorkspace) {
+        this.iterationId = iterationId; this.executionId = executionId; this.status = status; this.duration = duration; this.context = context;
         this.validations = Collections.unmodifiableList(new ArrayList<ValidationResult>(validations));
-        this.outputDirectory = outputDirectory; this.diagnostic = diagnostic; this.evidenceRetained = evidenceRetained;
-        this.evidenceLog = evidenceLog;
+        this.outputDirectory = outputDirectory; this.evidenceDirectory = evidenceDirectory;
+        this.diagnostic = diagnostic; this.evidenceRetained = evidenceRetained;
+        this.evidenceLog = evidenceLog; this.transientWorkspace = transientWorkspace;
     }
     public String iterationId() { return iterationId; }
+    public String executionId() { return executionId; }
     public ResultStatus status() { return status; }
     public Duration duration() { return duration; }
     public CaseRuntimeContext context() { return context; }
@@ -56,16 +81,26 @@ public final class IterationResult {
 
     /** Materializes deferred failure evidence after a post-completion retention claim. */
     IterationResult materializeEvidence() {
-        if (evidenceRetained || evidenceLog == null || outputDirectory == null) return this;
+        if (evidenceRetained || evidenceLog == null || evidenceDirectory == null) return this;
         boolean interrupted = Thread.interrupted();
         try {
             Files.createDirectories(outputDirectory);
+            Files.createDirectories(evidenceDirectory);
+            copyWorkspace(transientWorkspace, evidenceDirectory);
+            copyWorkspace(outputDirectory, evidenceDirectory);
+            if (context != null) context.materializeResourceOutputs(outputDirectory);
+            copyFile(outputDirectory.resolve("resource-output.yaml"), evidenceDirectory.resolve("resource-output.yaml"));
             evidenceLog.materialize(outputDirectory.resolve("case.log"));
-            if (context != null) Files.write(outputDirectory.resolve("case.yaml"),
-                    new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8));
-            if (!Files.isRegularFile(outputDirectory.resolve("case.log"))) return this;
-            return new IterationResult(iterationId, status, duration, context, validations, outputDirectory,
-                    diagnostic, true, null);
+            evidenceLog.materialize(evidenceDirectory.resolve("case.log"));
+            if (context != null) {
+                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
+                Files.write(outputDirectory.resolve("case.yaml"), caseYaml);
+                Files.write(evidenceDirectory.resolve("case.yaml"), caseYaml);
+            }
+            if (!Files.isRegularFile(evidenceDirectory.resolve("case.log"))) return this;
+            deleteWorkspace(transientWorkspace);
+            return new IterationResult(iterationId, executionId, status, duration, context, validations,
+                    outputDirectory, evidenceDirectory, diagnostic, true, null, null);
         } catch (IOException | RuntimeException ignored) {
             deletePartialWorkspace();
             return this;
@@ -75,8 +110,50 @@ public final class IterationResult {
     }
 
     private void deletePartialWorkspace() {
-        if (!Files.exists(outputDirectory)) return;
-        try (java.util.stream.Stream<Path> paths = Files.walk(outputDirectory)) {
+        if (evidenceDirectory == null || !Files.exists(evidenceDirectory)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(evidenceDirectory)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
+    }
+
+    /** Drops command side effects when the bounded retention policy declines this iteration. */
+    void discardTransientWorkspace() {
+        deleteWorkspace(transientWorkspace);
+        deleteWorkspace(outputDirectory);
+    }
+
+    private void copyFile(Path source, Path destination) throws IOException {
+        if (!Files.isRegularFile(source)) return;
+        if (source.toAbsolutePath().normalize().equals(destination.toAbsolutePath().normalize())) return;
+        Files.createDirectories(destination.getParent());
+        Files.copy(source, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private void copyWorkspace(Path source, Path destination) throws IOException {
+        if (source == null || !Files.isDirectory(source)) return;
+        if (source.toAbsolutePath().normalize().equals(destination.toAbsolutePath().normalize())) return;
+        Path root = destination.toAbsolutePath().normalize();
+        try (java.util.stream.Stream<Path> paths = Files.walk(source)) {
+            java.util.Iterator<Path> iterator = paths.iterator();
+            while (iterator.hasNext()) {
+                Path current = iterator.next();
+                if (current.equals(source) || Files.isSymbolicLink(current)) continue;
+                Path target = root.resolve(source.relativize(current)).normalize();
+                if (!target.startsWith(root)) throw new IOException("Load evidence path escapes its workspace");
+                if (Files.isDirectory(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) Files.createDirectories(target);
+                else if (Files.isRegularFile(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(current, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
+    private void deleteWorkspace(Path directory) {
+        if (directory == null || !Files.exists(directory)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
             paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                 try { Files.deleteIfExists(path); } catch (IOException ignored) { }
             });
@@ -85,7 +162,7 @@ public final class IterationResult {
 
     public EvidenceRef evidenceRef() {
         if (!evidenceRetained) return null;
-        Path caseLog = outputDirectory == null ? null : outputDirectory.resolve("case.log");
-        return new EvidenceRef(outputDirectory, caseLog, diagnostic);
+        Path caseLog = evidenceDirectory == null ? null : evidenceDirectory.resolve("case.log");
+        return new EvidenceRef(evidenceDirectory, caseLog, diagnostic, executionId);
     }
 }

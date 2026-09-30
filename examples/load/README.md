@@ -1,431 +1,76 @@
 # ATT Load Scenario Examples
 
-本目錄同時提供單 target 相容格式 `att-load/v1.0` 和多 workload 格式 `att-load/v1.1`。`att load` 會先完成 schema、語義、target 解析及依賴驗證，再啟動 closed-VU 或 fixed-arrival-rate scheduler。兩種 scheduler 共用同一個 `IterationExecutor` 和普通 run/debug 的 `EXEC`/`META` Context；mode 與 scheduler identity 只保存在 evidence-only `DIAG`，不會出現在 expression tree。
+本目錄的範例均使用 ATT 3.6.0 現行 schema att-load/v1.2。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
 
-## Schema versions at a glance
+## 範例索引
 
-| Version | Scenario shape | Examples |
-|---|---|---|
-| `att-load/v1.0` | One top-level `target` and one `load` block; preserves the existing single-target contract. All examples in sections 1–7 below use v1.0 unless stated otherwise. | [`closed-minimal.yaml`](closed-minimal.yaml), [`closed.yaml`](closed.yaml), [`arrival-rate.yaml`](arrival-rate.yaml), [`tool.yaml`](tool.yaml), and smoke examples |
-| `att-load/v1.1` | Top-level `workloads` list. Each workload has a stable `id`, its own fixed `target`, load settings and optional thresholds. Workloads in one run use the same scheduler model and phase-duration envelope; they run as independent targets, not as a transaction mix. | [`multi-closed.yaml`](multi-closed.yaml) shows separate closed-VU pools; [`multi-arrival.yaml`](multi-arrival.yaml) shows independently paced arrival-rate workloads. |
-
-Run the v1.1 examples with:
-
-```sh
-./att.sh load examples/load/multi-closed.yaml
-./att.sh load examples/load/multi-arrival.yaml
-```
-
-The main [Load Mode reference](../../docs/reference/04_execution_modes/load.md) describes the v1.0 compatibility contract and v1.1 multi-workload validation/lifecycle in detail.
-
-## 1. 最小 closed workload
-
-`closed` model 用固定數量的 Virtual Users。每個 user 可以連續產生多個 iteration，因此 scheduler 必須在 evidence 中為同一 Virtual User 維持穩定的 `userId`。
-
-```yaml
-schemaVersion: att-load/v1.0
-
-target:
-  type: template
-  id: V3_FLOW_EXAMPLE
-
-load:
-  users: 20
-  duration: 5m
-```
-
-執行：
-
-```sh
-./att.sh load examples/load/closed-minimal.yaml
-```
-
-`load.duration` 是唯一必填的 timing 欄位；`warmup`、`rampUp` 和 `rampDown` 可省略，省略時等同於零。實際可直接執行的完整例子見 [`closed.yaml`](closed.yaml)。
-
-## 1.1 最短 smoke commands
-
-以下兩個例子使用包內 deterministic `sample.getAcDate` Tool，約在數秒內完成，適合先確認 CLI、scheduler、summary 和 report 路徑：
-
-```sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-```
-
-`closed.yaml` 和 `arrival-rate.yaml` 保留 30 秒 warm-up、1 分鐘 ramp-up、5 分鐘 measured duration 和 30 秒 ramp-down，作為較接近實際 workload 的完整例子。
-
-## 2. 完整 closed scenario
-
-```yaml
-schemaVersion: att-load/v1.0
-
-target:
-  type: template
-  id: V3_FLOW_EXAMPLE
-
-# inputs 會進入每個 iteration 的 EXEC.INPUT；舊 CASE alias 僅為相容 view。
-inputs:
-  paymentType: LOAD
-  region: HK
-
-load:
-  users: 20
-  warmup: 30s
-  rampUp: 1m
-  duration: 5m
-  rampDown: 30s
-
-execution:
-  thinkTime: 500ms
-
-thresholds:
-  errorRate: "< 1%"
-  p95: "< 800ms"
-
-evidence:
-  mode: failures
-  sampleRate: 0.1
-  maxSamples: 1000
-```
-
-closed model 的規則：
-
-- 必須提供正整數 `load.users`。
-- 不可同時提供 `load.arrivalRate`、`load.maxConcurrent` 或 `load.overloadPolicy`。
-- `execution.thinkTime` 只適用 closed model。
-- `DIAG.load.userId` 對同一 Virtual User 保持穩定；每次 iteration 都有獨立的 `EXEC.ID`，且在整個 run 內唯一。
-
-## 3. 完整 fixed arrival-rate scenario
-
-`arrivalRate` model 用固定到達率建立 iteration，不建立長期 Virtual User identity。可直接執行的例子見 [`arrival-rate.yaml`](arrival-rate.yaml)。
-
-```yaml
-schemaVersion: att-load/v1.0
-
-target:
-  type: flow
-  id: common.compose.v1
-
-inputs:
-  source: load-example
-  region: HK
-
-load:
-  arrivalRate: 100/s
-  warmup: 30s
-  rampUp: 1m
-  duration: 5m
-  rampDown: 30s
-  maxConcurrent: 500
-  overloadPolicy: drop
-
-thresholds:
-  droppedRate: "== 0%"
-  achievedArrivalRate: ">= 99%"
-
-evidence:
-  mode: metrics
-```
-
-arrival-rate model 的規則：
-
-- `load.arrivalRate` 必須是正數加 `/s` 或 `/m`，例如 `100/s`、`6000/m`。
-- 必須同時提供正整數 `maxConcurrent` 和 `overloadPolicy: drop`。
-- 不可提供 `load.users` 或 `execution.thinkTime`。
-- `DIAG.load.userId` 不存在；不要把一次 arrival-rate iteration 當成長期 Virtual User。
-
-## 4. 三種 target
-
-`target.type` 只支持 `template`、`flow`、`tool`：
-
-```yaml
-# Template
-target: {type: template, id: V3_FLOW_EXAMPLE}
-
-# Flow；id 必須是已註冊的 canonical Flow ID
-target: {type: flow, id: common.compose.v1}
-
-# Tool；id 可以是全域 Tool key 或 group.localKey
-target:
-  type: tool
-  id: fpp.invokeApi
-  arguments:
-    requestId: LOAD-001
-    requestType: fromchannel
-    requestFile: /tmp/load-request.xml
-    apiLogPath: /tmp/load-api.log
-```
-
-Tool target 的 `arguments` 會轉成正常 Tool call；它必須符合 `config/config.yaml` 的全域 Tool 或 `config/tools/*.yaml` 的 Tool group 契約。`fpp.invokeApi` 是包內的 reference Tool，實際整合前要替換 reference script 和 payload 路徑。
-
-要先驗證一個不依賴外部服務的 Tool target，可直接使用 [`tool.yaml`](tool.yaml)：
-
-```sh
-./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
-```
-
-這個例子使用 `sample.getAcDate`，每次 iteration 啟動包內的 deterministic shell Tool；真實整合時只需替換 `target.id` 和其 `arguments`，不需要改 load scheduler 或 Context contract。
-
-## 5. 欄位說明
-
-| 路徑 | 必填 | 說明 |
-|---|---:|---|
-| `schemaVersion` | 是 | 本欄位表說明的單 target 格式固定為 `att-load/v1.0`；多 workload 請使用上方的 v1.1 範例。 |
-| `target.type` | 是 | `template`、`flow` 或 `tool`。 |
-| `target.id` | 是 | 目標 Template 名稱、Flow canonical ID 或 Tool key。 |
-| `target.arguments` | 否 | 只支持 Tool target 的 named arguments；Template/Flow target 会被拒绝。 |
-| `inputs` | 否 | 傳入每個 iteration 的 `EXEC.INPUT.*`；`CASE.*` 只保留為相容 alias。 |
-| `load.users` | closed 必填 | 正整數 Virtual User 數量。 |
-| `load.arrivalRate` | arrival 必填 | 正數速率，格式為 `number/s` 或 `number/m`。 |
-| `load.warmup` / `rampUp` / `duration` / `rampDown` | `duration` 必填 | 整數 duration，例如 `500ms`、`30s`、`5m`、`1h`；`duration` 必須大於零。 |
-| `load.maxConcurrent` | arrival 必填 | 大於零的並發上限。 |
-| `load.overloadPolicy` | arrival 必填 | V1 只支持 `drop`。 |
-| `execution.thinkTime` | 否 | closed iteration 之間的 think time；arrival-rate 禁止。 |
-| `thresholds.*` | 否 | `errorRate`/`droppedRate` 用 `%`，`achievedArrivalRate` 用 `%`、`/s` 或 `/m`，`p95`/`p99` 用 `ms`，`minThroughput` 用 `/s` 或 `/m`；`minThroughput` 对两种 workload 都适用。 |
-| `evidence.mode` | 否 | `metrics`、`failures`、`samples` 或 `all`。 |
-| `evidence.sampleRate` | 否 | `0` 到 `1` 之間的 sample fraction。 |
-| `evidence.maxSamples` | 否 | 非負整數 retention 上限；對 retained success 和 failure 共用，而不是只限制 success sample。`all` 只有在顯式設定時才受 cap 限制。 |
-
-未知欄位會被拒絕；需要自訂 metadata 時只能使用根層 `x-*` 欄位。
-
-## 6. CLI 覆蓋與優先級
-
-scenario 是基礎配置，明確提供的 CLI workload option 會覆蓋同名 YAML 欄位；沒有提供的 option 保留 YAML 值：
-
-```sh
-./att.sh load examples/load/closed.yaml \
-  --users 50 \
-  --warmup 1m \
-  --duration 2m \
-  --think-time 250ms
-
-./att.sh load examples/load/arrival-rate.yaml \
-  --arrival-rate 200/s \
-  --max-concurrent 800 \
-  --duration 10m \
-  --format json
-```
-
-支持的 workload overrides 是 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`。覆蓋後仍會重新執行完整 schema 和語義驗證；override 不會繞過 closed/arrival-rate 的互斥規則。
-
-## 7. EXEC/META Context
-
-scheduler 呼叫共用 `IterationExecutor` 時，每個 iteration 都建立獨立 runtime：
-
-| Context | 意義 |
+| 檔案 | 模型與用途 |
 |---|---|
-| `EXEC.ID` | 當前 iteration execution identity，在整個 load run 內唯一。 |
-| `EXEC.RUN_ID` | enclosing ATT run identity。 |
-| `EXEC.STARTED_AT` | 當前 iteration 的 ISO-8601 start timestamp。 |
-| `EXEC.OUTPUT_DIR` | 當前 iteration 隔離的 output directory。 |
-| `EXEC.INPUT.*` | scenario `inputs` 與 scheduler 傳入的 iteration input。 |
-| `EXEC.VARS.*` / `EXEC.ACTIONS.*` | 每個 iteration 內獨立的 mutable variables 和 current-scope Action 結果。 |
-| `DIAG.load.runId` | enclosing load run identity。 |
-| `DIAG.load.model` | `closed` 或 `arrivalRate`。 |
-| `DIAG.load.userId` | closed model 的穩定 VU identity；arrival-rate 不存在。 |
-| `DIAG.load.iterationId` | scheduler iteration identity。 |
-| `DIAG.load.iteration` | scheduler 提供的 iteration sequence。 |
-| `DIAG.load.phase` | `WARMUP`、`RAMP_UP`、`STEADY` 或 `RAMP_DOWN`。 |
-| `META.SOURCE` / `META.TARGET` | secret-safe 的 load scenario、target type/id 及來源 metadata；不暴露整份 config 或 secrets。 |
+| closed-minimal.yaml | 最小 closed VU。 |
+| closed.yaml | 完整 closed workload、inputs、thinkTime、threshold 與 evidence。 |
+| closed-random-think.yaml | Seeded closed-VU think-time range。 |
+| closed-smoke.yaml | 短時間 closed smoke。 |
+| arrival-rate.yaml | 完整 fixed arrival-rate 範例。 |
+| arrival-smoke.yaml | 短時間 arrival-rate smoke。 |
+| multi-closed.yaml | 多個獨立 closed VU workload。 |
+| multi-arrival.yaml | 多個獨立 arrival-rate workload。 |
+| tool.yaml | 呼叫包內 deterministic Tool 的短範例。 |
 
-Template、Flow 和 Tool 的 reusable component 仍使用 `EXEC.INPUT.*`、`EXEC.VARS.*`、`EXEC.ACTIONS.*` 與 action-local `output.*`；不要在 expression 中使用 `EXEC.MODE`、`EXEC.LOAD`、`DIAG`、root-level `LOAD.*`、`EXEC.OUTPUT` 或 public `CALL`/`INVOCATION` worker fields。
+## 最小 closed workload
 
-`CASE.VARS`、Action/Flow scope、DB state、Tool transient state 和 MQ state 不會在 concurrent iterations 之間共享。成功 iteration 預設不留下完整 Case artifact；需要輸出時由 scheduler 傳入 output directory。
+~~~yaml
+schemaVersion: att-load/v1.2
+workloads:
+  - id: default
+    target: {type: template, id: V3_FLOW_EXAMPLE}
+    load:
+      users: 20
+      duration: 5m
+~~~
 
-## 8. 驗證與診斷
+每個 Virtual User 重複執行固定 target。Think time 可設一個 duration，也可設定 min/max range。
 
-```sh
-./att.sh load examples/load/closed.yaml
-./att.sh load examples/load/arrival-rate.yaml --format json
-```
+## 自訂 Load execution ID
 
-成功執行時，human output 使用固定的三行摘要：
+execution.execIdFormat 使用一般 ATT ${...} / #{...} expression engine，在每個 iteration 初始化時求值一次：
 
-```text
-LOAD PASS | model=closed | runId=<id>
-Report: <absolute path>/output/load/<id>/report/index.html
-Metrics: { ... }
-```
-
-`--format json` 的 stdout 是完整的 load result/summary JSON，包括 `status`、`exitCode`、`runId`、report-safe `scenario`、`timing`、bounded `metrics`、`thresholds`、resource diagnostics 和可選 evidence；它不是另一個獨立的 resolved-target object。錯誤則返回 exit code `2`，並保留 scenario file、field/path 和建議。
-
-以下配置會在 scheduler 前失敗：
-
-```yaml
-load:
-  users: 20
-  arrivalRate: 100/s   # 與 users 互斥
-  duration: 5m
-```
-
-```yaml
-load:
-  arrivalRate: 100/s
-  duration: 5m
-  maxConcurrent: 500
-  overloadPolicy: drop
+~~~yaml
 execution:
-  thinkTime: 500ms     # arrival-rate 不允許
-```
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
+~~~
 
-修改 scenario 後可直接執行 `att load`。結果會寫到 `output/load/<runId>/load-summary.json`、`load-summary.yaml` 和 `report/index.html`；成功 iteration 預設只保留 metrics，不建立 physical workspace，失敗 iteration 只在需要保留 diagnostic 時 lazy 建立 `case.log`/`case.yaml`，明確設定的 success sample 才建立有界的 physical workspace 並寫入 evidence link。所有 load evidence 都留在 `output/load/<runId>/samples` 或 `failures`，`att run` 的普通 Excel Case lifecycle 不會因 load scenario 而改變。加上 `--profile` 時，load run 也會在同一目錄寫出 `performance.json`，包含 load execution/report phases、bounded load counters，以及既有 schema、Template、payload 和 process counters；它是 ATT generator self-overhead 的可重複診斷證據，不是 target CPU/memory benchmark。
+此時 EXEC.ID、EXEC.OUTPUT_DIR 尚未建立，也沒有 Action result 或 invocation-scoped META。Closed 可讀穩定 USER_ID；arrival-rate 沒有 USER_ID，需使用：
 
-## 9. Runtime、metrics 和 report
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
+~~~
 
-closed workload 會在 `DIAG.load.userId` 為每個 Virtual User 維持穩定 identity，完成一個 iteration 後才進入 think time；arrival-rate workload 按絕對 planned due time 送出 arrival，超過 `maxConcurrent` 時記錄 `dropped`，不排隊，也不把 generator saturation 算成 SUT error。warm-up traffic 會執行，但預設不納入 thresholds 的 measured aggregates。
+只允許 deterministic、side-effect-free built-ins。不允許 seq.next()、clock/random/filesystem functions 或 Tool/DB/MQ/HTTP/SSH calls。ID 必須安全且在同一 run 唯一。
 
-每次 load run 會產生 bounded-memory metrics：iterations、success/failure、completed throughput、SUT error rate、p50/p95/p99 latency，以及 arrival-rate 的 configured/achieved rate、current/max in-flight、scheduled/started/completed/dropped。arrival-rate 的 `achievedArrivalRate` 若以 `%` 作 threshold，表示 measured phase 的 `measuredStarted / measuredScheduled`；warmup 不計入這兩個 measured counters，ramp-up、steady 和 ramp-down 仍按 integrated planned arrivals 保持可比較。若以 `/s` 或 `/m` 作 threshold，則比較整個 phase window 的實際平均 started rate；`/m` 會先換算成每秒。threshold failure 會以 exit code `1` 結束；load runtime/infrastructure error 以 `3` 結束；validation/configuration failure 以 `2` 結束；只有 PASS 返回 `0`。JSON 與 load summary 會同時輸出 `status`、`exitCode` 及每個 threshold 的 expected/actual/status/diagnostic。
+## Evidence 與路徑
 
-### 9.1 Summary 與 HTML report contract
+evidence.mode 支援 metrics、failures、samples、all；預設 failures。Metrics-only iteration 不建立目錄。保留的成功 sample 位於 samples/<EXEC.ID>/，failure 位於 failures/<EXEC.ID>/；workspace 含 case.log 與 case.yaml。Report 顯示 EXEC.ID，有保留 log 時提供連結。evidence.resources.output 可設 none，略過 resource output 格式化與檔案寫入；typed runtime result 與 transport parsing 不受影響。
 
-`load-summary.json` 和 `load-summary.yaml` 共用穩定的 `att-load-summary/v1.0` contract。root-level 欄位包括 `schemaVersion`、`status`（`PASS`、`FAIL` 或 `ERROR`）、`exitCode`、`runId`、`startedAt`、`endedAt`、`durationMs`、`scenario`、`timing`、`metrics`、`thresholds`、`resources`、可選的 `evidence`，以及相對於 run directory 的 `report: report/index.html`。JSON schema 位於 `schemas/att-load-summary-v1.0.schema.json`，schema catalog 會以 `att-load-summary/v1.0` 對應它。
-
-報告中的 `scenario` 是專用的 report-safe projection，只保留 target type/id、load/execution timing、threshold 和 evidence policy；任意業務 `inputs` 及 Tool `target.arguments` 不會寫入 JSON、YAML 或 HTML `window.ATT_LOAD_SUMMARY`。因此可把 summary 交給 CI 或離線工具，而不會把 password、token、request body 或其他大 payload 帶入 durable report artifacts。
-
-`timing.phases` 以 `WARMUP`、`RAMP_UP`、`STEADY`、`RAMP_DOWN` 順序列出 configured start/end/duration；`metrics.phases` 則提供實際 observed 的 scheduled/started/completed/failure/drop、throughput、latency、scheduler lag 和 concurrency aggregates。`WARMUP` 的 `measured` 是 `false`，其 traffic 仍保留在 run history；其他 phase 的 measured aggregates 才用於 SLA 判斷。沒有事件的 phase 仍會在 `timing.phases` 出現，方便 empty/edge run 被機器穩定解析。
-
-`resources.db` 和 `resources.mq` 只包含 pool 的 bounded diagnostics（例如 pool size、active/idle、waiting、timeout/acquisition counts）；不包含 connection、queue handle、credential 或其他 live object。DB/MQ pool saturation、acquisition timeout 和 SUT failure 必須分開解讀。`evidence.items[].path` 是指向 `<runId>/samples/` 或 `<runId>/failures/` 的 retained evidence path，HTML report 會把它渲染成可點擊的相對連結。
-
-`report/index.html` 是 self-contained、可離線打開的 performance report：它顯示 run identity/status、closed 或 arrival-rate 的 model semantics、phase/warm-up 分隔、aggregate metrics、threshold diagnostics、resource diagnostics、retained evidence links，以及按一秒 bounded buckets 渲染的 time series。arrival-rate 會明確分開 configured arrival rate、achieved scheduling rate、completed TPS 和 generator drops；drop 不會被當成 SUT error。報告同時連結旁邊的 JSON/YAML summary，但不嵌入 raw per-iteration samples 或 secrets；`window.ATT_LOAD_SUMMARY` 只提供同一份 bounded summary 給離線工具使用。
-
-`load-summary.json` 的 `metrics` 是 machine-readable contract。全局 metrics 包含 `configuredUsers`、`configuredArrivalRatePerSecond`、`configuredMaxConcurrent`、`iterations`、`scheduled`、`measuredScheduled`、`started`、`measuredStarted`、`completed`、`success`、`failure`、`runtimeError`、`dropped`、`measuredDropped`、`activeVus`/`maxActiveVus`、`currentInFlight`/`maxInFlight`、`warmupCompleted`、`measuredCompleted`、`sutErrorRate`、`runtimeErrorRate`、`droppedRate`、`completedThroughput`、`achievedArrivalRate`、`schedulerLagMeanMs`/`schedulerLagMaxMs`、`errorClassifications` 及 bounded latency sample/percentile fields。`p50Ms`/`p95Ms`/`p99Ms` 来自 bounded reservoir；`latencyMinMs`、`latencyMeanMs`、`latencyMaxMs` 和 `latencyObservationCount` 则跨全部 measured observations exact。`runtimeError` 不計入 `sutErrorRate`；`dropped` 是 generator saturation，不是 SUT failure。成功 iteration 不會把完整 Context 或 Case evidence 放入 metrics。
-
-`metrics.buckets` 以一秒的 epoch-millisecond key 排序，每個 bucket 包含 `bucketStart`、`model`、`phase`、configured rate/concurrency、scheduled/started/completed/success/failure/runtimeError/dropped、`completedThroughput`/`completedTps`、`p95Ms`/`p99Ms`、`sutErrorRate`、`droppedRate`、active/in-flight、scheduler lag 和 error classifications。latency reservoir 最多保留 4096 個全局值、每 bucket 256 個值；time-series 最多保留 4096 個 bucket，超出的最舊 bucket 會被淘汰。
-
-示例：
-
-```json
-{
-  "metrics": {
-    "configuredArrivalRatePerSecond": 100.0,
-    "scheduled": 1000,
-    "started": 980,
-    "completed": 970,
-    "dropped": 20,
-    "completedThroughput": 96.5,
-    "p95Ms": 420,
-    "p99Ms": 730,
-    "sutErrorRate": 0.002,
-    "buckets": {
-      "1700000000000": {
-        "model": "arrivalRate",
-        "phase": "STEADY",
-        "completedTps": 97,
-        "p95Ms": 415,
-        "p99Ms": 710,
-        "dropped": 2
-      }
-    }
-  }
-}
-```
-
-DB pool 的 `maxSize`/`connectionTimeout` 與 VU 或 `maxConcurrent` 無關；MQ pool 的 `maxSize`/`borrowTimeout` 同樣獨立。DB/MQ physical resources 由 load-run owner 管理，queue handles 仍然是 invocation-scoped，pool timeout 會分別標示為 `DB_POOL_TIMEOUT` / `MQ_POOL_TIMEOUT`，不會冒充 SQL、MQRC 2033 或 SUT failure。
-
-## 10. Release-gate checks
-
-Issue #25 的整合檢查由 Maven 測試自動執行：
-
-```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
-```
-
-`LoadAcceptanceTest` 會先解析並驗證本目錄全部六個例子，再以真正的 CLI entry point 執行 closed、普通 arrival-rate 及 cap/drop saturation workload，確認 `load-summary.json`、`load-summary.yaml` 和離線 `report/index.html` 都被寫出，並檢查 configured arrival、achieved scheduling、completed TPS、scheduled/started/dropped 會一路保留到最終 report。`LoadCrossModeTest`、`ClosedVuSchedulerTest` 和 `FixedArrivalRateSchedulerTest` 覆蓋相同 component 的跨模式及兩種 scheduler lifecycle；`LoadRuntimeTest` 的 bounded-memory checks 會將 latency reservoir 和一秒 time-series 限制在固定容量；`LoadScenarioTest` 覆蓋 Context deep-copy、iteration workspace、process/file artifact 和 cancellation；`LoadReportTest` 驗證 schema、threshold、secret-safe projection、DB/MQ resource diagnostics 和 HTML；DB/MQ pooling suites 覆蓋 reuse、timeout、exclusive lease、cancellation cleanup 和 deterministic shutdown。
-
-這是可重複的 ATT self-overhead gate，不是 SUT microbenchmark：它檢查每成功 iteration 不產生無界 Case/log churn、Context 不跨 iteration 共享、scheduler lag/metrics 保持有界、pool/resource cleanup 及 report/evidence retention 受策略控制。V1 不承諾 distributed/Poisson/weighted multi-scenario、rendezvous、adaptive pool 或 target CPU/memory benchmarking。
-
-## 11. Evidence retention guide / Evidence 保留指南
-
-Evidence policy 是整個 load run 的設定，不會改變 pacing、closed-VU 的穩定 `userId`、arrival-rate 的 `maxConcurrent`、drop/think time、threshold 或 latency metric。選擇原則如下：
-
-| mode | successful iterations | failed iterations | 典型用途 |
-|---|---|---|---|
-| `metrics` | none | none | 最低 disk/IO 的純效能測試 |
-| `failures` | none | full | 一般 SIT/UAT，亦是 default |
-| `samples` | sampled | full | 代表性成功加上每個 failure |
-| `all` | full | full | Troubleshooting 或短時間 controlled run |
-
-Default 是 `failures`。`all` 是 opt-in，可能為每個 completed iteration 建立 workspace 和 evidence file；長時間、高 TPS 測試應先估算 disk 和 generator overhead。
-
-以下是四種可直接複製的設定：
-
-```yaml
-evidence:
-  mode: metrics
-```
-
-```yaml
-evidence:
-  mode: failures
-  maxSamples: 100
-```
-
-```yaml
-evidence:
-  mode: samples
-  sampleRate: 0.02
-  maxSamples: 500
-```
-
-```yaml
-evidence:
-  mode: all
-```
-
-也可以用 explicit policy 表達 full retention：
-
-```yaml
-# 這個 explicit form 只適用於 att-load/v1.1。
-evidence:
-  success: full
-  failure: full
-```
-
-`success` 的有效值是 `none`、`sample`、`full`；`failure` 是 `none` 或 `full`。Explicit `success`/`failure` 各自優先於由 `mode` 推導的值，而省略 `evidence` 時 framework default 是 `failures`。`success: full` 只適用於 `att-load/v1.1`；frozen 的 v1.0 schema 仍拒絕這個顯式值，v1.0 請使用 `mode: all` 或按 migration note 升級。`sampleRate` 範圍是 `0` 至 `1`，只有 `success: sample` 會使用它，default 是 `0.01`；`none` 和 `full` 會忽略它。`maxSamples` 是所有 retained completed success/failure 與已知 success eligibility 的 in-flight reservation 共用的總 cap，`0` 表示不保留。Success 只有在預先取得 reservation 時才會 materialize workspace；failure 則在 completed status 確定後 claim quota，再 materialize deferred evidence。未被保留的候選 workspace 會清理，因此 failure evidence overhead 也受 cap 限制。Bounded policy 未設定時 default 是 `1000`；`mode: all` 或 `success: full` 沒有 implicit cap，但顯式 `maxSamples` 仍會生效。
-
-容量估算：`10 TPS × 5 分鐘 ≈ 3,000 iterations`；`sampleRate: 0.02` 約有 `60` 個成功 sample 在 cap 前符合資格。Failure 由 `failure` policy 獨立處理，不受 sampleRate 影響；dropped arrivals 不是 completed iteration，不會產生 retained evidence。
-
-兩種 scheduler 都使用同一套 policy：
-
-```yaml
-# Closed VU
-schemaVersion: att-load/v1.0
-target: {type: template, id: PAYMENT}
-load: {users: 20, duration: 5m}
-evidence: {mode: samples, sampleRate: 0.02, maxSamples: 500}
-```
-
-```yaml
-# Fixed arrival rate
-schemaVersion: att-load/v1.0
-target: {type: flow, id: PAYMENT_LOOKUP}
-load: {arrivalRate: 10/s, duration: 5m, maxConcurrent: 50, overloadPolicy: drop}
-evidence: {mode: all, maxSamples: 5000}
-```
-
-Output layout：
-
-```text
-output/load/<runId>/
+~~~text
+output/load/<RUN_ID>/
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
-├── samples/<workloadId>/...
-├── failures/<workloadId>/...
-└── iterations/...
-```
+├── failures/<EXEC.ID>/
+└── samples/<EXEC.ID>/
+~~~
 
-v1.0 是 single-target，通常直接使用 `samples/` 和 `failures/`；v1.1 會按 `workloadId` 分區。Summary/report 的 aggregate metrics 與 per-iteration evidence 是不同資料；成功 workspace 預設 lazy，只有 retention policy 要求時才建立。`all` 不會改變 scheduler，只會增加 generator 的 filesystem work。
+## Workload 模型與執行
 
-常見問題：
+Closed workload 使用 load.users 及必填 duration，可配置 execution.thinkTime。Arrival-rate 使用 load.arrivalRate、maxConcurrent、overloadPolicy: drop；超額 arrival 計為 generator drop，不排隊，也不是 SUT error。Arrival-rate 不支援 thinkTime，且沒有 USER_ID。
 
-- 只看到 failure：這是 `failures` default；改用 `samples` 或 `all` 才會保留成功 iteration。
-- 沒有成功 sample：檢查 mode、`success`、`sampleRate` 是否為零，及是否已達 `maxSamples`。
-- 在 N 筆後停止：顯式 `maxSamples` 是 success/failure 的共同總 cap；`all` 只有顯式 cap 才會停止。
-- `sampleRate` 不會影響 failure；dropped arrival 也不會建立 evidence。
-- v1.1 的 workload evidence 到 `samples/<workloadId>/` 或 `failures/<workloadId>/` 查找。
+~~~sh
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
+./att.sh load examples/load/multi-closed.yaml
+./att.sh load examples/load/multi-arrival.yaml
+./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+~~~
 
-Migration note：舊版 `mode: all` 實際上是 sampled success + full failure；目前 `mode: all` 是 full success + full failure，沒有 implicit cap（除非顯式設定 `maxSamples`）。如需 bounded 成功診斷，請改用 `samples`。
-
-## 12. MQ payload paths in Load / Load 下的 MQ payload path
-
-MQ `file` 可以是 ATT package 內 regular file 的 absolute path。即使 Load iteration workspace 尚未建立，ATT 仍會以 package root 完成 path validation，不會為成功 iteration 預先建立空 directory。Relative path 仍限制在 Case output；`..` traversal、payload symlink 和 symlink escape 都會被拒絕。真正不存在的 file 會直接報告 payload path 錯誤，而不是 unrelated iteration-directory `NoSuchFileException`。這個檢查發生在 MQ connect/open/put/get 前，不會改變 MQ queue、response parsing 或 load pacing。
+同一 scenario 的 workloads 必須使用相同 model 與 phase timing envelope。Multi-workload 是多個固定 target 各自 pacing，不會在 target 間隨機切換。CLI load-model overrides 僅適用單一 workload；多 workload 時請修改 YAML。完整欄位、threshold、CLI option 與報告契約見[Load Mode](../../docs/reference/04_execution_modes/load.md)。

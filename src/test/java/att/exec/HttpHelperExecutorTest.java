@@ -124,14 +124,14 @@ class HttpHelperExecutorTest {
     private FrameworkConfig configuration(String url, String pool, String responseFormat) throws Exception {
         att.TestSchemas.install(root);
         Files.createDirectories(root.resolve("config/httphelpers"));
-        Files.write(root.resolve("config/httphelpers/sit.yaml"), ("schemaVersion: att-httphelper/v1.0\nid: paymentApi\nbaseUrl: " + url
+        Files.write(root.resolve("config/httphelpers/sit.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
                 + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: 1000\n"
                 + (responseFormat == null ? "" : "  responseFormat: " + responseFormat + "\n")
                 + (pool == null ? "" : "pool:\n" + pool)).getBytes(StandardCharsets.UTF_8));
-        Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.0\nid: paymentApi\nbaseUrl: " + url
+        Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
                 + "/uat\n").getBytes(StandardCharsets.UTF_8));
         Path config = root.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.9\nenvironment: SIT\nenvironments:\n"
+        Files.write(config, ("schemaVersion: att-config/v2.10\nenvironment: SIT\nenvironments:\n"
                 + "  SIT: {httphelpers: [config/httphelpers/sit.yaml]}\n"
                 + "  UAT: {httphelpers: [config/httphelpers/uat.yaml]}\n").getBytes(StandardCharsets.UTF_8));
         return new FrameworkConfigLoader().load(config, root, "SIT");
@@ -160,7 +160,7 @@ class HttpHelperExecutorTest {
             assertEquals("json", invocationEvidence.get("resolvedResponseFormat"));
 
             ToolInvocationResult contentTypeOverride = http.execute("paymentApi", "post",
-                    args("path", "/echo", "body", args("ok", true), "responseFormat", "json"),
+                    args("path", "/echo", "body", args("ok", true), "requestFormat", "json", "responseFormat", "json"),
                     context, 1000L, "http-octets-as-json", "yaml");
             assertTrue(contentTypeOverride.executionSuccess(), String.valueOf(contentTypeOverride.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) contentTypeOverride.output()).get("ok"));
@@ -202,6 +202,23 @@ class HttpHelperExecutorTest {
             assertEquals("text/plain; charset=UTF-8", invocation.get("contentType"));
             assertEquals(7, invocation.get("responseBytes"));
         }
+    }
+
+    @Test void structuredRequestRejectsBlankOrNullRequestFormatBeforeNetworkCall() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null);
+        CaseRuntimeContext context = context();
+        int before = hits.get();
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            for (Object format : Arrays.<Object>asList("", null)) {
+                ToolInvocationResult invalid = http.execute("paymentApi", "post",
+                        args("path", "/echo", "body", args("ok", true), "requestFormat", format),
+                        context, 1000L, "blank-request-format", "text");
+                assertFalse(invalid.executionSuccess());
+                assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) invalid.operationResult().outputMetadata().get("error")).get("type"));
+            }
+        }
+        assertEquals(before, hits.get(), "invalid requestFormat must fail before opening an HTTP connection");
     }
 
     private CaseRuntimeContext context() throws Exception {
@@ -254,7 +271,7 @@ class HttpHelperExecutorTest {
             assertEquals(500, serverError.operationResult().outputMetadata().get("statusCode"));
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) http.execute("paymentApi", "post", args("path", "http://outside/"), context, 1000L, "bad", "text").operationResult().outputMetadata().get("error")).get("type"));
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) http.execute("paymentApi", "get", args("path", "/echo", "body", "x"), context, 1000L, "bad-body", "text").operationResult().outputMetadata().get("error")).get("type"));
-            ToolInvocationResult typed = http.execute("paymentApi", "post", args("path", "/json", "body", args("ok", true)), context, 1000L, "typed", "text");
+            ToolInvocationResult typed = http.execute("paymentApi", "post", args("path", "/json", "body", args("ok", true), "requestFormat", "json"), context, 1000L, "typed", "text");
             assertTrue(typed.executionSuccess(), String.valueOf(typed.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) typed.output()).get("ok"));
             ToolInvocationResult redirected = http.execute("paymentApi", "get", args("path", "/redirect", "followRedirects", true), context, 1000L, "redirect", "json");
@@ -320,19 +337,18 @@ class HttpHelperExecutorTest {
         CaseRuntimeContext context = context();
         context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", root);
         TemplateAction action = new TemplateAction("fetch", args("type", "tool", "call", "#{http.paymentApi.get(path='/json', query={status:'OPEN', limit:50})}",
-                "result", args("format", "json", "path", "response.json"),
-                "assert", "${output.statusCode} == 200"), "att-template/v3.2");
+                "assert", "${output.statusCode} == 200"), "att-template/v3.3");
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
              CaseExecutionLog log = new CaseExecutionLog(context.caseOutputDirectory().resolve("case.log"))) {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config), null, null, http,
                     new att.template.DefaultBuiltInProvider());
             ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
-                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.2"), context, log).get(0);
+                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.3"), context, log).get(0);
             assertEquals(ResultStatus.PASS, result.status(), result.message());
             assertEquals(Boolean.TRUE, context.resolve("ACTIONS.fetch.output.result.ok"));
             assertEquals(200, context.resolve("ACTIONS.fetch.output.statusCode"));
             assertEquals("status=OPEN&limit=50", observedQuery.get());
-            assertTrue(Files.isRegularFile(context.caseOutputDirectory().resolve("response.json")));
+            assertFalse(Files.isRegularFile(context.caseOutputDirectory().resolve("response.json")));
         }
     }
 
@@ -344,13 +360,13 @@ class HttpHelperExecutorTest {
         TemplateAction action = new TemplateAction("retryFetch", args("type", "tool",
                 "call", "#{http.paymentApi.get(path='/slow')}", "timeoutMs", 30,
                 "retry", args("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))),
-                "att-template/v3.2");
+                "att-template/v3.3");
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
              CaseExecutionLog log = new CaseExecutionLog(context.caseOutputDirectory().resolve("retry.log"))) {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config), null, null, http,
                     new att.template.DefaultBuiltInProvider());
             ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
-                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.2"), context, log).get(0);
+                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.3"), context, log).get(0);
             assertEquals(ResultStatus.ERROR, result.status());
             assertEquals(2, hits.get(), "Each author-configured retry is a new HTTP request");
         }

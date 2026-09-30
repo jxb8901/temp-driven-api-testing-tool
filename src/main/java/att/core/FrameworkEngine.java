@@ -182,9 +182,11 @@ public class FrameworkEngine {
         }
         Instant started = Instant.now();
         String validatedCaseId = IdentifierValidator.caseId(testCase.workbookId(), testCase.groupId(), testCase.rowCaseId());
-        Path caseOutputDir = IdentifierValidator.strictChild(runDirectory, validatedCaseId, "Case directory");
+        Path executionsDirectory = runDirectory.resolve("executions");
+        Files.createDirectories(executionsDirectory);
+        Path caseOutputDir = IdentifierValidator.strictChild(executionsDirectory, validatedCaseId, "Execution directory");
         Files.createDirectories(caseOutputDir);
-        Path caseLogPath = caseOutputDir.resolve(testCase.caseId() + "." + runId.replace("-", ".") + ".001.log");
+        Path caseLogPath = caseOutputDir.resolve("case.log");
         java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
         if (options.verbose() && !options.quiet()) {
             synchronized (console) {
@@ -196,7 +198,7 @@ public class FrameworkEngine {
                 options.verbose() && !options.quiet()
                         ? new CaseLogConsoleMirror(testCase.caseId(), console)
                         : null);
-        CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, testCase.caseId(), runId,
+        CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, validatedCaseId, runId,
                 runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
         context.setProject(projectRoot);
         context.put("CASE.environment", suiteConfig.environment());
@@ -248,7 +250,7 @@ public class FrameworkEngine {
             writeCaseTree(caseOutputDir, context);
             return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
-                    testCase.workbookId(), testCase.groupId(), testCase.tags());
+                    testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId);
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             String errorMessage = typed == null ? message(e) : typed.format();
@@ -270,7 +272,7 @@ public class FrameworkEngine {
                 context.put("CASE.error", errorMessage);
             }
             return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()),
-                    typed == null ? null : typed.toDiagnostic());
+                    typed == null ? null : typed.toDiagnostic(), validatedCaseId);
         } finally {
             if (!dbFinalized) dbHelperExecutor.abortCase();
             caseLog.close();
@@ -440,6 +442,7 @@ public class FrameworkEngine {
         for (TestResult result : results) {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("caseId", result.caseId());
+            item.put("execId", result.executionId());
             item.put("caseName", result.caseName());
             item.put("workbookId", result.workbookId());
             item.put("groupId", result.groupId());
@@ -544,7 +547,12 @@ public class FrameworkEngine {
     }
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
                                     att.validation.Diagnostic diagnostic) {
-        return result(testCase, ResultStatus.ERROR, duration, "", message, outputXml, diagnostic);
+        return error(testCase, message, outputXml, duration, diagnostic, testCase.caseId());
+    }
+    private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
+                                   att.validation.Diagnostic diagnostic, String executionId) {
+        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.ERROR, duration, "", message, outputXml,
+                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(), diagnostic, executionId);
     }
     private static TestResult invalid(TestCase testCase, String message) {
         return result(testCase, ResultStatus.INVALID, Duration.ZERO, "", message, null);

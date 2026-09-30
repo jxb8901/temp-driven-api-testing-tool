@@ -26,7 +26,6 @@ public class StageTemplateRunner {
     private final UnifiedTemplateEngine templateEngine;
     private final ExpressionEvaluator evaluator = new ExpressionEvaluator();
     private final RenderPayloadResolver payloadResolver = new RenderPayloadResolver();
-    private final ActionResultArtifactWriter artifactWriter = new ActionResultArtifactWriter();
     private final FlowRegistry flows;
 
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this(templateEngine, null); }
@@ -39,7 +38,6 @@ public class StageTemplateRunner {
             List<String> targets = new ArrayList<String>();
             Map<String, Object> output = outcome(targets);
             if ("flow".equalsIgnoreCase(action.type())) {
-                output.remove("targetFiles");
                 output.remove("result");
             }
             Map<String, Object> node = new LinkedHashMap<String, Object>();
@@ -232,23 +230,13 @@ public class StageTemplateRunner {
                                Map<String, Object> output, List<String> targets) throws Exception {
         Path templateRoot = template.directory().toRealPath();
         List<Path> matches = payloadResolver.resolve(template.directory(), action.payload());
-        ActionResultConfig resultConfig = action.resultConfig();
-        String format = requiredFormat(resultConfig, "Render", "");
-        String configuredPath = resultConfig.configured() ? templateEngine.render(resultConfig.path(), context, log) : "";
-        List<String> expandedTargets = new ArrayList<String>();
-        if (resultConfig.configured() && !console(configuredPath)) {
-            Path payloadRoot = renderPayloadRoot(template.directory(), action.payload());
-            for (int i = 0; i < matches.size(); i++) {
-                String relative = RenderPayloadResolver.portable(payloadRoot.relativize(matches.get(i)));
-                String target = RenderResultPath.expand(configuredPath, relative, i + 1);
-                if (matches.size() > 1 && expandedTargets.contains(target)) {
-                    throw new IllegalArgumentException("Render result.path pattern maps multiple sources to the same target: " + target);
-                }
-                expandedTargets.add(target);
-            }
-        }
+        String configuredFormat = action.templateFormat() == null ? "auto" : action.templateFormat().toLowerCase(java.util.Locale.ROOT);
+        if (!java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(configuredFormat))
+            throw new IllegalArgumentException("templateFormat must be auto, text, json, yaml, or xml");
         Map<String, Object> multiple = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> sourceEvidence = new ArrayList<Map<String, Object>>();
         Object single = null;
+        long started = System.nanoTime();
         for (int index = 0; index < matches.size(); index++) {
             Path source = matches.get(index);
             String relative = RenderPayloadResolver.portable(templateRoot.relativize(source));
@@ -260,22 +248,27 @@ public class StageTemplateRunner {
                         att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
                         "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
             }
-            // Render produces a typed String. result.format controls only the
-            // saved/logged representation and never reparses output.result.
-            Object value = rendered;
-            if (resultConfig.configured()) {
-                if (console(configuredPath)) {
-                    log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, value));
-                } else {
-                    Path saved = artifactWriter.write(context, action.id(), expandedTargets.get(index), format, value, resultConfig.overwrite());
-                    targets.add(saved.toString());
-                }
-            }
+            String format = configuredFormat.equals("auto") ? inferredFormat(source) : configuredFormat;
+            Object value = new DocumentValue(format, rendered);
             if (matches.size() == 1) single = value; else multiple.put(relative, value);
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("source", relative); item.put("templateFormat", format);
+            item.put("sourceBytes", Long.valueOf(Files.size(source))); item.put("renderedChars", Integer.valueOf(rendered.length()));
+            sourceEvidence.add(item);
         }
         output.put("result", matches.size() == 1 ? single : multiple);
-        output.put("format", format.toLowerCase(java.util.Locale.ROOT));
-        output.put("sources", sourceNames(templateRoot, matches));
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        evidence.put("resource", "render"); evidence.put("templateFormat", configuredFormat);
+        evidence.put("sources", sourceEvidence); evidence.put("durationMs", Long.valueOf((System.nanoTime() - started) / 1000000L));
+        output.put("evidence", evidence);
+    }
+
+    private String inferredFormat(Path source) {
+        String name = source.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        if (name.endsWith(".json")) return "json";
+        if (name.endsWith(".yaml") || name.endsWith(".yml")) return "yaml";
+        if (name.endsWith(".xml")) return "xml";
+        return "text";
     }
 
     private Path renderPayloadRoot(Path templateDirectory, String payload) throws Exception {
@@ -297,20 +290,10 @@ public class StageTemplateRunner {
 
     private void executeLog(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output) throws Exception {
         String message = normalizeLines(templateEngine.render(action.message(), context, log));
-        String content = "";
-        if (!action.file().trim().isEmpty()) {
-            String renderedPath = templateEngine.render(action.file(), context, log);
-            Path source = logSource(renderedPath, context, log);
-            byte[] bytes = Files.readAllBytes(source);
-            content = normalizeLines(StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString());
-            output.put("sourceFile", source.toString());
-        }
-        output.put("result", joinLogContent(message, content));
+        Object value = action.valuePresent() ? templateEngine.evaluateTypedTree(action.value(), context, log) : null;
+        String formatted = action.valuePresent() ? new TypedValueFormatter().format(value, action.format()) : "";
+        output.put("result", message.isEmpty() ? formatted : formatted.isEmpty() ? message : message + "\n" + formatted);
         output.put("level", action.level());
-        output.put("fields", renderFields(action.fields(), context, log));
         try { log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result"))); }
         catch (Exception error) { recordEvidenceError(output, error); }
     }
@@ -361,9 +344,16 @@ public class StageTemplateRunner {
 
     private ResultStatus executeDb(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
                                    Map<String, Object> output, List<String> targets) throws Exception {
+        CaseRuntimeContext.MetadataScope scope = context.pushComponentMetadata("DBHELPER",
+                metadata(action.db(), "dbhelper"));
+        try { return executeDbScoped(stageName, action, context, log, output, targets); }
+        finally { scope.close(); }
+    }
+
+    private ResultStatus executeDbScoped(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+                                   Map<String, Object> output, List<String> targets) throws Exception {
         att.exec.DbHelperExecutor executor = templateEngine.dbHelperExecutor();
         if (executor == null) throw new IllegalStateException("DB action execution is unavailable");
-        context.setDbHelperMetadata(action.db());
         boolean query = !action.query().isEmpty();
         Map<String, Object> operation = query ? action.query() : action.update();
         String source = "inline";
@@ -429,7 +419,8 @@ public class StageTemplateRunner {
                         elapsedMillis(operationStarted), error.getClass().getSimpleName());
                 throw error;
             }
-            try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
+            executor.recordResourceOutput(action.db(), result, context);
+        try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
             catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
 
             ActionExecutionResult operationResult = result.operationResult();
@@ -467,13 +458,11 @@ public class StageTemplateRunner {
                 attempt.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) output.get("assertion")));
             }
             if (passed) {
-                saveDbResult(action, context, log, targets, result.result());
                 if (!retry.isEmpty()) output.put("winningAttempt", number);
                 output.put("status", "PASS"); output.put("success", true);
                 return ResultStatus.PASS;
             }
             if (!shouldRetry(retryOn, "ASSERTION", number, maxAttempts)) {
-                saveDbResult(action, context, log, targets, result.result());
                 if (!retry.isEmpty()) output.put("finalAttempt", number);
                 output.put("status", "FAIL"); output.put("success", false);
                 return ResultStatus.FAIL;
@@ -485,19 +474,8 @@ public class StageTemplateRunner {
         throw new IllegalStateException("DB action completed without a final attempt: " + action.id());
     }
 
-    private void saveDbResult(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
-                              List<String> targets, Object result) throws Exception {
-        ActionResultConfig resultConfig = action.resultConfig();
-        if (!resultConfig.configured()) return;
-        String path = templateEngine.render(resultConfig.path(), context, log);
-        String format = requiredFormat(resultConfig, "DB", "");
-        if (console(path)) {
-            try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.renderDb(format, result)); }
-            catch (Exception error) { /* saving evidence must not replace the operation result */ }
-        } else {
-            Path saved = artifactWriter.writeDb(context, action.id(), path, format, result, resultConfig.overwrite());
-            targets.add(saved.toString());
-        }
+    private Map<String, Object> metadata(String id, String type) {
+        Map<String, Object> values = new LinkedHashMap<String, Object>(); values.put("id", id); values.put("type", type); return values;
     }
 
     @SuppressWarnings("unchecked")
@@ -517,25 +495,16 @@ public class StageTemplateRunner {
         int intervalMs = integer(retry.get("intervalMs"), 0);
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
         output.put("attempts", attempts);
-        ActionResultConfig save = action.resultConfig();
-        String saveAs = save.configured() ? templateEngine.render(save.path(), context, log) : "";
-        boolean console = console(saveAs);
         String kind = templateEngine.callKind(action.call());
-        String format = save.specified() ? toolFormat(save, kind, action.call()) : "";
-        boolean actionOwnedArtifact = false;
         for (int number = 1; number <= maxAttempts; number++) {
             appendResourceEvent(log, stageName, action.id(), kind, number, "START", null, null);
             long operationStarted = System.nanoTime();
             try {
-                // Process capture files are bounded stream/log evidence, not the
-                // selected Action result. Persist raw output.result through the
-                // common writer so output.result and result.path cannot diverge.
-                String operationSaveAs = "";
                 att.exec.ToolInvocationResult result;
                 try {
                     result = templateEngine.executeToolAttempt(action.call(), context, log,
-                            context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), operationSaveAs, "",
-                            save.overwrite() || actionOwnedArtifact, !retry.isEmpty());
+                            context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), "", "",
+                            false, !retry.isEmpty());
                 } catch (att.exec.ToolExecutionException error) {
                     throw error;
                 } catch (Exception error) {
@@ -551,26 +520,11 @@ public class StageTemplateRunner {
                         operation.durationMs() >= 0L ? operation.durationMs() : elapsedMillis(operationStarted),
                         operation.executionSuccess() ? null : "OPERATION_FAILED");
                 Object selectedResult = resultValue(operation.result());
-                if (save.configured()) {
-                    if (console) {
-                        try { log.appendRaw("ACTION " + action.id() + " RESULT", artifactWriter.render(format, selectedResult)); }
-                        catch (Exception error) { recordEvidenceError(output, error); }
-                    } else {
-                        Path saved = artifactWriter.write(context, action.id(), saveAs, format, selectedResult,
-                                save.overwrite() || actionOwnedArtifact);
-                        actionOwnedArtifact = true;
-                        invocation.put("outputFile", saved.toString());
-                    }
-                } else if (invocation.get("outputFile") != null) {
-                    actionOwnedArtifact = true;
-                }
                 attempts.add(invocation);
                 publishOperationResult(output, operation);
                 output.put("result", selectedResult);
                 invocation.put("evidence", operation.evidence());
                 copy(invocation, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
-                Object saved = invocation.get("outputFile");
-                if (saved != null && !targets.contains(String.valueOf(saved))) targets.add(String.valueOf(saved));
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
                 if (invocation.get("HTTP") != null) node.put("HTTP", invocation.get("HTTP"));
@@ -620,7 +574,6 @@ public class StageTemplateRunner {
                 copy(evidence, output, "exitCode", "stdout", "stderr", "rawOutput", "command", "logicalArgv", "argv", "timeoutMs");
                 if (evidence.containsKey("output")) output.put("result", evidence.get("output"));
                 replaceActionEvidence(output, failedEvidence);
-                if (evidence.get("outputFile") != null && !targets.contains(String.valueOf(evidence.get("outputFile")))) targets.add(String.valueOf(evidence.get("outputFile")));
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
                 if ("TIMEOUT".equals(e.category()) && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
@@ -847,7 +800,6 @@ public class StageTemplateRunner {
         output.put("success", true);
         output.put("exception", null);
         output.put("durationMs", 0L);
-        output.put("targetFiles", targets);
         output.put("result", null);
         return output;
     }

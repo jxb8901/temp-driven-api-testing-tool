@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:flow:v3.3",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "description",
+    "actions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "att-flow/v3.3"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[^.]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/action"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "render",
+            "tool",
+            "db",
+            "assert",
+            "log",
+            "assign",
+            "flow"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "onFailure": {
+          "enum": [
+            "stop",
+            "continue"
+          ]
+        },
+        "runWhen": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "string"
+        },
+        "call": {
+          "type": "string"
+        },
+        "db": {
+          "type": "string"
+        },
+        "query": {
+          "type": "object"
+        },
+        "update": {
+          "type": "object"
+        },
+        "assert": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string"
+        },
+        "actual": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "TRACE",
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR"
+          ]
+        },
+        "timeoutMs": {
+          "type": "integer"
+        },
+        "retry": {
+          "type": "object"
+        },
+        "evidence": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[^.]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/evidenceCollector"
+          }
+        },
+        "use": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*$"
+        },
+        "templateFormat": {
+          "enum": [
+            "auto",
+            "text",
+            "json",
+            "yaml",
+            "xml"
+          ]
+        },
+        "value": {},
+        "format": {
+          "enum": [
+            "text",
+            "json",
+            "yaml",
+            "xml",
+            "sqlplus"
+          ]
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "flow"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "use"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "render"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "payload"
+            ]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "render"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "templateFormat"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "log"
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "message"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "log"
+              }
+            },
+            "required": [
+              "type",
+              "format"
+            ]
+          },
+          "then": {
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "log"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "value"
+                  ]
+                },
+                {
+                  "required": [
+                    "format"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "tool"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "call"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "db"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "db"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "assert"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "assert"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "assign"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name",
+              "expression"
+            ]
+          }
+        }
+      ]
+    },
+    "evidenceCollector": {
+      "type": "object",
+      "required": [
+        "call"
+      ],
+      "properties": {
+        "call": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "onFailure": {
+          "enum": [
+            "stop",
+            "continue"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

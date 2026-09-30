@@ -1,7 +1,7 @@
-# ATT V3.5.3 Reference Manual
+# ATT V3.6.0 Reference Manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.5.3
+Version: 3.6.0
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -22,7 +22,7 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper or MQHelper used by Actions or permitted expression calls.
+A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
 
 ### Execution modes are peers
 
@@ -32,18 +32,20 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ |
 | Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.0` scenario | one Template, Flow or Tool target repeatedly |
+| Load | `att-load/v1.2` scenario | one Template, Flow or Tool target repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
 ### Resources are peers
 
-Tool, DBHelper and MQHelper are independent resource types. They differ in configuration and lifecycle but publish operation data into one common Action envelope. Public expressions should consume Action results/evidence rather than resource-internal connection/process state.
+Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are independent resource types. They differ in configuration and lifecycle, while Actions publish native typed results through `output.result` and keep optional presentation evidence separate. Public expressions should consume Action results/evidence rather than resource-internal connection/process state.
 
 ```text
-Tool ----\
-DBHelper --+--> operation result/evidence --> Action output
-MQHelper -/
+Tool ------\
+DBHelper ---+
+MQHelper ---+--> typed operation result --> Action output
+HTTPHelper -+
+SSHHelper --/
 ```
 
 ### Package boundaries
@@ -187,204 +189,131 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 
 ### 2.2 Template
 
-A directory is a callable template only when it directly contains `template.yaml`. Category directories may contain other template directories but are not callable themselves.
+A directory is a callable Template only when it directly contains template.yaml. ATT 3.6.0 uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
 
-```yaml
-schemaVersion: att-template/v3.2
-name: PAYMENT_INVOKE
-description: Render and invoke a payment request
-actions:
-  buildReference:
-    type: assign
-    name: paymentReference
-    expression: "PAY-#{sysdate('yyyyMMdd')}-#{sample.getSeq(10)}"
-  renderRequest:
-    type: render
-    description: "Render request for ${EXEC.INPUT.caseId}; status=${output.status}"
-    payload: requests/*.xml
-    result: {format: text, path: rendered/{filename}}
-    assert: "${output.targetFiles[0]} != null"
-  callApi:
-    type: tool
-    call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
-    result:
-      path: "${EXEC.INPUT.caseId}-response.json"
-      format: json
-      overwrite: false
-    assert: "${output.result.status} == 'SUCCESS'"
-  recordResult:
-    type: log
-    level: INFO
-    message: "Payment ${EXEC.INPUT.caseId} completed"
-    file: "${EXEC.ACTIONS.callApi.output.targetFiles[0]}"
-```
+Each Action has a type-specific contract. Render returns DocumentValue without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
-`schemaVersion`, `description`, and a non-empty ordered `actions` map are required. `name` is optional when the template is always selected by full path; reusable templates should have a globally unique symbolic name.
-
-#### Action types
-
-| Type | Purpose | Required fields | Common result |
-|---|---|---|---|
-| `render` | Render one or more UTF-8 payloads | `type`, `payload`, `result.format`; optional `result.path` | nested `output.result` and `output.targetFiles` |
-| `tool` | Invoke a configured or framework-native Tool | `type`, `call` | nested typed result and operation evidence |
-| `db` | Query or update a configured database | `type`, `db`, exactly one `query`/`update` block | stable typed DB result and transaction evidence |
-| `assert` | Evaluate a boolean expression | `type`, `assert` | PASS/FAIL or evaluation ERROR; optional Expected/Actual values |
-| `log` | Write a rendered message and/or UTF-8 Case-output file | `type`, at least one of `message` or `file` | combined content, source path, and rendered fields |
-| `assign` | Evaluate an expression and publish a Case-scoped typed value | `type`, `name`, `expression` | `${EXEC.VARS.<name>}`, `output.name`, and `output.result` |
-
-Actions run in YAML order. Action IDs are unique within the template and cannot contain a dot. Every action may define `description` and `onFailure: stop|continue`.
-
-Action validation is type-specific. Render requires a safe non-empty payload glob and `result.format: text|json|yaml|xml`; an optional `result.path` persists its result. Tool, MQ receive/request, and DB use the same optional `result` object and the same four presentation formats. Retry and Action-level timeout are valid only for tool actions. A DB action requires a configured `db` ID and exactly one `query` or `update` block; the selected block requires exactly one `sql` or `sqlFile` source. An assert action requires `assert` and may include `expected` and `actual`; `expression`, `acture`, and `actural` are invalid there. A log action requires `message`, `file`, or both and may use `level` and `fields`. An assign action requires `name` and `expression`. Unsupported fields are errors rather than ignored values.
-
-Action `result.format` controls only the representation written to `result.path` or `path: console`; it never reparses or changes the logical `output.result`. `output.result` remains the native typed value produced by the operation. A pathless result creates no artifact. Legacy `renderAs` and `saveAs` fields are rejected with migration suggestions by `att validate`.
-
-For a command-backed Tool, the Tool descriptor's required `result.format` parses stdout into the typed primary result (`text`, `json`, `yaml`, or `xml`); bounded/full stream capture remains separate process evidence. The Action's optional `result.format` then affects only artifact/log serialization and does not alter that parsed value. Call-backed Tools and HTTPHelper/MQHelper/DB operations already return native typed values; Action formatting never changes them. `raw` is not a supported common result format.
-
-Every action may use `assert` except that an assert action uses it as its required primary expression. Every action outcome is nested under `output`, including `status`, `success`, `durationMs`, `exception`, `targetFiles`, `result`, and optional assertion detail. Operational errors remain ERROR; otherwise an explicit assertion decides PASS/FAIL. A completed tool process with a non-zero exit code is not automatically ERROR: inspect `output.exitCode` in `assert` when the exit code matters.
-
-Every action supports expression-bearing `description`. Validation checks `${...}` references and `#{...}` calls without invoking them, resolves available static Case values where needed, and preserves runtime-dependent references. After successful execution, ATT evaluates both forms against the current action-local `${output...}` scope before persisting the final description.
-
-An assign action evaluates `expression` with the normal Context, built-in, configured-tool, and read-only DB-expression grammar. Its `name` must match `[A-Za-z_][A-Za-z0-9_]*`, is case-sensitive, and must not already exist below `EXEC.VARS` for the current Case. `EXEC.VARS` is created once per Test Case, survives stage/template changes, and keeps runtime assignments separate from Excel and framework-owned Case fields. A complete typed expression such as `#{db.orders.query(...)}` retains its Java object; it is not stringified. A successful assignment remains available to later actions and later stages as `${EXEC.VARS.<name>}`. The same value is retained in `${EXEC.ACTIONS.<assignActionId>.output.result}`. Assign supports optional `description`, `assert`, and `onFailure`, but not render, tool-action, log, report-only, retry, timeout, or `result` fields. Assertion FAIL/ERROR does not roll back a value whose expression already evaluated successfully; expression failure creates no variable.
-
-Render payload paths must remain below the template root. Glob matches are regular non-symbolic-link files sorted by portable template-relative path. A Render `result.path` is evaluated as a normal ATT expression path first, then expands `{filename}`, `{name}`, `{ext}`, `{index}`, and `{relativePath}` tokens. Statically knowable path safety and collisions are checked during package validation; runtime-dependent path values are checked again before writing. Expanded targets must be unique; `overwrite: true` never permits intra-Action collisions. Render keeps one typed value for one source or an ordered source-keyed map for multiple sources, and `output.targetFiles` lists only files actually persisted.
-
-A log action can emit a rendered `message`, the complete content of one `file`, or both:
-
-```yaml
-logResponse:
-  type: log
-  level: DEBUG
-  message: "API response for ${EXEC.INPUT.caseId}:"
-  file: "${EXEC.ACTIONS.callApi.output.targetFiles[0]}"
-  fields:
-    action: callApi
-```
-
-Both `message` and `file` support the unified `${...}` / `#{...}` expression engine and are evaluated before the log action publishes its own output. Their combined content is written to the Case log as raw text with CRLF/CR normalized to LF, so multiline content remains physical lines rather than YAML-escaped `\\n`. A relative `file` path resolves below `${EXEC.OUTPUT_DIR}`; an absolute path is accepted only when its resolved real path is still below that directory. The source must be an existing regular non-symlink UTF-8 file. Path/symlink escapes, malformed UTF-8, blank resolved paths, and attempts to read the current Case log are ERROR.
-
-To print a typed DB result using the same SQL*Plus-style text as DB Action `result.format: text`, format it in the message with the pure `dbText(...)` built-in:
-
-```yaml
-printOrders:
-  type: log
-  message: "#{dbText(${EXEC.ACTIONS.queryOrders.output.result})}"
-```
-
-`dbText(...)` only formats its argument; it does not execute JDBC, change a transaction, or invalidate a cache. A nested read-only DB expression is also valid, but referencing a preceding DB Action avoids executing the query twice.
-
-`output.sourceFile` records the canonical source path. `output.result` contains the file text once, with CRLF/CR normalized to LF; when both inputs are present, it contains the message, one LF, then the file content. This same result is emitted once in the human Case log rather than copying the file into multiple evidence fields.
+See [Actions and Typed Values](reference/14_actions.md) for the complete field list, examples, typed result/evidence model, DocumentValue behavior, HTTP/MQ boundaries and migration guidance. [Expressions and Built-ins](reference/07_expressions.md) covers the shared expression engine and Load ID initialization scope.
 
 ## 03 Runtime and Context Model
 
-ATT uses one public Context model for Run, Debug and each Load iteration.
+Run, Debug and Load share one canonical EXEC/META expression model. EXEC changes through framework lifecycle and explicit input/variable/action publication. META is curated, immutable and secret-safe.
 
-### Canonical tree
+### Identity roots
 
-```text
-EXEC
-├── ID
-├── RUN_ID
-├── STARTED_AT
-├── RUN_STARTED_AT
-├── OUTPUT_DIR
-├── INPUT
-├── VARS
-└── ACTIONS
-
-META
-├── PROJECT
-├── SOURCE
-├── TARGET
-├── TEMPLATE
-├── FLOW
-├── TOOL
-├── DBHELPER
-└── MQHELPER
-
-output            # current Action only
-```
-
-`EXEC.INPUT` contains execution inputs adapted from the workbook/stage, debug sidecar, or load scenario. `EXEC.VARS` is the mutable publication area for `assign` and other explicit shared values. `EXEC.ACTIONS` contains completed Actions in the **current** Stage/Template/Flow scope. `META` is curated, immutable and secret-safe. `output` is the active Action's local result and is not a persistent root.
-
-### Scope and lifetime
-
-A normal Testcase owns its Case runtime. `EXEC.VARS` can carry explicitly published values across its Stages/Templates. Each Stage/Template starts a fresh `EXEC.ACTIONS` scope. Invoking a Flow temporarily installs a fresh Action scope for the Flow; nested Actions can read earlier Flow Actions, and the caller's Action scope is restored when the Flow returns. Values needed after a Flow returns must be published through `EXEC.VARS`.
-
-There is no public `EXEC.STAGES`, `EXEC.OUTPUT`, `EXEC.CALL`, or invocation-worker tree. Stage/Flow history belongs to result/report evidence, not reusable expression state. Resource connection/pool/process lifecycle state is internal.
-
-### Action-local output and publication
-
-Executable Actions publish a stable envelope. Fields are present where meaningful:
-
-```text
-output
-├── status
-├── success
-├── durationMs
-├── result
-├── diagnostic
-├── evidence
-└── attempts[]
-```
-
-While an Action is active, use `${output...}`. After it completes in the current scope, use `${EXEC.ACTIONS.<id>.output...}`. `result` is the final/winning primary operation result. Retry history and per-attempt collectors remain under `attempts[n]`; they do not replace the top-level final result.
-
-### Execution identity and diagnostics
-
-The identity and timestamps have mode-specific scope:
-
-| Mode | `EXEC.ID` | `EXEC.RUN_ID` | `EXEC.STARTED_AT` | `EXEC.RUN_STARTED_AT` |
-|---|---|---|---|---|
-| Testcase | Canonical `workbookId.groupId.rowCaseId`; one per Case | The enclosing Run ID, shared by all selected Cases | When this Case starts | When the enclosing Run starts; shared by its Cases |
-| Debug | The debug ID; also the `EXEC.RUN_ID` | Same debug ID | When the one-shot Debug execution starts | Same timestamp as `EXEC.STARTED_AT` |
-| Load | Unique `<runId>-execution-<n>` for each iteration across the run | The enclosing Load Run ID, shared by all workloads and iterations | When this iteration starts | When the enclosing Load Run starts; shared by its iterations |
-
-For example, two Cases in one Run have different `EXEC.ID` values but the same `EXEC.RUN_ID`:
-
-| Case | `EXEC.ID` | `EXEC.RUN_ID` |
+| Path | Meaning and type | Availability |
 |---|---|---|
-| `payments.payment.TC001` | `payments.payment.TC001` | `RUN-42` |
-| `payments.payment.TC002` | `payments.payment.TC002` | `RUN-42` |
+| EXEC.ID | Current Case, Debug execution or Load iteration ID; String. | After execution initialization; generated before Load business actions. |
+| EXEC.RUN_ID | Enclosing ATT Run ID; String. | All modes; shared by Cases/iterations in a run. |
+| EXEC.STARTED_AT | Current execution start time; ISO-8601 String. | All modes. |
+| EXEC.RUN_STARTED_AT | Enclosing run start time; ISO-8601 String. | All modes. |
+| EXEC.OUTPUT_DIR | Absolute execution workspace path. | After initialization; in Load it may be planned and not yet exist. |
+| EXEC.INPUT | Case/stage, Debug sidecar or Load workload input map. | All modes. Stage inputs temporarily overlay Case inputs. |
+| EXEC.VARS | Typed values published by assign. | All modes; empty before assignment. |
+| EXEC.ACTIONS | Completed Actions in the active Template/Flow scope. | After an Action is published; Flow has a nested scope. |
+| EXEC.LOAD.MODEL | closed or arrivalRate. | Load only; available before ID generation. |
+| EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |
+| EXEC.LOAD.USER_ID | Stable virtual-user ID. | Closed Load only; absent for arrival-rate. |
+| EXEC.LOAD.ITERATION | Numeric iteration sequence. | Load only; available before ID generation. |
+| EXEC.LOAD.PHASE | WARMUP, RAMP_UP, STEADY or RAMP_DOWN. | Load only; available before ID generation. |
 
-Two Load iterations (including iterations from different workloads or VUs) share their `EXEC.RUN_ID` but have unique `EXEC.ID` values, such as `LOAD-7-execution-1` and `LOAD-7-execution-2`. A closed VU's stable identity is separate evidence (`DIAG.load.userId`); fixed-arrival iterations have no persistent VU identity.
+EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
 
-These framework-owned fields cannot be overridden by input. Legacy `RUN.id` and `RUN.runId` remain deterministic aliases of `EXEC.RUN_ID`.
+### META field inventory and lifecycle
 
-The framework records mode, timestamps, and load scheduler metadata in the `DIAG` evidence section. `DIAG` is deliberately absent from expression Context: `${EXEC.MODE}`, `${EXEC.LOAD...}`, and `${DIAG...}` are invalid. Normal Template/Flow authors must not depend on or author against the `DIAG` structure; ATT may add, remove, regroup, or rename its fields without Template/Flow compatibility guarantees. Use `EXEC.INPUT` for business variation and `META.TARGET` for curated target identity. Load evidence may contain:
+The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, and `HTTPHELPER` as listed below. META contains descriptive fields only. A path may be absent when its component is not active.
 
-```text
-DIAG.load
-├── runId
-├── workloadId
-├── model
-├── userId
-├── targetType
-├── targetId
-├── iterationId
-├── iteration
-└── phase
-```
+| Public path | Meaning, type and example | Modes and availability | Scope and when absent |
+|---|---|---|---|
+| META.PROJECT.id | Project directory name; String, e.g. `payment-att`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.PROJECT.root | Normalized project-root path; String, e.g. `/srv/att/payment`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
+| META.SOURCE.path | Normalized absolute source path; String, e.g. `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
+| META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, e.g. `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
+| META.SOURCE.workbookId | Workbook identifier; String, e.g. `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.groupId | Workbook group identifier; String, e.g. `default`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.rowCaseId | Case ID from the workbook row; String, e.g. `P001`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.sheet | Workbook sheet name; String, e.g. `Payment`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
+| META.SOURCE.row | One-based workbook row number; Number, e.g. `12`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
+| META.SOURCE.workbook | Optional workbook label; String when present, e.g. `payment_regression.xlsx`. | Run when supplied by the adapter. | Execution-wide; optional and otherwise absent. |
+| META.SOURCE.scenario | Load scenario basename without its suffix; String, e.g. `payment-smoke`. | Load. | Execution-wide; absent outside Load. |
+| META.TARGET.type | Resolved target kind; String: `testcase`, `template`, `flow` or `tool`. | Run, Debug, Load; after target selection. | Execution-wide. |
+| META.TARGET.id | Resolved target identifier; String, e.g. `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
+| META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, e.g. `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
+| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, e.g. `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
+| META.FLOW.id | Active Flow ID; String, e.g. `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
+| META.FLOW.invocationId | Caller Action ID; String, e.g. `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
+| META.FLOW.depth | One-based nested Flow depth; Number, e.g. `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
+| META.TOOL.id | Active configured Tool or built-in name; String, e.g. `payment.queryOrder` or `upper`. | Run, Debug, Load during the invocation. | Invocation scope; never retained as the “last Tool” after return. |
+| META.TOOL.type | Invocation kind; String, e.g. `tool` or `builtin`. | Same availability as META.TOOL.id. | Invocation scope; absent after return unless an outer invocation remains. |
+| META.DBHELPER.id | Logical DBHelper ID; String, e.g. `orders`. | Run, Debug, Load during a DBHelper operation/DB Action. | Invocation scope; absent after return unless an outer scope remains. |
+| META.DBHELPER.type | Resource kind; String, `dbhelper`. | Same availability as META.DBHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
+| META.MQHELPER.id | Logical MQHelper ID; String, e.g. `payment`. | Run, Debug, Load during an MQHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.MQHELPER.type | Resource kind; String, `mqhelper`. | Same availability as META.MQHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
+| META.HTTPHELPER.id | Logical HTTPHelper ID; String, e.g. `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.HTTPHELPER.type | Resource kind; String, `httphelper`. | Same availability as META.HTTPHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
 
-For `att-load/v1.1`, `WORKLOAD_ID` is the configured workload `id`. `TARGET_TYPE` and `TARGET_ID` identify the fixed target owned by that workload. Closed workloads provide a stable `USER_ID` for one virtual user; fixed-arrival-rate iterations have no persistent VU identity.
+META.SSHHELPER is not public. SSH connection and credential settings stay private to Tool invocation. META.TOOL may identify the active Tool, but SSH endpoint, user, identity file and credentials are not META fields.
 
-Different closed-VU workload pools may both contain a `VU-1`. The durable evidence identity is therefore the pair `(workloadId, userId)`. Each iteration still gets isolated `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, transient Tool/DB state and Action-local `output`.
+ATT recursively filters credential-bearing keys such as password, secret, token, authorization/cookie, API key and private key. Expressions and adapters can read META but cannot mutate it.
 
-#### Migration from mode-specific Context
+### Invocation and scope rules
 
-| Previous expression/usage | Supported replacement |
+Entering a Template, Flow, Tool or helper invocation publishes metadata for that active scope. Nested calls push a frame; exit restores previous metadata. When no invocation is active, its branch is absent. Consumers must not depend on “last invoked” state.
+
+EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs and restores them after completion. EXEC.VARS is shared across later Stages in a Case. EXEC.ACTIONS is scoped to the active Template or Flow. An Action reads local output while running and publishes its envelope at EXEC.ACTIONS.<id>.output.
+
+### Action output and evidence paths
+
+| Path | Meaning and availability |
 |---|---|
-| `${EXEC.LOAD.RUN_ID}` | `${EXEC.RUN_ID}` |
-| `${EXEC.LOAD.TARGET_TYPE}` / `${EXEC.LOAD.TARGET_ID}` | `${META.TARGET.type}` / `${META.TARGET.id}` where a target is defined (for example, Debug/Load) |
-| Branching business behavior on mode, workload, VU, or phase | Pass the intended business selector explicitly through adapter-provided `${EXEC.INPUT.<name>}` |
-| Reading scheduler/diagnostic details in expressions | Inspect retained `DIAG` evidence outside expressions; do not reference `DIAG` from Template/Flow code |
+| `output.result` | Primary typed Action result while the Action is active, including its assertion. |
+| `output.evidence.collectors.<id>.result` | Typed result of an active Tool evidence collector. |
+| `output.evidence.collectors.<id>.status` | Collector `PASS`/`ERROR` status while the Action is active. |
+| `EXEC.ACTIONS.<actionId>.output.result` | Published primary typed result after the Action completes. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | Published final/winning collector result. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | Published final/winning collector status. |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
 
-### Optional lookup
+Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
-`${path}` is strict. `${path?}` returns null for a missing map/list path where optional lookup is defined, but it does not make malformed syntax, ambiguity, invalid traversal, or illegal scope access valid.
+### Load execution ID initialization
 
-### Compatibility aliases
+Load uses schema att-load/v1.2. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect.
 
-Deterministic legacy views such as `CASE`, `RUN`, and `ACTIONS` remain readable where they map one-to-one to canonical data and may produce migration warnings. New documentation and new authoring use `EXEC`/`META`. Semantically incompatible historical paths such as stage-history-as-runtime-state are errors rather than aliases.
+Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
+
+Only deterministic, side-effect-free built-ins are allowed. External Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem functions are rejected. seq.next() is neither allowed nor required. Use stable identity components:
+
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
+~~~
+
+Arrival-rate has no USER_ID:
+
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
+~~~
+
+IDs must be non-empty, path-safe single segments and unique within the Load run. Duplicate or unsafe values fail before the target starts; ATT does not append a hidden suffix.
+
+### Run, execution and evidence navigation
+
+| Identity | Meaning | Scope | Artifact role |
+|---|---|---|---|
+| EXEC.RUN_ID | Enclosing ATT run. | Run. | Run root, summary and report. |
+| EXEC.ID | Current Case/Debug/Load execution. | Execution. | Key for logs/evidence when a workspace exists. |
+| EXEC.OUTPUT_DIR | Workspace path associated with EXEC.ID. | Execution. | Physical Run/Debug workspace or planned lazy Load workspace. |
+
+Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. In Load, EXEC.OUTPUT_DIR and CASE.outputDirectory remain at output/load/<RUN_ID>/executions/<EXEC.ID>/ throughout the iteration. When retained, a copy of its artifacts is also stored under samples/<EXEC.ID>/ or failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory after the scheduler releases their temporary workspace. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
+
+DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler counters in expressions; pass business variation through EXEC.INPUT.
+
+### Optional lookup and compatibility
+
+${path} is strict. ${path?} returns null for an allowed missing map/list path; it does not make malformed syntax or illegal scope access valid. Legacy CASE, RUN and ACTIONS aliases remain only where they map one-to-one to canonical data. New Templates should use EXEC and META.
 
 ## 04 Execution Modes
 
@@ -468,313 +397,93 @@ Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does 
 
 ### 4.3 Load Mode
 
-ATT Load executes Template, Flow or Tool targets through a bounded load-run lifecycle. `att-load/v1.0` remains the single-target compatibility contract; `att-load/v1.1` adds multiple independently paced workloads in one run.
+ATT 3.6.0 accepts att-load/v1.2 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target and its pacing policy. ATT validates the scenario and all targets before a scheduler starts.
 
-#### Single-target compatibility (`att-load/v1.0`)
+#### Scenario shape
 
-```yaml
-schemaVersion: att-load/v1.0
-target: {type: template, id: V3_FLOW_EXAMPLE}
-inputs: {region: HK}
-load:
-  users: 20
-  duration: 5m
-execution:
-  thinkTime: 500ms
-thresholds:
-  errorRate: "< 1%"
-  p95: "< 800ms"
-```
-
-`target.type` is `template`, `flow`, or `tool`. Only Tool targets accept `target.arguments`. Scenario `inputs` become each iteration's `EXEC.INPUT`. Existing v1.0 scenarios continue through the original single-workload path.
-
-#### Live console progress
-
-`load` streams a start/configuration line, then bounded periodic counters, active work, throughput, and mean latency. Failures, errors, timeouts, and dropped arrivals are reported immediately with rate limiting; successful iterations are never printed one by one. `--quiet` keeps only the final summary and errors. `--format json` keeps JSON on stdout and sends live progress to stderr. The final `load-summary` and report remain authoritative.
-
-#### Multi-workload contract (`att-load/v1.1`)
-
-A v1.1 scenario owns one or more named `workloads`. Each workload has a stable `id`, one fixed target, optional inputs/Tool arguments, its own load settings, and optional workload thresholds.
-
-Independent arrival-rate example:
-
-```yaml
-schemaVersion: att-load/v1.1
+~~~yaml
+schemaVersion: att-load/v1.2
 workloads:
   - id: payment
-    target: {type: template, id: PAYMENT}
+    target: {type: template, id: PAYMENT_INVOKE}
+    inputs: {region: HK}
     load:
-      arrivalRate: 80/s
-      duration: 10m
-      maxConcurrent: 200
-      overloadPolicy: drop
+      users: 20
+      warmup: 10s
+      rampUp: 5s
+      duration: 1m
+      rampDown: 5s
+    execution:
+      thinkTime: 500ms
     thresholds:
       p95: "< 800ms"
       errorRate: "< 1%"
-
-  - id: balance
-    target: {type: template, id: BALANCE_INQUIRY}
-    load:
-      arrivalRate: 20/s
-      duration: 10m
-      maxConcurrent: 100
-      overloadPolicy: drop
-
-  - id: customer
-    target: {type: flow, id: CUSTOMER_LOOKUP}
-    load:
-      arrivalRate: 5/s
-      duration: 10m
-      maxConcurrent: 30
-      overloadPolicy: drop
-
 thresholds:
-  errorRate: "< 0.5%"
-  minThroughput: ">= 100/s"
-```
+  minThroughput: ">= 10/s"
+evidence:
+  mode: failures
+  resources:
+    output: none
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
+~~~
 
-These are three independent arrival generators, not one 105/s generator randomly choosing targets. PAYMENT remains paced at 80/s, BALANCE at 20/s and CUSTOMER at 5/s; each workload owns its own `maxConcurrent` and drop behavior.
-
-Closed-VU pool example:
-
-```yaml
-schemaVersion: att-load/v1.1
-seed: 12345
-workloads:
-  - id: payment
-    target: {type: template, id: PAYMENT}
-    load:
-      users: 60
-      duration: 10m
-    execution:
-      thinkTime:
-        min: 300ms
-        max: 1s
-
-  - id: balance
-    target: {type: template, id: BALANCE_INQUIRY}
-    load:
-      users: 30
-      duration: 10m
-    execution:
-      thinkTime: 500ms
-
-  - id: enquiry
-    target: {type: flow, id: CUSTOMER_ENQUIRY}
-    load:
-      users: 10
-      duration: 10m
-```
-
-Here 60 VUs always execute PAYMENT, 30 always execute BALANCE and 10 always execute ENQUIRY. This is **not** transaction mix: one VU does not switch targets during the run. Transaction-mix selection is a separate feature.
-
-#### v1.1 lifecycle and validation
-
-All workloads in one v1.1 run must use the same scheduler model: either all `arrivalRate` or all `users`. Mixed open/closed workload models are rejected. All workloads must also use the same `warmup`, `rampUp`, `duration` and `rampDown` envelope. This gives all child schedulers one common monotonic T0 and aligned phase windows.
-
-Before scheduling starts, ATT resolves and validates **every** workload target and dependency. If any workload is invalid, no workload begins execution. Workloads share the same run-scoped DB/MQ resource layer so they contend realistically for configured pools, while mutable iteration Context and output remain isolated.
-
-For v1.1, retained `DIAG.load` evidence additionally exposes `workloadId`, `targetType`, and `targetId`. Closed pools retain stable `userId`. Because separate pools may each contain `VU-1`, the durable virtual-user identity is `(workloadId, userId)`. Scheduler diagnostics are not expression Context.
-
-The former expression path `EXEC.LOAD` is no longer public; existing templates that reference it must move business inputs to `EXEC.INPUT` and inspect retained scheduler evidence outside expressions.
+A target accepts template, flow or tool; Tool targets may provide named arguments. Workload inputs become EXEC.INPUT for each iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
 
 #### Workload models
 
-**Closed VU** uses positive `load.users`. One virtual user repeatedly runs its workload's fixed target and waits for completion before its next iteration. `execution.thinkTime` applies between completed iterations.
+Closed workloads use positive load.users. Each stable virtual user repeatedly executes its target and observes execution.thinkTime before starting the next iteration. thinkTime may be a duration or a {min, max} range.
 
-**Fixed arrival rate** uses `load.arrivalRate` plus positive `maxConcurrent` and `overloadPolicy: drop`. It has no persistent VU identity. Arrivals that cannot start because the workload's concurrency limit is full are recorded as `dropped`; they are not queued and are not counted as SUT errors. Arrival-rate workloads reject `execution.thinkTime`.
+Arrival-rate workloads use load.arrivalRate, positive load.maxConcurrent and overloadPolicy: drop. They schedule against absolute due times. Arrivals beyond maxConcurrent are recorded as generator drops; they are not queued or counted as SUT errors. Arrival-rate workloads have no persistent USER_ID and cannot configure thinkTime.
 
-`duration` is required. Optional `warmup`, `rampUp`, and `rampDown` define phases; `DIAG.load.phase` evidence identifies `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. Warm-up traffic executes but is excluded from measured threshold aggregates.
+duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
 
-#### Closed-VU think time and deterministic randomization
+#### Load identity and output layout
 
-The fixed-duration form remains valid:
+Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Runtime and Context Model](reference/03_runtime_context.md) for field availability and function restrictions.
 
-```yaml
-execution:
-  thinkTime: 500ms
-```
+Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
-Closed VUs may alternatively use a uniform range:
-
-```yaml
-execution:
-  thinkTime:
-    min: 500ms
-    max: 2s
-```
-
-Both endpoints use ATT integer duration syntax (`ms`, `s`, `m`, `h`), are inclusive after millisecond normalization, and `max >= min` is required. A new delay is sampled after each completed iteration. Sleep is clipped to the remaining load envelope and excluded from response latency.
-
-Optional top-level `seed` supplies the run seed; otherwise ATT derives one from `runId`. Each v1.1 closed VU uses a deterministic stream derived from run seed + workload identity + `USER_ID`, preventing cross-workload/shared-RNG coupling. The report-safe summary records the effective seed for randomized think-time runs; individual sampled delays are not durably retained.
-
-Checked-in offline examples are `examples/load/multi-arrival.yaml` and `examples/load/multi-closed.yaml`.
-
-#### CLI overrides
-
-Explicit CLI values continue to replace corresponding v1.0 scenario values:
-
-`--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, `--overload-policy`.
-
-For a v1.1 scenario containing **more than one workload**, these unscoped load-model overrides are ambiguous and are rejected before execution; YAML is authoritative for each workload. A single-workload v1.1 scenario may still use them. `--think-time <duration>` remains fixed-only; range overrides are not encoded into an ad-hoc CLI string.
-
-#### Metrics, thresholds and evidence
-
-A v1.1 report contains both aggregate and per-workload metrics. Aggregate counters and rates combine raw workload events. Aggregate latency percentiles are calculated from the aggregate latency collector; ATT never computes overall P95/P99 by averaging workload percentiles.
-
-Workload thresholds live inside each workload; top-level v1.1 thresholds apply to the aggregate run. Any workload-threshold or global-threshold failure makes the run `FAIL`/exit `1`. A runtime/infrastructure error in any workload makes the run `ERROR`/exit `3`.
-
-Supported thresholds include `errorRate`, `p95`, `p99`, `minThroughput`, `droppedRate`, and `achievedArrivalRate`, subject to workload-model compatibility.
-
-Evidence policy remains run-scoped. For v1.1, retained artifacts are partitioned by workload where applicable. Each retained sample/failure record and its summary link identify the workload, target type and ID, iteration ID, and (for closed users) user ID:
-
-```text
-output/load/<runId>/
+~~~text
+output/load/<RUN_ID>/
 ├── load-summary.json
 ├── load-summary.yaml
 ├── report/index.html
-├── samples/<workloadId>/...
-├── failures/<workloadId>/...
-└── performance.json   # with --profile
-```
+├── executions/<EXEC.ID>/
+│   ├── case.log
+│   └── action outputs written under EXEC.OUTPUT_DIR
+├── failures/<EXEC.ID>/case.log
+├── failures/<EXEC.ID>/case.yaml
+├── samples/<EXEC.ID>/case.log
+└── samples/<EXEC.ID>/case.yaml
+~~~
 
-DB/MQ resource diagnostics remain aggregate/run-scoped. Successful iteration workspaces are not retained by default.
+A metrics-only iteration still has EXEC.ID but does not create a per-iteration execution directory unless an operation writes an artifact or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains the logical planned path at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Helper resource-output formatting is deferred until retention; explicit Tool evidence collectors still execute because they are author-requested diagnostic operations.
 
-#### Outputs and exit codes
+#### Evidence and resource output
 
-`--profile` measures ATT generator/runtime overhead; it is not a target-host CPU/memory benchmark. Load exit codes are `0` PASS, `1` threshold failure, `2` invalid scenario/configuration/target, and `3` runtime/infrastructure error.
+evidence.mode accepts metrics, failures, samples or all; the default is failures. sampleRate and maxSamples bound retained evidence. Dropped arrivals do not create iteration evidence.
 
-Load execution identity and evidence-only scheduler diagnostics are defined centrally in Chapter 3; artifact schemas and report details are in Chapter 11.
+evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, Render DocumentValue and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
 
-#### Evidence retention guide
+#### Reports, metrics and thresholds
 
-Evidence policy is a run-scoped choice. It controls which completed iteration records and workspaces are retained; it does not change scheduling, pacing, VU identity, `maxConcurrent`, overload/drop behavior, think time, threshold aggregation, or measured latency.
+ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
-| `mode` | Successful iterations | Failed iterations | Typical use |
-|---|---|---|---|
-| `metrics` | none | none | Pure performance measurement with the lowest evidence I/O |
-| `failures` | none | full | Normal SIT/UAT load testing; the recommended default |
-| `samples` | sampled | full | Representative successes plus every failure |
-| `all` | full | full | Troubleshooting and short, controlled tests only |
+Top-level thresholds apply to the aggregate run; workload thresholds apply to one workload. Threshold failure returns FAIL/exit 1. Invalid config/target returns exit 2; runtime/infrastructure errors return ERROR/exit 3. Generator drops are not SUT errors.
 
-The default is `failures`. It keeps actionable failures while avoiding a Case workspace and evidence file for every successful iteration. `all` is intentionally opt-in: it can materially increase generator disk and I/O usage.
+#### CLI and examples
 
-Each mode can be copied directly into a scenario:
+For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
-```yaml
-evidence:
-  mode: metrics
-```
+~~~sh
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
+./att.sh load examples/load/multi-closed.yaml
+./att.sh load examples/load/multi-arrival.yaml
+~~~
 
-```yaml
-evidence:
-  mode: failures
-  maxSamples: 100
-```
-
-```yaml
-evidence:
-  mode: samples
-  sampleRate: 0.02
-  maxSamples: 500
-```
-
-```yaml
-evidence:
-  mode: all
-```
-
-The explicit equivalent of full retention is:
-
-```yaml
-# This explicit form is available in att-load/v1.1.
-evidence:
-  success: full
-  failure: full
-```
-
-##### Field semantics and precedence
-
-`mode` supplies the default policy. Explicit `success` and `failure` fields override their corresponding mode-derived value independently; the framework default is `mode: failures` when `evidence` is omitted.
-
-| Field | Values/default | Semantics |
-|---|---|---|
-| `mode` | `metrics`, `failures`, `samples`, `all`; default `failures` | Selects the success/failure policy shown above. |
-| `success` | `none`, `sample`, `full`; omitted means mode-derived | `sample` is the only success policy affected by `sampleRate`; `full` retains every eligible completed success. Explicit `full` requires `att-load/v1.1`; the frozen v1.0 schema accepts `mode: all` but rejects this field value. |
-| `failure` | `none`, `full`; omitted means mode-derived | `full` retains eligible completed failures independently of success sampling. |
-| `sampleRate` | `0` to `1`; default `0.01` only for `success: sample` | Fraction used for deterministic success sampling. It is ignored, and resolved to `0`, for `none` and `full`. |
-| `maxSamples` | Integer `>= 0`; default `1000` for bounded policies | One cap over all retained completed success and failure records. `0` retains none. An explicit value applies to `all` too. |
-
-`mode: all` and `success: full` have no implicit retention cap. Therefore `all` retains every completed success and failure unless `maxSamples` is explicitly configured. For example, `mode: all` with `maxSamples: 1000` is “all eligible records up to the configured cap”, not unlimited retention. Dropped arrivals are scheduler events, not completed iterations, and never create retained iteration evidence.
-
-`maxSamples` is enforced atomically across retained records and in-flight success reservations. A success whose eligibility is known from its iteration ID may reserve a slot before execution. Failure quota is claimed only after the completed status is known, then the deferred log/context is materialized. This prevents an in-flight success or an unsampled iteration from starving a later eligible failure while still bounding retained workspace/evidence overhead to the configured cap. A completion is retained only when its claim, policy, and materialized evidence all agree.
-
-##### Retained artifacts and sizing
-
-The aggregate result and retained records are separate concerns:
-
-```text
-output/load/<runId>/
-├── load-summary.json
-├── load-summary.yaml
-├── report/index.html
-├── samples/<workloadId>/...     # retained successful iterations
-├── failures/<workloadId>/...    # retained failed iterations
-└── iterations/...               # temporary/retained Case workspaces when needed
-```
-
-`load-summary.json`, `load-summary.yaml`, the HTML report, and bounded metrics exist for every completed run. A retained evidence file is a link to an iteration workspace; it is not the aggregate latency/throughput metric. Successful workspaces are normally lazy and are materialized only when the evidence policy retains them. Failure workspaces are claimed and materialized after completion, so `mode: failures` cannot let successful in-flight work consume the failure slot or exceed the available cap when many failures finish concurrently. v1.0 uses the single-target `samples/` and `failures/` directories; v1.1 adds `<workloadId>` so records from separate targets cannot be confused.
-
-For a concrete estimate, `10 TPS × 5 minutes` produces about `3,000` scheduled iterations. With `success: sample` and `sampleRate: 0.02`, roughly `60` successful records are eligible before the retention cap. Failure records are evaluated independently by `failure`; they do not consume the success sample rate, although both kinds share the explicit total `maxSamples` cap.
-
-Use `metrics` for the lowest disk/IO overhead, `failures` for normal load tests, and `samples` when representative successful request context is needed. `all` does not alter scheduler semantics or measured latency, but without an explicit cap it can write one workspace and evidence record per completed iteration; avoid it for long, high-TPS, production-like tests unless the resulting disk and generator overhead are acceptable.
-
-##### Closed-VU and arrival-rate examples
-
-The same policy applies to both scheduler models:
-
-```yaml
-# Closed VU: stable userId is retained in each selected record.
-schemaVersion: att-load/v1.0
-target: {type: template, id: PAYMENT}
-load: {users: 20, duration: 5m}
-evidence: {mode: samples, sampleRate: 0.02, maxSamples: 500}
-```
-
-```yaml
-# Fixed arrival rate: dropped arrivals remain drops and create no evidence record.
-schemaVersion: att-load/v1.0
-target: {type: flow, id: PAYMENT_LOOKUP}
-load: {arrivalRate: 10/s, duration: 5m, maxConcurrent: 50, overloadPolicy: drop}
-evidence: {mode: all, maxSamples: 5000}
-```
-
-Evidence policy is evaluated once for the run. It does not turn arrival-rate work into a queue, add a VU identity, change closed-VU think time, change `maxConcurrent`, or turn a generator drop into a SUT error. In v1.1, the same run-scoped policy is applied to every workload and retained files are partitioned by workload ID.
-
-##### Troubleshooting
-
-- **Why are there no successful samples?** The policy may be `metrics`/`failures`, `success` may be `none`, `sampleRate` may be `0`, or the sampled successes may have reached `maxSamples`. Use `mode: samples` with a non-zero rate for bounded inspection.
-- **Why do I only see failures?** That is the intended `failures` default. Select `samples` or `all` when successful iteration evidence is required.
-- **Why did retained evidence stop after N records?** An explicit `maxSamples` is a total cap across retained success and failure records. An omitted cap defaults to `1000` for bounded policies; `all` has no implicit cap.
-- **Does `mode: all` really mean all?** Yes: all completed successful and failed iterations are eligible, unless an explicit `maxSamples` cap is configured. Dropped arrivals are not completed iterations.
-- **Does `sampleRate` affect failures?** No. It is consulted only for `success: sample`; failure retention follows `failure`.
-- **Why did a failure not get a workspace under `mode: failures`?** The shared cap may already be held by retained evidence or success reservations that were known to be eligible. Failure quota is claimed after completion, so successful in-flight work does not permanently consume it; a failure that finishes after the total cap is full is not retained.
-- **Do dropped arrivals create retained evidence?** No. They remain scheduler metrics/events and are excluded from retained iteration evidence.
-- **Where is one workload's evidence?** v1.0 uses `samples/` or `failures/`; v1.1 uses `samples/<workloadId>/` or `failures/<workloadId>/`. Follow the relative path in `load-summary.json` or the report.
-
-##### Migration note for `mode: all`
-
-Previous ATT behavior treated `mode: all` like sampled successes plus full failures, using the default success `sampleRate`. The corrected behavior is full successes plus full failures, with no implicit cap unless `maxSamples` is explicitly configured. Existing scenarios that used `mode: all` while relying on low success sampling may therefore create substantially more evidence; review disk budget and use `samples` when representative successes are sufficient.
-
-##### Schema migration for explicit full success
-
-The historical `att-load/v1.0` schema is frozen. Its `evidence.success` enum remains `none` or `sample`; `success: full` is intentionally rejected even though the runtime policy supports full success retention. A v1.0 scenario that needs full success evidence should keep `evidence: {mode: all}` or migrate to v1.1 by changing `schemaVersion` to `att-load/v1.1`, moving `target`, `inputs`, and `load` under one workload such as `workloads: [{id: default, ...}]`, and then using the explicit `success: full` field.
-
-#### MQ payload files in lazy Load workspaces
-
-An MQ `file` argument may use an absolute path to a regular file inside the ATT package. In Load mode this file is validated against the package root, so it works even when the current iteration workspace has not been materialized. ATT does not create an empty workspace merely to validate that project payload.
-
-Relative MQ payload paths remain Case-output scoped: `..` traversal is rejected, symlink payloads and symlink escapes are rejected, and the resolved file must be a safe regular file. A missing payload reports the payload path problem directly. These rules are local path validation and occur before MQ connect/open/put/get; they do not change queue configuration, response parsing, pacing, or evidence retention.
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../examples/load/README.md). Historical v1.0/v1.1 schemas are archived and are not accepted as active versions. Migrate to v1.2 workloads syntax; see [Migrations](reference/appendices/migrations.md).
 
 ## 05 Resources and Integrations
 
@@ -792,54 +501,47 @@ Resource IDs are logical contracts referenced by Templates/expressions or Tool g
 
 ### 5.1 Tool
 
-A Tool is a named external or framework-native capability. A Tool declares exactly one backend: **command-backed** or **call-backed**. Current config and Tool Group schemas use `result.format`; the legacy Tool `output` field is rejected by the current schema.
+A Tool is a named external or framework-native capability. A descriptor selects exactly one backend: command or call.
 
 #### Command-backed Tool
 
-Command-backed Tools execute a configured argv contract locally or through configured SSH transport. Argv-list definitions preserve item boundaries; scalar command definitions are tokenized into the same internal argv model. ATT does not implicitly invoke a shell or expand wildcards for ordinary process-backed Tools. Stdout/stderr, exit code, timeout and process diagnostics are evidence; a non-zero process exit does not by itself define assertion PASS/FAIL unless the Action contract says so.
+A command Tool declares stdoutFormat to parse external stdout into the typed result:
 
-A command-backed Tool must declare `result.format: text|json|yaml|xml`. This Tool-level format selects how stdout is parsed into the typed primary `output.result` (for example, JSON stdout becomes a map); it is not a raw-byte mode. Bounded process preview and full streamed capture remain separate evidence.
-
-```yaml
+~~~yaml
 tools:
-  queryTool:
-    name: Query tool
-    description: Parse JSON stdout as a typed result
-    command: [./tools/query.sh]
-    result: {format: json}
+  queryOrder:
+    command: [./tools/query-order.sh]
+    stdoutFormat: json
     arguments: {}
-```
+~~~
 
-Use command-backed Tools for scripts, CLIs, SSH and third-party executables.
+stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses stdout once and publishes the typed value at output.result. It does not control human-readable logging or file output. Exit code, bounded stdout/stderr preview and streamed process artifacts remain evidence.
 
 #### Call-backed Tool
 
-Call-backed Tools execute typed framework-native calls without converting typed values into process strings. Supported calls include built-ins and primary DB, MQHelper, or HTTPHelper operations; call-backed MQ/HTTP operations must run as a `type: tool` Action's primary call. The call's native return type is preserved. Optional Tool-level `result.format` is only a preferred serialization format when Action output is written to a file or Case log; it never reparses or changes the native value. A call-backed Tool does not need `result.format` when no serialization default is needed.
+A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP operation. Its native typed return value is output.result. Call-backed descriptors do not declare stdoutFormat.
 
-```yaml
+~~~yaml
 tools:
-  requestPayment:
-    name: Request payment
-    description: Invoke the selected payment HTTP helper
-    call: "#{http.paymentApi.post(path='/v1/payments', body=${input.request})}"
-    result: {format: json}
+  queryOrder:
+    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
     arguments:
-      request:
-        name: Request
-        description: Typed request body
+      orderId:
+        name: Order ID
+        description: Order key
         required: true
-```
+~~~
 
-Both backends publish the same public Action envelope. The primary value is `${output.result}` while active and `${EXEC.ACTIONS.<id>.output.result}` after publication. Final operation evidence is under `output.evidence`; retries preserve per-attempt evidence under `output.attempts[n].evidence`.
+Tool invocation has no result.format/path/overwrite contract. File persistence is explicit to an API that defines it; human-readable presentation belongs to Log or configured evidence output. HTTP/MQ parsing is owned by those transport boundaries.
 
-The Action's optional `result.format` supports only `text|json|yaml|xml` and controls file/console serialization, not the in-memory result. `result.path` is optional; omitting it creates no artifact. `path: console` writes the serialized value to the Case log. Post-operation evidence collectors execute after the primary operation and before that attempt's assertion; collector failure policy does not replace the primary `result`.
+See [Actions and Typed Values](reference/14_actions.md) for Action result handling and [Operation Result and Evidence](reference/05_resources/operation_result.md) for typed results versus evidence.
 
 ### 5.2 DBHelper
 
-DBHelper is a first-class JDBC resource, configured independently from Tools. Each descriptor uses `schemaVersion: att-dbhelper/v2.5` and a stable logical `id`; global `dbhelpers` references descriptor files.
+DBHelper is a first-class JDBC resource, configured independently from Tools. Each descriptor uses `schemaVersion: att-dbhelper/v2.6` and a stable logical `id`; global `dbhelpers` references descriptor files.
 
 ```yaml
-schemaVersion: att-dbhelper/v2.5
+schemaVersion: att-dbhelper/v2.6
 id: orders
 driverClass: oracle.jdbc.OracleDriver
 url: ${ENV:ORDERS_DB_URL}
@@ -880,404 +582,112 @@ DBHelper owns connection/statement limits, query timeout and transaction behavio
 
 ### 5.3 MQHelper
 
-MQHelper is a first-class IBM MQ resource. Each descriptor uses `schemaVersion: att-mqhelper/v1.0` or `att-mqhelper/v1.1`, with a stable logical `id`, connection topology and optional credentials. Global `mqhelpers` references descriptor files; environment profiles may select a different descriptor for the same logical ID. v1.0 remains the compatible single-instance form; v1.1 adds logical groups of physical instances.
-
-Primary calls are:
-
-```text
-#{mq.<id>.send(...)}
-#{mq.<id>.receive(...)}
-#{mq.<id>.request(...)}
-```
-
-Payloads are file-based so request bytes do not have to be duplicated into Context/evidence. `request` combines send and correlated receive behavior. Correlation identifiers, queue/operation metadata, timing and diagnostic information are evidence; credentials and payload bytes are not copied into evidence.
-
-Timeout behavior is operation-specific and remains distinct from assertion failure. MQ connection/pool lifecycle is framework-owned resource state, especially in Load mode; it is not exposed as a public `EXEC.MQ` tree.
-
-An Action `timeoutMs` takes precedence over the helper's default `requestReply.waitMs` and caps receive/request waits to the remaining Action deadline, recalculated immediately before each GET. A call-level `waitMs` takes precedence over the helper default but cannot extend that deadline. IBM MQ client calls are synchronous and cannot be forcibly interrupted by ATT; if connect/open/put/get returns after the deadline, ATT immediately records `MQ_TIMEOUT` and applies the configured retry policy. Tool Action retry is author-controlled for every MQ operation (`send`, `receive`, and `request`): ATT does not infer idempotency or suppress potentially mutating replays. Retrying `send` may enqueue duplicate messages; retrying `request` performs another PUT with a new MsgId and a new correlation cycle, and may replay the business operation. The package author owns replay/duplicate safety. Per-attempt timing and retry outcomes remain in Action evidence, including each request attempt's message/correlation IDs.
-
-ATT's default build does not require IBM MQ client classes. Runtime MQ use requires the IBM MQ client jar/profile documented by the package/release instructions. MQ operations feed the same Action result/evidence envelope as Tool and DB operations.
-
-
-#### Issue #59 configuration and public contract
-
-A complete descriptor can contain connection, message, requestReply, evidence, and pool fields:
+MQHelper is a logical IBM MQ resource with one or more physical instances. Current descriptors use att-mqhelper/v1.2. Connection settings, credentials, queue defaults and pool limits belong to the resource and are not exposed through META.
 
 ~~~yaml
-schemaVersion: att-mqhelper/v1.0
-id: ordersMq
-name: Orders MQ
-description: IBM MQ connection used by SIT/UAT order tests
-connection:
-  queueManager: QM1
-  host: 10.12.13.14
-  port: 1414
-  channel: CHANNEL
-  username: ${ENV:MQ_USERNAME}
-  password: ${ENV:MQ_PASSWORD}
-message:
-  charset: 1208
-  encoding: 273
-  format: ""
-  persistence: asQueue
-  expiry: -1
-  requestQueue: requestQ
-  replyQueue: replyQ
-requestReply: {waitMs: 40000}
-evidence: {payload: metadata}
-pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
-~~~
-
-username and password map to MQConstants.USER_ID_PROPERTY and PASSWORD_PROPERTY before constructing MQQueueManager. `evidence.payload` accepts `metadata` or `none`; `metadata` keeps only the policy marker in evidence, while `none` omits it. Environment credentials are secret and never enter evidence, logs, reports, or generated docs.
-
-`connection.transport` is configurable in v1.1 using `MQSeries Client`, `MQSeries`, or `MQSeries Bindings`; v1.1 instance values override `defaults.connection.transport`. The historical v1.0 schema does not accept this field, but its runtime default remains `MQSeries Client`. ATT passes the selected IBM MQ client constant as-is with `MQConstants.TRANSPORT_PROPERTY`; if the installed client lacks that transport constant, ATT reports the required constant and client dependency instead of substituting a numeric value.
-
-message.charset is an integer IBM MQ CCSID for MQMessage.characterSet, not a Java charset name. ccsid remains a compatibility alias and must equal charset when both are present. encoding maps to MQMessage.encoding. Empty message.format is valid and remains empty; named values MQSTR, MQFMT_STRING, MQHRF2, MQFMT_NONE, and NONE remain supported. persistence accepts asQueue/0, persistent/1, and notPersistent/nonPersistent/2. expiry -1 means MQEI_UNLIMITED; positive values use IBM MQ tenths-of-a-second units, not milliseconds.
-
-`message.requestQueue` and `message.replyQueue` are optional defaults for all matching operations: send/request use `requestQueue`; receive/request use `replyQueue`. For v1.1, ATT selects or resolves the requested physical instance first, materializes that instance's inherited `message` settings, then applies the call argument as the final override. Thus the effective order is explicit call argument > selected instance override > group default > runtime default (if defined) > point-of-use validation error. ATT never borrows a queue default from a different physical instance. If the effective queue is still absent, the call fails before connecting. Request payload files stay byte-preserving through MQMessage.write(byte[]). Only the request output queue uses `MQOO_BIND_NOT_FIXED`; send output uses ordinary `MQOO_OUTPUT`, and reply input uses shared input. ATT sets MQPMO_NEW_MSG_ID and correlates reply correlationId to the generated request MsgId with MQGMO_WAIT, MQMO_MATCH_CORREL_ID, and waitInterval from waitMs. ATT uses NO_SYNCPOINT for put/get and does not call legacy commit(). `encoding` is validated as a legal IBM MQ integer/decimal/float encoding combination before the descriptor is accepted.
-
-#### Common Action result
-
-MQ receive/request use the common Action `result` object; no MQ-specific resultType/replyType exists.
-
-~~~yaml
-result:
-  format: text
-  path: response.txt
-  overwrite: false
-~~~
-
-MQ reply bytes are decoded using the received CCSID when available, then parsed as the effective `responseFormat` (`text|json|yaml|xml`). v1.1 may configure `requestReply.responseFormat`; v1.0 does not accept this descriptor field and keeps the runtime default `text`. For `request`, precedence is call `responseFormat` > selected instance's inherited v1.1 `requestReply.responseFormat` > `text`; `receive` uses the same precedence. `send` rejects `responseFormat`. Action `result.format` remains serialization-only and never changes the resource response parser. A pathless `result` creates no file; `path: console` writes the selected serialization to the Case log and creates no `output.targetFiles` entry. No implicit `.reply.bin` is created. Overwrite/path safety follow the common Action rules.
-
-~~~yaml
-- id: requestXml
-  type: tool
-  call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: text}
-  assert: "${output.replyReceived} == true"
-
-- id: requestXmlSaved
-  type: tool
-  call: "#{mq.ordersMq.request(file='request.xml')}"
-  result: {format: text, path: responses/payment.txt, overwrite: false}
-
-- id: receiveReply
-  type: tool
-  call: "#{mq.ordersMq.receive(queue='replyQ', correlationId=${EXEC.ACTIONS.sendRequest.output.messageId}, waitMs=40000)}"
-  result: {format: json}
-~~~
-
-#### Output and validation
-
-`output.result` is the business payload (a charset-decoded String for MQ replies); MQ metadata is directly under `output`. Every operation publishes `mqHelper`, selected physical `instance`, `queueManager`, and `selectionStrategy`; v1.0 and single-instance helpers report `selectionStrategy: single`. send publishes sent, queue, bytes, messageId, correlationId, and leaves result null/absent. `send` does not produce a business payload and rejects Action `result`; `receive` and `request` support it. receive/request publish received or replyReceived, queue names, effective waitMs, messageId, replyMessageId, replyCorrelationId, byte counts, reply CCSID/encoding/format when supplied by MQ, completion/reason fields, and place the decoded payload only in `output.result`. A normal request satisfies `output.messageId == output.replyCorrelationId`. MQRC 2033 leaves result null and publishes received/replyReceived false plus reasonCode 2033, MQRC_NO_MSG_AVAILABLE, and the effective waitMs.
-
-Public MsgId/CorrelId values are lowercase hex, two characters per byte, no separators, with leading zeroes; a 24-byte ID is 48 characters. Transport payloads remain byte-preserving through the MQ client; the public typed reply value is a `String` decoded using the received MQMessage.characterSet/CCSID when available, with an explicit IBM MQ CCSID-to-Java charset resolver and configured charset as fallback. Unsupported CCSIDs fail clearly. Logs/reports serialize the typed result and never create an implicit file. Validation rejects unknown fields, conflicting charset/ccsid, invalid encoding/expiry/queues, unsupported result formats, and unsafe paths; a missing effective queue is rejected at the operation's point of use.
-
-#### Choosing an API
-
-All calls use the stable logical helper ID and named arguments. `file` is read as exact bytes from the Case output directory or package. The APIs differ in whether they wait for a reply and who owns correlation:
-
-| API | Primary use | Default queue(s) | Correlation |
-|---|---|---|---|
-| `send` | One-way producer; does not wait for a reply | `message.requestQueue` | None |
-| `receive` | Standalone consumer | `message.replyQueue` | Optional caller-supplied `correlationId`; omitted means no filter |
-| `request` | Request/reply in one operation | `message.requestQueue` + `message.replyQueue` | Automatic: reply `MQMD.CorrelId` matches request `MsgId` |
-
-For v1.1, ATT first selects or resolves the physical instance, then uses that instance's inherited effective queues. An explicit operation argument overrides that selected instance's setting. No other instance's queue is borrowed. An Action `timeoutMs` is the outer execution deadline; call-level `waitMs` overrides `requestReply.waitMs` but is capped by the remaining Action deadline. Tool Action retry is explicit for each API; ATT does not infer idempotency.
-
-#### `mq.<helper>.send(...)`
-
-Use `send` to put a file-backed message on a request/producer queue when the caller does not need a synchronous reply. The call completes after the PUT succeeds; it does not open or wait on a reply queue.
-
-| Argument | Type | Required? | Default / precedence | Description |
-|---|---|---:|---|---|
-| `file` | string/path | Yes | None | Payload file, read byte-for-byte from the Case output directory or package. |
-| `queue` | string | No when configured | Call `queue` > selected instance's `message.requestQueue` > validation error | Destination queue. |
-| `instance` | string | No | v1.0/single instance uses that instance; multi-instance uses configured selection strategy | Pin a v1.1 call to one physical instance. |
-
-The helper must provide an effective `message.requestQueue` if `queue` is omitted. Missing both is an actionable argument/configuration error before connecting. Result/evidence records `sent`, the resolved `queue`, byte count, `messageId`, and `correlationId`; send has no business reply, leaves `output.result` null/absent, and does not accept Action result persistence. `timeoutMs` bounds the Action; if retry is explicitly enabled, a repeated PUT may enqueue a duplicate, so the package author owns replay safety.
-
-Minimal send uses the helper default:
-
-~~~yaml
-message: {requestQueue: PAYMENT.REQUEST}
-~~~
-
-~~~text
-mq.payment.send(file='request.xml')
-~~~
-
-An explicit queue overrides the configured default:
-
-~~~text
-mq.payment.send(queue='PAYMENT.REQUEST.ALT', file='request.xml')
-~~~
-
-The payload may be generated earlier in the same Action sequence; `targetFiles[0]` is the rendered file path, not a hard-coded package filename:
-
-~~~yaml
-- id: renderRequest
-  type: render
-  payload: payload/request.xml
-  result: {format: text, path: generated/request.xml}
-- id: sendRendered
-  type: tool
-  call: "#{mq.payment.send(file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]})}"
-  assert: "${output.sent} == true"
-~~~
-
-For a v1.1 group, selecting an instance happens before that instance's queue fallback. In this descriptor fragment, the explicit `payment-b` call uses its own `PAYMENT.REQUEST.B`, not the group default:
-
-~~~yaml
-defaults:
-  message: {requestQueue: PAYMENT.REQUEST}
-instances:
-  - id: payment-a
-  - id: payment-b
-    message: {requestQueue: PAYMENT.REQUEST.B}
-selection: {strategy: roundRobin}
-~~~
-
-This call pins to `payment-b`; an explicit `queue` would override that instance value:
-
-~~~text
-mq.payment.send(file='request.xml', instance='payment-b')
-~~~
-
-#### `mq.<helper>.receive(...)`
-
-Use `receive` as a standalone consumer for a reply or independently produced message. It performs one MQGET using the effective wait and returns whether a message arrived.
-
-| Argument | Type | Required? | Default / precedence | Description |
-|---|---|---:|---|---|
-| `queue` | string | No when configured | Call `queue` > selected instance's `message.replyQueue` > validation error | Input/reply queue. |
-| `correlationId` | hex string | No | No default; omitted means no `MQMD.CorrelId` filter | When supplied, match this value against the incoming message's `MQMD.CorrelId`. |
-| `waitMs` | integer | No | Call value > `requestReply.waitMs`; capped by Action `timeoutMs` | Maximum MQGET wait in milliseconds. |
-| `instance` | string | No | v1.0/single instance uses that instance; multi-instance uses configured selection strategy | Pin a v1.1 call to one physical instance. |
-
-The helper must provide `message.replyQueue` when `queue` is omitted. `output`/evidence records the resolved `queue`, effective `waitMs`, `received`, message identifiers and safe MQ reason/completion metadata. A received reply is decoded using its CCSID into the native `String` at `output.result`. At the end of the wait, MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) is a completed no-message result—not an ATT/runtime error: `received` is false and `output.result` is null. An expired Action deadline instead reports `MQ_TIMEOUT`. Explicit Action retries may consume a later message, so retry is not automatic.
-
-Minimal receive uses the helper's reply queue; the wait can be tuned per call:
-
-~~~yaml
-message: {replyQueue: PAYMENT.REPLY}
-~~~
-
-~~~text
-mq.payment.receive()
-mq.payment.receive(waitMs=5000)
-~~~
-
-An explicit input queue overrides that default:
-
-~~~text
-mq.payment.receive(queue='PAYMENT.REPLY.ALT', waitMs=5000)
-~~~
-
-For v1.1, `instance` selects first and the selected instance's effective `message.replyQueue` is then used when `queue` is omitted:
-
-~~~text
-mq.payment.receive(waitMs=5000, instance='payment-b')
-~~~
-
-To wait for a particular request's reply, supply its correlation ID:
-
-~~~text
-mq.payment.receive(correlationId='414d5120...', waitMs=5000)
-~~~
-
-~~~text
-correlationId supplied  -> match incoming MQMD.CorrelId
-correlationId omitted   -> receive without correlation filtering
-~~~
-
-Uncorrelated receives are appropriate for independently addressed event, notification, or batch-result queues, and for a simple consumer that intentionally accepts the next message:
-
-~~~text
-mq.events.receive()                 # event queue
-mq.notifications.receive()          # notification queue
-mq.batchResults.receive(waitMs=1000) # bounded batch-result poll
-mq.validation.receive(queue='QA.CONSUMER')
-~~~
-
-Warning: a bare `receive()` on a shared reply queue can consume another caller's reply. Prefer `request(...)` for request/reply, or use `receive(correlationId=...)` when a standalone consumer must select one caller's reply.
-
-#### `mq.<helper>.request(...)`
-
-Use `request` when one operation must send a request and wait for its correlated reply. ATT owns the request/reply correlation lifecycle; callers do not pass `correlationId`.
-
-| Argument | Type | Required? | Default / precedence | Description |
-|---|---|---:|---|---|
-| `file` | string/path | Yes | None | Request payload file, read byte-for-byte. |
-| `requestQueue` | string | No when configured | Call value > selected instance's `message.requestQueue` > validation error | Request output queue. |
-| `replyQueue` | string | No when configured | Call value > selected instance's `message.replyQueue` > validation error | Reply input queue. |
-| `waitMs` | integer | No | Call value > `requestReply.waitMs`; capped by Action `timeoutMs` | Maximum reply wait in milliseconds. |
-| `instance` | string | No | v1.0/single instance uses that instance; multi-instance uses configured selection strategy | Pin both PUT and GET to one v1.1 physical instance. |
-
-Both effective queues must exist before connecting. Explicit queue arguments override the selected instance's settings. The normal lifecycle is:
-
-~~~text
-PUT request
-  -> obtain request MsgId
-  -> GET from the effective reply queue
-  -> match reply MQMD.CorrelId against that request MsgId
-~~~
-
-Result/evidence records the resolved queues, wait, request/reply identifiers, `replyReceived`, and safe MQ completion/reason information. For a received reply, `output.messageId == output.replyCorrelationId`; `output.result` is the CCSID-decoded native String. If no reply arrives before the effective wait, MQRC 2033 is a completed request with no reply (`replyReceived: false`, null result and reason 2033 / `MQRC_NO_MSG_AVAILABLE`), not an ATT/runtime error. If the Action deadline expires, ATT reports `MQ_TIMEOUT` instead. Action retry is opt-in; a retry sends another PUT with a new MsgId and can repeat the business operation.
-
-Minimal request uses both helper defaults:
-
-~~~yaml
-message: {requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
-~~~
-
-~~~text
-mq.payment.request(file='request.xml')
-~~~
-
-Both queues can be overridden together:
-
-~~~text
-mq.payment.request(requestQueue='PAYMENT.REQUEST.ALT', replyQueue='PAYMENT.REPLY.ALT', file='request.xml')
-~~~
-
-A call-level wait overrides the helper's `requestReply.waitMs` (but not the Action deadline):
-
-~~~text
-mq.payment.request(file='request.xml', waitMs=10000)
-~~~
-
-To pin the full request/reply cycle to a v1.1 instance:
-
-~~~text
-mq.payment.request(file='request.xml', instance='payment-b')
-~~~
-
-#### Issue #60 v1.1 logical groups and physical instances
-
-`att-mqhelper/v1.1` keeps one public logical helper id while declaring one or more physical connection instances. A v1.0 descriptor remains valid without changes. The v1.1 descriptor has group defaults and per-instance overrides for `connection`, `message`, `requestReply`, and `pool`:
-
-~~~yaml
-schemaVersion: att-mqhelper/v1.1
+schemaVersion: att-mqhelper/v1.2
 id: payment
 name: Payment MQ
-description: Payment MQ endpoints
+description: Payment request/reply queues
 defaults:
   connection:
     queueManager: QM1
-    host: mq.default.example
+    host: mq.example.internal
     port: 1414
     channel: APP.SVRCONN
-    username: ${ENV:MQ_USERNAME}
-    password: ${ENV:MQ_PASSWORD}
-  message: {charset: 1208, requestQueue: PAYMENT.REQUEST, replyQueue: PAYMENT.REPLY}
-  requestReply: {waitMs: 40000}
-  pool: {maxSize: 20, minIdle: 2, borrowTimeout: 2s}
+  message:
+    requestQueue: PAYMENT.REQUEST
+    replyQueue: PAYMENT.REPLY
+  requestReply:
+    waitMs: 5000
+    responseFormat: xml
+  pool:
+    maxSize: 20
 instances:
-  - id: payment-a
-    connection: {host: mq-a.example}
-  - id: payment-b
-    connection: {host: mq-b.example}
-    message: {replyQueue: PAYMENT.REPLY.B}
-selection: {strategy: roundRobin}
-evidence: {payload: none}
+  - id: primary
+evidence:
+  payload: none
+  output:
+    format: text
+    maxChars: 10000
 ~~~
 
-Each physical instance is materialized into an immutable effective configuration before an invocation. For every section the precedence is invocation override, instance override, group default, runtime default, then validation error. Effective `queueManager`, `host`, `port`, and `channel` are required; username/password are optional and are never emitted as evidence.
+A Tool Action calls mq.<id>.send, mq.<id>.receive or mq.<id>.request as its primary operation. MQ reply bytes are decoded using received CCSID metadata when available, then parsed by responseFormat (text/json/yaml/xml). The parsed typed value is output.result. responseFormat owns ingress parsing; Log.format and evidence.output.format only control presentation.
 
-The public call remains logical:
+#### Sending represented and abstract values
 
-~~~text
-#{mq.payment.send(queue='PAYMENT.REQUEST', file='request.bin')}
-#{mq.payment.request(file='request.bin', instance='payment-b')}
-#{mq.payment.receive(queue='PAYMENT.REPLY', instance='payment-a')}
+Render output is a DocumentValue and can be passed directly as payload:
+
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+send:
+  type: tool
+  call: "#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}"
 ~~~
 
-A single-instance v1.1 group uses that instance directly. A group with multiple instances must declare `selection.strategy: random` or `roundRobin`; selection occurs once per MQ invocation, before connecting, so a `request` PUT and correlated GET always use the same physical instance. An explicit `instance` call argument selects that physical id and is rejected when it is unknown. Each physical instance has an isolated pool; pool identity is logical id plus physical id.
+ATT encodes the exact rendered text using the configured MQ charset/CCSID. It does not parse and reserialize the document. Do not supply requestFormat for DocumentValue. The document format does not set MQMD.Format; MQ transport metadata remains resource-owned.
 
-Output and evidence retain the logical helper id and expose the selected physical instance. Evidence also records the applicable strategy, queue manager, operation, queue names, MsgId/CorrelId, and safe connection metadata. With `evidence.payload: none`, the payload policy marker is omitted; credentials and payload bytes are never included. Validation rejects duplicate physical ids, unknown inherited fields, missing effective connection fields, invalid strategies or overrides, and invalid effective message/requestReply/pool values.
+A Map/List is an abstract structured value and requires requestFormat (text/json/yaml/xml), for example payload=${EXEC.INPUT.request}, requestFormat=json. DocumentValue + requestFormat and String + requestFormat are rejected. payload and file are mutually exclusive. file remains available for explicit raw file input; Render does not create a file or targetFiles.
 
-`output.selectionStrategy` identifies the configured group policy (`single`, `random`, or `roundRobin`), not the selection source for an individual invocation. When a call explicitly supplies `instance`, that policy value remains unchanged and `output.instance` identifies the physical instance actually selected.
+#### Evidence, response parsing and Load
 
-#### Payload paths in Load mode
+MQ evidence may contain bounded transport metadata such as helper/instance identity, operation, safe queue names, message IDs, CCSID, byte counts, response format, duration and failure classification. Payload capture is controlled by evidence.payload; human-readable result snapshots are separately controlled by evidence.output. Load can disable resource snapshots with evidence.resources.output: none; otherwise formatting is deferred until the iteration is retained. Typed result and response parsing do not change.
 
-`file` accepts an absolute path only when its resolved regular file is inside the ATT package root. This is useful for a Flow or Template that uses a checked-in request payload, for example:
+Call-level responseFormat may override requestReply.responseFormat for receive/request; send does not parse a reply. Instance selection and pool limits belong to the descriptor. Historical v1.0/v1.1 schemas are archived; migrate descriptors to v1.2 before validation.
 
-~~~text
-#{mq.toeaimq.request(file='/fpp/att/templates/flows/mqtest/BOC060032.xml')}
-~~~
-
-Load iteration workspaces are intentionally lazy. An absolute package payload is validated against the package root and therefore does not require the current `output/load/<runId>/iterations/<iterationId>/` directory to exist. ATT does not create one empty iteration directory per successful iteration merely to validate this file. The payload is validated before MQ connect/open/put/get, so a failure at this point is a local path-safety error, not an IBM MQ transport, queue, or response-parse error.
-
-Relative paths keep the Case-output contract: ATT resolves them below the current Case output directory, rejects `..` traversal, rejects payload symlinks and symlink escapes, and requires a safe regular file. Absolute files outside the package and genuinely missing files are rejected; the diagnostic names the payload problem rather than exposing an unrelated lazy-workspace `NoSuchFileException`.
-
-For troubleshooting, first check whether the `file` value is absolute or relative, then check the resolved file and the relevant root. Do not pre-create every Load workspace as a workaround. Use `evidence: {mode: failures}` or `metrics` according to the evidence guide when the test should avoid retaining successful iteration artifacts.
+See [Actions and Typed Values](reference/14_actions.md) for the shared DocumentValue and typed-result contract.
 
 ### 5.5 HTTPHelper
 
-HTTPHelper is a first-class, environment-bound HTTP resource. A Template or Flow calls a stable logical ID; the selected `att-config/v2.9` profile supplies the physical endpoint. Unlike a command-backed curl Tool, HTTPHelper owns a bounded, reusable client, native response decoding and HTTP metadata.
+HTTPHelper is an environment-bound HTTP resource. The selected config profile binds a stable logical helper ID to its base URL. Descriptors use att-httphelper/v1.1.
 
-```yaml
-# config/config.yaml
-schemaVersion: att-config/v2.9
-environment: SIT
-environments:
-  SIT: {httphelpers: [config/httphelpers/sit/payment.yaml]}
-  UAT: {httphelpers: [config/httphelpers/uat/payment.yaml]}
-```
-
-Both descriptor files use `id: paymentApi`; only environment-owned values such as `baseUrl`, credentials or trust material differ. A root `httphelpers` list is inherited when a profile omits its own list; a profile list replaces it in full. IDs and paths must be unique (IDs case-insensitively), safe and package-contained. Validate each selected environment before execution.
-
-```yaml
-schemaVersion: att-httphelper/v1.0
-id: paymentApi
+~~~yaml
+schemaVersion: att-httphelper/v1.1
+id: payment
 name: Payment API
 description: Payment service
-baseUrl: https://sit-payments.example.internal
+baseUrl: https://payments.example.internal
 defaults:
-  headers: {Accept: application/json, X-Channel: ATT}
+  responseFormat: auto
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
-  responseFormat: auto
   followRedirects: false
-pool:
-  maxConnections: 50
-  maxConnectionsPerRoute: 20
-  connectionRequestTimeoutMs: 5000
-  keepAliveMs: 30000
-  idleEvictMs: 60000
-auth:
-  type: bearer
-  token: ${ENV:PAYMENT_API_TOKEN}
-tls:
-  verifyHostname: true
-```
+evidence:
+  output:
+    format: json
+    maxChars: 10000
+~~~
 
-The [schema](../schemas/att-httphelper-v1.0.schema.json) rejects unknown fields and unsafe values. `baseUrl` must be absolute HTTP/HTTPS without embedded credentials, query or fragment. Path resolution uses standard URI resolution: `/v1/orders` starts at the origin root, whereas `v1/orders` resolves against the configured base path. Absolute per-call URLs, protocol-relative paths, and paths with a literal query/fragment are rejected. Pass an encoded `query` map instead; query values are omitted from recorded URLs.
+Call http.<id>.get/post/request as the primary call of a type: tool Action. Response bytes are parsed at this boundary using call responseFormat, the helper default, or Content-Type when auto is selected. Supported response formats are auto, text, json, yaml and xml. The parsed native value is output.result. Optional evidence.output is a bounded human-readable snapshot and never changes that value.
 
-Use `#{http.<id>.request(method='POST', path='/v1/orders', ...)}` or convenience `get`, `post`, `put`, `patch`, `delete`, `head`, `options`. Calls must be the primary call of a `type: tool` Action. Arguments are named: `method` (only for `request`), `path`, `query`, `headers`, `body`, `file`, `contentType`, `responseFormat`, `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs`, and `followRedirects`. `responseFormat` accepts `auto|text|json|yaml|xml` and applies to every HTTP method; the call overrides `defaults.responseFormat`, whose default is `auto`. Header names compare case-insensitively; call headers override helper defaults. `file` reads exact bytes from a safe Case output or package path; relative file paths start at the Case output directory. `body` accepts bytes, text or a typed value serialized as UTF-8 JSON. `body` and `file` are exclusive; GET and HEAD reject both. Content type may be overridden per call. No implicit cookie session is shared across Cases.
+#### Request bodies and DocumentValue
 
-```yaml
-actions:
-  createPayment:
-    type: tool
-    call: >-
-      #{http.paymentApi.post(path='/v1/payments',
-        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
-        contentType='application/json')}
-    result: {format: json, path: responses/payment.json}
-    assert: "${output.statusCode} == 201"
-```
+A Render Action returns a DocumentValue containing format and authoritative rendered text. Pass it directly as body:
 
-`responseFormat: auto` preserves Content-Type-based detection (including `HTTP_FORMAT` for unsupported `application/octet-stream`); explicit formats override Content-Type. JSON/YAML/XML responses use ATT's typed parsers, and `text` returns decoded text. A malformed explicit/auto structured body fails as `HTTP_RESULT_PARSE_ERROR`, distinct from transport/protocol failure. Metadata and evidence record both effective `responseFormat` and `resolvedResponseFormat`. The common Action formats are only `text`, `json`, `yaml`, and `xml`; `result.format` controls serialization to `result.path` or `path: console` and never reparses or mutates `output.result`.
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+sendRequest:
+  type: tool
+  call: "#{http.payment.post(path='/v1/payments', body=${EXEC.ACTIONS.renderRequest.output.result})}"
+~~~
 
-HTTP metadata is directly under `output`: `httpHelper`, `method`, safe `url` (without query), `statusCode`, `reasonPhrase`, `contentType`, `requestBytes`, `responseBytes`, and multi-valued `headers`. Public response-header keys are normalized to lowercase so case-sensitive Context paths are stable; repeated values remain lists. Only secret-bearing response headers and values matching configured credentials or values from secret-bearing request headers are redacted. Ordinary values that happen to match `Accept` or another non-secret request header remain visible. Request headers, query values, auth secrets and payloads are not recorded in HTTP evidence.
+HTTP sends the exact DocumentValue text to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a DocumentValue with requestFormat.
 
-A received 4xx/5xx is a completed exchange, so assertions may deliberately expect 404 or 500. Transport/configuration/format failures make the Action `ERROR` with an HTTP-specific error type; an assertion mismatch is `FAIL`. Evidence contains helper ID, method, safe URL, byte counts, status when received, duration and any error/redirect count. The existing Action attempt list retains retries. HTTPHelper never retries statuses automatically. `retry.retryOn: [TIMEOUT]` can replay a request after an HTTP or pool-borrow timeout; `ASSERTION` can replay after a failed assertion. Authors must assess side effects for **every** method, including GET/PUT—POST/PATCH/DELETE may create duplicate work.
+A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. DocumentValue + requestFormat and String + requestFormat are rejected. body and file are mutually exclusive; file is explicit raw file input supported by the HTTP call. Render creates no result file and has no targetFiles.
 
-The Action timeout is the overall deadline; pool-borrow, connect and read timeouts use the smaller of call override, helper default and remaining Action time. Late responses are still timeouts. Each helper client has a thread-safe Apache HTTP connection pool bounded by `maxConnections` and `maxConnectionsPerRoute`; pool waits have an HTTP-specific timeout. Idle connections are evicted before reuse and the run/load resource owner closes the pool once. TLS certificate and hostname verification are on by default and cannot be disabled by the descriptor. Optional `tls.trustStore` is a safe package-relative Java trust store path, with optional `${ENV:...}` path/password; no mutual TLS in v1.0. `auth.type` is `none`, `basic` (`username`, `password`) or `bearer` (`token`); `${ENV:NAME}` resolves secrets without logging values. Redirects are off by default; if enabled, at most five redirects are followed and cross-origin redirects are rejected to prevent credential forwarding.
+DocumentValue.format does not override resource-owned HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
 
-Existing command-backed curl/script Tools remain supported. To migrate a common curl call, move the endpoint and credentials to the selected HTTPHelper descriptor, keep a stable logical ID in the Template, replace curl argv with `http.<id>.<method>(...)`, and select the response representation via the common Action `result` field.
+#### Failure and evidence
+
+Transport/protocol and response-parse failures are operational errors. A received 4xx/5xx is a completed response and can be asserted through statusCode. HTTP evidence may include helper ID, method, safe URL, response status, content type, byte counts, response format and duration. Credentials and payloads are not implicitly stored. Load can set evidence.resources.output: none to skip optional resource-output formatting, or defer it until the iteration evidence is retained.
+
+See [Actions and Typed Values](reference/14_actions.md) for the shared DocumentValue and typed-result contract.
 
 ### 5.4 SSHHelper: logical SSH targets
 
@@ -1297,11 +707,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.9`. The logical SSH binding was introduced in config/group v2.7; current packages use config v2.9 and Tool Group v2.8. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.10`. Current packages use config v2.10 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool or Action:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.9
+schemaVersion: att-config/v2.10
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -1325,7 +735,7 @@ instances:
 
 ```yaml
 # config/tools/application.yaml
-schemaVersion: att-tool-group/v2.8
+schemaVersion: att-tool-group/v2.9
 id: app
 name: Application tools
 description: Remote application inspection
@@ -1340,7 +750,7 @@ tools:
     result: {format: text}
 ```
 
-The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. Existing inline global SSH and v2.6/v2.2 group files remain readable; the logical form requires v2.7 or later. Current Tool Groups use v2.8 and command-backed Tools require `result.format` (`text|json|yaml|xml`); legacy `output: txt` migrates to `result: {format: text}`. There is no Action- or per-call strategy override.
+The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools cannot use SSH. The active Tool Group schema is v2.9. Command-backed Tools declare stdout parsing with `stdoutFormat` (`text|json|yaml|xml`); call-backed Tools preserve their native result type. Superseded config and group schemas are migration references only. SSH routing details are not published as `META.SSHHELPER`; see [Runtime Context](reference/03_runtime_context.md) for the public META inventory and the reason. There is no Action- or per-call strategy override.
 
 Strategy precedence is group override then helper default. One instance works without a strategy (`single`); multiple instances require one. `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **`all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in the SSH diagnostics chapter.
 
@@ -1350,316 +760,124 @@ Environment-supplied identity paths are redacted from argv, transport stderr (in
 
 Migration: leave direct SSH unchanged if one physical target suffices. To migrate, move its host/user/port/key into a helper descriptor, bind that descriptor per environment, upgrade the group to v2.7, replace physical `ssh` with `ssh: {helper: application}`, and validate each environment. Actions stay unchanged. Inventory discovery, per-Action host override, distributed transactions, cross-host failover and orchestration are out of scope.
 
-### 5.5 Common Operation Result and Evidence
+### 5.5 Operation Result and Evidence
 
-Tool, DB and MQ executors converge at one operation boundary before the Template runner applies Action lifecycle, assertions and retry policy.
+ATT keeps an operation's logical result separate from execution evidence:
 
-```text
-operation
-├── result
-├── evidence
-├── executionSuccess
-├── diagnostic
-└── timing
-       |
-       v
-Action output
-├── status / success
-├── durationMs
-├── result          # final/winning primary operation
-├── diagnostic
-├── evidence        # final operation evidence
-└── attempts[]      # retry history + per-attempt evidence
-```
+~~~text
+Operation
+├── result       # native typed value
+└── evidence     # bounded execution/transport metadata
+~~~
 
-`result` is business/operation data. `evidence` is supporting execution data. `diagnostic` explains an operational failure. `status` is the Action-level classification after operation outcome and assertion handling. These are intentionally different concepts.
+The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. Render returns DocumentValue as described in [Actions and Typed Values](reference/14_actions.md).
 
-Retries never publish multiple competing top-level results: only the final/winning primary operation is top-level. Each attempt retains its own evidence and collector results in `attempts[n]`. Connection pools, JDBC transaction objects, MQ sessions and process handles are internal lifecycle state and must not be treated as Context.
+Resource evidence can include low-cost metadata. A helper may also configure an optional human-readable snapshot:
+
+~~~yaml
+evidence:
+  output:
+    format: json
+    maxChars: 10000
+~~~
+
+Evidence output supports json, yaml, xml, text and sqlplus. It is presentation only; it does not mutate or replace output.result. Secret-bearing values are filtered or omitted.
+
+Load scenarios may set evidence.resources.output to inherit (default) or none. none skips optional resource-output formatting/materialization. inherit defers formatting until a success sample or failure receives a retention slot. Metrics-only iterations do not serialize resource output or create an evidence workspace. Transport parsing and Render representation are unchanged.
 
 ## 06 Environment and Test Data
 
-Environment selection changes resource binding, not Action logic.
+Environment selection changes resource bindings, not Action logic.
 
 ### Environment profiles
 
-`att-config/v2.7` may declare an `environment` default and an `environments` map. `--config` selects the base configuration file; `--env` selects one named binding inside that configuration. Explicit `--env` wins over the configured default. Unknown environments fail before external execution. Existing v2.6 profiles remain readable for DB/MQ-only packages.
+`att-config/v2.10` defines the current `environment` default and `environments` map. `--config` selects the shared configuration file; `--env` selects one profile and overrides the configured default. Matching is case-insensitive. Unknown profiles fail before external execution.
 
-Profiles are typed shallow bindings, not generic recursive YAML inheritance. Current profile-owned lists are `dbhelpers`, `mqhelpers` and `sshhelpers`: when a profile supplies one of those lists it replaces that resource list; an omitted list inherits the common root list.
+Profiles are typed shallow bindings, not generic recursive YAML inheritance. The profile may replace each configured `dbhelpers`, `mqhelpers`, `sshhelpers`, or `httphelpers` list as a whole; an omitted list inherits the common root list.
 
 ```yaml
+schemaVersion: att-config/v2.10
 environment: SIT
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
     sshhelpers: [config/sshhelpers/sit/application.yaml]
+    httphelpers: [config/httphelpers/sit/payment.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
     sshhelpers: [config/sshhelpers/uat/application.yaml]
+    httphelpers: [config/httphelpers/uat/payment.yaml]
 ```
 
-The descriptor in every environment should expose the same stable logical IDs (`orders`, `payment`, `application`, etc.). Template/Flow/Action references and Tool-group helper bindings therefore remain unchanged across SIT/UAT/PREPROD. See the [SSHHelper chapter](../docs/reference/05_resources/sshhelper.md) for complete examples and fan-out safety.
+Each environment should expose the same stable logical IDs (`orders`, `payment`, `application`, etc.). Templates, Flows, Actions, and Tool-group bindings then remain unchanged across SIT/UAT/PREPROD. SSH endpoint details are intentionally not published as `META.SSHHELPER`; see the [SSHHelper chapter](reference/05_resources/sshhelper.md) and [Runtime Context inventory](reference/03_runtime_context.md).
 
 ### Topology and secrets
 
-Topology may vary by descriptor/environment. Secrets should be injected through `${ENV:NAME}` where the descriptor supports it and must not be committed or surfaced in effective metadata/diagnostics. Missing required environment variables are validation/configuration errors that identify the field/variable name without printing a resolved secret.
+Topology may vary by descriptor and environment. Inject secrets through `${ENV:NAME}` where supported; never commit them or expose resolved values in META, reports or diagnostics. Missing required variables identify the field/name without printing the secret.
 
 ### Cross-mode consistency
 
-Run, Validate, Debug and Load resolve the environment through the same effective-config step before their mode-specific work. `--env` therefore cannot be used as Action branching and does not create mode-specific helper IDs.
+Run, Validate, Debug, and Load resolve the selected environment through the same effective configuration. `--env` is not Action branching and does not create mode-specific helper IDs.
 
-### Migration from separate configs
+### Separate configuration files
 
-Existing separate `--config config/environments/sit.yaml` / `uat.yaml` workflows remain useful when whole configurations genuinely differ. Profiles are preferable when the package contract is common and only typed DB/MQ/SSH bindings vary. Separate configs remain preferable for materially different package policy, roots, Tool topology or configuration ownership.
+Separate `--config config/environments/sit.yaml` and `uat.yaml` files remain useful when package roots, report policy, Tool topology, or other configuration intentionally differ. Use profiles when the package contract is shared and only resource bindings change.
 
 ### Test data extension point
 
-Workbook/sidecar/snapshot remains the current Testcase data contract. Future logical environment-bound fixtures (#38) belong in this chapter and should follow the same stable logical-name principle rather than introducing environment branches into Actions.
+Workbook/sidecar/snapshot remains the Testcase data contract. Environment-bound business inputs belong in `EXEC.INPUT`; environment selection belongs to configuration, not Action expressions.
 
 ## 07 Expressions and Built-ins
 
 ### Unified expression engine
 
-V3.4 uses one engine with two deliberately separate roles:
+ATT uses one expression engine for runtime Templates, Flows, Actions and Tool calls:
 
-- `${path}` reads one Context value and interpolates it into surrounding text, for example `Reference=${EXEC.VARS.SrcRefNo}`.
-- `#{expression}` evaluates one typed expression block. The block may contain Context operands, calls, list literals, parentheses, unary operators, arithmetic, comparisons, `like`, `in`, null tests, and boolean logic.
+- ${path} reads a Context value and interpolates it into surrounding text.
+- #{expression} evaluates a typed expression. It supports Context operands, built-in calls, list literals, parentheses, unary operators, arithmetic, comparisons, like, in, null checks and boolean logic.
 
-Context references remain explicit inside a block; write `${EXEC.INPUT.amount}`, never bare `CASE.amount`. Append `?` to make the entire reference optional, for example `${EXEC.INPUT.response.body.missing?}`. If any map, list, root-owned Context value, or intermediate segment is missing, the result is the real `null`; an existing final `null` also remains `null`. `${path}` remains strict. Optional lookup does not suppress ambiguity, malformed syntax, or invalid traversal such as indexing a scalar, so those authoring errors still fail. Exact blocks preserve their Java result type, while a block embedded in surrounding text is converted to text.
+A complete expression preserves its value type. For example, an exact #{...} may return a number, boolean, map, list or DocumentValue. Embedding an expression in surrounding text produces a String. Use canonical EXEC and META paths; optional lookup uses a trailing question mark.
 
-```yaml
-assert: "#{${EXEC.INPUT.response.body.missing?} is null}"
-actual: "#{nvl(${EXEC.INPUT.response.body.missing?}, 'not supplied')}"
-description: "status=${EXEC.INPUT.response.body.status?}; fallback=#{coalesce(${EXEC.INPUT.response.body.missing?}, 'N/A')}"
-```
+~~~yaml
+assert: "#{${EXEC.INPUT.amount} > 0}"
+description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
+~~~
 
-```yaml
-assert: >-
-  #{(${EXEC.INPUT.amount} * ${EXEC.INPUT.rate}) >= 100
-    and ${EXEC.INPUT.status} in ['PENDING', 'POSTED']}
-description: "Reference length: #{length(${EXEC.VARS.SrcRefNo})}"
-expression: "#{${EXEC.ACTIONS.query.output.result.rowCount} + 1}"
-```
+Use the expression form supported by each field. Render content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/14_actions.md).
 
-Operator precedence from highest to lowest is:
+### Load execution ID initialization
 
-1. parentheses, literals, `${...}`, lists, and calls;
-2. unary `+`, unary `-`, and `not`;
-3. `*` and `/`;
-4. `+` and `-`;
-5. `== != > >= < <=`, `like`, `in`, and `is [not] null`;
-6. `and`;
-7. `or`.
+ATT does not define a separate non-runtime/configuration expression language. Load execution.execIdFormat uses the same ${...} / #{...} engine, evaluated once during iteration initialization. Its accessible values are limited by lifecycle: EXEC.RUN_ID, timestamps, EXEC.INPUT, stable EXEC.LOAD identity, and META branches already initialized.
 
-Arithmetic operands must be numeric and division by zero is an error. `in` requires a List, array, or Iterable right operand; a literal list such as `['A', 'B']` and a typed Context list such as `${EXEC.INPUT.allowedStatuses}` are valid. The legacy non-block assertion grammar also accepts literal-list `in`, but arithmetic and typed list membership should use `#{...}`.
+EXEC.ID/EXEC.OUTPUT_DIR are not yet available because the ID determines the workspace. EXEC.ACTIONS and invocation-scoped Flow/Tool/DB/MQ/HTTP metadata are absent. Arrival-rate has no EXEC.LOAD.USER_ID. Only deterministic side-effect-free built-ins are allowed; external calls, seq.next(), random/clock/filesystem functions are rejected.
 
-Call arguments may themselves be any expression. Calls can be nested directly, for example `#{upper(trim(${EXEC.INPUT.name}))}`; the older nested-block spelling `#{upper(#{trim(${EXEC.INPUT.name})})}` remains accepted. Single/double ASCII quotes and paired typographic quotes delimit strings. Numeric, boolean, and null literals retain their types. Other unquoted tokens are literal strings unless they look like reserved Context paths or a visible scoped variable, in which case ATT requires `${...}`.
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
+~~~
 
-Context interpolation within surrounding text still uses `${...}`: write `prefix-${EXEC.INPUT.caseId}` or `#{concat('prefix-', ${EXEC.INPUT.caseId})}`. Unique-suffix lookup remains available only inside `${...}`, although canonical paths such as `${EXEC.VARS.SrcRefNo}` are preferred.
+For arrival-rate, omit USER_ID:
 
-For backward compatibility, an unquoted Tool-call argument shaped like `${directory}/file.name` remains text interpolation rather than numeric division. New numeric division such as `${EXEC.INPUT.amount}/2` remains arithmetic; quote path-like values in new configuration when practical.
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
+~~~
 
-The available values and callable capabilities still depend on the location's scope:
-
-| Expression-bearing location | `${...}` scope | Built-in `#{...}` | Configured Tool `#{...}` | DB `db.*` query | Evaluation point |
-|---|---|---:|---:|---:|---|
-| render payload content | Runtime Context | Yes | Yes | Yes | Before payload parsing/writing |
-| action `description` | Runtime Context including current `output` | Yes | Yes | Yes | After normal action completion |
-| action `assert` | Runtime Context including current `output` | Yes | Yes | Yes | After the action result is published locally |
-| assert-action `expected` | Runtime Context before current output | Yes | Yes | Yes | Before the assert action |
-| assert-action `actual` | Runtime Context including current `output` | Yes | Yes | Yes | After assertion evaluation |
-| log-action `message`, `file`, and `fields` values | Runtime Context before current output | Yes | Yes | Yes | Before reading/emitting the optional file |
-| assign-action `expression` | Runtime Context before current output | Yes | Yes | Yes, typed for an exact call | Before publishing `EXEC.VARS.<name>` |
-| Tool-action `call` | Runtime Context before current output | Yes, including as the primary call | Yes | Yes inside arguments | As the action's primary invocation |
-| Tool/DB-action `result.path` | Runtime Context before current output | Yes | Yes | Yes | Before the primary Tool/JDBC invocation |
-| DB-action `query/update.params` | Runtime Context before current output | Yes | Yes | Yes | Before primary JDBC binding |
-| DB-action `query/update.sql` or `sqlFile` content | Runtime Context before current output | Pure built-ins only | No | No | Before JDBC prepare |
-| `config.report.fileNamePattern` | `${suiteName}` | Yes | No | No | When writing the result workbook |
-| Tool-definition `command` tokens | declared Tool-input `${...}` aliases | Yes | No | No | When constructing logical argv |
-| Tool-definition `call` | declared typed `${input.*}` only | Pure built-ins | No configured Tool chaining | One primary DB query/scalar/update | When invoking the façade |
-
-For a `type: tool` action, the outer `call` may name either a configured Tool or an ATT built-in. A primary built-in runs in a bounded daemon executor and publishes its value at `${output.result}`; it has `exitCode: 0`, supports timeout, Action assertion/retry, and optional `result`, and records `type: builtin` attempt evidence without a `TOOL` process node, argv, stdout, or stderr. Built-ins, command-backed Tools, call-backed READ Tools, and direct read-only DB queries may be used inside ordinary Case-runtime expressions. A call-backed DB update is restricted to the primary call of a Tool Action. Configured Tool and DB calls remain unavailable in `fileNamePattern`, Tool `command`, and DB SQL-source rendering because those dedicated scopes cannot safely contain hidden or recursive external execution.
-
-```yaml
-normalizeReference:
-  type: tool
-  call: "#{upper(${EXEC.INPUT.reference})}"
-  result:
-    path: "normalized-reference.txt"
-    format: text
-  assert: "${output.result} == 'PAY-001'"
-```
-
-`#{...}` is not restricted to text replacement. An exact block retains its typed result and is evaluated before the Action consumes it. Therefore both of these are valid:
-
-```yaml
-assert: "#{length(value=${EXEC.VARS.SrcRefNo})} <= 35"
-assert: "#{${EXEC.INPUT.status} in ${EXEC.INPUT.allowedStatuses}}"
-```
-
-The first block returns a Boolean directly; ATT does not stringify and reparse it. A configured Tool or DB query called from a Case-runtime field is a real external invocation and produces evidence; do not use either merely for formatting when a built-in or existing Context value is sufficient.
-
-### Runtime Context
-
-The execution-neutral Context has two canonical roots and one Action-local binding:
-
-```text
-EXEC
-├── ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR
-├── INPUT (TestCase data or debug sidecar input)
-├── VARS (typed variables shared by later stages/templates)
-└── ACTIONS (completed/published Action results)
-META
-├── PROJECT, SOURCE, TARGET
-├── TEMPLATE, FLOW
-└── TOOL, DBHELPER, MQHELPER (curated invocation metadata)
-output
-└── current Action/attempt-local result; unavailable outside that Action scope
-```
-
-`EXEC.ID` identifies the current execution unit and `EXEC.RUN_ID` its enclosing run. `EXEC.INPUT`, `EXEC.VARS`, and `EXEC.ACTIONS` are shared runtime concepts across all modes. The TestCase adapter overlays current Stage caller/input values onto `EXEC.INPUT` for the active Stage; Stage values win on collision and Case-level values are restored after the Stage. Framework-owned identity/input fields cannot be overwritten. Mode and scheduler state live in evidence-only `DIAG` and cannot be referenced through `${...}` or `#{...}`; in particular, `EXEC.MODE`, `EXEC.LOAD`, and `DIAG` are not expression APIs. Use `EXEC.INPUT` for business variation. There is intentionally no `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.OUTPUT`, `EXEC.CALL`, `EXEC.INVOCATION`, `EXEC.STAGE`, or `EXEC.STAGES`: helper/resource state remains internal, and Action result/evidence is consumed through local `output` while active and `EXEC.ACTIONS` after publication. Stage/Template status, timing, and history remain in result/evidence and legacy `CASE.STAGES`.
-
-### Load V1 Context (3.5.2)
-
-Each load iteration has an `EXEC.ID` unique across all workloads and virtual users in its ATT run; `EXEC.RUN_ID` is shared by the run. Iteration state (`EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, and local `output`) remains isolated. Scheduler-owned fields are retained only in `DIAG.load` evidence:
-
-| Path | Meaning |
-|---|---|
-| `DIAG.load.runId` | Enclosing load run identity. |
-| `DIAG.load.model` | `closed` or `arrivalRate`. |
-| `DIAG.load.userId` | Stable closed-model Virtual User identity; absent for arrival-rate. |
-| `DIAG.load.iterationId` | Scheduler iteration identity. |
-| `DIAG.load.iteration` | Scheduler sequence number. |
-| `DIAG.load.phase` | `WARMUP`, `RAMP_UP`, `STEADY`, or `RAMP_DOWN`. |
-
-Scenario `inputs` are copied only into `EXEC.INPUT.*`; reusable Templates, Flows, and Tools must use that canonical input tree, `EXEC.VARS.*`, `EXEC.ACTIONS.*`, and current `output.*`. `META.SOURCE` identifies the load scenario by type, scenario name, and path; scheduler identity stays in retained evidence and secrets are excluded. Root-level `LOAD.*`, `EXEC.OUTPUT`, `EXEC.CALL`, and `EXEC.INVOCATION` are not public load APIs. See [`examples/load/README.md`](../examples/load/README.md) for complete closed/arrival-rate configurations, CLI overrides, target forms, thresholds, evidence, and validation examples.
-
-`att load` validates the scenario and target before starting one of two schedulers. Closed mode keeps a stable Virtual User identity and waits for target completion before think time and the next iteration. Arrival-rate mode uses absolute planned due times; when `maxConcurrent` is full, the arrival is recorded as generator `dropped` work rather than queued or counted as a SUT failure. Both schedulers publish compact events to bounded-memory metrics, and both write isolated `output/load/<runId>/load-summary.json`, `load-summary.yaml`, and `report/index.html`. Warm-up is real traffic but is excluded from measured threshold aggregates by default. Successful iterations retain metrics only unless evidence sampling is configured; a bounded sampled success gets a physical iteration workspace with `case.log` and `case.yaml`, while a failure creates that workspace lazily when its diagnostic is retained. Evidence links are written below the load run's `samples/` or `failures/` directories and never enter ordinary functional-run artifacts.
-
-The shortest end-to-end smoke commands are:
-
-```sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
-```
-
-`examples/load/README.md` is the maintained copyable reference for Template, Flow, Tool, DB/MQ pool sizing, thresholds, evidence, CLI overrides, and invalid configurations. All six examples are schema- and dependency-validated by `LoadAcceptanceTest`; that test also launches the real `att.FrameworkRunner load` CLI for short closed and arrival-rate scenarios and checks the persisted JSON, YAML, and offline HTML report.
-
-### Load summary and HTML report contract
-
-`load-summary.json` and `load-summary.yaml` share the stable `att-load-summary/v1.0` contract. Root fields are `schemaVersion`, `status` (`PASS`, `FAIL`, or `ERROR`), `exitCode`, `runId`, `startedAt`, `endedAt`, `durationMs`, `scenario`, `timing`, `metrics`, `thresholds`, `resources`, optional `evidence`, and `report: report/index.html` relative to the run directory. The JSON schema is `schemas/att-load-summary-v1.0.schema.json`, registered in the schema catalog as `att-load-summary/v1.0`.
-
-The persisted `scenario` is a dedicated report-safe projection. It retains target type/id, workload and execution timing, threshold configuration, and evidence policy, but omits arbitrary business `inputs` and Tool `target.arguments` from JSON, YAML, and the HTML `window.ATT_LOAD_SUMMARY`. CI and offline tooling can therefore consume the summary without durable password, token, request-body, or other oversized payload values.
-
-`timing.phases` lists configured `WARMUP`, `RAMP_UP`, `STEADY`, and `RAMP_DOWN` start/end/duration windows. `metrics.phases` contains observed scheduled/started/completed/failure/drop counts, throughput, latency, scheduler lag, and concurrency aggregates per phase. Warm-up has `measured: false`: its traffic remains visible in the run history, but measured SLA aggregates exclude it. Other phases remain measured. A phase with no events still appears in `timing.phases`, so empty and edge runs have a stable machine-readable shape.
-
-`resources.db` and `resources.mq` contain only bounded pool diagnostics such as pool size, active/idle, waiting, and timeout/acquisition counts; they never contain connections, queue handles, credentials, or other live objects. Pool saturation and acquisition timeouts are separate from SUT failures. `evidence.items[].path` points to retained evidence below `<runId>/samples/` or `<runId>/failures/`; the HTML report renders each path as a relative link.
-
-`report/index.html` is self-contained and can be opened offline. It shows run identity/status, closed or arrival-rate semantics, phase and warm-up separation, aggregate metrics, threshold diagnostics, resource diagnostics, retained evidence links, and bounded one-second time-series buckets. Arrival-rate reports explicitly distinguish configured arrival rate, achieved scheduling rate, completed TPS, and generator drops; drops are not SUT errors. The report links to the adjacent JSON/YAML summaries but does not embed raw per-iteration samples or secrets; `window.ATT_LOAD_SUMMARY` exposes the same bounded summary for offline tooling.
-
-`att load --profile` keeps the existing profiling contract and writes `performance.json` beside the load summary. It records load execution/report phases, bounded load counters, and the shared schema/Template/payload/process counters, so the documented self-overhead gate is reproducible without turning ATT into a target CPU or memory benchmark.
-
-The machine-readable `metrics` object reports configured load (`configuredUsers`, `configuredArrivalRatePerSecond`, `configuredMaxConcurrent`), iteration/scheduling counts (`iterations`, `scheduled`, `measuredScheduled`, `started`, `measuredStarted`, `completed`, `success`, `failure`, `runtimeError`, `dropped`, `measuredDropped`), concurrency (`activeVus`, `maxActiveVus`, `currentInFlight`, `maxInFlight`), measured-phase results (`warmupCompleted`, `measuredCompleted`, `sutErrorRate`, `runtimeErrorRate`, `droppedRate`, `completedThroughput`), latency percentiles (`p50Ms`, `p95Ms`, `p99Ms`), scheduler lag, and grouped `errorClassifications`. Percentiles use a bounded reservoir; `latencyMinMs`, `latencyMeanMs`, `latencyMaxMs`, and `latencyObservationCount` remain exact across all measured observations. Runtime errors are separate from SUT failures, and generator drops never increase `sutErrorRate`. The `buckets` map is sorted by one-second epoch-millisecond key; each bucket includes `model`, `phase`, configured rate/concurrency, completed TPS, p95/p99, SUT/drop rates, active/in-flight counts, scheduler lag, and error classifications. Latency storage is capped at 4096 global samples and 256 samples per bucket; time-series storage is capped at 4096 buckets and evicts the oldest bucket, so memory does not grow linearly with run duration or raw latency values.
-
-Load thresholds use the common `errorRate` (`%`), `p95`/`p99` (`ms`), and `minThroughput` (`/s` or `/m`) fields for both workload models. Arrival-rate scenarios additionally support `droppedRate` (`%`) and `achievedArrivalRate` (`%`, `/s`, or `/m`). For the percentage form, achieved arrival rate is measured `measuredStarted / measuredScheduled`; warm-up is excluded, while ramp-up, steady, and ramp-down remain part of the integrated measured schedule. The rate forms compare the actual average started rate over the full phase window; `/m` thresholds are normalized to per-second before comparison. Each threshold is reported independently with expected expression, formatted actual value, PASS/FAIL status, and failure diagnostic. The load result then uses exit code `0` for PASS, `1` for a completed run with failed SLA thresholds, `2` for validation/configuration failure, and `3` for load runtime/infrastructure error. `target.arguments` is valid only for Tool targets; Template and Flow targets reject it with a field-specific diagnostic.
-
-The release gate is deliberately reproducible rather than a SUT microbenchmark:
-
-```sh
-mvn -q -Dtest=LoadAcceptanceTest,LoadCrossModeTest,ClosedVuSchedulerTest,FixedArrivalRateSchedulerTest,LoadRuntimeTest,LoadScenarioTest,LoadReportTest,LoadDbPoolingTest,LoadMqPoolingTest,PooledMqHelperExecutorTest,PooledMqTransportFactoryTest test
-```
-
-It checks the CLI-to-report path for both schedulers, including deterministic arrival-rate cap/drop and configured-versus-achieved-versus-completed metrics; Context deep-copy and iteration isolation; lazy success/failure workspaces; bounded evidence and metric reservoirs; scheduler lag accounting; process/file artifact behavior; DB/MQ reuse, timeout, pool diagnostics, and cleanup; threshold PASS/FAIL; summary schema; report rendering; and compatibility of the existing run/debug/validation test suite. Load V1 does not claim distributed execution, Poisson/random pacing, weighted multi-scenario, rendezvous, adaptive pools, MQ handle pooling, XA/affinity, or target CPU/memory benchmarking.
-
-Common properties include:
-
-| Scope | Examples |
-|---|---|
-| EXEC.INPUT | TestCase columns, debug `case`/`inputs`, and stage input aliases |
-| EXEC.VARS | `assign` values; `CASE.VARS` remains a compatibility alias |
-| EXEC.ACTIONS | current Stage's completed/published Action results; cleared when the next Stage starts |
-| CASE.STAGES | persisted Stage/Template status, timing, and nested Action evidence; not a supported expression namespace |
-| META | safe project/source/target/component identity; never a config dump or credential store |
-| output | current Action result, assertion actual value, and final description inputs |
-| CASE / RUN / ACTIONS | generated legacy views of the canonical state; `ACTIONS` is current-scope only |
-| CASE.DB / TOOL / DB | existing finalization or transient framework scopes, kept separate from `EXEC` |
-
-Prefer canonical paths such as `${EXEC.INPUT.amount}`, `${EXEC.INPUT.channel}`, `${EXEC.VARS.txnSeq}`, `${EXEC.ACTIONS.callApi.output.result}`, and `${META.TARGET.id}`. Use `${output...}` only for the current Action and `${EXEC.ACTIONS.<id>...}` only for a completed Action in the current scope. Stage/Template/Flow history, including `${CASE.STAGES...}`, is persisted result/evidence data and is not a supported reusable expression path; direct reads produce `CONTEXT_CROSS_SCOPE`. Root `${TOOL...}` and `${DB...}` may remain only as internal or persisted historical/result compatibility views, not case-wide “latest invocation” APIs; general expressions using them produce `CONTEXT_LEGACY_PATH`. Tool and inline DB evidence is persisted below the containing Action with stable `<kind>.invocations[]` cardinality; Case-level DB finalization remains available through `${CASE.DB.<instance>}` after Case completion.
-
-The following aliases are required for existing packages. New authoring should use the right-hand canonical/local path; the left-hand forms belong in migration or compatibility material only:
-
-| Legacy path | Canonical/local path |
-|---|---|
-| `${CASE.<businessField>}` | `${EXEC.INPUT.<businessField>}` |
-| `${CASE.caseId}` / `${CASE.workbookId}` / `${CASE.groupId}` / `${CASE.rowCaseId}` | `${META.SOURCE.caseId}` / `${META.SOURCE.workbookId}` / `${META.SOURCE.groupId}` / `${META.SOURCE.rowCaseId}` |
-| `${CASE.VARS}` | `${EXEC.VARS}` |
-| `${ACTIONS}` | `${EXEC.ACTIONS}` |
-| `${RUN.id}` / `${RUN.runId}` | `${EXEC.ID}` |
-| `${CASE.outputDirectory}` | `${EXEC.OUTPUT_DIR}` |
-| `${CASE.status}` / `${CASE.durationMs}` / `${CASE.environment}` | Legacy lifecycle/result aliases; there is no corresponding canonical `EXEC` field |
-| `${CASE.STAGES.<stage>...}` | Legacy execution/evidence data only; direct expression use is rejected with `CONTEXT_CROSS_SCOPE` |
-| `${output.*}` | current Action-local `output.*` |
-
-For compatibility, a framework adapter may still write `${CASE.<businessField>}`; that write is applied to the same `EXEC.INPUT` map and does not create a second input store. New expressions should read the canonical path; only compatibility adapters should use the legacy write spelling. Framework-owned identity, lifecycle, `VARS`, `DB`, and Stage evidence fields remain protected.
-
-`META` is read-only to expressions and contains only curated safe metadata. Optional references such as `${EXEC.INPUT.maybeMissing?}` and `${output.response?}` use the same canonical/local resolver and return null only for missing values; malformed, ambiguous, or invalid traversal remains an error.
-
-V2.4.1 also accepts a case-sensitive path-segment suffix when it identifies exactly one currently readable logical Context path. For example, if `EXEC.INPUT.payment.response.resultCode` is the only readable path ending with those segments, `${payment.response.resultCode}`, `${response.resultCode}`, and `${resultCode}` resolve to the same value. Matching uses parsed map keys/list indexes, not a raw character suffix. Canonical and convenience aliases of the same logical node count once. If multiple logical paths match, ATT raises `ATT-CTX-002`, lists every canonical candidate in deterministic order, and requires a longer suffix or full path. Adding a conflicting node therefore makes an existing shorthand invalid rather than silently changing its target. Documentation continues to prefer canonical paths.
-
-`${EXEC.OUTPUT_DIR}` is a reserved, normalized absolute path and Case data cannot override it. `EXEC.VARS` and `CASE.DB` are likewise fixed framework-owned maps, so a sidecar `excel.dataColumns` alias or any other Case-root alias cannot be named `VARS` or `DB`. All three nodes exist before the first stage; `CASE.DB` remains empty until Case transaction finalization publishes used-instance outcomes. During a Stage, its caller/input values are adapted into `EXEC.INPUT` and do not create an `EXEC.TOOL`, `EXEC.DB`, `EXEC.MQ`, `EXEC.STAGE`, or `EXEC.STAGES` node. Stage status, timing, and historical selector values remain below legacy `CASE.STAGES.<stage>` evidence. During execution `outputDirectory` is already the final `<outputDirectory>/<RunID>/<CaseID>` directory, so live evidence and persisted paths are identical. Validation preserves the output-directory placeholder because no runtime Run directory exists yet.
-
-Map properties use dot navigation and lists use zero-based brackets:
-
-```text
-${EXEC.INPUT.amount}
-${EXEC.INPUT.channel}
-${EXEC.ACTIONS.callApi.output.result.items[0].status}
-```
-
-Dot notation navigates simple map keys. Lists accept bracket or numeric-dot indexes, so `${EXEC.INPUT.items[0].status}` and `${EXEC.INPUT.items.0.status}` are equivalent. Indexes are zero-based. Map keys containing dots, spaces, braces, or colons use quoted brackets, for example `${EXEC.INPUT.response['{urn:payment}Status'].text}`.
-
-#### Example: reference stage-selector data from an XML payload
-
-Suppose the Excel selector cell for stage `invoke` contains this YAML flow map:
-
-```yaml
-{name: templateName, debitAccount: "012123456", InstrAmt: "100.00"}
-```
-
-Flow-map entries use commas, not semicolons. Every selector-map key is adapted into the current Stage's `EXEC.INPUT`, so the canonical XML payload reference is:
-
-```xml
-<InstrAmt>${EXEC.INPUT.InstrAmt}</InstrAmt>
-```
-
-The old `CASE.STAGES` path remains available in persisted execution evidence and migration material only; it is not readable from a Template/Flow expression. When no other currently readable logical path creates a suffix conflict, the following forms resolve to the same current Stage input value:
-
-| Expression | Meaning | Stability |
-|---|---|---|
-| `${EXEC.INPUT.InstrAmt}` | Canonical current-Stage input | Preferred; explicit and stable |
-| `${EXEC.INPUT.InstrAmt}` | Canonical current-Stage input | Preferred; explicit and stable |
-| `${invoke.InstrAmt}` | Unique current-input suffix | Valid only while unique; migrate to canonical form |
-| `${InstrAmt}` | One-segment suffix | May be ambiguous because the value is also in `EXEC.INPUT` |
-
-If another readable path also ends in `InstrAmt`, the shortest form raises `ATT-CTX-002` instead of choosing one silently. Lengthen the suffix or use the canonical path. Bracket notation for `CASE.STAGES` remains a report/evidence selector spelling only and is rejected when used as a runtime Context expression.
-
-`InstrAmt` is current Stage input at `${EXEC.INPUT.InstrAmt}`; it is not a direct child of `TEMPLATE`. `${TEMPLATE.InstrAmt}` is invalid unless an independently mapped value actually exists at the requested path. Quote XML lexical values such as account numbers and fixed-scale amounts in the selector YAML. This preserves the leading zero in `"012123456"` and the authored decimal representation `"100.00"`; unquoted YAML numeric values are typed numbers and do not promise to retain their original text formatting.
-
-Validation resolves available static values and preserves only values that are legitimately runtime-dependent. Runtime resolves every remaining reference at its defined execution point. Canonical `EXEC`/`META` roots and supported legacy aliases are traversed strictly; `CASE.STAGES` and cross-scope Action reads are rejected as incompatible scope references. References without an explicit root use the unique-suffix rule above; when validation can identify the canonical current-scope replacement, it emits `CONTEXT_LEGACY_PATH` and should be migrated. Tool definitions have a separate rule described below. An unknown Context path is never converted silently to empty text: `ATT-CTX-001` reports the exact `requestedPath`, deepest successfully reached `currentNode`, first `missingSegment`, and source location. `ATT-CTX-002` reports the requested shorthand and all candidate paths. Neither diagnostic dumps the complete Context tree, preventing large failed Action/Tool/DB structures from being copied repeatedly into logs and reports. A declared optional Case field whose actual value is blank remains a valid empty string. An Action may read only Case data, its local `output` where supported, and Action outputs that exist in its current scope; validation rejects current/future or cross-scope Action references.
+See [Runtime and Context Model](reference/03_runtime_context.md) for the full META inventory, lifecycle table and artifact-navigation layout. There is no general configuration-expression model in 3.6.0.
 
 ### `config.report.fileNamePattern`
 
 #### Context and legal forms
 
-`report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has one case-sensitive value reference:
+`report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has a dedicated configuration-local root, separate from EXEC:
 
 | Placeholder | Value |
 |---|---|
 | `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
 
-The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. Bare `suiteName` inside a call is rejected. Legal examples include:
+The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `suiteName` inside a call is rejected. Legal examples include:
 
 ```yaml
 report:
@@ -1678,27 +896,27 @@ For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/
 
 #### Illegal or unsupported forms
 
-These values fail configuration loading because they do not reference `suiteName`:
+These values fail configuration loading because they do not reference `${suiteName}`:
 
 ```yaml
 fileNamePattern: "result.xlsx"
-fileNamePattern: "${runId}.result.xlsx"
-fileNamePattern: "${workbookId}.result.xlsx"
+fileNamePattern: "${RUN_ID}.result.xlsx"
+fileNamePattern: "${WORKBOOK_ID}.result.xlsx"
 ```
 
-No other value reference or Runtime Context path is supported. Configured Tool calls are also unavailable in this scope. These forms are invalid:
+No other configuration root or Runtime Context path is supported. Configured Tool calls are also unavailable in this scope. These forms are invalid:
 
 ```text
-${runId}
-${workbookId}
-${environment}
+${RUN_ID}
+${WORKBOOK_ID}
+${ENVIRONMENT}
 ${EXEC.INPUT.caseId}
 ${EXEC.ID}
 #{configuredTool()}
-#{upper(${runId})}
+#{upper(${RUN_ID})}
 ```
 
-A pattern such as `${suiteName}-${runId}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
+A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
 ### Tool-definition `command` expressions
 
@@ -1708,9 +926,9 @@ A configured Tool `command` also has its own restricted Context. It may referenc
 
 | Form | Meaning |
 |---|---|
-| `${requestFile}` | Legacy shorthand; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
-| `${input.requestFile}` | Explicit Tool-input namespace |
-| `${TOOL.input.requestFile}` | Legacy full alias; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
+| `${requestText}` | Legacy shorthand; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
+| `${input.requestText}` | Explicit Tool-input namespace |
+| `${TOOL.input.requestText}` | Legacy full alias; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
 
 For example:
 
@@ -1721,11 +939,11 @@ tools:
     description: Invoke a rendered payment request
     command:
       - ./tools/invoke_payment_api.sh
-      - "${input.requestFile}"
+      - "${input.requestText}"
       - "${input.environment}"
-    result: {format: json}
+    stdoutFormat: json
     arguments:
-      requestFile:
+      requestText:
         name: Request File
         description: Rendered XML request path
         required: true
@@ -1740,10 +958,10 @@ The action call is the boundary between the general Runtime Context and this res
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}, environment=${EXEC.INPUT.environment})}"
+  call: "#{invokePaymentApi(requestText=${EXEC.ACTIONS.renderRequest.output.result}, environment=${EXEC.INPUT.environment})}"
 ```
 
-The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestFile` and `environment`. The command then substitutes `${input.requestFile}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestFile}` / `${environment}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
+The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
 
 Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
 
@@ -1751,17 +969,17 @@ Each command token also accepts built-in calls through the same expression engin
 command:
   - ./tools/invoke_payment_api.sh
   - "--environment=#{upper(${input.environment})}"
-  - "--label=#{concat('ATT-', #{lower(${input.requestFile})})}"
+  - "--label=#{concat('ATT-', #{lower(${input.requestText})})}"
 ```
 
-Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestFile}` is canonical; `${TOOL.input.requestFile}` and `${requestFile}` are deprecated compatible forms and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Bare `requestFile` or `input.requestFile` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
+Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestText}` is canonical; `${TOOL.input.requestText}` and `${requestText}` are deprecated compatible forms and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Bare `requestText` or `input.requestText` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
 
 A normal argument placeholder may occupy a complete argv token, which is preferred, or be embedded in fixed text:
 
 ```yaml
 command:
   - ./tools/invoke_payment_api.sh
-  - "--request=${input.requestFile}"
+  - "--request=${input.requestText}"
   - "--environment=${input.environment}"
 ```
 
@@ -1779,7 +997,7 @@ tools:
     name: Write audit
     description: Write one audit message for one source file
     command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
-    result: {format: yaml}
+    stdoutFormat: yaml
     arguments:
       message:
         name: Message
@@ -1799,7 +1017,7 @@ singleQuote:
   call: >-
     #{writeAudit(
         message="Customer O'Reilly",
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.INPUT.sourceFile}
     )}
 
 doubleQuote:
@@ -1807,7 +1025,7 @@ doubleQuote:
   call: >-
     #{writeAudit(
         message='status="READY"',
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.INPUT.sourceFile}
     )}
 
 mixedQuotesAndContext:
@@ -1815,7 +1033,7 @@ mixedQuotesAndContext:
   call: >-
     #{writeAudit(
         message="O'Reilly said \"READY\" for ${EXEC.INPUT.caseId}",
-        sourceFile=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+        sourceFile=${EXEC.INPUT.sourceFile}
     )}
 ```
 
@@ -1839,17 +1057,17 @@ Tool commands cannot directly read the general Runtime Context, use unique-suffi
 ```text
 ${EXEC.INPUT.environment}
 ${EXEC.ID}
-${EXEC.ACTIONS.renderRequest.output.targetFiles[0]}
+${EXEC.ID}
 ${STAGES.invoke.InstrAmt}
-${input['requestFile']}
-${TOOL.input['requestFile']}
-${requestFile.path}
+${input['requestText']}
+${TOOL.input['requestText']}
+${requestText.path}
 ```
 
 Configured Tool calls are not available inside `command`:
 
 ```text
-#{anotherConfiguredTool(value=${requestFile})}
+#{anotherConfiguredTool(value=${requestText})}
 ```
 
 This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a standalone global Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
@@ -1857,16 +1075,16 @@ This is rejected during configuration loading. Expanding one Tool's command cann
 If an argument declares a non-empty `argName`, its placeholder must appear exactly once and occupy one complete command token:
 
 ```yaml
-command: [./tools/invoke_payment_api.sh, "${input.requestFile}"]
+command: [./tools/invoke_payment_api.sh, "${input.requestText}"]
 arguments:
-  requestFile:
+  requestText:
     name: Request File
     description: Rendered XML request path
     required: true
     argName: --request
 ```
 
-ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${input.requestFile}` or a transformed form such as `#{str.upper(${input.requestFile})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
+ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${input.requestText}` or a transformed form such as `#{str.upper(${input.requestText})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
 
 ### Operators
 
@@ -1906,11 +1124,11 @@ Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`,
 | `date.systimestamp` | Return system-zone timestamp, optionally formatted | `#{date.systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
 | `date.format` | Format an ISO-8601 value | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `date.add` | Add a calendar/time amount | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `file.exists` | Test whether a regular file exists | `#{file.exists(${EXEC.INPUT.requestFile})}` |
+| `file.exists` | Test whether a regular file exists | `#{file.exists(${EXEC.INPUT.requestText})}` |
 | `file.directoryExists` | Test whether a directory exists | `#{file.directoryExists(${EXEC.OUTPUT_DIR})}` |
-| `file.size` | Return regular-file size in bytes | `#{file.size(${EXEC.INPUT.requestFile})}` |
+| `file.size` | Return regular-file size in bytes | `#{file.size(${EXEC.INPUT.requestText})}` |
 | `file.mkdirs` | Create a directory tree and return its absolute path | `#{file.mkdirs(${EXEC.INPUT.archiveDirectory})}` |
-| `file.copy` | Copy a regular file and return the target path | `#{file.copy(${EXEC.INPUT.requestFile}, ${EXEC.INPUT.backupFile}, true)}` |
+| `file.copy` | Copy a regular file and return the target path | `#{file.copy(${EXEC.INPUT.requestText}, ${EXEC.INPUT.backupFile}, true)}` |
 | `file.move` | Move a regular file and return the target path | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
 | `file.delete` | Delete a non-directory file | `#{file.delete(${EXEC.INPUT.temporaryFile}, true)}` |
 | `misc.string` | Convert a value to text | `#{misc.string(value=${EXEC.INPUT.amount})}` |
@@ -1954,7 +1172,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-`dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as direct DB Action `result.format: text` and has no JDBC, transaction, connection, or cache side effects.
+`dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as DB `output.result` text presentation and has no JDBC, transaction, connection, or cache side effects.
 
 `prettyPrint` accepts exactly one positional argument or named `value`. It formats Maps, Lists, Iterables, arrays, scalars, and null with two-space indentation. Linked and sorted Maps retain their iteration order; other Map keys are sorted by text. Strings are quoted and escaped, cycles and excessive depth are marked, output is bounded, and the source object is not modified.
 
@@ -1991,7 +1209,9 @@ Where retry is supported, one logical Action owns multiple attempts. Retry polic
 
 ### Evidence collectors
 
-Tool evidence collectors run after the primary operation and before that attempt's assertion. Collectors have independent timeout and `onFailure: continue|stop`. Collector output belongs to the attempt's evidence and never replaces the primary operation result.
+Tool evidence collectors run after the primary operation has published its typed `output.result` and before that attempt's assertion. While the Action is active, `${output.evidence.collectors.<id>.result}` and `${output.evidence.collectors.<id>.status}` are available; after publication the canonical paths are `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` and `.status`. Collectors have independent `timeoutMs` and `onFailure: continue|stop`. Collector output belongs to the attempt's evidence and never replaces or mutates the primary operation result.
+
+Collectors run once per primary attempt. The top-level collector node represents the final/winning attempt, while `output.attempts[n].evidence.collectors.<id>` retains each attempt. `continue` keeps the primary/assertion outcome visible when diagnostic collection fails; `stop` makes the collector failure an Action error. Use an ordinary Tool/Log/Assign Action when the collected value is business/test data rather than pre-assertion diagnostics.
 
 ### Transaction/resource lifecycle
 
@@ -2009,7 +1229,7 @@ Future fixture behavior (#38) and DB Action-level timeout/retry (#39) extend thi
 
 ## 09 Configuration Reference
 
-This chapter is the authoritative reading reference for author-authored configuration. The files below [`schemas/`](../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+This chapter is the authoritative reading reference for author-authored configuration. The files below [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 ### Configuration layers and precedence
 
@@ -2026,11 +1246,11 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment profiles in V3.5.2
+### Multi-environment profiles in V3.6.0
 
-`att-config/v2.8` extends the v2.7 profile model with `httphelpers`. Profiles replace each DB/MQ/SSH/HTTP descriptor list as a whole. See [HTTPHelper](../docs/reference/05_resources/httphelper.md) and [SSHHelper](../docs/reference/05_resources/sshhelper.md). The v2.6 examples below remain valid for existing DB/MQ-only packages.
+`att-config/v2.10` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper descriptor lists as a whole. See the resource chapters for each binding.
 
-ATT V3.5.2 selects an environment through one common `att-config/v2.6` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT 3.6.0 selects an environment through one common `att-config/v2.10` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2045,11 +1265,11 @@ config/
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer is deliberately limited to typed DB/MQ descriptor lists:
+The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists; the example below shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.6
+schemaVersion: att-config/v2.10
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2077,7 +1297,7 @@ actions:
   renderRequest:
     type: render
     payload: payment/request.json
-    result: {format: text, path: rendered/{filename}}
+    templateFormat: json
 
   queryOrder:
     type: db
@@ -2093,12 +1313,13 @@ actions:
       #{mq.payment.request(
         requestQueue='PAYMENT.REQUEST',
         replyQueue='PAYMENT.REPLY',
-        file=${EXEC.ACTIONS.renderRequest.output.targetFiles[0]},
+        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        responseFormat='xml',
         waitMs=5000
       )}
 ```
 
-`environment` is the default profile name. A case-insensitive `--env` selector overrides it. Each profile may replace `dbhelpers` and/or `mqhelpers` as a whole list; omitted lists inherit the common list. No generic recursive YAML merge is performed, and profile fields other than `dbhelpers` and `mqhelpers` are rejected. Unknown profile names fail before validation or external execution. Use the same package with every supported execution mode:
+`environment` is the default profile name. A case-insensitive `--env` selector overrides it. Each profile may replace configured resource descriptor lists as a whole; omitted lists inherit the common list. No generic recursive YAML merge is performed. Unknown profile names fail before validation or external execution. Use the same package with every supported execution mode:
 
 ```sh
 # SIT
@@ -2131,38 +1352,27 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-V3.4 adds post-invocation Tool evidence and the independent MQ helper schema. V3.5.3 advances the unified Tool result and Action contracts; the dbhelper schema remains V2.5.
+ATT 3.6.0 uses the active resource/configuration schemas below. The current JSON Schema definitions live in schemas/. Historical definitions live under schemas/history and do not enable active runtime compatibility.
 
-| Artifact | Schema identifier | Formal definition |
-|---|---|---|
-| Debug input | `att-debug/v1.0` | [att-debug-v1.0.schema.json](../schemas/att-debug-v1.0.schema.json) |
-| Global configuration | `att-config/v2.9` | [att-config-v2.9.schema.json](../schemas/att-config-v2.9.schema.json) |
-| Legacy global configuration (read compatibility) | `att-config/v2.1`–`v2.8` | [v2.8](../schemas/history/att-config-v2.8.schema.json), [v2.7](../schemas/history/att-config-v2.7.schema.json), [v2.5](../schemas/history/att-config-v2.5.schema.json) |
-| Dbhelper instance | `att-dbhelper/v2.5` | [att-dbhelper-v2.5.schema.json](../schemas/att-dbhelper-v2.5.schema.json) |
-| MQ helper descriptor | `att-mqhelper/v1.1` (current), `v1.0` (legacy) | [v1.1](../schemas/att-mqhelper-v1.1.schema.json), [v1.0](../schemas/history/att-mqhelper-v1.0.schema.json) |
-| HTTP helper descriptor | `att-httphelper/v1.0` | [att-httphelper-v1.0.schema.json](../schemas/att-httphelper-v1.0.schema.json) |
-| SSH helper descriptor | `att-sshhelper/v1.0` | [att-sshhelper-v1.0.schema.json](../schemas/att-sshhelper-v1.0.schema.json) |
-| Tool group | `att-tool-group/v2.8` | [att-tool-group-v2.8.schema.json](../schemas/att-tool-group-v2.8.schema.json) |
-| Legacy Tool group (read compatibility) | `att-tool-group/v2.2`, `v2.6`, `v2.7` | [v2.2](../schemas/history/att-tool-group-v2.2.schema.json), [v2.6](../schemas/history/att-tool-group-v2.6.schema.json), [v2.7](../schemas/history/att-tool-group-v2.7.schema.json) |
-| Workbook sidecar | `att-sidecar/v2.2` | [att-sidecar-v2.2.schema.json](../schemas/att-sidecar-v2.2.schema.json) |
-| Legacy workbook sidecar (without timeout) | `att-sidecar/v2.1` | [att-sidecar-v2.1.schema.json](../schemas/history/att-sidecar-v2.1.schema.json) |
-| Template descriptor | `att-template/v3.2` | [att-template-v3.2.schema.json](../schemas/att-template-v3.2.schema.json) |
-| Previous template descriptors | `att-template/v3.0`–`v3.1` | [v3.1](../schemas/history/att-template-v3.1.schema.json), [v3.0](../schemas/history/att-template-v3.0.schema.json) |
-| Flow descriptor | `att-flow/v3.2` | [att-flow-v3.2.schema.json](../schemas/att-flow-v3.2.schema.json) |
-| Previous Flow descriptors | `att-flow/v3.0`–`v3.1` | [v3.1](../schemas/history/att-flow-v3.1.schema.json), [v3.0](../schemas/history/att-flow-v3.0.schema.json) |
-| Legacy template descriptors (recognized for validation/migration) | `att-template/v2.6`, `att-template/v2.5`, `att-template/v2.3` | [v2.6](../schemas/history/att-template-v2.6.schema.json), [v2.5](../schemas/history/att-template-v2.5.schema.json) |
-| Run manifest | `att-run/v2.1` | [att-run-v2.1.schema.json](../schemas/att-run-v2.1.schema.json) |
-| Validation JSON | `att-validation/v2.1` | [att-validation-v2.1.schema.json](../schemas/att-validation-v2.1.schema.json) |
-| CI summary | `att-ci-summary/v2.1` | [att-ci-summary-v2.1.schema.json](../schemas/att-ci-summary-v2.1.schema.json) |
-| JUnit XML | XSD | [att-junit-v2.1.xsd](../schemas/att-junit-v2.1.xsd) |
-| Diagnostic codes | `att-diagnostic-catalog/v2.1` | [diagnostic-codes.yaml](../schemas/diagnostic-codes.yaml) |
+| Artifact | Active schema |
+|---|---|
+| Global configuration | att-config/v2.10 |
+| DBHelper | att-dbhelper/v2.6 |
+| MQHelper | att-mqhelper/v1.2 |
+| HTTPHelper | att-httphelper/v1.1 |
+| SSHHelper | att-sshhelper/v1.0 |
+| Tool group | att-tool-group/v2.9 |
+| Workbook sidecar | att-sidecar/v2.2 |
+| Template | att-template/v3.3 |
+| Flow | att-flow/v3.3 |
+| Load scenario | att-load/v1.2 |
 
-Current JSON Schemas live in `schemas/`; non-current schemas live only in `schemas/history/` and remain available for validation and migration guidance. `validate --package` checks every current and historical resource registered in the catalog, including schemas unused by package files. A registered resource that is missing, unreadable, unsafe, or duplicated is a hard package error; supported-schema validation is never silently skipped and schemas are never loaded from the process working directory. All JSON Schema files use Draft 2020-12. Schema-controlled objects reject unknown properties unless the schema explicitly permits `x-*`. Extensions are preserved metadata and have no execution meaning. Duplicate YAML keys, unsafe tags, wrong types, missing fields, invalid enums, and unsupported properties are errors.
+The schema catalog at schemas/catalog.yaml is authoritative. Package validation verifies catalog registrations; it does not make archived schema versions executable. Unsupported active schema versions fail with migration guidance.
 
 ### Global configuration
 
 ```yaml
-schemaVersion: att-config/v2.6
+schemaVersion: att-config/v2.10
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2194,7 +1404,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.9`; v2.1–v2.8 remain readable under their declared contracts. The example above intentionally shows v2.6. |
+| `schemaVersion` | required | Current: `att-config/v2.10`; older configuration versions are not active contracts. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2207,16 +1417,16 @@ environments:
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
-| `report.columns` | `{}` | Arbitrary string keys and string label values |
+| `report.columns` | `{}` | Supported keys: `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, `runTime`, `execId`; each value is a string column label |
 | `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
-| `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.5` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.0` or `att-mqhelper/v1.1` YAML paths; normalized duplicates are rejected |
-| `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths; v2.7 only |
-| `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.0` YAML paths; v2.8 only |
-| `environments` | absent | Non-empty map of profile names; v2.8 profiles may also contain `httphelpers` typed lists |
+| `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
+| `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
+| `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource descriptor lists |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -2237,15 +1447,15 @@ Allowed global object properties are:
 | `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` |
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
-| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; process Tools may use `output`, call-backed Tools may use `cache`; `x-*` |
+| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
 | call-backed `tools.<key>.cache` | required `scope: case|db` |
-| `arguments.<key>` | `name`, `description`, `required`, `argName`, `argNameMode`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, optional `argName`, `argNameMode`, `delimit`, `x-*` |
 
 V2.0 fields such as `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` are not V2.2 fields.
 
 ### Dbhelper configuration
 
-Each path in global `dbhelpers` resolves from the package root and contains one `att-dbhelper/v2.5` object:
+Each path in global `dbhelpers` resolves from the package root and contains one `att-dbhelper/v2.6` object:
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
@@ -2261,7 +1471,7 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 ### MQ helper configuration
 
-Each path in global `mqhelpers` resolves from the package root and contains one `att-mqhelper/v1.0` or `att-mqhelper/v1.1` object. v1.0 is a flat single-instance descriptor. v1.1 has `defaults`, a non-empty `instances[]` list, optional `selection.strategy` (`random` or `roundRobin` for multiple instances), and group-level `evidence`; each physical instance receives effective `connection`, `message`, `requestReply`, and `pool` values before execution. The detailed v1.1 model and invocation examples are maintained in the MQHelper resource module.
+Each path in global `mqhelpers` resolves from the package root and contains one active `att-mqhelper/v1.2` object. It defines the logical group, defaults, physical `instances[]`, selection, and evidence policy; each physical instance receives effective `connection`, `message`, `requestReply`, and `pool` values before execution. Optional `evidence.output` controls human-readable snapshots without changing typed `output.result`. See the [MQHelper resource module](reference/05_resources/mqhelper.md).
 
 | Object | Required/default | Allowed properties and constraints |
 |---|---|---|
@@ -2291,93 +1501,25 @@ Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` rejec
 
 ### Template and action
 
-| Object/type | Allowed/required contract |
-|---|---|
-| template root | `schemaVersion`, `name`, `description`, `actions`, `x-*`; schemaVersion, description, non-empty actions required |
-| action common | `type`, `description`, `onFailure`, plus only fields belonging to its selected type; action ID has no dot |
-| render | requires `payload` and `result.format`; optional `result.path`, `assert`; no `call`/expression/message/file/level/fields/timeout/retry/DB fields |
-| tool | requires `call`; optional object-shaped `result`, `assert`, `expected`, `actual`, `timeoutMs`, Action-only `retry`, and `evidence`; command/call-backed Tools share this contract |
-| db | requires `db` and exactly one `query`/`update`; selected block requires exactly one `sql`/`sqlFile` and either typed-list `params` or named `parameters`; optional `assert` and `result`; no `call`, retry, or Action timeout |
-| assert | requires `assert`; optional `expected`, `actual`; no expression/render/tool/log-only fields, timeout, or retry |
-| log | requires at least one of `message` or `file`; optional `level`, `fields`, `assert`; no render/tool/assert-action-only fields, timeout, or retry |
-| assign | requires `name`, `expression`; optional `assert`; exact typed calls retain their Java value; name is unique below `EXEC.VARS` for the entire Case; no render/tool/DB/assert-action/log-only fields, timeout, retry, or result |
-| `result` | required for Render; optional for supported Tool/DB Actions; `format` is Action-specific; `path` is optional; `overwrite` defaults false |
-| retry | required `maxAttempts`, `intervalMs`, `retryOn`; categories are `ASSERTION`, `TIMEOUT` |
+A callable Template directly contains template.yaml and uses att-template/v3.3. Its description and non-empty ordered actions map are required. ATT validates actions against the type-specific active contract.
 
-Template schema `att-template/v3.2` uses the common `result` contract; legacy `renderAs` and `saveAs` fields are rejected with migration suggestions. Action `result.format` selects only the file/Case-log serialization and never reparses or changes `output.result`; a pathless result creates no artifact and `path: console` logs without creating a file. The four common formats are `text|json|yaml|xml`; `raw` is not supported. Retry `maxAttempts` is 2–10 and `intervalMs` is 0–3600000. `ASSERTION` requires a non-empty Tool Action `assert`. Log level is `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR`. The template root and action permit `x-*`; `fields` is an unconstrained log-field map. `output` is runtime evidence and is never an action configuration field.
+| Action | Required fields | Typed-result contract |
+|---|---|---|
+| render | payload | Returns DocumentValue; no result file or targetFiles. |
+| tool | call | Publishes the native Tool/helper result. Command stdout parsing is configured by stdoutFormat. |
+| db | db and one query/update block | Publishes the native typed DB result. |
+| assert | assert | Records PASS/FAIL for the evaluated condition. |
+| log | message or value | Accepts level/message/value/format; no file or fields. |
+| assign | name/expression | Publishes a typed value below EXEC.VARS. |
+| flow | use | Runs a Flow in a nested Action scope. |
 
-#### Assign variable uniqueness and lifetime
-
-An `assign` action creates one immutable, Case-scoped entry below `EXEC.VARS`; it is not a mutable-variable update operation. Every `name` must be unique for the entire Test Case, including across stages and templates:
-
-```yaml
-firstAssign:
-  type: assign
-  name: txnSeq
-  expression: "FIRST"
-
-secondAssign:
-  type: assign
-  name: txnSeq
-  expression: "SECOND"  # invalid: txnSeq was already declared for this Case
-```
-
-Validation reports `ATT-CTX-001` for the duplicate `${EXEC.VARS.txnSeq}` assignment and blocks execution. The second action never replaces the first value. `onFailure: continue` changes only subsequent action scheduling; it does not authorize an overwrite.
-
-Use a new name for every transformation step:
-
-```yaml
-captureInitialAmount:
-  type: assign
-  name: initialAmount
-  expression: "${EXEC.INPUT.amount}"
-
-normalizeAmount:
-  type: assign
-  name: normalizedAmount
-  expression: "#{number(${EXEC.VARS.initialAmount})}"
-```
-
-Later actions and stages read the transformed value as `${EXEC.VARS.normalizedAmount}`. The same assign name may be used by different Test Cases because each Case owns an isolated `EXEC.VARS`; uniqueness applies within one Case execution, not across the package globally.
-
-If an assign expression fails, ATT does not create its variable. This does not relax the authoring rule: a later assign in the same Case plan still cannot reuse that declared name. If the expression succeeds and the assign action's optional assertion subsequently returns FAIL or ERROR, the variable remains available; assertions do not roll back successful assignment. `EXEC.VARS` survives stage/template transitions and is discarded only when that Test Case ends.
-
-#### Common Action `result`
-
-```yaml
-renderRequest:
-  type: render
-  payload: requests/*.xml
-  result:
-    format: text
-    path: rendered/{name}-out.{ext}
-    overwrite: false
-
-callApi:
-  type: tool
-  call: "#{invokePaymentApi(...)}"
-  result: {format: json, path: responses/payment.json}
-```
-
-Action `result.format` never selects or reparses the logical `output.result`; it only selects file/console serialization. The common formats are `text|json|yaml|xml`. Command-backed Tool configuration separately requires Tool-level `result.format` to parse stdout into a typed value; call-backed Tools and HTTP/MQ/DB calls preserve their native result type. HTTP response type is inferred from its media type, not the Action format. DB `text` uses its stable SQL*Plus-style formatter. Omitting `path` never creates an artifact. `path: console` writes the representation to the Case log without creating a file or `output.targetFiles` entry. All real paths remain safe, relative to the Case artifact directory, and are containment-checked.
-
-Legacy `att-template/v2.6`, `v2.5`, and `v2.3` descriptors are recognized for validation and migration; legacy `renderAs`/`saveAs` result fields must be migrated to `att-template/v3.2` and are not accepted for execution. Do not interpret schema recognition as runtime compatibility for those fields.
-
-Render evaluates ordinary ATT `${...}` / `#{...}` expressions in `result.path` first, then expands these source-set path tokens: `{filename}` (including extension), `{name}` (without final extension), `{ext}` (without dot), `{index}` (one-based deterministic order), and `{relativePath}` (relative to the matched source root). Token values are not recursively expression-evaluated. Multi-source paths must expand uniquely even when `overwrite: true`; every expanded path is safety-checked before writing. `output.result` remains a typed value for one source and an ordered source-keyed map for multiple sources; `output.targetFiles` lists only persisted paths.
-
-Migration for `att-template/v3.2`: `renderAs` becomes `result.format`; `saveAs.format` becomes `result.format`; `saveAs.path` becomes `result.path`; `saveAs.overwrite` becomes `result.overwrite`. `renderAs: file` is ambiguous because it mixed output representation and persistence: choose a real format and a path explicitly. `att validate` rejects legacy fields and emits a concrete replacement suggestion (including the required representation choice for `file`) in human and JSON diagnostics; it never rewrites files.
+Common Action result.format/path/overwrite is removed. Render uses templateFormat to label DocumentValue. HTTP/MQ responseFormat handles ingress parsing; requestFormat is only for abstract Map/List payloads. See [Actions and Typed Values](reference/14_actions.md) for field details, examples, evidence behavior and migration notes.
 
 ### Tool contract
 
-Each Tool requires `name`, `description`, and exactly one of `command` or `call`. Optional descriptor `timeoutMs` supplies the Tool-level default. A command is a non-blank scalar or non-empty string list and requires `result: {format: text|json|yaml|xml}` to parse stdout into the typed primary result. A call may target a built-in or native DB, MQHelper, or HTTPHelper operation; its result is already typed, and optional Tool-level `result.format` is only a file/log serialization default. Current schemas reject legacy Tool `output` and do not support `raw`. Optional call-backed `cache` contains exactly `scope: case|db`; updates cannot be cached and `db` scope requires a DB query/scalar target.
+A Tool descriptor defines exactly one of command or call. Command-backed Tools require stdoutFormat: text|json|yaml|xml to parse stdout into output.result. Call-backed Tools preserve their native return type and do not define stdoutFormat. Tool descriptors and actions have no common result representation/persistence field. Process output is operational evidence; human-readable formatting belongs to Log or optional resource evidence output.
 
-Every argument requires `name`, `description`, and a YAML boolean `required`. For command-backed Tools, `argName` is optional and must be empty or one whitespace-free argv token. A non-empty `argName` requires exactly one complete-token placeholder. `argNameMode` accepts `once|repeat` and defaults to `once`; it controls a typed List supplied at the call site. These two argv properties are invalid for call-backed arguments. V2.6 does not define `delimit`.
-
-Tool/argument keys are case-sensitive and argument keys use identifier syntax. The argument descriptor `name` is display text and may contain spaces, Chinese, and punctuation. External tool calls use named arguments. Positional arguments are reserved for ATT built-ins.
-
-A tool-group root requires `schemaVersion`, package-unique `id`, `name`, `description`, and non-empty `tools`. It optionally accepts `script` in scalar/list command form and `ssh`. In v2.7 and later, `ssh` may be direct or a logical `{helper, selection?}` binding. The current v2.8 schema also requires `result.format` on command-backed Tools. The group ID is the Tool package, so group calls use `group.tool`; inline global calls remain unqualified. Group/tool IDs match `[A-Za-z_][A-Za-z0-9_-]*` and contain no dot. Neither global nor qualified Tools may collide case-insensitively with canonical or legacy built-in names.
-
-Migration for command-backed Tools: replace legacy `output: txt` with `result: {format: text}` (or `yaml`, `json`, `xml` as appropriate); `txt` becomes `text`. Set the config schema to `att-config/v2.9` and Tool Group schema to `att-tool-group/v2.8`. A command Tool must choose a parse format. Call-backed Tool results are already typed; optional Tool-level `result.format` only supplies a serialization default. Do not use `raw`.
+Tool group resources use att-tool-group/v2.9. See [Tool](reference/05_resources/tools.md) for command, call, argument and evidence examples.
 
 ### Identifier and path constraints
 
@@ -2385,14 +1527,14 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and all Action `result.path` targets remain below the Case artifact directory. ATT normalizes and checks root containment before reads and writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and resource file inputs and outputs must remain below their documented safe roots. ATT normalizes and checks root containment before reads and writes.
 
 ### Validation JSON contract
 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.5.3",
+  "attVersion": "3.6.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2603,9 +1745,9 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 | 2 | CLI/configuration/validation/INVALID failure |
 | 3 | One or more ERROR results or unrecoverable runtime failure |
 
-### Complete option matrix (3.5.3)
+### Complete option matrix (3.6.0)
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.6` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.10` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -2695,11 +1837,9 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. Supported older descriptors (including config, Flow, Template, Tool Group, sidecar, load scenario and MQHelper) are checked against their **declared** schema. If a rejected descriptor validates against the current schema after only changing `schemaVersion`, ATT retains the original violation, file and YAML field location, and adds the declared/current versions plus an upgrade suggestion. For example, `att-flow/v3.0` with a current `result` field should be upgraded to `att-flow/v3.2` and validated again. Existing `renderAs`/`saveAs` diagnostics still give their specific `result.format/path/overwrite` field mappings. If the current-schema probe also fails, ATT advises reviewing the original violation and current schema without claiming that a version bump is enough. Unsupported versions continue to fail as unsupported; valid older descriptors remain supported and are never rewritten.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT 3.6.0 validates changed descriptor families against their active schemas only: config v2.10, DBHelper v2.6, MQHelper v1.2, HTTPHelper v1.1, Tool Group v2.9, Template/Flow v3.3 and Load v1.2. Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file and YAML field location and provide migration guidance; they never rewrite descriptors. For example, remove an old Render `result.path` and pass the typed `output.result` value as described in [Actions and Typed Values](reference/14_actions.md). Unsupported versions fail before execution.
 
-Package validation also emits `ATT-SCHEMA-001` when a descriptor is valid under a registered historical schema but a newer schema for that descriptor family is available. The warning includes the declared and current versions plus the `schemaVersion` source location; validation still uses the declared schema and never rewrites the descriptor. Current versions are not warned. Invalid old descriptors retain their normal validation error and #71 migration guidance without an extra old-version warning. Unsupported versions and missing registered schema resources remain errors. Historical files merely present under `schemas/history/` do not trigger warnings; only package descriptors declaring those versions do.
-
-Current schemas are in [`schemas/`](../schemas/); retained older versions are only in [`schemas/history/`](../schemas/history/). `validate --package` checks every catalog-registered schema resource, even when the package does not currently use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. When a descriptor declares a supported schema, inability to resolve its registered resource is also a hard error; ATT never skips schema verification or falls back to a CWD copy. Keep the authored descriptor unchanged until you review the suggested migration, update `schemaVersion` and any required fields, then rerun `validate --package` (and each selected `--env`). Validation never rewrites YAML.
+Current schemas are in [`schemas/`](../schemas); older definitions are under [`schemas/history/`](../schemas/history). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
 Then use the diagnostic code and structured location. Do not automate against message text.
 
@@ -2822,29 +1962,242 @@ Parallel jobs should use unique Run IDs and, when independent retention/latest-r
 
 Maintainer implementation sequencing, scheduler internals and resource-owner details live in `docs/system-design/`, not in this end-user Reference.
 
+## 14 Actions and Typed Values
+
+This chapter defines the active ATT 3.6.0 action contract. Templates use att-template/v3.3. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
+
+### Action types
+
+| Type | Required fields | Result and behavior |
+|---|---|---|
+| render | payload | Renders template files into a DocumentValue, or a relative-path keyed map of DocumentValues for multiple sources. It does not parse the document or write a result file. |
+| tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. |
+| db | db and exactly one query/update block | Returns the DB operation's typed value and evidence. |
+| assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
+| log | message or value | Formats a typed value for the Case log. Its fields are level, message, value and format. |
+| assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
+| flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
+
+Actions run in YAML order. Where supported, an action may also define id, description, onFailure and runWhen. Action IDs are unique within their scope. Type-specific invalid fields fail validation. Action result, Log file and Log fields are not part of the current action contract.
+
+### Separate logical values from representations
+
+ATT keeps the logical operation result separate from human or wire representations:
+
+| Boundary | Field/value | Purpose |
+|---|---|---|
+| Command Tool stdout | stdoutFormat | Parses external stdout into a typed result. |
+| HTTP/MQ response | responseFormat | Parses external response bytes into a typed result. |
+| Render output | templateFormat | Labels the representation produced by the template. |
+| Abstract Map/List sent over HTTP/MQ | requestFormat | Serializes the value at the outbound boundary. |
+| Log or resource evidence | format / evidence.output.format | Produces a human-readable representation. |
+
+DB results are already typed values. Tool, Action, Template, Flow and expression results remain typed while they move through ATT.
+
+### Render and DocumentValue
+
+Render returns a represented document. DocumentValue carries a format and the exact rendered text:
+
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+~~~
+
+One source produces output.result as a DocumentValue. Multiple sources produce an ordered map keyed by template-root-relative source paths. templateFormat accepts auto, text, json, yaml or xml. auto selects json for .json, yaml for .yaml/.yml, xml for .xml, and text otherwise.
+
+DocumentValue.text is authoritative. ATT does not parse it into a navigable map/tree, pretty-print, normalize or rewrite it before transport. Render creates no file and exposes no output.targetFiles. Use the original typed Context value for structured access, such as EXEC.INPUT.amount or a prior action's output.result.amount.
+
+Pass Render output directly to HTTP or MQ:
+
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+
+sendRequest:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+~~~
+
+For MQ, pass the DocumentValue as payload. Do not add requestFormat to a DocumentValue. A resource encodes its exact text with its configured charset/CCSID. DocumentValue.format does not set MQMD.Format or override resource-owned HTTP Content-Type.
+
+requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with DocumentValue fails, so an already represented document is never silently parsed and serialized. A raw file input remains available only for resource calls that explicitly define a file argument; Render does not create a handoff file.
+
+### Tool, DB and Flow results
+
+A command-backed Tool declares stdoutFormat in its Tool descriptor:
+
+~~~yaml
+tools:
+  getOrder:
+    command: [./get-order.sh]
+    stdoutFormat: json
+~~~
+
+stdoutFormat parses external stdout once into output.result; it is not output serialization. Call-backed Tools and DB/HTTP/MQ operations keep their native return types.
+
+A DB action uses db and exactly one query or update block. SQL, bind parameters, transaction controls and DB evidence follow the DB action and DBHelper contracts.
+
+A Flow action uses use with a canonical Flow ID. It runs in a fresh EXEC.ACTIONS scope and publishes its result/evidence to the caller when it returns. META.FLOW exists only while that invocation is active.
+
+### Tool evidence collectors
+
+A Tool Action may define first-class `evidence` collectors for diagnostics that must be gathered before the Action assertion. The lifecycle is:
+
+```text
+primary Tool call
+    -> typed primary output.result
+    -> evidence collector call(s)
+    -> Action assertion
+    -> PASS / FAIL / ERROR
+```
+
+Collectors are diagnostic operations, not replacement Actions. Each collector has its own typed result and does not replace or mutate the primary `output.result`:
+
+```yaml
+callPayment:
+  type: tool
+  call: >-
+    #{mq.payment.request(
+      payload=${EXEC.ACTIONS.renderRequest.output.result},
+      responseFormat='xml'
+    )}
+  evidence:
+    appLog:
+      call: >-
+        #{ssh.app.execute(
+          command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100'
+        )}
+      timeoutMs: 10000
+      onFailure: continue
+  assert: >-
+    ${output.replyReceived} == true
+```
+
+While the containing Action, including its assertion, is active, use these paths:
+
+```text
+${output.result}
+${output.evidence.collectors.<collectorId>.result}
+${output.evidence.collectors.<collectorId>.status}
+```
+
+After publication, the same values are available below `EXEC.ACTIONS`:
+
+```text
+${EXEC.ACTIONS.callPayment.output.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
+${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}
+```
+
+The public shape keeps primary resource evidence and collector evidence separate:
+
+```text
+output
+├── result                         # primary Tool logical result
+├── evidence
+│   ├── <resource-kind>            # primary operation evidence
+│   └── collectors
+│       └── <collectorId>
+│           ├── result             # typed collector result
+│           ├── status
+│           ├── invocationId
+│           └── durationMs
+└── attempts
+    └── [n]
+        └── evidence.collectors.<collectorId>.result/status
+```
+
+When a Tool retries, collectors run for every primary attempt before that attempt's assertion. The top-level `output.evidence.collectors.<id>` is the final/winning attempt; `output.attempts[n].evidence.collectors.<id>` retains each attempt, including earlier failures. After publication, the corresponding history path is `${EXEC.ACTIONS.<actionId>.output.attempts[0].evidence.collectors.<id>.result}`.
+
+`call` is required. `timeoutMs` is independent of the primary Tool timeout. `onFailure: continue` is the normal application-log pattern so a diagnostic collection failure does not hide the original business or assertion failure; `stop` makes the collector failure an Action error. Collector status and diagnostic remain observable, and collector failure never changes the primary logical result. Distinguish an evidence collector from an ordinary Tool/Log/Assign Action: use a collector for diagnostic data needed before the containing Tool assertion, and an ordinary Action when the collected value is normal business/test data for later assertions.
+
+Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or `DocumentValue`; matching-format presentation preserves a `DocumentValue`'s authoritative text. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
+
+### Log: typed value to Case log
+
+Log is a presentation action and therefore has its own format field:
+
+~~~yaml
+logOrder:
+  type: log
+  level: INFO
+  message: "Order response"
+  value: "${EXEC.ACTIONS.callOrder.output.result}"
+  format: yaml
+~~~
+
+level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
+
+When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A DocumentValue is emitted as its authoritative text when format is omitted or matches its own format; a conflicting format fails instead of converting it. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
+
+### Expressions and variable scope
+
+Action expressions use the regular ATT expression engine. A complete ${...} or #{...} expression keeps its result type; embedding an expression in surrounding text produces a String. See [Expressions and Built-ins](reference/07_expressions.md).
+
+assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Values assigned in one Stage are available to later Stages. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; publish values to EXEC.VARS when the caller needs them after the Flow returns.
+
+### Resource output evidence
+
+Resource evidence is separate from the logical result. A helper may configure an optional evidence.output presentation policy:
+
+~~~yaml
+evidence:
+  output:
+    format: json
+    maxChars: 10000
+~~~
+
+This adds a bounded human-readable snapshot beside operation metadata; it does not change output.result or response parsing. In Load, evidence.resources.output accepts inherit (default) or none. none skips resource-output formatting and file materialization. Metrics-only iterations create no execution directory. When iteration evidence is retained, eligible resource output is formatted lazily into that workspace.
+
+### Removed fields and migration
+
+ATT 3.6.0 accepts only the current schema for each resource. Historical versions are archived under schemas/history and are not active contracts.
+
+| Old configuration | 3.6.0 form |
+|---|---|
+| Command Tool result.format | Tool descriptor stdoutFormat |
+| Render result.format/path/overwrite or renderAs/saveAs | templateFormat; consume output.result as DocumentValue; no implicit file replacement |
+| Log file | Pass a typed value to Log.value |
+| Log fields | Put a typed map/list in Log.value and select Log.format |
+| Render targetFiles handoff to HTTP/MQ | Pass DocumentValue directly as HTTP body or MQ payload |
+| requestFormat on rendered output | Remove it; reserve requestFormat for abstract Map/List values |
+
+Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.
+
+See [Runtime and Context Model](reference/03_runtime_context.md) for META lifecycle and [Load Mode](reference/04_execution_modes/load.md) for execution identity and retained evidence paths.
+
 ## 14 Appendices
 
 The appendices collect stable lookup material that should not drive the main product narrative: schema/version matrix, compatibility/deprecations, migration notes, and limits/defaults.
 
 ### 14.1 Schema and Version Matrix
 
-| Artifact | Current schema |
-|---|---|
-| Global configuration | `att-config/v2.9` (v2.1–v2.8 remain readable) |
-| DBHelper | `att-dbhelper/v2.5` |
-| MQHelper | `att-mqhelper/v1.1` (`v1.0` remains readable) |
-| HTTPHelper | `att-httphelper/v1.0` |
-| SSHHelper | `att-sshhelper/v1.0` |
-| Tool group | `att-tool-group/v2.8` (v2.2, v2.6, and v2.7 remain readable) |
-| Sidecar | `att-sidecar/v2.2` |
-| Snapshot | `att-testcases/v2.4` |
-| Template | `att-template/v3.2` (`renderAs`/`saveAs` are rejected with migration suggestions) |
-| Flow | `att-flow/v3.2` (legacy read: `att-flow/v3.0`–`v3.1`) |
-| Debug input | `att-debug/v1.0` |
-| Load scenario | `att-load/v1.1` (`v1.0` remains readable) |
-| Load summary | `att-load-summary/v1.0` |
+ATT 3.6.0 active schemas:
 
-`schemas/catalog.yaml` is the authoritative repository catalog. Current schemas live in `schemas/`, retained older schemas in `schemas/history/`. `validate --package` checks every registered current/history resource; a missing or unsafe registration is a hard error and is never skipped or loaded from the process CWD. Compatibility is a reader contract; new authoring should use the current schema for the feature being authored.
+| Artifact | Active schema |
+|---|---|
+| Global configuration | att-config/v2.10 |
+| DBHelper | att-dbhelper/v2.6 |
+| MQHelper | att-mqhelper/v1.2 |
+| HTTPHelper | att-httphelper/v1.1 |
+| SSHHelper | att-sshhelper/v1.0 |
+| Tool group | att-tool-group/v2.9 |
+| Workbook sidecar | att-sidecar/v2.2 |
+| Testcase snapshot | att-testcases/v2.4 |
+| Template | att-template/v3.3 |
+| Flow | att-flow/v3.3 |
+| Debug input | att-debug/v1.0 |
+| Load scenario | att-load/v1.2 |
+| Load summary | att-load-summary/v1.0 |
+| Run manifest | att-run/v2.1 |
+| Validation JSON | att-validation/v2.1 |
+| CI summary | att-ci-summary/v2.1 |
+
+For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
 
 ### 14.2 Compatibility and Deprecated Aliases
 
@@ -2854,25 +2207,43 @@ Deterministic legacy aliases may remain readable with migration warnings. Aliase
 
 ### 14.3 Migration Notes
 
-The current Reference describes ATT by product concept rather than release chronology. Release-by-release changes remain in `CHANGELOG.md` and `docs/history/`.
+ATT 3.6.0 separates typed operation results, external parsing, rendered documents, outbound transport and human-readable evidence.
 
-Key current migrations are:
+| Previous field/model | 3.6.0 migration |
+|---|---|
+| Command Tool result.format | Move the parsing choice to the Tool descriptor's stdoutFormat. |
+| Common Action result.format/path/overwrite | Remove it. output.result is the native logical typed value; no implicit file replacement exists. |
+| Render result.format/path or renderAs/saveAs | Use templateFormat. Render returns DocumentValue with exact text and creates no result file or targetFiles. |
+| Render file handoff through targetFiles | Pass the DocumentValue directly as HTTP body or MQ payload. |
+| requestFormat on rendered output | Remove it. requestFormat is only for abstract Map/List values; DocumentValue + requestFormat fails. |
+| Log file | Pass the value directly to Log.value. |
+| Log fields | Put the typed map/list in Log.value and select Log.format. |
+| HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
+| Older active resource/config schema versions | Update schemaVersion to the ATT 3.6.0 active schema and migrate the fields listed above. Archived schemas under schemas/history are not active runtime contracts. |
 
-- prefer `EXEC` / `META` over legacy Context aliases;
-- use `output.result` / `EXEC.ACTIONS.<id>.output.result` and the common evidence/attempt contract;
-- treat Tool, DBHelper, MQHelper and HTTPHelper as peer resources;
-- use environment profiles when DB/MQ/SSH/HTTPHelper bindings vary;
-- move common curl invocations to a logical `http.<id>.<method>` Action when pooled transport and typed response metadata are useful; existing curl Tools remain valid;
-- when an older descriptor uses newer fields, follow the validation diagnostic, migrate `schemaVersion` and any named legacy fields, then validate again; historical schema definitions live in `schemas/history/`;
-- migrate command Tool `output: txt|json|yaml|xml` to required Tool-level `result: {format: text|json|yaml|xml}`; Action-level `result.format` now controls serialization only, and `raw` is not a common result format;
-- use `att-config/v2.9`, `att-tool-group/v2.8`, and `att-template/v3.2` / `att-flow/v3.2`; prior registered schema resources remain in `schemas/history/` and are validated from the package catalog;
-- configure HTTPHelper results from response `Content-Type`; public header keys are lowercase, and Action serialization no longer changes the native typed result;
-- set optional MQ defaults in `message.requestQueue` for send/request and `message.replyQueue` for receive/request; explicit call arguments override the selected instance's inherited settings;
-- unexpected internal exceptions now include bounded, secret-sanitized stack detail in Case logs; expected transport and validation errors remain concise;
-- migrate physical group SSH to `ssh: {helper: <id>}` with `att-tool-group/v2.7` when logical multi-instance routing is needed;
-- treat Run, Debug and Load as peer execution modes.
+A Render-to-HTTP example:
 
-The auditable disposition of the pre-#42 monolithic manual is recorded in `docs/reference-migration-map.md`.
+~~~yaml
+renderRequest:
+  type: render
+  payload: payload/request.xml
+  templateFormat: xml
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+~~~
+
+For an abstract value, use requestFormat explicitly:
+
+~~~yaml
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
+~~~
+
+For Load, migrate old single-target or v1.1 scenarios to att-load/v1.2 workloads form. Put pacing under each workload and set the optional top-level execution.execIdFormat when a custom EXEC.ID is required. That field uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it. Do not use seq.next() or external/stateful functions in the format.
+
+Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](reference/14_actions.md), [Runtime and Context Model](reference/03_runtime_context.md), [Load Mode](reference/04_execution_modes/load.md) and [Schema Matrix](reference/appendices/schema_matrix.md).
 
 ### 14.4 Limits and Defaults
 

@@ -19,11 +19,15 @@ public class TemplateAction {
     private final String type;
     private final String description;
     private final String payload;
+    private final String templateFormat;
     private final String resultFormat;
     private final String name;
     private final String expression;
     private final String call;
     private final String message;
+    private final Object value;
+    private final boolean valuePresent;
+    private final String format;
     private final String file;
     private final ActionResultConfig result;
     private final String db;
@@ -53,16 +57,20 @@ public class TemplateAction {
         this.type = text(data.get("type"), "tool");
         this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");
-        Map<String, Object> resultMap = map(data.get("result"));
-        this.resultFormat = text(resultMap.get("format"), "");
+        this.templateFormat = text(data.get("templateFormat"), "auto");
+        // v3.3 has no common Action result/serialization contract. Render uses
+        // templateFormat and Log uses its own presentation format.
+        Map<String, Object> resultMap = Collections.emptyMap();
+        this.resultFormat = "";
         this.name = text(data.get("name"), "");
         this.expression = text(data.get("expression"), "");
         this.call = text(data.get("call"), "");
         this.message = text(data.get("message"), "");
-        this.file = text(data.get("file"), "");
-        this.result = data.get("result") == null ? ActionResultConfig.none()
-                : new ActionResultConfig(text(resultMap.get("path"), ""), resultFormat,
-                        Boolean.parseBoolean(text(resultMap.get("overwrite"), "false")));
+        this.valuePresent = data.containsKey("value");
+        this.value = data.get("value");
+        this.format = text(data.get("format"), "");
+        this.file = "";
+        this.result = ActionResultConfig.none();
         this.db = text(data.get("db"), "");
         this.query = map(data.get("query"));
         this.update = map(data.get("update"));
@@ -71,7 +79,7 @@ public class TemplateAction {
         this.actual = text(data.get("actual"), "");
         this.onFailure = failureMode(data.get("onFailure"));
         this.level = text(data.get("level"), "INFO");
-        this.fields = map(data.get("fields"));
+        this.fields = Collections.emptyMap();
         this.retry = map(data.get("retry"));
         this.evidence = collectors(data.get("evidence"));
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
@@ -97,11 +105,15 @@ public class TemplateAction {
     public String type() { return type; }
     public String description() { return description; }
     public String payload() { return payload; }
+    public String templateFormat() { return templateFormat; }
     public String resultFormat() { return resultFormat; }
     public String name() { return name; }
     public String expression() { return expression; }
     public String call() { return call; }
     public String message() { return message; }
+    public Object value() { return value; }
+    public boolean valuePresent() { return valuePresent; }
+    public String format() { return format; }
     public String file() { return file; }
     public ActionResultConfig resultConfig() { return result; }
     public String db() { return db; }

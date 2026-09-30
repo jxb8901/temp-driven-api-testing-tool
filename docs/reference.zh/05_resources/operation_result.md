@@ -1,25 +1,24 @@
-### 5.5 Common Operation Result 與 Evidence
+### 5.5 Operation Result 與 Evidence
 
-Tool、DB、MQ executor 先收斂到同一 operation boundary，之後 Template runner 才套用 Action lifecycle、assertion、retry policy。
+ATT 將 operation 的邏輯結果與執行 evidence 分開：
 
-```text
-operation
-├── result
-├── evidence
-├── executionSuccess
-├── diagnostic
-└── timing
-       |
-       v
-Action output
-├── status / success
-├── durationMs
-├── result          # 最後／勝出的 primary operation
-├── diagnostic
-├── evidence        # final operation evidence
-└── attempts[]      # retry history + per-attempt evidence
-```
+~~~text
+Operation
+├── result       # native typed value
+└── evidence     # 有界的 execution/transport metadata
+~~~
 
-`result` 是 business/operation data；`evidence` 是支援執行的證據；`diagnostic` 解釋 operational failure；`status` 則是在 operation outcome 與 assertion 處理後的 Action-level classification。這些概念刻意分開。
+Action 在 output.result 發布最後的 operation value。Action status、assertion detail、diagnostic、attempts 描述執行，不會取代 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ response 使用 responseFormat；DB operation 回傳 native typed value。Render 回傳 DocumentValue，詳見[動作與型別化值](../14_actions.md)。
 
-Retry 不會在 top-level 發布多個競爭結果：只有最後／勝出的 primary operation 位於 top-level。每個 attempt 的 evidence 與 collector result 保留在 `attempts[n]`。Connection pool、JDBC transaction object、MQ session、process handle 都是 internal lifecycle state，不屬於 Context。
+Resource evidence 可包含低成本 metadata。Helper 也可選擇配置人類可讀 snapshot：
+
+~~~yaml
+evidence:
+  output:
+    format: json
+    maxChars: 10000
+~~~
+
+Evidence output 支援 json、yaml、xml、text、sqlplus。這只用於 presentation，不會修改或取代 output.result。含 secrets 的值會過濾或省略。
+
+Load scenario 可將 evidence.resources.output 設為 inherit（預設）或 none。none 略過可選的 resource-output formatting/materialization；inherit 會等 success sample 或 failure 取得 retention slot 後才格式化。Metrics-only iteration 不序列化 resource output，也不建立 evidence workspace。Transport parsing 與 Render representation 不變。

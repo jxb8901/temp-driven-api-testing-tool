@@ -114,12 +114,12 @@ class LoadCrossModeTest {
         att.TestSchemas.install(project);
         Files.createDirectories(project.resolve("templates/SHARED"));
         Files.createDirectories(project.resolve("templates/flows/shared/echo"));
-        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.2\n"
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: SHARED\ndescription: cross-mode fixture\nactions:\n"
                 + "  direct:\n    type: log\n    message: \"value=${EXEC.INPUT.value}\"\n"
                 + "  invoke:\n    type: tool\n    call: \"#{echo(value=${EXEC.INPUT.value})}\"\n"
                 + "  nested:\n    type: flow\n    use: shared.echo.v1\n");
-        write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.0\n"
+        write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.3\n"
                 + "id: shared.echo.v1\nname: Shared Echo\ndescription: cross-mode flow\nactions:\n"
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.0\ninputs:\n  value: shared-value\n");
@@ -129,7 +129,6 @@ class LoadCrossModeTest {
     private Path write(Path project, String relative, String content) throws Exception {
         Path file = project.resolve(relative);
         Files.createDirectories(file.getParent());
-        Files.write(file, content.getBytes(StandardCharsets.UTF_8));
-        return file;
+        return LoadTestSupport.writeScenario(file, content);
     }
 }

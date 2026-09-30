@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import argparse
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -47,11 +49,26 @@ def manifest():
     return items
 
 
-def rebase_for_docs_root(text):
-    # Reference modules are authored below docs/reference*/, where ../../ reaches
-    # the repository root. The generated combined manuals now live directly
-    # below docs/, so repository-root links need one fewer parent traversal.
-    return text.replace("](../../", "](../")
+def rebase_for_docs_root(text, lang, module_rel):
+    """Rebase source-module links for the combined manual's docs/ location."""
+    module_root = LANGS[lang]["root"].resolve()
+    source = (module_root / module_rel).resolve()
+
+    def replace_link(match):
+        raw_target = match.group(1)
+        target, marker, fragment = raw_target.partition("#")
+        if not target or re.match(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:|//)", target):
+            return match.group(0)
+        resolved = (source.parent / unquote(target)).resolve()
+        try:
+            within_modules = resolved.relative_to(module_root)
+            rebased = ("reference" if lang == "en" else "reference.zh") + "/" + within_modules.as_posix()
+        except ValueError:
+            rebased = os.path.relpath(str(resolved), str(DOCS.resolve())).replace("\\", "/")
+        suffix = marker + fragment if marker else ""
+        return "](" + rebased + suffix + ")"
+
+    return re.sub(r"(?<!!)\]\(([^)]+)\)", replace_link, text)
 
 
 def markdown(lang, items, ver):
@@ -62,7 +79,7 @@ def markdown(lang, items, ver):
         if not path.is_file():
             raise SystemExit("Missing %s Reference module: %s" %
                              (lang.upper(), path.relative_to(ROOT)))
-        chunks.append(path.read_text(encoding="utf-8").rstrip())
+        chunks.append(rebase_for_docs_root(path.read_text(encoding="utf-8").rstrip(), lang, rel))
 
     title = cfg["title"].format(version=ver)
     header = [
@@ -76,7 +93,7 @@ def markdown(lang, items, ver):
         "",
     ]
     combined = "\n".join(header) + "\n\n".join(chunks) + "\n"
-    return rebase_for_docs_root(combined)
+    return combined
 
 
 def render_html(md_path, html_path, title):

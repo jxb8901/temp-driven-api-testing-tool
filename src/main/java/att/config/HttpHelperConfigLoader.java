@@ -39,9 +39,12 @@ public final class HttpHelperConfigLoader {
                 Object loaded = YamlSupport.load(file);
                 if (!(loaded instanceof Map)) throw new IllegalArgumentException("HTTP helper must be a YAML map");
                 Map<?, ?> map = (Map<?, ?>) loaded;
-                Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-httphelper-v1.0.schema.json");
+                if (!Version.HTTPHELPER_SCHEMA.equals(map.get("schemaVersion")))
+                    throw new IllegalArgumentException("Unsupported HTTP helper schemaVersion '" + map.get("schemaVersion")
+                            + "'; ATT 3.6.0 supports only " + Version.HTTPHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
+                Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion")));
                 JsonSchemaVerifier.verify(schema, map);
-                helper = parse(map, projectRoot);
+                helper = parse(map, projectRoot).withEvidenceOutput(map.get("evidence"));
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
                 String field = invalid == null ? "httphelper" : invalid.field();

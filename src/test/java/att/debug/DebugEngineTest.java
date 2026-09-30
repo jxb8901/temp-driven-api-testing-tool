@@ -77,7 +77,7 @@ class DebugEngineTest {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/SLOW"));
         Files.write(project.resolve("templates/SLOW/template.yaml"), (
-                "schemaVersion: att-template/v2.3\nname: SLOW\ndescription: slow debug\nactions:\n"
+                "schemaVersion: att-template/v3.3\nname: SLOW\ndescription: slow debug\nactions:\n"
                         + "  wait:\n    type: tool\n    call: '#{slow()}'\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/SLOW/debug.yaml"),
                 "schemaVersion: att-debug/v1.0\ncase: {caseName: slow}\n".getBytes(StandardCharsets.UTF_8));
@@ -167,10 +167,10 @@ class DebugEngineTest {
         Files.createDirectories(project.resolve("templates/BROKEN"));
         Files.createDirectories(project.resolve("templates/flows/debug/echo"));
         Files.write(project.resolve("templates/SIMPLE/template.yaml"), (
-                "schemaVersion: att-template/v2.3\nname: SIMPLE\ndescription: Simple debug template\nactions:\n  log:\n    type: log\n    message: 'value=${EXEC.INPUT.value}'\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-template/v3.3\nname: SIMPLE\ndescription: Simple debug template\nactions:\n  log:\n    type: log\n    message: 'value=${EXEC.INPUT.value}'\n" ).getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/BROKEN/template.yaml"), "not: [valid\n".getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/debug/echo/flow.yaml"), (
-                "schemaVersion: att-flow/v3.0\nid: debug.echo.v1\nname: Debug Echo\ndescription: Debug Echo\nactions:\n  echo:\n    type: log\n    message: 'debug=${CASE.inputs.message}'\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-flow/v3.3\nid: debug.echo.v1\nname: Debug Echo\ndescription: Debug Echo\nactions:\n  echo:\n    type: log\n    message: 'debug=${CASE.inputs.message}'\n" ).getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(project.resolve("output"));
         return project;
     }

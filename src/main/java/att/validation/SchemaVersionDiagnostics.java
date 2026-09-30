@@ -27,7 +27,14 @@ public final class SchemaVersionDiagnostics {
         final Map<String, String> historical;
         try { historical = SchemaFiles.historicalSchemaVersions(root); }
         catch (RuntimeException invalidCatalog) { return Collections.emptyList(); }
-        if (historical.isEmpty() || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root))
+        // Descriptor families with new 3.6.0 contracts are current-schema-only.
+        // Sidecar v2.1 remains supported by SuiteConfigResolver and can still
+        // receive an advisory about the available v2.2 schema.
+        Map<String, String> supportedHistorical = new LinkedHashMap<String, String>();
+        String legacySidecar = att.Version.LEGACY_SIDECAR_SCHEMA;
+        if (historical.containsKey(legacySidecar))
+            supportedHistorical.put(legacySidecar, historical.get(legacySidecar));
+        if (supportedHistorical.isEmpty() || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root))
             return Collections.emptyList();
 
         final List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
@@ -42,7 +49,7 @@ public final class SchemaVersionDiagnostics {
                 @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
                     if (!attributes.isRegularFile() || Files.isSymbolicLink(file) || !yaml(file)
                             || !visited.add(file.toAbsolutePath().normalize())) return FileVisitResult.CONTINUE;
-                    inspect(root, file, historical, diagnostics);
+                    inspect(root, file, supportedHistorical, diagnostics);
                     return FileVisitResult.CONTINUE;
                 }
             });

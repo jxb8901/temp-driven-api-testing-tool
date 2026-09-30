@@ -15,6 +15,7 @@ import java.util.Collections;
  */
 public class TestResult {
     private final String caseId;
+    private final String executionId;
     private final String caseName;
     private final ResultStatus status;
     private final Duration duration;
@@ -29,18 +30,25 @@ public class TestResult {
     private final att.validation.Diagnostic diagnostic;
 
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath, List<ValidationResult> validations) {
-        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, inferred(caseId, 0), inferred(caseId, 1), Collections.<String>emptyList(), null);
+        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, inferred(caseId, 0), inferred(caseId, 1), Collections.<String>emptyList(), null, caseId);
     }
 
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
                       List<ValidationResult> validations, String workbookId, String groupId, List<String> tags) {
-        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, workbookId, groupId, tags, null);
+        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, workbookId, groupId, tags, null, caseId);
     }
 
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
                       List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
                       att.validation.Diagnostic diagnostic) {
+        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, workbookId, groupId, tags, diagnostic, caseId);
+    }
+
+    public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
+                      List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
+                      att.validation.Diagnostic diagnostic, String executionId) {
         this.caseId = caseId;
+        this.executionId = executionId == null || executionId.isEmpty() ? caseId : executionId;
         this.caseName = caseName;
         this.status = status;
         this.duration = duration;
@@ -55,6 +63,8 @@ public class TestResult {
     }
 
     public String caseId() { return caseId; }
+    /** Stable EXEC.ID captured when the Case starts. */
+    public String executionId() { return executionId; }
     public String caseName() { return caseName; }
     public ResultStatus status() { return status; }
     public Duration duration() { return duration; }
@@ -69,7 +79,7 @@ public class TestResult {
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
     public TestResult relocate(Path from, Path to) {
         Path relocated = caseLogPath != null && caseLogPath.startsWith(from) ? to.resolve(from.relativize(caseLogPath)) : caseLogPath;
-        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, groupId, tags, diagnostic);
+        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, groupId, tags, diagnostic, executionId);
     }
     private static String inferred(String caseId, int index) {
         if (caseId == null) return "";

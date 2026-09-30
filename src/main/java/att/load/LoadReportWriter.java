@@ -209,14 +209,17 @@ public final class LoadReportWriter {
         html.append("<section class=\"panel\"><h2>Retained evidence</h2>");
         Object itemsValue = evidence == null ? null : evidence.get("items");
         if (!(itemsValue instanceof List) || ((List<?>) itemsValue).isEmpty()) { html.append("<p class=\"empty\">No failure or sampled-success evidence was retained.</p></section>"); return; }
-        html.append("<div class=\"scroll\"><table><thead><tr><th>Iteration</th><th>Kind</th><th>Link</th></tr></thead><tbody>");
+        html.append("<div class=\"scroll\"><table><thead><tr><th>EXEC.ID</th><th>Iteration</th><th>Kind</th><th>Link</th></tr></thead><tbody>");
         for (Object value : (List<?>) itemsValue) {
             if (!(value instanceof Map)) continue;
             Map<String, Object> item = (Map<String, Object>) value;
             String path = String.valueOf(item.get("path"));
-            html.append("<tr><td>").append(escape(String.valueOf(item.get("iterationId")))).append("</td><td>")
+            String executionId = item.get("execId") == null ? "" : String.valueOf(item.get("execId"));
+            String caseLog = item.get("caseLog") == null ? "" : String.valueOf(item.get("caseLog"));
+            String destination = caseLog.isEmpty() ? path : caseLog;
+            html.append("<tr><td>").append(escape(executionId)).append("</td><td>").append(escape(String.valueOf(item.get("iterationId")))).append("</td><td>")
                     .append(escape(String.valueOf(item.get("status")))).append("</td><td><a href=\"../")
-                    .append(escapeAttribute(path)).append("\">").append(escape(path)).append("</a></td></tr>");
+                    .append(escapeAttribute(destination)).append("\">").append(escape(destination)).append("</a></td></tr>");
         }
         html.append("</tbody></table></div></section>");
     }

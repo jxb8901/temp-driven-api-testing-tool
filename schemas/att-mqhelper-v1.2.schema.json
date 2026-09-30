@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:mqhelper:v1.2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "description",
+    "instances"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "att-mqhelper/v1.2"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "defaults": {
+      "$ref": "#/$defs/settings"
+    },
+    "instances": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/instance"
+      }
+    },
+    "selection": {
+      "$ref": "#/$defs/selection"
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidence"
+    }
+  },
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "connection": {
+      "type": "object",
+      "properties": {
+        "queueManager": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transport": {
+          "enum": [
+            "MQSeries Client",
+            "MQSeries",
+            "MQSeries Bindings"
+          ]
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "object",
+      "properties": {
+        "charset": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "ccsid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "encoding": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            16,
+            17,
+            18,
+            32,
+            33,
+            34,
+            256,
+            257,
+            258,
+            272,
+            273,
+            274,
+            288,
+            289,
+            290,
+            512,
+            513,
+            514,
+            528,
+            529,
+            530,
+            544,
+            545,
+            546,
+            768,
+            769,
+            770,
+            784,
+            785,
+            786,
+            800,
+            801,
+            802,
+            1024,
+            1025,
+            1026,
+            1040,
+            1041,
+            1042,
+            1056,
+            1057,
+            1058
+          ]
+        },
+        "format": {
+          "enum": [
+            "",
+            "MQSTR",
+            "MQHRF2",
+            "MQFMT_STRING",
+            "MQFMT_NONE",
+            "NONE"
+          ]
+        },
+        "persistence": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            },
+            {
+              "enum": [
+                "asQueue",
+                "persistent",
+                "notPersistent",
+                "nonPersistent"
+              ]
+            }
+          ]
+        },
+        "expiry": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 2147483647
+        },
+        "requestQueue": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.%/-]{1,48}$"
+        },
+        "replyQueue": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.%/-]{1,48}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "requestReply": {
+      "type": "object",
+      "properties": {
+        "waitMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "responseFormat": {
+          "enum": [
+            "text",
+            "json",
+            "yaml",
+            "xml"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "pool": {
+      "type": "object",
+      "properties": {
+        "maxSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "minIdle": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "borrowTimeout": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(ms|s|m)$"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/connection"
+        },
+        "message": {
+          "$ref": "#/$defs/message"
+        },
+        "requestReply": {
+          "$ref": "#/$defs/requestReply"
+        },
+        "pool": {
+          "$ref": "#/$defs/pool"
+        }
+      },
+      "additionalProperties": false
+    },
+    "instance": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+        },
+        "connection": {
+          "$ref": "#/$defs/connection"
+        },
+        "message": {
+          "$ref": "#/$defs/message"
+        },
+        "requestReply": {
+          "$ref": "#/$defs/requestReply"
+        },
+        "pool": {
+          "$ref": "#/$defs/pool"
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "enum": [
+            "random",
+            "roundRobin"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "enum": [
+            "none",
+            "metadata"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "required": [
+            "format"
+          ],
+          "properties": {
+            "format": {
+              "enum": [
+                "json",
+                "yaml",
+                "xml",
+                "text",
+                "sqlplus"
+              ]
+            },
+            "maxChars": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000,
+              "default": 10000
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

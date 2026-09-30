@@ -26,6 +26,13 @@ public final class LoadScenario {
     private final Map<String, Object> evidence;
     private final Long seed;
     private final boolean workloadView;
+    private String execIdFormat = "";
+    public String execIdFormat() { return execIdFormat; }
+    LoadScenario withExecIdFormat(String value) { execIdFormat = value == null ? "" : value; return this; }
+    public boolean resourceOutputEnabled() {
+        Object resources = evidence.get("resources");
+        return !(resources instanceof Map) || !"none".equals(((Map<?, ?>) resources).get("output"));
+    }
 
     /** Compatibility constructor for the original fixed-duration think-time model. */
     LoadScenario(Path source, String targetType, String targetId, Map<String, Object> targetArguments,
@@ -38,13 +45,13 @@ public final class LoadScenario {
                 maxConcurrent, overloadPolicy, thresholds, evidence);
     }
 
-    /** Compatibility constructor used by att-load/v1.0. */
+    /** Legacy in-memory constructor retained for old report projections; v1.0 YAML is not loadable. */
     LoadScenario(Path source, String targetType, String targetId, Map<String, Object> targetArguments,
                  Map<String, Object> inputs, Model model, int users, double arrivalRatePerSecond,
                  String arrivalRate, Duration warmup, Duration rampUp, Duration duration, Duration rampDown,
                  ThinkTimePolicy thinkTimePolicy, Long seed, int maxConcurrent, String overloadPolicy,
                  Map<String, Object> thresholds, Map<String, Object> evidence) {
-        this(source, Version.LOAD_SCHEMA,
+        this(source, Version.LOAD_SCHEMA_V1_0,
                 Collections.singletonList(new LoadWorkload("default", targetType, targetId, targetArguments,
                         inputs, model, users, arrivalRatePerSecond, arrivalRate, warmup, rampUp, duration,
                         rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy, thresholds)),
@@ -72,8 +79,8 @@ public final class LoadScenario {
     public String schemaVersion() { return schemaVersion; }
     public List<LoadWorkload> workloads() { return workloads; }
     public boolean multiWorkload() { return workloads.size() > 1; }
-    public boolean legacyV1() { return Version.LOAD_SCHEMA.equals(schemaVersion); }
-    boolean coordinatorRequired() { return !legacyV1() && !workloadView; }
+    public boolean legacyV10() { return Version.LOAD_SCHEMA_V1_0.equals(schemaVersion); }
+    boolean coordinatorRequired() { return !legacyV10() && !workloadView; }
     public LoadWorkload workload() { return workloads.get(0); }
     public LoadWorkload workload(String id) {
         for (LoadWorkload workload : workloads) if (workload.id().equals(id)) return workload;
@@ -99,7 +106,7 @@ public final class LoadScenario {
     public Long seed() { return seed; }
     public int maxConcurrent() { return workload().maxConcurrent(); }
     public String overloadPolicy() { return workload().overloadPolicy(); }
-    /** Run-level thresholds for v1.1; identical to workload thresholds for legacy v1.0. */
+    /** Run-level thresholds; a single workload can also declare workload-specific thresholds. */
     public Map<String, Object> thresholds() { return thresholds; }
     public Map<String, Object> evidence() { return evidence; }
 
@@ -127,7 +134,7 @@ public final class LoadScenario {
     public LoadScenario forWorkload(LoadWorkload workload) {
         if (workload == null) throw new IllegalArgumentException("Load workload is required");
         return new LoadScenario(source, schemaVersion, Collections.singletonList(workload), seed,
-                workload.thresholds(), evidence, true);
+                workload.thresholds(), evidence, true).withExecIdFormat(execIdFormat);
     }
 
     public Map<String, Object> toMap() { return toMap(true, false); }
@@ -136,9 +143,10 @@ public final class LoadScenario {
     public Map<String, Object> toSummaryMap() { return toMap(false, true); }
 
     private Map<String, Object> toMap(boolean includeExecutionData, boolean summary) {
-        if (legacyV1()) return legacyMap(includeExecutionData, summary);
+        if (legacyV10()) return legacyMap(includeExecutionData, summary);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", schemaVersion);
+        if (!execIdFormat.isEmpty()) result.put("execution", Collections.<String, Object>singletonMap("execIdFormat", execIdFormat));
         if (seed != null) result.put("seed", seed);
         List<Map<String, Object>> workloadMaps = new ArrayList<Map<String, Object>>();
         for (LoadWorkload workload : workloads) workloadMaps.add(workload.toMap(includeExecutionData, summary));
@@ -151,7 +159,7 @@ public final class LoadScenario {
     private Map<String, Object> legacyMap(boolean includeExecutionData, boolean summary) {
         LoadWorkload workload = workload();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("schemaVersion", Version.LOAD_SCHEMA);
+        result.put("schemaVersion", Version.LOAD_SCHEMA_V1_0);
         if (seed != null) result.put("seed", seed);
         Map<String, Object> target = new LinkedHashMap<String, Object>();
         target.put("type", workload.targetType());

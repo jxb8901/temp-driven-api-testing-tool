@@ -8,6 +8,12 @@ import java.util.Map;
 
 /** Immutable configuration for one independently declared V2.5 dbhelper instance. */
 public final class DbHelperConfig {
+    private ResourceOutputConfig evidenceOutput;
+    public ResourceOutputConfig evidenceOutput() { return evidenceOutput; }
+    DbHelperConfig withEvidenceOutput(Object evidence) {
+        this.evidenceOutput = ResourceOutputConfig.from(evidence);
+        return this;
+    }
     private final String id;
     private final String name;
     private final String description;
