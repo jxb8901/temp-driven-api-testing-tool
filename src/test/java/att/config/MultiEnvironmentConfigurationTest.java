@@ -42,10 +42,10 @@ class MultiEnvironmentConfigurationTest {
         assertEquals(Arrays.asList("config/mqhelpers/sit/payment.yaml"), sit.get("mqhelpers"));
         assertEquals(Arrays.asList("config/mqhelpers/uat/payment.yaml"), uat.get("mqhelpers"));
 
-        validateDescriptor(sit, "dbhelpers", "schemas/att-dbhelper-v2.5.schema.json");
-        validateDescriptor(uat, "dbhelpers", "schemas/att-dbhelper-v2.5.schema.json");
-        validateDescriptor(sit, "mqhelpers", "schemas/history/att-mqhelper-v1.0.schema.json");
-        validateDescriptor(uat, "mqhelpers", "schemas/history/att-mqhelper-v1.0.schema.json");
+        validateDescriptor(sit, "dbhelpers", "schemas/att-dbhelper-v2.6.schema.json");
+        validateDescriptor(uat, "dbhelpers", "schemas/att-dbhelper-v2.6.schema.json");
+        validateDescriptor(sit, "mqhelpers", "schemas/att-mqhelper-v1.2.schema.json");
+        validateDescriptor(uat, "mqhelpers", "schemas/att-mqhelper-v1.2.schema.json");
 
         Map<?, ?> sitDb = yaml(root.resolve("config/dbhelpers/sit/orders.yaml"));
         Map<?, ?> uatDb = yaml(root.resolve("config/dbhelpers/uat/orders.yaml"));

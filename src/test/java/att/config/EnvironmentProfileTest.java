@@ -190,11 +190,13 @@ class EnvironmentProfileTest {
     private String mq(String id, String host) {
         return "schemaVersion: att-mqhelper/v1.2\n"
                 + "id: " + id + "\nname: " + id + " MQ\ndescription: " + id + " queue\n"
-                + "connection: {queueManager: QM1, host: " + host + ", port: 1414, channel: APP.SVRCONN}\n";
+                + "defaults:\n  connection: {queueManager: QM1, host: " + host + ", port: 1414, channel: APP.SVRCONN}\n"
+                + "instances: [{id: primary}]\n";
     }
 
     private Object connectionValue(Map<?, ?> helper, String field) {
-        return ((Map<?, ?>) helper.get("connection")).get(field);
+        Map<?, ?> defaults = (Map<?, ?>) helper.get("defaults");
+        return ((Map<?, ?>) defaults.get("connection")).get(field);
     }
 
     private CliResult runCli(Path root, String... args) throws Exception {

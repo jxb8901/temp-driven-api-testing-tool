@@ -134,6 +134,7 @@ class FrameworkConfigLoaderTest {
                 "report: {fileNamePattern: \"#{upper(${suiteName})}.result.xlsx\"}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo\n" +
                 "    command: [echo, \"#{trim(${input.value})}\"]\n" +
+                "    stdoutFormat: text\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfigLoader().load(valid);
         assertEquals("#{upper(${suiteName})}.result.xlsx", config.report().fileNamePattern());
@@ -185,9 +186,9 @@ class FrameworkConfigLoaderTest {
         assertFalse(new FrameworkConfigLoader().load(ok).caseLogYamlAnchors());
         Path excessive=tempDir.resolve("excessive.yaml"); Files.write(excessive,"schemaVersion: att-config/v2.10\ntimeoutMs: 3600001\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(excessive));
-        Path mismatch=tempDir.resolve("mismatch.yaml"); Files.write(mismatch,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${KeyWords}'\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
+        Path mismatch=tempDir.resolve("mismatch.yaml"); Files.write(mismatch,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${KeyWords}'\n    stdoutFormat: text\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(mismatch));
-        Path direct=tempDir.resolve("direct.yaml"); Files.write(direct,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${keywords} ${input.keywords}'\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
+        Path direct=tempDir.resolve("direct.yaml"); Files.write(direct,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${keywords} ${input.keywords}'\n    stdoutFormat: text\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
         ToolConfig legacyScalar = new FrameworkConfigLoader().load(direct).tool("find");
         assertEquals("顯示 名稱 !", legacyScalar.name());
         assertEquals(java.util.Arrays.asList("echo", "${keywords}", "${input.keywords}"), legacyScalar.commandArgv());
@@ -206,16 +207,16 @@ class FrameworkConfigLoaderTest {
                 "script: [./tools/dispatch.sh, --read-only]\n" +
                 "ssh: {host: db.example, user: att, port: 2222, identityFile: keys/id_ed25519}\n" +
                 "tools:\n  select:\n    name: Select\n    description: Query row\n" +
-                "    command: [query, '${id}']\n    output: json\n" +
+                "    command: [query, '${id}']\n    stdoutFormat: json\n" +
                 "    arguments:\n      id: {name: ID, description: Row ID, required: true, argName: --id}\n").getBytes("UTF-8"));
         Files.write(configDirectory.resolve("tools/logs.yaml"), ("schemaVersion: att-tool-group/v2.9\n" +
                 "id: logs\nname: Logs\ndescription: Log tools\n" +
-                "tools:\n  tail:\n    name: Tail\n    description: Tail logs\n    command: [./tools/tail.sh]\n").getBytes("UTF-8"));
+                "tools:\n  tail:\n    name: Tail\n    description: Tail logs\n    command: [./tools/tail.sh]\n    stdoutFormat: text\n").getBytes("UTF-8"));
         Files.write(configDirectory.resolve("config.yaml"), ("schemaVersion: att-config/v2.10\n" +
                 "toolGroups: [config/tools/database.yaml, config/tools/logs.yaml]\n" +
                 "ssh: {host: global.example, user: runner}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo value\n" +
-                "    command:\n      - /usr/bin/printf\n      - '%s\\n'\n      - '${value}'\n" +
+                "    command:\n      - /usr/bin/printf\n      - '%s\\n'\n      - '${value}'\n    stdoutFormat: text\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true, argName: ''}\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfigLoader().load(configDirectory.resolve("config.yaml"));
         assertEquals(java.util.Arrays.asList("/usr/bin/printf", "%s\\n", "${value}"), config.tool("echo").commandArgv());
@@ -257,6 +258,7 @@ class FrameworkConfigLoaderTest {
         Files.write(config, ("schemaVersion: att-config/v2.10\n" +
                 "tools:\n  sample:\n    name: Sample\n    description: Sample\n" +
                 "    command: [echo, '${missing}']\n" +
+                "    stdoutFormat: text\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
 
         att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
@@ -274,6 +276,7 @@ class FrameworkConfigLoaderTest {
         Files.write(config, ("schemaVersion: att-config/v2.10\n" +
                 "tools:\n  capture:\n    name: Capture\n    description: Capture lists\n" +
                 "    command: [capture, '${keywords}', '${types}']\n" +
+                "    stdoutFormat: text\n" +
                 "    arguments:\n" +
                 "      keywords: {name: Keywords, description: Search words, required: true, delimit: ',', argName: --keyword, argNameMode: repeat}\n" +
                 "      types: {name: Types, description: Transaction types, required: true, delimit: '|', argName: --types}\n").getBytes("UTF-8"));
