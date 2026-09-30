@@ -75,7 +75,7 @@ public class StageTemplateRunner {
                 actionStart.put("status", "START");
                 appendProgress(log, "ACTION", actionStart);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
-                else if ("tool".equals(type)) toolStatus = executeTool(stageName, action, context, log, output, targets, node);
+                else if ("tool".equals(type)) toolStatus = executeTool(stageName, template, action, context, log, output, targets, node);
                 else if ("db".equals(type)) toolStatus = executeDb(stageName, action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
@@ -487,7 +487,7 @@ public class StageTemplateRunner {
         return type == null ? null : String.valueOf(type);
     }
 
-    private ResultStatus executeTool(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
+    private ResultStatus executeTool(String stageName, StageTemplate template, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
                              List<String> targets, Map<String, Object> node) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
@@ -542,8 +542,13 @@ public class StageTemplateRunner {
                     return ResultStatus.ERROR;
                 }
                 context.setActionOutput(output);
-                runEvidenceCollectors(action, number, context, log, output, invocation);
-                boolean passed = evaluateAssertion(action, output, context, log);
+                runEvidenceCollectors(template, action, number, context, log, output, invocation);
+                boolean passed;
+                try {
+                    passed = evaluateAssertion(action, output, context, log);
+                } catch (Exception error) {
+                    throw phaseDiagnostic(error, template, action, "actions." + action.id() + ".assert");
+                }
                 if (output.get("assertion") != null) invocation.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) output.get("assertion")));
                 if (passed) {
                     output.put("winningAttempt", number);
@@ -623,7 +628,7 @@ public class StageTemplateRunner {
         return "HTTP_TIMEOUT".equals(type) || "HTTP_POOL_TIMEOUT".equals(type);
     }
 
-    private void runEvidenceCollectors(TemplateAction action, int attempt, CaseRuntimeContext context,
+    private void runEvidenceCollectors(StageTemplate template, TemplateAction action, int attempt, CaseRuntimeContext context,
                                        CaseExecutionLog log, Map<String, Object> output,
                                        Map<String, Object> invocation) throws Exception {
         if (action.evidence().isEmpty()) return;
@@ -658,7 +663,9 @@ public class StageTemplateRunner {
                 ActionExecutionResult.mergeEvidence(outputEvidence(output), collectorEvidence);
                 if (!passed) {
                     record.put("error", collectorError(result.invocation(), "Evidence collector did not complete successfully"));
-                    throw new EvidenceCollectorFailure(collector, record);
+                    att.validation.DiagnosticException diagnostic = collectorDiagnostic(template, action, collector, record, null);
+                    record.put("diagnostic", diagnostic.toDiagnostic().toMap());
+                    throw new EvidenceCollectorFailure(collector, record, diagnostic);
                 }
                 appendEvidenceLog(log, action, attempt, collector, record);
             } catch (EvidenceCollectorFailure failure) {
@@ -677,10 +684,32 @@ public class StageTemplateRunner {
                 collectorEvidence.put("collectors", evidence);
                 ActionExecutionResult.mergeEvidence(attemptEvidence, collectorEvidence);
                 ActionExecutionResult.mergeEvidence(outputEvidence(output), collectorEvidence);
+                att.validation.DiagnosticException diagnostic = collectorDiagnostic(template, action, collector, record, error);
+                record.put("diagnostic", diagnostic.toDiagnostic().toMap());
                 appendEvidenceLog(log, action, attempt, collector, record);
-                if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, error);
+                if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, diagnostic);
             }
         }
+    }
+
+    private att.validation.DiagnosticException collectorDiagnostic(StageTemplate template, TemplateAction action,
+                                                                    EvidenceCollector collector, Map<String, Object> record,
+                                                                    Throwable failure) {
+        String field = "actions." + action.id() + ".evidence." + collector.id() + ".call";
+        att.validation.DiagnosticException existing = failure == null ? null : att.validation.DiagnosticException.find(failure);
+        if (existing != null) return phaseDiagnostic(existing, template, action, field);
+        Object error = record.get("error");
+        String message = error instanceof Map && ((Map<?, ?>) error).get("message") != null
+                ? String.valueOf(((Map<?, ?>) error).get("message"))
+                : failure instanceof Exception ? safeMessage((Exception) failure) : "Evidence collector failed";
+        if (message == null || message.trim().isEmpty()) message = "Evidence collector failed";
+        att.validation.DiagnosticException generated = new att.validation.DiagnosticException(
+                att.validation.DiagnosticCodes.TOOL_EXECUTION,
+                "Evidence collector '" + collector.id() + "' failed",
+                message,
+                null, field, null, null, null, template.name(), action.id(),
+                "Inspect the collector call and its execution evidence for the underlying resource failure.", failure);
+        return phaseDiagnostic(generated, template, action, field);
     }
 
     private Map<String, Object> collectorError(Object source, String fallback) {
@@ -891,6 +920,24 @@ public class StageTemplateRunner {
         Object existing = node.get("evidenceError");
         String message = safeMessage(error);
         node.put("evidenceError", existing == null ? message : String.valueOf(existing) + "; " + message);
+    }
+    private att.validation.DiagnosticException phaseDiagnostic(Exception error, StageTemplate template,
+                                                               TemplateAction action, String field) {
+        att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
+        if (typed == null) {
+            typed = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_EXECUTION,
+                    "Action '" + action.id() + "' failed", safeMessage(error), null, field,
+                    null, null, null, template.name(), action.id(),
+                    "Inspect the action field and its execution evidence.", error);
+        }
+        return phaseDiagnostic(typed, template, action, field);
+    }
+    private att.validation.DiagnosticException phaseDiagnostic(att.validation.DiagnosticException typed,
+                                                               StageTemplate template, TemplateAction action,
+                                                               String field) {
+        if (typed.file() != null || template.sourceFile() == null) return typed;
+        return att.config.YamlSupport.locate(typed, template.sourceFile(), field)
+                .withLocation(null, null, null, null, null, template.name(), action.id());
     }
     private att.validation.DiagnosticException detailed(Exception error, StageTemplate template, TemplateAction action, String executionField) {
         att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
