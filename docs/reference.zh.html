@@ -164,7 +164,7 @@
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -227,6 +227,9 @@
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
 </head>
 <body>
 <header id="title-block-header">
@@ -3507,7 +3510,7 @@ JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 d
 追加配置的结果列。全局 <code>report.fileNamePattern</code>
 控制文件名。侧车 <code>report.columns</code>
 只修改工作簿标签。支持的映射包括
-<code>result</code>、<code>durationMs</code>、<code>expectedResult</code>、<code>actualResult</code>、<code>caseLog</code>、<code>reportLink</code>、<code>runTime</code>、<code>execId</code>；Expected/Actual
+<code>result</code>、<code>durationMs</code>、<code>expectedResult</code>、<code>actualResult</code>、<code>caseLog</code>、<code>reportLink</code>、<code>runTime</code>；Expected/Actual
 单元格保留 LF 字符并以换行文本显示。结果回填使用与 testcase loader
 相同的 Excel 显示格式和空白规范化规则读取 Case
 ID，因此带前导零等数字格式的 ID 在执行与报表写入时会匹配同一 Case。</p>
