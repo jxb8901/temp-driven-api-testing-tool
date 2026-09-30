@@ -52,7 +52,7 @@ class StageTemplateLoaderTest {
         assertTrue(legacyError.getMessage().contains("renderAs"));
         assertTrue(legacyError.suggestion().contains("DocumentValue"));
         assertTrue(att.validation.DiagnosticRenderer.exception(legacyError.toDiagnostic()).contains("actions.render.renderAs"));
-        assertTrue(att.validation.DiagnosticRenderer.jsonError(legacyError.toDiagnostic()).contains("format: json"));
+        assertTrue(att.validation.DiagnosticRenderer.jsonError(legacyError.toDiagnostic()).contains("renderAs"));
         att.validation.DiagnosticException saveError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-save"));
         assertTrue(saveError.field().endsWith("saveAs"));
         assertTrue(saveError.suggestion().contains("removed"));

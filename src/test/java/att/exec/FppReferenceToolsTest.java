@@ -28,7 +28,7 @@ class FppReferenceToolsTest {
         Path log = tempDir.resolve("logs/api.log");
         Files.write(request, "<Request/>".getBytes(StandardCharsets.UTF_8));
 
-        CommandResult result = run("./tools/fpp_invoke_api.sh", "REQ<&1", "PAYMENT", request.toString(), log.toString());
+        CommandResult result = run("./tools/fpp_invoke_api.sh", "REQ<&1", "PAYMENT", "", request.toString(), log.toString());
 
         assertEquals(0, result.exitCode());
         assertTrue(result.stdout().contains("<RequestId>REQ&lt;&amp;1</RequestId>"));

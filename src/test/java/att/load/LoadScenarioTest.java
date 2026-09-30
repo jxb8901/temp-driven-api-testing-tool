@@ -130,7 +130,7 @@ class LoadScenarioTest {
                 + "target: {type: template, id: LOAD_TEMPLATE, arguments: {ignored: true}}\n"
                 + "load: {users: 1, duration: 1s}\n");
         DiagnosticException argumentsError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidArguments));
-        assertEquals("target.arguments", argumentsError.field());
+        assertEquals("workloads[0].target.arguments", argumentsError.field());
 
         Path invalidMaxConcurrent = write(project, "invalid-max-concurrent.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: LOAD_TEMPLATE}\n"
@@ -262,8 +262,9 @@ class LoadScenarioTest {
         write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
                 + "  write: {type: tool, call: \"" + call + "\"}\n");
-        Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.0\n"
-                + "target: {type: template, id: FILE_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
+        Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.2\n"
+                + "workloads:\n  - id: files\n    target: {type: template, id: FILE_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 1s}\n");
         Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
         arguments.put("source", new ToolArgumentConfig("source", "Source", "Payload source", true, ""));
         arguments.put("target", new ToolArgumentConfig("target", "Target", "Output path", true, ""));
@@ -281,7 +282,8 @@ class LoadScenarioTest {
                     IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
             assertEquals(ResultStatus.PASS, result.status());
             assertEquals(result.outputDirectory().toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
-            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered.txt")));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered.txt")),
+                    String.valueOf(result.context().resolve("ACTIONS.write.output.evidence.tool.invocations[0].argv")));
             assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
                     "file-producing actions need a workspace but must not force a case log");
         } finally { resources.close(); }
@@ -497,14 +499,18 @@ class LoadScenarioTest {
         Files.createDirectories(project.resolve("templates/SLOW_TEMPLATE"));
         Path started = temp.resolve("slow-started");
         Path completed = temp.resolve("slow-completed");
-        String command = "/bin/sh -c 'touch " + started + "; sleep 1; touch " + completed + "'";
+        Path slowScript = project.resolve("tools/slow-tool.sh");
+        Files.createDirectories(slowScript.getParent());
+        Files.write(slowScript, ("#!/bin/sh\ntouch '" + started + "'\nsleep 1\ntouch '" + completed + "'\n").getBytes("UTF-8"));
+        slowScript.toFile().setExecutable(true);
         write(project, "templates/SLOW_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: SLOW_TEMPLATE\ndescription: cancellable load action\nactions:\n"
                 + "  run: {type: tool, call: \"#{slow()}\"}\n");
-        Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.0\n"
-                + "target: {type: template, id: SLOW_TEMPLATE}\nload: {users: 1, duration: 10s}\n");
+        Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.2\n"
+                + "workloads:\n  - id: slow\n    target: {type: template, id: SLOW_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 10s}\n");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
-                Paths.get("templates"), Collections.singletonMap("slow", new ToolConfig("slow", "Slow", "Slow", command, "txt", Collections.emptyMap())), null, null);
+                Paths.get("templates"), Collections.singletonMap("slow", new ToolConfig("slow", "Slow", "Slow", slowScript.toString(), "text", Collections.emptyMap())), null, null);
         LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
         LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
         Path outputRoot = temp.resolve("cancel-output");

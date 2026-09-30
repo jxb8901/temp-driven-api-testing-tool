@@ -36,7 +36,7 @@ class FlowRuntimeTest {
         writeFlow("inner-error", "schemaVersion: att-flow/v3.3\nid: common.inner-error.v1\nname: Inner\ndescription: Inner\nactions:\n  bad: {type: log, message: '${CASE.notPresent}'}\n");
         writeFlow("outer-error", "schemaVersion: att-flow/v3.3\nid: common.outer-error.v1\nname: Outer\ndescription: Outer\nactions:\n  nested: {type: flow, use: common.inner-error.v1}\n");
         StageTemplate template = new StageTemplate("T", tempDir, Collections.singletonList(
-                flowAction("outer", "common.outer-error.v1", "stop")), "att-template/v3.0");
+                flowAction("outer", "common.outer-error.v1", "stop")), "att-template/v3.3");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             ValidationResult result = new StageTemplateRunner(new UnifiedTemplateEngine(null),
@@ -87,7 +87,7 @@ class FlowRuntimeTest {
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
                 flowAction("skipFlow", "common.skip.v1", "continue"),
-                flowAction("failFlow", "common.fail.v1", "continue")), "att-template/v3.0");
+                flowAction("failFlow", "common.fail.v1", "continue")), "att-template/v3.3");
         CaseRuntimeContext context = context();
         List<ValidationResult> results;
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
@@ -106,7 +106,7 @@ class FlowRuntimeTest {
         Map<String,Object> values = new LinkedHashMap<String,Object>();
         values.put("type", "flow"); values.put("use", "common.outer-skip.v1"); values.put("runWhen", "false");
         StageTemplate template = new StageTemplate("T", tempDir,
-                Collections.singletonList(new TemplateAction("skippedFlow", values, "att-template/v3.0")), "att-template/v3.0");
+                Collections.singletonList(new TemplateAction("skippedFlow", values, "att-template/v3.3")), "att-template/v3.3");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             assertEquals(ResultStatus.SKIPPED, new StageTemplateRunner(new UnifiedTemplateEngine(null),
@@ -122,7 +122,7 @@ class FlowRuntimeTest {
         writeFlow("save", "schemaVersion: att-flow/v3.3\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir,
-                Collections.singletonList(flowAction("saveFlow", "common.save.v1", "stop")), "att-template/v3.0");
+                Collections.singletonList(flowAction("saveFlow", "common.save.v1", "stop")), "att-template/v3.3");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             assertEquals(ResultStatus.PASS, new StageTemplateRunner(new UnifiedTemplateEngine(null), flows)
@@ -140,7 +140,7 @@ class FlowRuntimeTest {
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
                 flowAction("continues", "common.continue.v1", "continue"),
-                flowAction("stops", "common.stop.v1", "continue")), "att-template/v3.0");
+                flowAction("stops", "common.stop.v1", "continue")), "att-template/v3.3");
         CaseRuntimeContext context = context();
         List<ValidationResult> results;
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
@@ -160,8 +160,8 @@ class FlowRuntimeTest {
         Map<String,Object> seed = new LinkedHashMap<String,Object>();
         seed.put("type", "assign"); seed.put("name", "SrcRefNo"); seed.put("expression", "REF-001");
         StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
-                new TemplateAction("seed", seed, "att-template/v3.0"),
-                flowAction("copyFlow", "common.copy.v1", "stop")), "att-template/v3.0");
+                new TemplateAction("seed", seed, "att-template/v3.3"),
+                flowAction("copyFlow", "common.copy.v1", "stop")), "att-template/v3.3");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null), flows).execute("verify", template, context, log);
@@ -204,8 +204,10 @@ class FlowRuntimeTest {
         }
 
         assertEquals(expected, ((att.template.DocumentValue) inlineContext.resolve("ACTIONS.renderRequest.output.result")).text());
-        assertEquals(expected, ((att.template.DocumentValue) CaseRuntimeContext.getPath(flowContext.caseTree(),
-                "STAGES.verify.TEMPLATE.ACTIONS.renderFlow.flow.actions.renderRequest.output.result")).text());
+        Map<?, ?> serialized = (Map<?, ?>) CaseRuntimeContext.getPath(flowContext.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.renderFlow.flow.actions.renderRequest.output.result");
+        assertEquals("DocumentValue", serialized.get("type"));
+        assertEquals(expected, serialized.get("text"));
     }
 
     private CaseRuntimeContext context() {
@@ -223,7 +225,7 @@ class FlowRuntimeTest {
     private TemplateAction flowAction(String id, String use, String onFailure) {
         Map<String,Object> values = new LinkedHashMap<String,Object>();
         values.put("type", "flow"); values.put("use", use); values.put("onFailure", onFailure);
-        return new TemplateAction(id, values, "att-template/v3.0");
+        return new TemplateAction(id, values, "att-template/v3.3");
     }
 
     private void writeFlow(String name, String yaml) throws Exception {

@@ -160,7 +160,7 @@ class HttpHelperExecutorTest {
             assertEquals("json", invocationEvidence.get("resolvedResponseFormat"));
 
             ToolInvocationResult contentTypeOverride = http.execute("paymentApi", "post",
-                    args("path", "/echo", "body", args("ok", true), "responseFormat", "json"),
+                    args("path", "/echo", "body", args("ok", true), "requestFormat", "json", "responseFormat", "json"),
                     context, 1000L, "http-octets-as-json", "yaml");
             assertTrue(contentTypeOverride.executionSuccess(), String.valueOf(contentTypeOverride.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) contentTypeOverride.output()).get("ok"));
@@ -254,7 +254,7 @@ class HttpHelperExecutorTest {
             assertEquals(500, serverError.operationResult().outputMetadata().get("statusCode"));
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) http.execute("paymentApi", "post", args("path", "http://outside/"), context, 1000L, "bad", "text").operationResult().outputMetadata().get("error")).get("type"));
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) http.execute("paymentApi", "get", args("path", "/echo", "body", "x"), context, 1000L, "bad-body", "text").operationResult().outputMetadata().get("error")).get("type"));
-            ToolInvocationResult typed = http.execute("paymentApi", "post", args("path", "/json", "body", args("ok", true)), context, 1000L, "typed", "text");
+            ToolInvocationResult typed = http.execute("paymentApi", "post", args("path", "/json", "body", args("ok", true), "requestFormat", "json"), context, 1000L, "typed", "text");
             assertTrue(typed.executionSuccess(), String.valueOf(typed.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) typed.output()).get("ok"));
             ToolInvocationResult redirected = http.execute("paymentApi", "get", args("path", "/redirect", "followRedirects", true), context, 1000L, "redirect", "json");

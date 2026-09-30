@@ -107,7 +107,7 @@ class EnvironmentProfileTest {
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("schemas/history/att-config-v2.6.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.10.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());
@@ -195,8 +195,11 @@ class EnvironmentProfileTest {
     }
 
     private Object connectionValue(Map<?, ?> helper, String field) {
-        Map<?, ?> defaults = (Map<?, ?>) helper.get("defaults");
-        return ((Map<?, ?>) defaults.get("connection")).get(field);
+        Map<?, ?> connection = (Map<?, ?>) helper.get("connection");
+        if (connection != null) return connection.get(field);
+        List<?> instances = (List<?>) helper.get("instances");
+        Map<?, ?> instance = (Map<?, ?>) instances.get(0);
+        return ((Map<?, ?>) instance.get("connection")).get(field);
     }
 
     private CliResult runCli(Path root, String... args) throws Exception {
