@@ -516,8 +516,10 @@ class LoadScenarioTest {
         LoadTarget target = new LoadTargetResolver(project, config).resolve(workloadScenario);
         Path outputRoot = temp.resolve("cancel-output");
         LoadRunResources resources = new LoadRunResources(project, config);
+        List<LoadEvent> observedEvents = Collections.synchronizedList(new ArrayList<LoadEvent>());
         LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
-                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10));
+                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10),
+                event -> observedEvents.add(event));
         ClosedVuScheduler scheduler = new ClosedVuScheduler(workloadScenario,
                 new IterationExecutor(project, config, target, resources, outputRoot), "cancel-run", evidence);
         ExecutorService runner = Executors.newSingleThreadExecutor();
@@ -526,11 +528,15 @@ class LoadScenarioTest {
             long deadline = System.currentTimeMillis() + 3000L;
             while (!Files.exists(started) && System.currentTimeMillis() < deadline) Thread.sleep(10L);
             assertTrue(Files.exists(started), "the active iteration did not start");
+            Thread.sleep(100L);
             scheduler.cancel();
             future.get(5, TimeUnit.SECONDS);
             Thread.sleep(1500L);
             assertFalse(Files.exists(completed), "the cancelled tool completed after scheduler shutdown");
-            assertEquals(1, evidence.events().size());
+            List<String> observedSummary = new ArrayList<String>();
+            for (LoadEvent event : observedEvents) observedSummary.add(event.iterationId() + ":" + event.status()
+                    + ":completed=" + event.completed() + ":evidence=" + String.valueOf(event.evidence()));
+            assertEquals(1, evidence.events().size(), "observed events: " + observedSummary);
             assertEquals(ResultStatus.ERROR, evidence.events().get(0).status());
             assertNotNull(evidence.events().get(0).evidence());
             assertFalse(resources.isClosed());

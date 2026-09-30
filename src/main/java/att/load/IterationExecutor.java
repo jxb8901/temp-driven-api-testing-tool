@@ -180,10 +180,16 @@ public final class IterationExecutor implements LoadIterationRunner {
     }
 
     private void deleteEmptyWorkspace(Path directory) {
-        if (directory == null || !Files.isDirectory(directory)) return;
-        try (java.nio.file.DirectoryStream<Path> contents = Files.newDirectoryStream(directory)) {
-            if (!contents.iterator().hasNext()) Files.deleteIfExists(directory);
-        } catch (IOException ignored) { }
+        Path boundary = outputRoot.resolve("load").toAbsolutePath().normalize();
+        Path current = directory == null ? null : directory.toAbsolutePath().normalize();
+        while (current != null && current.startsWith(boundary) && !current.equals(boundary)) {
+            if (!Files.isDirectory(current)) return;
+            try (java.nio.file.DirectoryStream<Path> contents = Files.newDirectoryStream(current)) {
+                if (contents.iterator().hasNext()) return;
+                Files.deleteIfExists(current);
+            } catch (IOException ignored) { return; }
+            current = current.getParent();
+        }
     }
 
     private void deleteWorkspace(Path directory) {

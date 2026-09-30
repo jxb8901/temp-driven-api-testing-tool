@@ -169,8 +169,8 @@ class FrameworkEngineTest {
         assertEquals("API status", summary.results().get(0).validations().get(1).description());
         assertEquals("SUCCESS", summary.results().get(0).actual());
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/workbooks/payment.result.xlsx")));
-        assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/payments.payment.TC001/case.yaml")));
-        Path caseDirectory = projectRoot.resolve("output/TEST-V2/payments.payment.TC001").toAbsolutePath().normalize();
+        Path caseDirectory = summary.results().get(0).caseLogPath().getParent().toAbsolutePath().normalize();
+        assertTrue(Files.exists(caseDirectory.resolve("case.yaml")));
         Path cwdEvidence = caseDirectory.resolve("tool-cwd.txt");
         assertTrue(Files.exists(cwdEvidence));
         assertEquals(caseDirectory.toRealPath().toString() + "\n", new String(Files.readAllBytes(cwdEvidence), "UTF-8"));
