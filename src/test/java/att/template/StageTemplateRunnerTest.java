@@ -608,7 +608,7 @@ class StageTemplateRunnerTest {
             }
             assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
             String collector = "ACTIONS.call.output.evidence.collectors.snapshot";
-            assertEquals("partial-data", context.resolve(collector + ".result"));
+            assertNull(context.resolve(collector + ".result"));
             String message = String.valueOf(context.resolve(collector + ".error.message"));
             assertTrue(message.contains("status ERROR"), message);
             assertTrue(message.contains("exitCode=2"), message);
@@ -1288,6 +1288,102 @@ class StageTemplateRunnerTest {
                 assertFalse(results.get(0).message().contains(fragment), fragment);
             }
             assertTrue(published.contains("[REDACTED_SECRET]"));
+        }
+    }
+
+    @Test void returnedCommandCollectorFailuresNeverPublishPrivateExecutionData() throws Exception {
+        String secret = "returned-command-secret-739";
+        for (boolean oversized : new boolean[] {false, true}) {
+            String payload = oversized ? String.join("", Collections.nCopies(20000, "x")) : "ordinary-payload";
+            for (String mode : Arrays.asList("continue", "stop")) {
+                Path caseDir = tempDir.resolve("returned-private-" + oversized + "-" + mode);
+                Files.createDirectories(caseDir);
+                TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+                CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+                context.beginStage(new StageCaseData("invoke", "T", map("secret", secret, "payload", payload)), "T", tempDir);
+                Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
+                arguments.put("secret", new ToolArgumentConfig("secret", "Secret", "", true, ""));
+                arguments.put("payload", new ToolArgumentConfig("payload", "Payload", "", true, ""));
+                Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+                tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "text", arguments));
+                FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+                CommandRunner process = new CommandRunner() {
+                    @Override public CommandResult run(List<String> argv, java.time.Duration timeout, Path directory,
+                            Map<String, String> environment) {
+                        assertTrue(argv.contains(secret));
+                        assertTrue(argv.contains(payload));
+                        return new CommandResult(2, secret + " " + payload, "Denied token " + secret, false);
+                    }
+                };
+                TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                        "evidence", map("private", map("call",
+                                "#{sample(secret=${EXEC.INPUT.secret}, payload=${EXEC.INPUT.payload})}", "onFailure", mode))));
+                List<ValidationResult> results;
+                try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                    results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config, process)))
+                            .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                }
+                assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+                String path = "ACTIONS.call.output.evidence.collectors.private";
+                String invocation = path + ".evidence.tool.invocations[0]";
+                assertEquals("ERROR", context.resolve(path + ".status"));
+                assertNull(context.resolve(path + ".result"));
+                assertEquals("sample", context.resolve(invocation + ".name"));
+                assertEquals("ERROR", context.resolve(invocation + ".status"));
+                assertEquals(2, context.resolve(invocation + ".exitCode"));
+                assertEquals(Boolean.TRUE, context.resolve(invocation + ".inputOmitted"));
+                for (String field : Arrays.asList("input", "argv", "logicalArgv", "command", "stdout", "rawOutput", "output")) {
+                    assertNull(context.resolve(invocation + "." + field), field);
+                }
+                assertEquals(oversized ? CollectorExceptionEvidence.OMITTED_TEXT : "Denied token [REDACTED_SECRET]",
+                        context.resolve(invocation + ".stderr"));
+                if (oversized) assertEquals(Boolean.TRUE, context.resolve(invocation + ".inputRedactionLimited"));
+                String message = String.valueOf(context.resolve(path + ".error.message"));
+                assertTrue(message.contains("exitCode=2"), message);
+                String published = att.validation.JsonSupport.write(context.resolve(path));
+                String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+                assertFalse(published.contains(secret));
+                assertFalse(caseLog.contains(secret));
+                assertFalse(published.contains(payload));
+                assertFalse(caseLog.contains(payload));
+                assertFalse(results.get(0).message().contains(secret));
+            }
+        }
+    }
+
+    @Test void returnedNativeDiagnosticsUseTheSharedPrivateInputProjection() {
+        String secret = "native-private-token-729";
+        Map<String, Object> invocation = map("status", "ERROR", "input", map("token", secret));
+        Map<String, Object> nativeNode = map("id", "native", "input", map("token", secret),
+                "error", map("type", "HTTP_TIMEOUT", "message", "Denied " + secret), "stdout", secret);
+        ActionExecutionResult operation = new ActionExecutionResult(secret,
+                ActionExecutionResult.evidence("http", nativeNode), false,
+                map("code", "HTTP_TIMEOUT", "message", "Denied " + secret, "detail", secret,
+                        "privatePayload", secret), 10L);
+        ToolInvocationResult projected = CollectorExceptionEvidence.project(
+                new ToolInvocationResult("native", "native", secret, invocation, false, operation));
+        assertNull(projected.output());
+        assertEquals("Denied [REDACTED_SECRET]", projected.operationResult().diagnostic().get("message"));
+        assertEquals("HTTP_TIMEOUT", projected.operationResult().diagnostic().get("code"));
+        assertFalse(att.validation.JsonSupport.write(projected.evidence()).contains(secret));
+        assertFalse(att.validation.JsonSupport.write(projected.operationResult().diagnostic()).contains(secret));
+        assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
+    }
+
+    @Test void shortScalarAndPrimitiveTokensOmitDetailsInsteadOfCorruptingNumbers() {
+        for (Object input : Arrays.asList(new int[] {1, 2}, Integer.valueOf(1), Byte.valueOf((byte) 2), "ab")) {
+            ToolExecutionException projected = CollectorExceptionEvidence.project(new ToolExecutionException("TIMEOUT",
+                    "HTTP 502 from app01 at 2026-10-01",
+                    map("input", input, "status", "TIMEOUT", "sshHelper", "app01", "exitCode", 2,
+                            "stderr", "HTTP 502 from app01 at 2026-10-01"), 2, null));
+            assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, projected.getMessage());
+            assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, projected.evidence().get("stderr"));
+            assertEquals(Boolean.TRUE, projected.evidence().get("inputRedactionLimited"));
+            assertEquals("TIMEOUT", projected.category());
+            assertEquals("app01", projected.evidence().get("sshHelper"));
+            assertEquals(2, projected.exitCode());
+            assertEquals(2, projected.evidence().get("exitCode"));
         }
     }
 

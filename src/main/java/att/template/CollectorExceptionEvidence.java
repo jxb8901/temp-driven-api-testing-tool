@@ -1,6 +1,8 @@
 package att.template;
 
 import att.exec.ToolExecutionException;
+import att.exec.ToolInvocationResult;
+import att.exec.ActionExecutionResult;
 import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.Set;
 /** Public collector projection; exception evidence may contain private execution inputs. */
 final class CollectorExceptionEvidence {
     static final int TEXT_LIMIT = 1024;
+    static final int MIN_TOKEN_LENGTH = 4;
     static final int INSTANCE_LIMIT = 64;
     static final int INPUT_NODE_LIMIT = 256;
     static final int TOKEN_CHARACTER_LIMIT = 8192;
@@ -27,7 +30,8 @@ final class CollectorExceptionEvidence {
         "inputOmitted", "inputRedactionLimited", "failureDetailsOmitted", "evidenceTruncated", "messageTruncated", "instancesTruncated", "instanceCount",
         "durationMs", "timeoutMs", "groupId", "toolKey", "sshHelper", "instance",
         "host", "sshPort", "sshTransport", "selectionStrategy", "selectionSource",
-        "httpHelper", "mqHelper", "dbHelper", "reasonCode", "statusCode",
+        "httpHelper", "mqHelper", "dbHelper", "helper", "helperId", "operation", "reasonCode", "statusCode",
+        "message", "error", "cleanupWarning",
         "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated",
         "stdoutArtifactTruncated", "stderrArtifactTruncated", "stderr"
     };
@@ -39,6 +43,12 @@ final class CollectorExceptionEvidence {
         "errorTruncated", "cleanupWarningTruncated", "failureDetailsOmitted"
     };
 
+    private static final String[] DIAGNOSTIC_FIELDS = {
+        "code", "severity", "type", "category", "field", "message", "detail", "hint",
+        "status", "exitCode", "reasonCode", "statusCode", "inputRedactionLimited",
+        "failureDetailsOmitted", "messageTruncated", "evidenceTruncated"
+    };
+
     private CollectorExceptionEvidence() {}
 
     static ToolExecutionException project(ToolExecutionException failure) {
@@ -46,8 +56,65 @@ final class CollectorExceptionEvidence {
         if (source == null) source = Collections.emptyMap();
         Redaction redaction = new Redaction();
         redaction.limited = Boolean.TRUE.equals(source.get("inputRedactionLimited"));
+        redaction.captureTruncated = truncatedDetails(source);
         redaction.collect(source.get("input"));
         redaction.tokens.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        Map<String, Object> evidence = projectNode(source, redaction);
+        String message = freeText(failure.getMessage(), redaction, evidence, "message", truncatedDetails(source));
+        String category = bound(failure.category());
+        evidence.put("category", category);
+        evidence.put("message", message);
+        // Do not let diagnostic traversal republish details from the private cause chain.
+        return new ToolExecutionException(category, message, evidence, failure.exitCode(), null);
+    }
+
+    /** Project a returned failure before any collector publication or logging. */
+    static ToolInvocationResult project(ToolInvocationResult failure) {
+        Redaction redaction = new Redaction();
+        Map<String, Object> invocation = failure.invocation();
+        redaction.limited = Boolean.TRUE.equals(invocation.get("inputRedactionLimited"));
+        redaction.captureTruncated = truncatedDetails(invocation);
+        redaction.collect(invocation.get("input"));
+        Map<String, Object> nativeEvidence = failure.operationResult().evidence();
+        for (String kind : new String[] {"tool", "http", "db", "mq"}) {
+            for (Map<?, ?> node : invocationNodes(nativeEvidence.get(kind), redaction)) {
+                redaction.collect(node.get("input"));
+                redaction.captureTruncated |= truncatedDetails(node);
+            }
+        }
+        redaction.tokens.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        for (String kind : new String[] {"tool", "http", "db", "mq"}) {
+            List<Map<?, ?>> nodes = invocationNodes(nativeEvidence.get(kind), redaction);
+            if (nodes.isEmpty()) continue;
+            Map<String, Object> group = new LinkedHashMap<String, Object>();
+            List<Object> projected = new ArrayList<Object>();
+            for (Map<?, ?> node : nodes) projected.add(projectNode(node, redaction));
+            group.put("invocations", projected);
+            evidence.put(kind, group);
+        }
+        Map<String, Object> safeInvocation = projectNode(invocation, redaction);
+        Map<String, Object> diagnostic = failure.operationResult().diagnostic();
+        Map<String, Object> safeDiagnostic = diagnostic == null ? null : fields(diagnostic, DIAGNOSTIC_FIELDS, redaction);
+        // Failed results can be raw stdout/payload echoes, so only publish failure metadata.
+        return new ToolInvocationResult(failure.toolName(), failure.invocationId(), null, safeInvocation,
+                failure.executionSuccess(), new ActionExecutionResult(null, evidence, failure.executionSuccess(),
+                        safeDiagnostic, failure.operationResult().durationMs()));
+    }
+
+    private static List<Map<?, ?>> invocationNodes(Object group, Redaction redaction) {
+        List<Map<?, ?>> result = new ArrayList<Map<?, ?>>();
+        Object nodes = group instanceof Map ? ((Map<?, ?>) group).get("invocations") : null;
+        if (!(nodes instanceof List)) return result;
+        List<?> values = (List<?>) nodes;
+        if (values.size() > INSTANCE_LIMIT) redaction.limited = true;
+        for (int index = 0; index < Math.min(values.size(), INSTANCE_LIMIT); index++) {
+            if (values.get(index) instanceof Map) result.add((Map<?, ?>) values.get(index));
+        }
+        return result;
+    }
+
+    private static Map<String, Object> projectNode(Map<?, ?> source, Redaction redaction) {
         Map<String, Object> evidence = fields(source, FIELDS, redaction);
         if (redaction.limited) evidence.put("inputRedactionLimited", Boolean.TRUE);
         Object instances = source.get("instances");
@@ -72,12 +139,11 @@ final class CollectorExceptionEvidence {
             }
         }
         if (source.containsKey("input")) evidence.put("inputOmitted", Boolean.TRUE);
-        String message = freeText(failure.getMessage(), redaction, evidence, "message", truncatedDetails(source));
-        String category = bound(failure.category());
-        evidence.put("category", category);
-        evidence.put("message", message);
-        // Do not let diagnostic traversal republish details from the private cause chain.
-        return new ToolExecutionException(category, message, evidence, failure.exitCode(), null);
+        Object error = source.get("error");
+        if (error instanceof Map) evidence.put("error", fields((Map<?, ?>) error, DIAGNOSTIC_FIELDS, redaction));
+        Object diagnostic = source.get("diagnostic");
+        if (diagnostic instanceof Map) evidence.put("diagnostic", fields((Map<?, ?>) diagnostic, DIAGNOSTIC_FIELDS, redaction));
+        return evidence;
     }
 
     private static Map<String, Object> fields(Map<?, ?> source, String[] names, Redaction redaction) {
@@ -85,7 +151,8 @@ final class CollectorExceptionEvidence {
         for (String field : names) {
             Object value = source.get(field);
             if (value instanceof String) {
-                boolean freeForm = "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field);
+                boolean freeForm = "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field)
+                        || "message".equals(field) || "detail".equals(field) || "hint".equals(field);
                 target.put(field, freeForm ? freeText((String) value, redaction, target, field, truncatedDetails(source)) : bound((String) value));
                 if (((String) value).length() > TEXT_LIMIT) {
                     target.put(field + "Truncated", Boolean.TRUE);
@@ -103,7 +170,7 @@ final class CollectorExceptionEvidence {
         // Full-value substitution cannot prove that an upstream-truncated echo is safe.
         // Omit details when private inputs cannot be completely inspected within the budget.
         // Also avoid scanning/materializing oversized diagnostic strings.
-        if (redaction.limited || value.length() > TEXT_LIMIT || (truncated && !redaction.tokens.isEmpty())) {
+        if (redaction.limited || value.length() > TEXT_LIMIT || ((truncated || redaction.captureTruncated) && !redaction.tokens.isEmpty())) {
             target.put("failureDetailsOmitted", Boolean.TRUE);
             if (value.length() > TEXT_LIMIT) {
                 target.put(field + "Truncated", Boolean.TRUE);
@@ -140,10 +207,11 @@ final class CollectorExceptionEvidence {
         int nodes;
         int characters;
         boolean limited;
+        boolean captureTruncated;
 
         void token(String value) {
             if (limited || value == null || value.isEmpty()) return;
-            if (value.length() > TEXT_LIMIT || characters + value.length() > TOKEN_CHARACTER_LIMIT) {
+            if (value.length() < MIN_TOKEN_LENGTH || value.length() > TEXT_LIMIT || characters + value.length() > TOKEN_CHARACTER_LIMIT) {
                 limited = true;
                 return;
             }

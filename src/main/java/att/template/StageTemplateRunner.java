@@ -652,6 +652,7 @@ public class StageTemplateRunner {
                         invocationId, collector.timeoutMs(), "", false, true);
                 Object status = result.invocation().get("status");
                 boolean passed = result.executionSuccess() && "PASS".equalsIgnoreCase(String.valueOf(status));
+                if (!passed) result = CollectorExceptionEvidence.project(result);
                 record.put("status", passed ? "PASS" : (status == null ? "ERROR" : String.valueOf(status)));
                 record.put("success", Boolean.valueOf(passed));
                 record.put("invocationId", result.invocationId());

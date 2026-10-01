@@ -4334,28 +4334,31 @@ contains <code>status</code>, <code>success</code>,
 <code>invocationId</code>, <code>result</code>, <code>error</code>, and
 the bounded/redacted underlying operation <code>evidence</code>; when an
 operation supplies structured diagnostics,
-<code>operationDiagnostic</code> retains the native operation
-diagnostic. <code>diagnostic</code> identifies the collector failure and
-its source file/field. <code>error.message</code> is populated from the
-underlying exception, operation status/exit code, or a safe fallback.
-Resource identity and fields such as SSH helper/instance, command, exit
-code, bounded stderr, MQ reason codes, HTTP status, parser diagnostics,
-and timeout details remain under <code>evidence</code> when provided by
-the executor. For thrown Tool exceptions, the public projection omits
-raw input, payload, argv, output, and resolved command text, and does
-not guarantee <code>parserDiagnostic</code>; the command/parser details
-above apply to other executor evidence, redacts input values from
-retained text, and limits each retained text field to 1024 characters.
+<code>operationDiagnostic</code> retains safe fields from the native
+operation diagnostic. <code>diagnostic</code> identifies the collector
+failure and its source file/field. <code>error.message</code> is
+populated from the underlying exception, operation status/exit code, or
+a safe fallback. Resource identity and fields such as SSH
+helper/instance, exit code, bounded stderr, MQ reason codes, HTTP
+status, and timeout details remain under <code>evidence</code> when
+provided by the executor. All failed collectors, including returned
+operation errors and thrown Tool exceptions, pass through the same
+public projection before publication or logging. The projection omits
+raw input, payload, argv, output, resolved command text, and the failed
+record's <code>result</code>, and does not guarantee
+<code>parserDiagnostic</code>. Native error/diagnostic maps retain only
+safe fields; each retained text field is limited to 1024 characters.
 <code>inputOmitted</code> and truncation flags identify omitted or
 bounded evidence. Free-form messages, stderr, per-instance errors, and
 cleanup warnings redact string, DocumentValue text, and array inputs
 within a fixed budget: 256 input nodes, 8192 token characters, and 1024
 characters per token. Byte arrays are limited to 128 bytes (UTF-8,
 Base64, hexadecimal, and Java decimal renderings), other arrays to 64
-elements, and char arrays to 1024 characters. Exceeding any budget or
-encountering an unknown input type omits all free-form failure details
-with a safe marker, including upstream-truncated secret prefixes or
-head/tail echoes, and sets <code>inputRedactionLimited</code> and
+elements, and char arrays to 1024 characters. Exceeding any budget,
+encountering a private token shorter than 4 characters, or encountering
+an unknown input type omits all free-form failure details with a safe
+marker, including upstream-truncated secret prefixes or head/tail
+echoes, and sets <code>inputRedactionLimited</code> and
 <code>failureDetailsOmitted</code>. Free-form fields longer than 1024
 characters are also omitted and marked truncated; structured metadata
 remains available. Structured status, category, and resource identity
