@@ -7,7 +7,7 @@ ATT uses one expression engine for runtime Templates, Flows, Actions and Tool ca
 - ${path} reads a Context value and interpolates it into surrounding text.
 - #{expression} evaluates a typed expression. It supports Context operands, built-in calls, list literals, parentheses, unary operators, arithmetic, comparisons, like, in, null checks and boolean logic.
 
-A complete expression preserves its value type. For example, an exact #{...} may return a number, boolean, map, list or DocumentValue. Embedding an expression in surrounding text produces a String. Use canonical EXEC and META paths; optional lookup uses a trailing question mark.
+A complete expression preserves its value type. For example, an exact #{...} may return a number, boolean, map, list or String. Embedding an expression in surrounding text also produces a String. Use canonical EXEC and META paths; optional lookup uses a trailing question mark.
 
 ~~~yaml
 assert: "#{${EXEC.INPUT.amount} > 0}"
@@ -34,7 +34,7 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
 ~~~
 
-See [Runtime and Context Model](03_runtime_context.md) for the full META inventory, lifecycle table and artifact-navigation layout. There is no general configuration-expression model in 3.6.0.
+See [Runtime and Context Model](03_runtime_context.md) for the full META inventory, lifecycle table and artifact-navigation layout. There is no general configuration-expression model in 3.6.2.
 
 ### `config.report.fileNamePattern`
 

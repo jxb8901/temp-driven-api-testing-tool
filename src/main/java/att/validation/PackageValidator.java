@@ -17,7 +17,9 @@ import att.template.ToolCallParser;
 import att.template.EvidenceCollector;
 
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -840,9 +842,8 @@ public final class PackageValidator {
             if (!action.runWhen().trim().isEmpty()) validateAssertionExpression(action.runWhen(), syntaxEngine, config);
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
-                String templateFormat = action.templateFormat().trim().toLowerCase(java.util.Locale.ROOT);
-                if (!java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(templateFormat)) throw new IllegalArgumentException("templateFormat must be auto, text, json, yaml, or xml: " + action.id());
-                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "fields", "level", "retry", "timeoutMs", "result", "render", "format", "value");
+                if (action.raw().containsKey("templateFormat")) throw new IllegalArgumentException("Render.templateFormat is no longer supported; Render output is always a String: " + action.id());
+                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "fields", "level", "retry", "timeoutMs", "result", "render", "format", "value", "templateFormat");
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
                 for (Path payload : payloads) {
                     try {
@@ -1735,6 +1736,11 @@ public final class PackageValidator {
             validateHttpCall(parsed, config);
             return;
         }
+        if (toolName.startsWith("ssh.")) {
+            if (!allowWriteFacade) throw new IllegalArgumentException("SSH operations may only be the primary call of a type: tool Action");
+            validateSshCall(parsed, config);
+            return;
+        }
         if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
@@ -1764,7 +1770,9 @@ public final class PackageValidator {
                     suggestion == null ? "Define the tool in config/tools or correct the qualified group.tool name." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
         }
         if (tool.callBacked() && isWriteFacade(tool) && !allowWriteFacade) {
-            throw new IllegalArgumentException("DB update Tool may only be the primary call of a type: tool Action: " + tool.key());
+            String target = callParser.parse(tool.call()).name();
+            throw new IllegalArgumentException((target.startsWith("db.") ? "DB update" : "MQ/HTTP/SSH resource")
+                    + " call-backed Tool may only be the primary call of a type: tool Action: " + tool.key());
         }
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
@@ -1907,6 +1915,76 @@ public final class PackageValidator {
         }
     }
 
+    private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
+            throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + parsed.name());
+        if (config.sshHelper(parts[1]) == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
+        String operation = parts[2];
+        Set<String> allowed = new LinkedHashSet<String>();
+        Set<String> required = new LinkedHashSet<String>();
+        if ("execute".equals(operation)) {
+            allowed.add("command"); allowed.add("stdoutFormat"); allowed.add("timeoutMs"); required.add("command");
+        } else if ("upload".equals(operation)) {
+            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("payload");
+            allowed.add("overwrite"); allowed.add("timeoutMs"); required.add("remotePath");
+        } else if ("download".equals(operation)) {
+            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("overwrite");
+            allowed.add("timeoutMs"); required.add("remotePath"); required.add("localPath");
+        } else {
+            throw new IllegalArgumentException("Unknown SSH operation '" + operation + "'; use execute, upload, or download");
+        }
+        Set<String> supplied = new LinkedHashSet<String>();
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(parsed.name() + " requires named arguments");
+            String key = argument.key();
+            if (!allowed.contains(key)) throw new IllegalArgumentException("Unknown SSH argument '" + key + "' for " + parsed.name());
+            if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate SSH argument '" + key + "'");
+            String expression = argument.expression().trim();
+            boolean dynamic = expression.contains("${") || expression.contains("#{")
+                    || expression.startsWith("input.") || expression.startsWith("TOOL.input.");
+            if (dynamic) continue;
+            Object literal = callParser.literal(expression);
+            if ("timeoutMs".equals(key)) {
+                if (!(literal instanceof Number) || ((Number) literal).doubleValue() != ((Number) literal).longValue()
+                        || ((Number) literal).longValue() < 1L || ((Number) literal).longValue() > 3600000L)
+                    throw new IllegalArgumentException("SSH timeoutMs must be an integer from 1 to 3600000");
+            } else if ("overwrite".equals(key)) {
+                if (!(literal instanceof Boolean)) throw new IllegalArgumentException("SSH overwrite must be boolean");
+            } else if ("stdoutFormat".equals(key)) {
+                if (!(literal instanceof String) || !String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)
+                        .matches("text|json|yaml|xml"))
+                    throw new IllegalArgumentException("SSH stdoutFormat must be text, json, yaml, or xml");
+            } else if ("command".equals(key) || "localPath".equals(key) || "remotePath".equals(key)) {
+                if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty())
+                    throw new IllegalArgumentException("SSH " + key + " must be a non-blank string");
+                if ("remotePath".equals(key)) {
+                    String value = String.valueOf(literal);
+                    for (int index = 0; index < value.length(); index++)
+                        if (Character.isISOControl(value.charAt(index))) throw new IllegalArgumentException("SSH remotePath must not contain control characters");
+                }
+                if ("localPath".equals(key)) validateSshStaticLocalPath(String.valueOf(literal), "download".equals(operation));
+            } else if ("payload".equals(key) && (literal instanceof Map || literal instanceof List)) {
+                throw new IllegalArgumentException("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation");
+            }
+        }
+        for (String key : required) if (!supplied.contains(key)) throw new IllegalArgumentException("Missing required SSH argument '" + key + "' for " + parsed.name());
+        if ("upload".equals(operation) && supplied.contains("localPath") == supplied.contains("payload"))
+            throw new IllegalArgumentException("SSH upload requires exactly one of localPath or payload");
+    }
+
+    private void validateSshStaticLocalPath(String value, boolean caseOutputOnly) {
+        try {
+            Path path = Paths.get(value).normalize();
+            if (caseOutputOnly && (path.isAbsolute() || path.startsWith("..")))
+                throw new IllegalArgumentException("SSH download localPath must be a case-output-relative path");
+            if (!caseOutputOnly && path.isAbsolute() && !path.startsWith(projectRoot.toAbsolutePath().normalize()))
+                throw new IllegalArgumentException("SSH localPath must stay under the ATT package or case output");
+        } catch (InvalidPathException invalid) {
+            throw new IllegalArgumentException("SSH localPath is not a valid path", invalid);
+        }
+    }
+
     private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {
         for (att.config.MqHelperConfig instance : helper.instances().values()) {
             if (request ? instance.requestQueue().isEmpty() : instance.replyQueue().isEmpty()) return false;
@@ -1917,7 +1995,7 @@ public final class PackageValidator {
     private boolean isWriteFacade(ToolConfig tool) {
         if (tool == null || !tool.callBacked()) return false;
         String target = callParser.parse(tool.call()).name();
-        return target.matches("db\\.[^.]+\\.update") || target.startsWith("mq.") || target.startsWith("http.");
+        return target.matches("db\\.[^.]+\\.update") || target.startsWith("mq.") || target.startsWith("http.") || target.startsWith("ssh.");
     }
 
     private void validateCallBackedDefinition(ToolConfig tool, FrameworkConfig config) {
@@ -1928,6 +2006,10 @@ public final class PackageValidator {
         }
         if (target.name().startsWith("http.")) {
             validateHttpCall(target, config);
+            return;
+        }
+        if (target.name().startsWith("ssh.")) {
+            validateSshCall(target, config);
             return;
         }
         if (BUILT_INS.contains(target.name().toLowerCase(java.util.Locale.ROOT))) {

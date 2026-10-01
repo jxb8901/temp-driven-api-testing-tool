@@ -12,7 +12,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Loads the optional policy-only load/load.yaml quick-load profile without resolving or executing a target. */
+/** Loads the historical att-load-profile/v1.0 descriptor for migration compatibility only. */
 public final class LoadProfileLoader {
     public static final String SCHEMA_VERSION = "att-load-profile/v1.0";
     private final Path projectRoot;
@@ -29,7 +29,7 @@ public final class LoadProfileLoader {
             Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Quick-load profile must be a YAML map");
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-profile-v1.0.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(projectRoot, SCHEMA_VERSION), map);
             SchemaSupport.requireVersion(map, SCHEMA_VERSION, "quick-load profile");
             return map;
         } catch (DiagnosticException error) {
@@ -42,7 +42,7 @@ public final class LoadProfileLoader {
     private DiagnosticException invalid(Path path, String detail, Throwable cause) {
         return new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Invalid quick-load profile", detail,
                 path.toString(), "profile", null, null, null, null, null,
-                "Use load/load.yaml as a policy-only att-load-profile/v1.0 descriptor with load intensity, evidence, and thresholds only.", cause);
+                "Migrate load/load.yaml to the current policy-only att-load/v1.4 descriptor with load intensity, evidence, and thresholds only.", cause);
     }
 
     private static Map<String, Object> objectMap(Map<?, ?> map) {

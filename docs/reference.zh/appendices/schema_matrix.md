@@ -1,6 +1,6 @@
 ### 14.1 Schema 與版本矩陣
 
-ATT 3.6.0 現行 schema：
+ATT 3.6.2 現行 schema：
 
 | Artifact | 現行 schema |
 |---|---|
@@ -15,7 +15,7 @@ ATT 3.6.0 現行 schema：
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
 | Debug input | att-debug/v1.1 |
-| Load scenario | att-load/v1.3 |
+| Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |

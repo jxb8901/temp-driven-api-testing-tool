@@ -17,11 +17,11 @@ This chapter is the authoritative reading reference for author-authored configur
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, stages, and Templates do not own timeout/retry defaults. For call-backed DB Tools the dbhelper statement timeout remains a backend ceiling. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
 
-### Multi-environment profiles in V3.6.0
+### Multi-environment profiles in V3.6.2
 
 `att-config/v2.10` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper descriptor lists as a whole. See the resource chapters for each binding.
 
-ATT 3.6.0 selects an environment through one common `att-config/v2.10` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT 3.6.2 selects an environment through one common `att-config/v2.10` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -68,7 +68,6 @@ actions:
   renderRequest:
     type: render
     payload: payment/request.json
-    templateFormat: json
 
   queryOrder:
     type: db
@@ -123,7 +122,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-ATT 3.6.0 uses the active resource/configuration schemas below. The current JSON Schema definitions live in schemas/. Historical definitions live under schemas/history and do not enable active runtime compatibility.
+ATT 3.6.2 uses the active resource/configuration schemas below. The current JSON Schema definitions live in schemas/. Historical definitions live under schemas/history and do not enable active runtime compatibility.
 
 | Artifact | Active schema |
 |---|---|
@@ -136,7 +135,7 @@ ATT 3.6.0 uses the active resource/configuration schemas below. The current JSON
 | Workbook sidecar | att-sidecar/v2.2 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Load scenario | att-load/v1.3 |
+| Load scenario | att-load/v1.4 |
 
 The schema catalog at schemas/catalog.yaml is authoritative. Package validation verifies catalog registrations; it does not make archived schema versions executable. Unsupported active schema versions fail with migration guidance.
 
@@ -276,7 +275,7 @@ A callable Template directly contains template.yaml and uses att-template/v3.3. 
 
 | Action | Required fields | Typed-result contract |
 |---|---|---|
-| render | payload | Returns DocumentValue; no result file or targetFiles. |
+| render | payload | Returns the exact rendered String; no result file or targetFiles. |
 | tool | call | Publishes the native Tool/helper result. Command stdout parsing is configured by stdoutFormat. |
 | db | db and one query/update block | Publishes the native typed DB result. |
 | assert | assert | Records PASS/FAIL for the evaluated condition. |
@@ -284,7 +283,7 @@ A callable Template directly contains template.yaml and uses att-template/v3.3. 
 | assign | name/expression | Publishes a typed value below EXEC.VARS. |
 | flow | use | Runs a Flow in a nested Action scope. |
 
-Common Action result.format/path/overwrite is removed. Render uses templateFormat to label DocumentValue. HTTP/MQ responseFormat handles ingress parsing; requestFormat is only for abstract Map/List payloads. See [Actions and Typed Values](14_actions.md) for field details, examples, evidence behavior and migration notes.
+Common Action result.format/path/overwrite is removed. Render returns String and has no format field. HTTP/MQ responseFormat handles ingress parsing; requestFormat is only for abstract Map/List payloads. See [Actions and Typed Values](14_actions.md) for field details, examples, evidence behavior and migration notes.
 
 ### Tool contract
 
@@ -305,7 +304,7 @@ Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not 
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.6.1",
+  "attVersion": "3.6.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

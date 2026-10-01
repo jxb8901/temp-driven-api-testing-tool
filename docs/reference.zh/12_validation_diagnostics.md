@@ -8,7 +8,7 @@
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 3.6.0 對本次調整的 descriptor family 僅接受現行 schema：config v2.10、DBHelper v2.6、MQHelper v1.2、HTTPHelper v1.1、Tool Group v2.9、Template/Flow v3.3 及 Load v1.2。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，移除舊 Render `result.path`，並依[動作與型別化值](14_actions.md)將 typed `output.result` 傳至下一個 Action。Unsupported version 會在執行前失敗。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 3.6.2 對本次調整的 descriptor family 僅接受現行 schema：config v2.10、DBHelper v2.6、MQHelper v1.2、HTTPHelper v1.1、Tool Group v2.9、Template/Flow v3.3 及 Load v1.4。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，移除舊 Render `result.path`，並依[動作與型別化值](14_actions.md)將 typed `output.result` 傳至下一個 Action。Unsupported version 會在執行前失敗。
 
 現行 schema 位於 [`schemas/`](../../schemas/)，較舊定義位於 [`schemas/history/`](../../schemas/history/)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 

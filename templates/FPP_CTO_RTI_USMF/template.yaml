@@ -21,7 +21,6 @@ actions:
     type: render
     description: "0. Render CT001 Precheck request with testcase amount"
     payload: CT001_Precheck.xml
-    templateFormat: auto
 
   log1:
     type: log

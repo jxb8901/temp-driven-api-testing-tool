@@ -21,28 +21,27 @@ evidence:
 
 Call http.<id>.get/post/request as the primary call of a type: tool Action. Response bytes are parsed at this boundary using call responseFormat, the helper default, or Content-Type when auto is selected. Supported response formats are auto, text, json, yaml and xml. The parsed native value is output.result. Optional evidence.output is a bounded human-readable snapshot and never changes that value.
 
-#### Request bodies and DocumentValue
+#### Request bodies and Render String
 
-A Render Action returns a DocumentValue containing format and authoritative rendered text. Pass it directly as body:
+A Render Action returns the exact rendered String. Pass it directly as body:
 
 ~~~yaml
 renderRequest:
   type: render
   payload: payload/request.xml
-  templateFormat: xml
 sendRequest:
   type: tool
   call: "#{http.payment.post(path='/v1/payments', body=${EXEC.ACTIONS.renderRequest.output.result})}"
 ~~~
 
-HTTP sends the exact DocumentValue text to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a DocumentValue with requestFormat.
+HTTP sends the exact String to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a String Render result with requestFormat.
 
-A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. DocumentValue + requestFormat and String + requestFormat are rejected. body and file are mutually exclusive; file is explicit raw file input supported by the HTTP call. Render creates no result file and has no targetFiles.
+A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. String + requestFormat is rejected. body and file are mutually exclusive; file is explicit raw file input supported by the HTTP call. Render creates no result file and has no targetFiles.
 
-DocumentValue.format does not override resource-owned HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
+Render has no format metadata and does not set HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
 
 #### Failure and evidence
 
 Transport/protocol and response-parse failures are operational errors. A received 4xx/5xx is a completed response and can be asserted through statusCode. HTTP evidence may include helper ID, method, safe URL, response status, content type, byte counts, response format and duration. Credentials and payloads are not implicitly stored. Load can set evidence.resources.output: none to skip optional resource-output formatting, or defer it until the iteration evidence is retained.
 
-See [Actions and Typed Values](../14_actions.md) for the shared DocumentValue and typed-result contract.
+See [Actions and Typed Values](../14_actions.md) for the shared String Render and typed-result contract.

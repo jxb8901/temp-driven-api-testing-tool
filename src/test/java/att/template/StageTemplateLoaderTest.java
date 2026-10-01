@@ -25,7 +25,7 @@ class StageTemplateLoaderTest {
         Files.createDirectories(legacyFile);
         Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.3\n" +
                 "name: current\ndescription: Typed output template\nactions:\n" +
-                "  render:\n    type: render\n    payload: request.json\n    templateFormat: json\n").getBytes("UTF-8"));
+                "  render:\n    type: render\n    payload: request.json\n").getBytes("UTF-8"));
         Files.write(legacy.resolve("template.yaml"), ("schemaVersion: att-template/v3.0\n" +
                 "name: legacy\ndescription: Legacy template\nactions:\n" +
                 "  render: {type: render, payload: request.json, renderAs: json}\n")
@@ -46,11 +46,10 @@ class StageTemplateLoaderTest {
         StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
         TemplateAction render = loader.load("current").actions().get(0);
         assertEquals("render", render.type());
-        assertEquals("json", render.templateFormat());
         assertEquals("", render.resultConfig().format());
         att.validation.DiagnosticException legacyError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy"));
         assertTrue(legacyError.getMessage().contains("renderAs"));
-        assertTrue(legacyError.suggestion().contains("DocumentValue"));
+        assertTrue(legacyError.suggestion().contains("String"));
         assertTrue(att.validation.DiagnosticRenderer.exception(legacyError.toDiagnostic()).contains("actions.render.renderAs"));
         assertTrue(att.validation.DiagnosticRenderer.jsonError(legacyError.toDiagnostic()).contains("renderAs"));
         att.validation.DiagnosticException saveError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-save"));
@@ -60,8 +59,8 @@ class StageTemplateLoaderTest {
                 () -> loader.load("legacy-save-no-format"));
         assertTrue(missingFormat.suggestion().contains("removed"));
         att.validation.DiagnosticException fileError = assertThrows(att.validation.DiagnosticException.class, () -> loader.load("legacy-file"));
-        assertTrue(fileError.suggestion().contains("DocumentValue"));
-        assertTrue(att.validation.DiagnosticRenderer.jsonError(fileError.toDiagnostic()).contains("templateFormat"));
+        assertTrue(fileError.suggestion().contains("String"));
+        assertTrue(att.validation.DiagnosticRenderer.jsonError(fileError.toDiagnostic()).contains("renderAs"));
     }
 
     @Test void resolvesChineseSymbolicNameAndFullPath() throws Exception {

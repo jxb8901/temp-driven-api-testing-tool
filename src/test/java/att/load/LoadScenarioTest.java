@@ -58,7 +58,7 @@ class LoadScenarioTest {
         Path prior = write(project, "prior-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
                 + "  - id: default\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
         DiagnosticException oldCurrent = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(prior));
-        assertTrue(oldCurrent.getMessage().contains("att-load/v1.3"), oldCurrent.getMessage());
+        assertTrue(oldCurrent.getMessage().contains("att-load/v1.4"), oldCurrent.getMessage());
     }
 
     @Test void currentWorkloadVarsRemainDefinitionsAndCliOverridesAreAppliedBeforeEvaluation() throws Exception {
@@ -204,6 +204,33 @@ class LoadScenarioTest {
                 + "thresholds: {achievedArrivalRate: '>= 5700/m'}\n");
         LoadScenario arrivalPerMinuteThresholdScenario = new LoadScenarioLoader(project).load(arrivalPerMinuteThreshold);
         assertEquals(">= 5700/m", arrivalPerMinuteThresholdScenario.thresholds().get("achievedArrivalRate"));
+    }
+
+    @Test void currentV14RootDefaultsMergeIntoWorkloadsAndCliOverridesWin() throws Exception {
+        Path project = project();
+        Path scenarioFile = write(project, "v14-defaults.yaml", "schemaVersion: att-load/v1.4\n"
+                + "load: {duration: 5s, warmup: 1s}\n"
+                + "execution: {thinkTime: 10ms, execIdFormat: '${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}'}\n"
+                + "thresholds: {p95: '< 100ms'}\n"
+                + "workloads:\n"
+                + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 3}\n"
+                + "  - id: second\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 2}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        assertEquals(3, scenario.workload("first").users());
+        assertEquals(2, scenario.workload("second").users());
+        assertEquals(1000L, scenario.workload("second").warmup().toMillis());
+        assertEquals(10L, scenario.workload("second").thinkTimePolicy().min().toMillis());
+        assertEquals("< 100ms", scenario.workload("first").thresholds().get("p95"));
+        assertEquals("${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}", scenario.execIdFormat());
+
+        Path singleFile = write(project, "v14-single.yaml", "schemaVersion: att-load/v1.4\n"
+                + "load: {users: 2, duration: 5s}\n"
+                + "workloads:\n  - id: only\n    target: {type: template, id: LOAD_TEMPLATE}\n");
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", singleFile.toString(), "--users", "7", "--duration", "2s"});
+        LoadScenario overridden = new LoadScenarioLoader(project).load(singleFile, LoadOverrides.from(options));
+        assertEquals(7, overridden.workload().users());
+        assertEquals(2000L, overridden.workload().duration().toMillis());
+        assertEquals("5s", overridden.loadDefaults().get("duration"));
     }
 
     @Test void rejectsAmbiguousWorkloadAndClosedOnlyOptionsWithSourceDiagnostics() throws Exception {

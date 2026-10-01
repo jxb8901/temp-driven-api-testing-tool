@@ -13,6 +13,7 @@ import att.exec.DbInvocationResult;
 import att.exec.MqHelperExecutor;
 import att.exec.MqInvocationResult;
 import att.exec.HttpHelperExecutor;
+import att.exec.SshResourceExecutor;
 import att.config.ToolConfig;
 
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ public class UnifiedTemplateEngine {
     private final DbHelperExecutor dbHelperExecutor;
     private final MqHelperExecutor mqHelperExecutor;
     private final HttpHelperExecutor httpHelperExecutor;
+    private final SshResourceExecutor sshHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
     private final ExpressionBlockEvaluator expressionBlocks = new ExpressionBlockEvaluator();
     private final BuiltInProvider builtIns;
@@ -72,10 +74,18 @@ public class UnifiedTemplateEngine {
     public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
                                  MqHelperExecutor mqHelperExecutor, HttpHelperExecutor httpHelperExecutor,
                                  BuiltInProvider builtIns) {
+        this(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor,
+                toolInvoker == null ? null : new SshResourceExecutor(toolInvoker.projectRoot(), toolInvoker.config()), builtIns);
+    }
+
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                 MqHelperExecutor mqHelperExecutor, HttpHelperExecutor httpHelperExecutor,
+                                 SshResourceExecutor sshHelperExecutor, BuiltInProvider builtIns) {
         this.toolInvoker = toolInvoker;
         this.dbHelperExecutor = dbHelperExecutor;
         this.mqHelperExecutor = mqHelperExecutor;
         this.httpHelperExecutor = httpHelperExecutor;
+        this.sshHelperExecutor = sshHelperExecutor;
         this.builtIns = builtIns;
         if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
     }
@@ -92,6 +102,7 @@ public class UnifiedTemplateEngine {
         if (parsed.name().startsWith("db.")) return "db";
         if (parsed.name().startsWith("mq.")) return "mq";
         if (parsed.name().startsWith("http.")) return "http";
+        if (parsed.name().startsWith("ssh.")) return "ssh";
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return "builtin";
         ToolConfig tool = toolInvoker == null ? null : toolInvoker.tool(parsed.name());
         if (tool != null && !tool.sshHelper().isEmpty()) return "ssh";
@@ -382,6 +393,14 @@ public class UnifiedTemplateEngine {
             String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
             return httpHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, saveFormat, log);
         }
+        if (name.startsWith("ssh.")) {
+            if (!attempt) throw new IllegalArgumentException("An SSH operation must be the primary call of a type: tool Action");
+            if (sshHelperExecutor == null) throw new IllegalStateException("SSH invocation is unavailable: " + name);
+            String[] parts = name.split("\\.", -1);
+            if (parts.length != 3) throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + name);
+            String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
+            return sshHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, log);
+        }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             long started = System.nanoTime();
             long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
@@ -410,6 +429,7 @@ public class UnifiedTemplateEngine {
         if (parts.length >= 2 && "db".equals(parts[0])) { key = "DBHELPER"; id = parts[1]; type = "dbhelper"; }
         else if (parts.length >= 2 && "mq".equals(parts[0])) { key = "MQHELPER"; id = parts[1]; type = "mqhelper"; }
         else if (parts.length >= 2 && "http".equals(parts[0])) { key = "HTTPHELPER"; id = parts[1]; type = "httphelper"; }
+        else if (parts.length >= 2 && "ssh".equals(parts[0])) { key = "SSHHELPER"; id = parts[1]; type = "sshhelper"; }
         else if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) type = "builtin";
         return helperScope(key, id, type, context);
     }
@@ -454,12 +474,12 @@ public class UnifiedTemplateEngine {
         Map<String, Object> input = toolInvoker.prepareInput(tool.key(), supplied);
         ToolCallParser.ParsedCall target = callParser.parse(tool.call());
         boolean write = target.name().startsWith("db.") && target.name().endsWith(".update");
-        boolean resourceCall = target.name().startsWith("mq.") || target.name().startsWith("http.");
+        boolean resourceCall = target.name().startsWith("mq.") || target.name().startsWith("http.") || target.name().startsWith("ssh.");
         if (write && !attempt) {
             throw new IllegalArgumentException("A call-backed DB update Tool may only be the primary call of a type: tool Action: " + tool.key());
         }
         if (resourceCall && !attempt) {
-            throw new IllegalArgumentException("MQ/HTTP call-backed Tools may only be the primary call of a type: tool Action: " + tool.key());
+            throw new IllegalArgumentException("MQ/HTTP/SSH call-backed Tools may only be the primary call of a type: tool Action: " + tool.key());
         }
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextInvocationId(tool.key()) : requestedId;
@@ -518,7 +538,7 @@ public class UnifiedTemplateEngine {
         if (!dbEvidence.isEmpty()) toolEvidence.put("DB", dbEvidence);
         if (nativeInvocation != null) {
             Map<String, Object> nativeRecord = nativeInvocation.invocation();
-            for (String key : new String[]{"MQ", "HTTP", "DB"}) if (nativeRecord.get(key) != null) toolEvidence.put(key, nativeRecord.get(key));
+            for (String key : new String[]{"MQ", "HTTP", "SSH", "DB"}) if (nativeRecord.get(key) != null) toolEvidence.put(key, nativeRecord.get(key));
         }
         if (cached) {
             Map<String, Object> cache = new LinkedHashMap<String, Object>();
@@ -549,7 +569,7 @@ public class UnifiedTemplateEngine {
         if (!dbEvidence.isEmpty()) invocation.put("DB", dbEvidence);
         if (nativeInvocation != null) {
             Map<String, Object> nativeRecord = nativeInvocation.invocation();
-            for (String key : new String[]{"MQ", "HTTP", "DB"}) if (nativeRecord.get(key) != null) invocation.put(key, nativeRecord.get(key));
+            for (String key : new String[]{"MQ", "HTTP", "SSH", "DB"}) if (nativeRecord.get(key) != null) invocation.put(key, nativeRecord.get(key));
         }
         Map<String, Object> commonToolEvidence = new LinkedHashMap<String, Object>(toolEvidence);
         commonToolEvidence.remove("DB");

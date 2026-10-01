@@ -133,8 +133,8 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 
 ### 2.2 Template
 
-A directory is a callable Template only when it directly contains template.yaml. ATT 3.6.0 uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
+A directory is a callable Template only when it directly contains template.yaml. ATT 3.6.2 uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
 
-Each Action has a type-specific contract. Render returns DocumentValue without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
+Each Action has a type-specific contract. Render returns the exact rendered String without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
-See [Actions and Typed Values](14_actions.md) for the complete field list, examples, typed result/evidence model, DocumentValue behavior, HTTP/MQ boundaries and migration guidance. [Expressions and Built-ins](07_expressions.md) covers the shared expression engine and Load ID initialization scope.
+See [Actions and Typed Values](14_actions.md) for the complete field list, examples, typed result/evidence model, String Render behavior, HTTP/MQ boundaries and migration guidance. [Expressions and Built-ins](07_expressions.md) covers the shared expression engine and Load ID initialization scope.

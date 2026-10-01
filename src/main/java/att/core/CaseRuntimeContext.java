@@ -1002,14 +1002,6 @@ public final class CaseRuntimeContext {
 
     private Object evidenceValue(Object value, java.util.IdentityHashMap<Object, Object> copies,
                                  java.util.IdentityHashMap<Object, Boolean> active) {
-        if (value instanceof att.template.DocumentValue) {
-            att.template.DocumentValue document = (att.template.DocumentValue) value;
-            Map<String, Object> represented = new LinkedHashMap<String, Object>();
-            represented.put("type", "DocumentValue");
-            represented.put("format", document.format());
-            represented.put("text", document.text());
-            return represented;
-        }
         if (value instanceof Map) {
             if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to Case evidence");
             Object prior = copies.get(value);

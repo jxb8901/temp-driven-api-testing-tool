@@ -5,7 +5,6 @@ actions:
   renderRequest:
     type: render
     payload: request.tmp.xml
-    templateFormat: auto
   callApi:
     type: tool
     call: "#{invokePaymentApi(requestText=${ACTIONS.renderRequest.output.result}, environment=${CASE.environment})}"

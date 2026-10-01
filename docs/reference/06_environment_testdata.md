@@ -24,7 +24,7 @@ environments:
     httphelpers: [config/httphelpers/uat/payment.yaml]
 ```
 
-Each environment should expose the same stable logical IDs (`orders`, `payment`, `application`, etc.). Templates, Flows, Actions, and Tool-group bindings then remain unchanged across SIT/UAT/PREPROD. SSH endpoint details are intentionally not published as `META.SSHHELPER`; see the [SSHHelper chapter](05_resources/sshhelper.md) and [Runtime Context inventory](03_runtime_context.md).
+Each environment should expose the same stable logical IDs (`orders`, `payment`, `application`, etc.). Templates, Flows, Actions, and Tool-group bindings then remain unchanged across SIT/UAT/PREPROD. SSH Resource Helper calls publish only the logical helper ID and type as `META.SSHHELPER`; endpoint and credential details remain private. See the [SSHHelper chapter](05_resources/sshhelper.md) and [Runtime Context inventory](03_runtime_context.md).
 
 ### Topology and secrets
 

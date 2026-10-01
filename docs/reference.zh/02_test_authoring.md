@@ -133,8 +133,8 @@ ATT 会先将 `name` 作为全局唯一的符号名解析。只有在没有符�
 
 ### 2.2 Template
 
-只有直接包含 template.yaml 的目錄才是可呼叫 Template。ATT 3.6.0 使用 att-template/v3.3。每個 Template 都需要非空且有序的 actions map，以及 description。
+只有直接包含 template.yaml 的目錄才是可呼叫 Template。ATT 3.6.2 使用 att-template/v3.3。每個 Template 都需要非空且有序的 actions map，以及 description。
 
-每個 Action 依類型使用不同契約。Render 回傳 DocumentValue，不寫入檔案。Tool/DB/HTTP/MQ action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
+每個 Action 依類型使用不同契約。Render 回傳原樣 String，不寫入檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
-完整欄位、範例、typed result/evidence model、DocumentValue 行為、HTTP/MQ boundary 與 migration guidance，請參閱[動作與型別化值](14_actions.md)。[Expressions and Built-ins](07_expressions.md) 說明共用 expression engine 與 Load ID initialization scope。
+完整欄位、範例、typed result/evidence model、String Render 行為、HTTP/MQ/SSH boundary 與 migration guidance，請參閱[動作與型別化值](14_actions.md)。[Expressions and Built-ins](07_expressions.md) 說明共用 expression engine 與 Load ID initialization scope。

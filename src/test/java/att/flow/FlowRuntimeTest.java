@@ -176,12 +176,11 @@ class FlowRuntimeTest {
         String payload = "case=${CASE.caseId}\nref=${CASE.SrcRefNo}\namount=${CASE.amount}\nchannel=${CASE.channel}\n";
         Files.write(tempDir.resolve("request.txt"), payload.getBytes(StandardCharsets.UTF_8));
         writeFlow("render", "schemaVersion: att-flow/v3.3\nid: common.render.v1\nname: Render\ndescription: Render\nactions:\n"
-                + "  renderRequest: {type: render, payload: request.txt, templateFormat: text}\n");
+                + "  renderRequest: {type: render, payload: request.txt}\n");
         Files.write(tempDir.resolve("templates/flows/render/request.txt"), payload.getBytes(StandardCharsets.UTF_8));
 
         Map<String,Object> render = new LinkedHashMap<String,Object>();
         render.put("type", "render"); render.put("payload", "request.txt");
-        render.put("templateFormat", "text");
         StageTemplate inlineTemplate = new StageTemplate("INLINE", tempDir,
                 Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.3")), "att-template/v3.3");
         StageTemplate flowTemplate = new StageTemplate("FLOW", tempDir,
@@ -203,11 +202,10 @@ class FlowRuntimeTest {
                     .execute("verify", flowTemplate, flowContext, log).get(0).status());
         }
 
-        assertEquals(expected, ((att.template.DocumentValue) inlineContext.resolve("ACTIONS.renderRequest.output.result")).text());
-        Map<?, ?> serialized = (Map<?, ?>) CaseRuntimeContext.getPath(flowContext.caseTree(),
+        assertEquals(expected, inlineContext.resolve("ACTIONS.renderRequest.output.result"));
+        Object serialized = CaseRuntimeContext.getPath(flowContext.caseTree(),
                 "STAGES.verify.TEMPLATE.ACTIONS.renderFlow.flow.actions.renderRequest.output.result");
-        assertEquals("DocumentValue", serialized.get("type"));
-        assertEquals(expected, serialized.get("text"));
+        assertEquals(expected, serialized);
     }
 
     private CaseRuntimeContext context() {

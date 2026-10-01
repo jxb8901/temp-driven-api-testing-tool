@@ -31,6 +31,6 @@ tools:
         required: true
 ~~~
 
-Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ parsing 由 transport boundary 管理。
+Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ/SSH parsing 或 transfer 由各自 transport boundary 管理。
 
 Action result 規則見[動作與型別化值](../14_actions.md)；typed result/evidence 的區分見[Operation Result and Evidence](operation_result.md)。

@@ -228,15 +228,6 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*$"
         },
-        "templateFormat": {
-          "enum": [
-            "auto",
-            "text",
-            "json",
-            "yaml",
-            "xml"
-          ]
-        },
         "value": {},
         "format": {
           "enum": [
@@ -411,11 +402,6 @@
                     "required": [
                       "format"
                     ]
-                  },
-                  {
-                    "required": [
-                      "templateFormat"
-                    ]
                   }
                 ]
               }
@@ -507,11 +493,6 @@
                   {
                     "required": [
                       "format"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "templateFormat"
                     ]
                   }
                 ]
@@ -608,11 +589,6 @@
                     "required": [
                       "format"
                     ]
-                  },
-                  {
-                    "required": [
-                      "templateFormat"
-                    ]
                   }
                 ]
               }
@@ -703,11 +679,6 @@
                   {
                     "required": [
                       "evidence"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "templateFormat"
                     ]
                   }
                 ]
@@ -804,11 +775,6 @@
                   {
                     "required": [
                       "format"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "templateFormat"
                     ]
                   }
                 ]
@@ -909,11 +875,6 @@
                   {
                     "required": [
                       "format"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "templateFormat"
                     ]
                   }
                 ]

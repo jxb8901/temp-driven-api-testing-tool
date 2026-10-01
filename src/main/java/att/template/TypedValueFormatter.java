@@ -5,11 +5,6 @@ package att.template;
 public final class TypedValueFormatter {
     public String format(Object value, String format) {
         String normalized = format == null || format.trim().isEmpty() ? "text" : format.trim().toLowerCase(java.util.Locale.ROOT);
-        if (value instanceof DocumentValue) {
-            DocumentValue document = (DocumentValue) value;
-            if (format == null || format.trim().isEmpty() || document.format().equalsIgnoreCase(format.trim())) return document.text();
-            throw new IllegalArgumentException("Cannot format DocumentValue " + document.format() + " as " + format + "; cross-format conversion is not implicit");
-        }
         Object printable = representedChildren(value, normalized,
                 new java.util.IdentityHashMap<Object, Boolean>());
         if ("sqlplus".equals(normalized)) return new DbTextResultFormatter().format(printable);
@@ -20,12 +15,6 @@ public final class TypedValueFormatter {
 
     private Object representedChildren(Object value, String requestedFormat,
                                         java.util.IdentityHashMap<Object, Boolean> seen) {
-        if (value instanceof DocumentValue) {
-            DocumentValue document = (DocumentValue) value;
-            if (!document.format().equals(requestedFormat))
-                throw new IllegalArgumentException("Cannot format DocumentValue " + document.format() + " as " + requestedFormat + "; cross-format conversion is not implicit");
-            return document.text();
-        }
         if (value instanceof java.util.Map) {
             if (seen.put(value, Boolean.TRUE) != null) throw new IllegalArgumentException("Cannot format a cyclic typed value");
             java.util.Map<Object, Object> result = new java.util.LinkedHashMap<Object, Object>();

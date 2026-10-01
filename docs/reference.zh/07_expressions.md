@@ -7,7 +7,7 @@ ATT 的 runtime Template、Flow、Action、Tool call 共用一個 expression eng
 - ${path} 讀取 Context 值，並可插入一般文字。
 - #{expression} 評估型別化 expression，支援 Context operands、built-in calls、list literals、括號、一元運算、算術、比較、like、in、null 檢查及布林邏輯。
 
-完整 expression 會保留回傳型別，例如 Number、Boolean、Map、List 或 DocumentValue；expression 放在一般文字中會產生 String。請使用 canonical EXEC/META paths；optional lookup 在路徑尾端加問號。
+完整 expression 會保留回傳型別，例如 Number、Boolean、Map 或 List；expression 放在一般文字中會產生 String。請使用 canonical EXEC/META paths；optional lookup 在路徑尾端加問號。
 
 ~~~yaml
 assert: "#{${EXEC.INPUT.amount} > 0}"
@@ -34,7 +34,7 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
 ~~~
 
-完整 META inventory、lifecycle 表格與 artifact navigation layout 見[Runtime 與 Context 模型](03_runtime_context.md)。ATT 3.6.0 沒有通用 configuration-expression model。
+完整 META inventory、lifecycle 表格與 artifact navigation layout 見[Runtime 與 Context 模型](03_runtime_context.md)。ATT 3.6.2 沒有通用 configuration-expression model。
 
 ### `config.report.fileNamePattern`
 

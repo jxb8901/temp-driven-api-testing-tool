@@ -1,6 +1,6 @@
 # ATT Load Scenario Examples
 
-本目錄的範例均使用 ATT 3.6.0 現行 schema att-load/v1.3。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
+本目錄的範例均使用 ATT 3.6.2 現行 schema att-load/v1.4。每個 scenario 以 workloads 清單配置 target；root defaults 可供多個 workload 共用。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
 
 ## 範例索引
 
@@ -20,7 +20,7 @@
 ## 最小 closed workload
 
 ~~~yaml
-schemaVersion: att-load/v1.3
+schemaVersion: att-load/v1.4
 workloads:
   - id: default
     target: {type: template, id: V3_FLOW_EXAMPLE}
@@ -40,7 +40,7 @@ workloads:
 Template/Flow workload 可設定 bootstrap `vars`。完整 reference 保留原生型別；expression 在每次 Load execution 的 EXEC.ID/EXEC.OUTPUT_DIR 初始化後評估：
 
 ~~~yaml
-schemaVersion: att-load/v1.3
+schemaVersion: att-load/v1.4
 workloads:
   - id: payments
     target: {type: template, id: PAYMENT_INVOKE}

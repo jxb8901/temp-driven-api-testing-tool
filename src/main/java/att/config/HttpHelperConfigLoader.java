@@ -41,7 +41,7 @@ public final class HttpHelperConfigLoader {
                 Map<?, ?> map = (Map<?, ?>) loaded;
                 if (!Version.HTTPHELPER_SCHEMA.equals(map.get("schemaVersion")))
                     throw new IllegalArgumentException("Unsupported HTTP helper schemaVersion '" + map.get("schemaVersion")
-                            + "'; ATT 3.6.0 supports only " + Version.HTTPHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
+                            + "'; ATT 3.6.2 supports only " + Version.HTTPHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
                 Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion")));
                 JsonSchemaVerifier.verify(schema, map);
                 helper = parse(map, projectRoot).withEvidenceOutput(map.get("evidence"));

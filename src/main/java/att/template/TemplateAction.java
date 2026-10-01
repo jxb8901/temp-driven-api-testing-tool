@@ -19,7 +19,6 @@ public class TemplateAction {
     private final String type;
     private final String description;
     private final String payload;
-    private final String templateFormat;
     private final String resultFormat;
     private final String name;
     private final String expression;
@@ -57,10 +56,6 @@ public class TemplateAction {
         this.type = text(data.get("type"), "tool");
         this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");
-        this.templateFormat = text(data.get("templateFormat"), "auto");
-        // v3.3 has no common Action result/serialization contract. Render uses
-        // templateFormat and Log uses its own presentation format.
-        Map<String, Object> resultMap = Collections.emptyMap();
         this.resultFormat = "";
         this.name = text(data.get("name"), "");
         this.expression = text(data.get("expression"), "");
@@ -105,7 +100,6 @@ public class TemplateAction {
     public String type() { return type; }
     public String description() { return description; }
     public String payload() { return payload; }
-    public String templateFormat() { return templateFormat; }
     public String resultFormat() { return resultFormat; }
     public String name() { return name; }
     public String expression() { return expression; }

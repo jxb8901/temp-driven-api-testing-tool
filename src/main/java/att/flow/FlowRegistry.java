@@ -183,8 +183,8 @@ public final class FlowRegistry {
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     flowVersion, Version.FLOW_SCHEMA);
             throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
-                    + "'; ATT 3.6.0 supports only " + Version.FLOW_SCHEMA
-                    + ". Migrate nested Actions to the 3.6.0 typed-result contract and see docs/reference/appendices/migrations.md.");
+                    + "'; ATT 3.6.2 supports only " + Version.FLOW_SCHEMA
+                    + ". Migrate nested Actions to the 3.6.2 typed-result contract and see docs/reference/appendices/migrations.md.");
         }
         boolean currentVersion = true;
         boolean previousVersion = false;
@@ -216,7 +216,7 @@ public final class FlowRegistry {
             Map<?, ?> action = (Map<?, ?>) entry.getValue();
             String id = String.valueOf(entry.getKey());
             for (String field : new String[]{"result", "render", "file", "fields"}) if (action.containsKey(field)) {
-                String guidance = "Remove the common Action result block. Keep the typed value in output.result; helper evidence uses helper evidence.output. Render uses templateFormat; Log uses value and format.";
+                String guidance = "Remove the common Action result block. Keep the typed value in output.result; helper evidence uses helper evidence.output. Render returns String; Log uses value and format.";
                 throw migrationError(descriptor, id, field, guidance);
             }
         }
@@ -231,8 +231,7 @@ public final class FlowRegistry {
             String id = String.valueOf(entry.getKey());
             if (action.containsKey("renderAs")) {
                 String old = String.valueOf(action.get("renderAs"));
-                String suggestion = "Legacy field 'renderAs' is no longer supported. Replace it with:\n  templateFormat: " + old
-                        + "\nRender returns a DocumentValue and does not create a file.";
+                String suggestion = "Legacy field 'renderAs' is no longer supported. Render returns the exact rendered String and does not create a file. The old format hint has no replacement.";
                 throw migrationError(descriptor, id, "renderAs", suggestion);
             }
             if (action.containsKey("saveAs")) {
@@ -240,7 +239,7 @@ public final class FlowRegistry {
                 Map<?, ?> save = old instanceof Map ? (Map<?, ?>) old : Collections.emptyMap();
                 String format = save.get("format") == null ? null : String.valueOf(save.get("format"));
                 String path = save.get("path") == null ? (old instanceof String ? String.valueOf(old) : null) : String.valueOf(save.get("path"));
-                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Render now returns a DocumentValue and does not create a file. Use templateFormat on a Render Action and pass its output.result directly to the consuming Tool/resource.");
+                StringBuilder suggestion = new StringBuilder("Legacy field 'saveAs' is no longer supported. Render now returns String and does not create a file. Pass its output.result directly to the consuming Tool/resource.");
                 if (format != null && !format.trim().isEmpty()) suggestion.append(" Legacy format was '").append(format).append("'.");
                 if (path != null) suggestion.append(" Legacy path '").append(path).append("' has no implicit replacement.");
                 if (Boolean.TRUE.equals(save.get("overwrite"))) suggestion.append(" Legacy overwrite is not carried forward.");

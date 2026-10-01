@@ -394,7 +394,7 @@ class PackageValidatorTest {
         Files.createDirectories(tempDir.resolve("data"));
         Files.write(tempDir.resolve("data/valid.json"), "{\"ok\":true}".getBytes("UTF-8"));
         Map<String,Object> valid = new LinkedHashMap<String,Object>();
-        valid.put("type", "render"); valid.put("payload", "data/*.json"); valid.put("templateFormat", "json");
+        valid.put("type", "render"); valid.put("payload", "data/*.json");
         assertDoesNotThrow(() -> {
             try { method.invoke(validator, new StageTemplate("T", tempDir,
                     Collections.singletonList(new TemplateAction("render", valid, "att-template/v3.3")), "att-template/v3.3"), config); }
@@ -432,7 +432,7 @@ class PackageValidatorTest {
                 configuredTools,null,null);
         PackageValidator validator = new PackageValidator(tempDir, config);
         Map<String,Object> render = new LinkedHashMap<String,Object>();
-        render.put("type", "render"); render.put("payload", "request.txt"); render.put("templateFormat", "text");
+        render.put("type", "render"); render.put("payload", "request.txt");
         StageTemplate template = new StageTemplate("PAYMENT", tempDir,
                 Collections.singletonList(new TemplateAction("request", render)));
         java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
@@ -974,7 +974,7 @@ class PackageValidatorTest {
                 Collections.<String,ToolConfig>emptyMap(),null,null);
         PackageValidator validator = new PackageValidator(tempDir, config);
         Map<String,Object> render = new LinkedHashMap<String,Object>();
-        render.put("type", "render"); render.put("payload", "date.txt"); render.put("templateFormat", "text");
+        render.put("type", "render"); render.put("payload", "date.txt");
         StageTemplate template = new StageTemplate("DATES", tempDir,
                 Collections.singletonList(new TemplateAction("date", render)));
         java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);

@@ -8,7 +8,7 @@ Operation
 └── evidence     # 有界的 execution/transport metadata
 ~~~
 
-Action 在 output.result 發布最後的 operation value。Action status、assertion detail、diagnostic、attempts 描述執行，不會取代 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ response 使用 responseFormat；DB operation 回傳 native typed value。Render 回傳 DocumentValue，詳見[動作與型別化值](../14_actions.md)。
+Action 在 output.result 發布最後的 operation value。Action status、assertion detail、diagnostic、attempts 描述執行，不會取代 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH response 或 stdout 使用各自的 responseFormat；DB operation 回傳 native typed value。Render 回傳原樣 String，詳見[動作與型別化值](../14_actions.md)。
 
 Resource evidence 可包含低成本 metadata。Helper 也可選擇配置人類可讀 snapshot：
 

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
@@ -18,11 +19,11 @@ public final class LoadReportWriter {
         Map<String, Object> map = result.toMap();
         Files.write(runDirectory.resolve("load-summary.json"), JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(map));
         Files.write(runDirectory.resolve("load-summary.yaml"), new Yaml().dump(map).getBytes(StandardCharsets.UTF_8));
-        Files.write(runDirectory.resolve("report/index.html"), html(result, map).getBytes(StandardCharsets.UTF_8));
+        Files.write(runDirectory.resolve("report/index.html"), html(runDirectory, result, map).getBytes(StandardCharsets.UTF_8));
         return runDirectory.resolve("report/index.html");
     }
 
-    private String html(LoadRunResult result, Map<String, Object> summary) {
+    private String html(Path runDirectory, LoadRunResult result, Map<String, Object> summary) {
         Map<String, Object> metrics = result.metrics().values();
         StringBuilder html = new StringBuilder(64 * 1024);
         String status = result.status().name();
@@ -51,7 +52,7 @@ public final class LoadReportWriter {
         appendWorkloadTable(html, result);
         appendThresholdTable(html, result.thresholds().results());
         appendResourceTable(html, result.resources());
-        appendEvidenceTable(html, result.evidence());
+        appendEvidenceTable(html, runDirectory, result.evidence());
         appendTimeSeries(html, result);
 
         html.append("<section class=\"panel\"><h2>Machine-readable summary</h2><p class=\"note\">The complete bounded summary is available beside this report as ");
@@ -205,23 +206,63 @@ public final class LoadReportWriter {
     }
 
     @SuppressWarnings("unchecked")
-    private void appendEvidenceTable(StringBuilder html, Map<String, Object> evidence) {
+    private void appendEvidenceTable(StringBuilder html, Path runDirectory, Map<String, Object> evidence) {
         html.append("<section class=\"panel\"><h2>Retained evidence</h2>");
         Object itemsValue = evidence == null ? null : evidence.get("items");
         if (!(itemsValue instanceof List) || ((List<?>) itemsValue).isEmpty()) { html.append("<p class=\"empty\">No failure or sampled-success evidence was retained.</p></section>"); return; }
-        html.append("<div class=\"scroll\"><table><thead><tr><th>EXEC.ID</th><th>Iteration</th><th>Kind</th><th>Link</th></tr></thead><tbody>");
+        html.append("<div class=\"scroll\"><table><thead><tr><th>Workload</th><th>EXEC.ID</th><th>Iteration</th><th>Kind</th><th>Case Log</th><th>Evidence</th></tr></thead><tbody>");
         for (Object value : (List<?>) itemsValue) {
             if (!(value instanceof Map)) continue;
             Map<String, Object> item = (Map<String, Object>) value;
-            String path = String.valueOf(item.get("path"));
+            String workload = item.get("workloadId") == null ? "" : String.valueOf(item.get("workloadId"));
+            String path = item.get("path") == null ? "" : String.valueOf(item.get("path"));
             String executionId = item.get("execId") == null ? "" : String.valueOf(item.get("execId"));
             String caseLog = item.get("caseLog") == null ? "" : String.valueOf(item.get("caseLog"));
-            String destination = caseLog.isEmpty() ? path : caseLog;
-            html.append("<tr><td>").append(escape(executionId)).append("</td><td>").append(escape(String.valueOf(item.get("iterationId")))).append("</td><td>")
-                    .append(escape(String.valueOf(item.get("status")))).append("</td><td><a href=\"../")
-                    .append(escapeAttribute(destination)).append("\">").append(escape(destination)).append("</a></td></tr>");
+            String iteration = item.get("iterationId") == null ? "" : String.valueOf(item.get("iterationId"));
+            String status = item.get("status") == null ? "" : String.valueOf(item.get("status"));
+            html.append("<tr><td>").append(escape(workload)).append("</td><td>").append(escape(executionId)).append("</td><td>")
+                    .append(escape(iteration)).append("</td><td>").append(escape(status)).append("</td><td>")
+                    .append(artifactLink(runDirectory, caseLog, "Case Log")).append("</td><td>")
+                    .append(artifactLink(runDirectory, path, "Evidence")).append("</td></tr>");
         }
         html.append("</tbody></table></div></section>");
+    }
+
+    private String artifactLink(Path runDirectory, String reference, String label) {
+        Path target = safeArtifact(runDirectory, reference);
+        if (target == null) return "<span class=\"empty\">Not retained</span>";
+        String relative = runDirectory.relativize(target).toString().replace('\\', '/');
+        String href = "../" + encodePath(relative);
+        return "<a href=\"" + escapeAttribute(href) + "\">" + escape(label) + "</a>";
+    }
+
+    private Path safeArtifact(Path runDirectory, String reference) {
+        if (reference == null || reference.trim().isEmpty() || reference.indexOf('\\') >= 0) return null;
+        try {
+            Path base = runDirectory.toAbsolutePath().normalize();
+            Path raw = Paths.get(reference);
+            Path target = (raw.isAbsolute() ? raw : base.resolve(raw)).normalize();
+            return target.startsWith(base) && Files.isRegularFile(target) ? target : null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private String encodePath(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        StringBuilder encoded = new StringBuilder(bytes.length);
+        final char[] hex = "0123456789ABCDEF".toCharArray();
+        for (byte valueByte : bytes) {
+            int unsigned = valueByte & 0xff;
+            if ((unsigned >= 'A' && unsigned <= 'Z') || (unsigned >= 'a' && unsigned <= 'z')
+                    || (unsigned >= '0' && unsigned <= '9') || unsigned == '-' || unsigned == '_'
+                    || unsigned == '.' || unsigned == '~' || unsigned == '/') {
+                encoded.append((char) unsigned);
+            } else {
+                encoded.append('%').append(hex[unsigned >>> 4]).append(hex[unsigned & 0x0f]);
+            }
+        }
+        return encoded.toString();
     }
 
     private void appendTimeSeries(StringBuilder html, LoadRunResult result) {

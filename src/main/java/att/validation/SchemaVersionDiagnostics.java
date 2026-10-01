@@ -27,7 +27,7 @@ public final class SchemaVersionDiagnostics {
         final Map<String, String> historical;
         try { historical = SchemaFiles.historicalSchemaVersions(root); }
         catch (RuntimeException invalidCatalog) { return Collections.emptyList(); }
-        // Descriptor families with new 3.6.0 contracts are current-schema-only.
+        // Descriptor families with new 3.6.2 contracts are current-schema-only.
         // Sidecar v2.1 remains supported by SuiteConfigResolver and can still
         // receive an advisory about the available v2.2 schema.
         Map<String, String> supportedHistorical = new LinkedHashMap<String, String>();

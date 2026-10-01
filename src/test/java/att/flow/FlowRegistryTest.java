@@ -24,7 +24,7 @@ class FlowRegistryTest {
 
     @Test void acceptsCurrentTypedOutputContractAndRejectsHistoricalFlowSchema() throws Exception {
         flow("current", "schemaVersion: att-flow/v3.3\nid: common.current.v1\nname: Current\ndescription: Current flow\nactions:\n"
-                + "  render: {type: render, payload: request.json, templateFormat: json}\n");
+                + "  render: {type: render, payload: request.json}\n");
         assertDoesNotThrow(() -> new FlowRegistry(root, root.resolve("templates")));
 
         deleteFlows();

@@ -111,8 +111,8 @@ class SchemaMigrationGuidanceTest {
                 .getBytes(StandardCharsets.UTF_8));
         DiagnosticException error = assertThrows(DiagnosticException.class,
                 () -> new FlowRegistry(root, root.resolve("templates")));
-        assertTrue(error.suggestion().contains("templateFormat"), error.suggestion());
-        assertTrue(error.suggestion().contains("DocumentValue"), error.suggestion());
+        assertTrue(error.suggestion().contains("String"), error.suggestion());
+        assertTrue(error.suggestion().contains("exact rendered"), error.suggestion());
         assertFalse(error.suggestion().contains("result:"), error.suggestion());
         assertFalse(error.suggestion().contains("path:"), error.suggestion());
     }

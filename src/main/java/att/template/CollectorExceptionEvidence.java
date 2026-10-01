@@ -267,8 +267,6 @@ final class CollectorExceptionEvidence {
             if (++nodes > INPUT_NODE_LIMIT) { limited = true; return; }
             if (value instanceof String) {
                 token((String) value);
-            } else if (value instanceof DocumentValue) {
-                token(((DocumentValue) value).text());
             } else if (value instanceof byte[]) {
                 byte[] bytes = (byte[]) value;
                 if (bytes.length > BINARY_LIMIT) { limited = true; return; }

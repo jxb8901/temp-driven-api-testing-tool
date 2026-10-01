@@ -231,9 +231,6 @@ public class StageTemplateRunner {
                                Map<String, Object> output, List<String> targets) throws Exception {
         Path templateRoot = template.directory().toRealPath();
         List<Path> matches = payloadResolver.resolve(template.directory(), action.payload());
-        String configuredFormat = action.templateFormat() == null ? "auto" : action.templateFormat().toLowerCase(java.util.Locale.ROOT);
-        if (!java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(configuredFormat))
-            throw new IllegalArgumentException("templateFormat must be auto, text, json, yaml, or xml");
         Map<String, Object> multiple = new LinkedHashMap<String, Object>();
         List<Map<String, Object>> sourceEvidence = new ArrayList<Map<String, Object>>();
         Object single = null;
@@ -249,27 +246,18 @@ public class StageTemplateRunner {
                         att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
                         "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
             }
-            String format = configuredFormat.equals("auto") ? inferredFormat(source) : configuredFormat;
-            Object value = new DocumentValue(format, rendered);
+            Object value = rendered;
             if (matches.size() == 1) single = value; else multiple.put(relative, value);
             Map<String, Object> item = new LinkedHashMap<String, Object>();
-            item.put("source", relative); item.put("templateFormat", format);
+            item.put("source", relative);
             item.put("sourceBytes", Long.valueOf(Files.size(source))); item.put("renderedChars", Integer.valueOf(rendered.length()));
             sourceEvidence.add(item);
         }
         output.put("result", matches.size() == 1 ? single : multiple);
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
-        evidence.put("resource", "render"); evidence.put("templateFormat", configuredFormat);
+        evidence.put("resource", "render");
         evidence.put("sources", sourceEvidence); evidence.put("durationMs", Long.valueOf((System.nanoTime() - started) / 1000000L));
         output.put("evidence", evidence);
-    }
-
-    private String inferredFormat(Path source) {
-        String name = source.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-        if (name.endsWith(".json")) return "json";
-        if (name.endsWith(".yaml") || name.endsWith(".yml")) return "yaml";
-        if (name.endsWith(".xml")) return "xml";
-        return "text";
     }
 
     private Path renderPayloadRoot(Path templateDirectory, String payload) throws Exception {
@@ -529,6 +517,7 @@ public class StageTemplateRunner {
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
                 if (invocation.get("HTTP") != null) node.put("HTTP", invocation.get("HTTP"));
+                if (invocation.get("SSH") != null) node.put("SSH", invocation.get("SSH"));
                 if (!operation.executionSuccess()) {
                     if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
                             || ("http".equals(kind) && httpTimeout(operation.outputMetadata())))
@@ -582,6 +571,7 @@ public class StageTemplateRunner {
                 replaceActionEvidence(output, failedEvidence);
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
+                if (evidence.get("SSH") != null) node.put("SSH", evidence.get("SSH"));
                 if ("TIMEOUT".equals(e.category()) && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                     evidence.put("retryReason", "TIMEOUT");
                     appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");

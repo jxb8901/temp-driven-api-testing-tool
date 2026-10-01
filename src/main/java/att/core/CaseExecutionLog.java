@@ -383,13 +383,6 @@ public class CaseExecutionLog implements AutoCloseable {
     private Object serializable(Object value, IdentityHashMap<Object, Object> copies,
                                 IdentityHashMap<Object, Boolean> active) {
         if (value == null) return null;
-        if (value instanceof att.template.DocumentValue) {
-            att.template.DocumentValue document = (att.template.DocumentValue) value;
-            Map<String, Object> represented = new LinkedHashMap<String, Object>();
-            represented.put("type", "DocumentValue"); represented.put("format", document.format());
-            represented.put("text", document.text());
-            return represented;
-        }
         boolean container = value instanceof Map || value instanceof Iterable || value.getClass().isArray();
         if (!container) return value;
         if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to the case log");

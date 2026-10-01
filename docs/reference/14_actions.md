@@ -1,12 +1,12 @@
 ## 14 Actions and Typed Values
 
-This chapter defines the active ATT 3.6.0 action contract. Templates use att-template/v3.3. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
+This chapter defines the active ATT 3.6.2 action contract. Templates use att-template/v3.3. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
 
 ### Action types
 
 | Type | Required fields | Result and behavior |
 |---|---|---|
-| render | payload | Renders template files into a DocumentValue, or a relative-path keyed map of DocumentValues for multiple sources. It does not parse the document or write a result file. |
+| render | payload | Renders template files into the exact `String` content, or a relative-path keyed map of `String` values for multiple sources. It does not parse, normalize or write a result file. |
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. |
 | db | db and exactly one query/update block | Returns the DB operation's typed value and evidence. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
@@ -24,26 +24,25 @@ ATT keeps the logical operation result separate from human or wire representatio
 |---|---|---|
 | Command Tool stdout | stdoutFormat | Parses external stdout into a typed result. |
 | HTTP/MQ response | responseFormat | Parses external response bytes into a typed result. |
-| Render output | templateFormat | Labels the representation produced by the template. |
+| Render output | `String` | Preserves the exact characters produced by the template. |
 | Abstract Map/List sent over HTTP/MQ | requestFormat | Serializes the value at the outbound boundary. |
 | Log or resource evidence | format / evidence.output.format | Produces a human-readable representation. |
 
 DB results are already typed values. Tool, Action, Template, Flow and expression results remain typed while they move through ATT.
 
-### Render and DocumentValue
+### Render returns String
 
-Render returns a represented document. DocumentValue carries a format and the exact rendered text:
+Render returns the exact rendered `String`:
 
 ~~~yaml
 renderRequest:
   type: render
   payload: payload/request.xml
-  templateFormat: xml
 ~~~
 
-One source produces output.result as a DocumentValue. Multiple sources produce an ordered map keyed by template-root-relative source paths. templateFormat accepts auto, text, json, yaml or xml. auto selects json for .json, yaml for .yaml/.yml, xml for .xml, and text otherwise.
+One source produces output.result as a `String`. Multiple sources produce an ordered map keyed by template-root-relative source paths, with a `String` for each value. File extensions have no effect: Render does not infer or attach a format, parse the content, reorder it, pretty-print it, normalize it, or rewrite it.
 
-DocumentValue.text is authoritative. ATT does not parse it into a navigable map/tree, pretty-print, normalize or rewrite it before transport. Render creates no file and exposes no output.targetFiles. Use the original typed Context value for structured access, such as EXEC.INPUT.amount or a prior action's output.result.amount.
+Render creates no file and exposes no output.targetFiles. Use the original typed Context value for structured access, such as EXEC.INPUT.amount or a prior action's output.result.amount.
 
 Pass Render output directly to HTTP or MQ:
 
@@ -51,16 +50,14 @@ Pass Render output directly to HTTP or MQ:
 renderRequest:
   type: render
   payload: payload/request.xml
-  templateFormat: xml
-
 sendRequest:
   type: tool
   call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
 ~~~
 
-For MQ, pass the DocumentValue as payload. Do not add requestFormat to a DocumentValue. A resource encodes its exact text with its configured charset/CCSID. DocumentValue.format does not set MQMD.Format or override resource-owned HTTP Content-Type.
+For HTTP or MQ, pass the `String` as the body/payload. The resource encodes the exact text with its configured charset/CCSID. HTTP content type and MQ transport metadata remain resource-owned settings.
 
-requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with DocumentValue fails, so an already represented document is never silently parsed and serialized. A raw file input remains available only for resource calls that explicitly define a file argument; Render does not create a handoff file.
+requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with a `String` fails; a Render result is never silently parsed and serialized. A raw file input remains available only for resource calls that explicitly define a file argument; Render does not create a handoff file.
 
 ### Tool, DB and Flow results
 
@@ -151,7 +148,7 @@ When a Tool retries, collectors run for every primary attempt before that attemp
 
 `call` is required. `timeoutMs` is independent of the primary Tool timeout. `onFailure: continue` is the normal application-log pattern so a diagnostic collection failure does not hide the original business or assertion failure; `stop` makes the collector failure an Action error. Collector status and diagnostic remain observable, and collector failure never changes the primary logical result. Distinguish an evidence collector from an ordinary Tool/Log/Assign Action: use a collector for diagnostic data needed before the containing Tool assertion, and an ordinary Action when the collected value is normal business/test data for later assertions.
 
-Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or `DocumentValue`; matching-format presentation preserves a `DocumentValue`'s authoritative text. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
+Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or Render `String`; helper `evidence.output` is an explicit presentation boundary. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
 
 ### Log: typed value to Case log
 
@@ -168,7 +165,7 @@ logOrder:
 
 level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
-When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A DocumentValue is emitted as its authoritative text when format is omitted or matches its own format; a conflicting format fails instead of converting it. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
+When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A Render String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 
 ### Expressions and variable scope
 
@@ -191,15 +188,15 @@ This adds a bounded human-readable snapshot beside operation metadata; it does n
 
 ### Removed fields and migration
 
-ATT 3.6.0 accepts only the current schema for each resource. Historical versions are archived under schemas/history and are not active contracts.
+ATT 3.6.2 accepts only the current schema for each resource. Historical versions are archived under schemas/history and are not active contracts.
 
-| Old configuration | 3.6.0 form |
+| Old configuration | 3.6.2 form |
 |---|---|
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite or renderAs/saveAs | templateFormat; consume output.result as DocumentValue; no implicit file replacement |
+| Render result.format/path/overwrite or renderAs/saveAs | Remove the old fields; consume output.result as the exact String; no implicit file replacement |
 | Log file | Pass a typed value to Log.value |
 | Log fields | Put a typed map/list in Log.value and select Log.format |
-| Render targetFiles handoff to HTTP/MQ | Pass DocumentValue directly as HTTP body or MQ payload |
+| Render targetFiles handoff to HTTP/MQ | Pass the Render String directly as HTTP body or MQ payload |
 | requestFormat on rendered output | Remove it; reserve requestFormat for abstract Map/List values |
 
 Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.

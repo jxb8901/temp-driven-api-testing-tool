@@ -24,7 +24,7 @@ environments:
     httphelpers: [config/httphelpers/uat/payment.yaml]
 ```
 
-各環境應提供相同的 stable logical ID（例如 `orders`、`payment`、`application`），Template、Flow、Action 和 Tool-group binding 才能在 SIT/UAT/PREPROD 之間保持不變。SSH endpoint detail 不會公開為 `META.SSHHELPER`；見[SSHHelper 章](05_resources/sshhelper.md)及[Runtime Context 欄位清單](03_runtime_context.md)。
+各環境應提供相同的 stable logical ID（例如 `orders`、`payment`、`application`），Template、Flow、Action 和 Tool-group binding 才能在 SIT/UAT/PREPROD 之間保持不變。SSH Resource Helper call 只會以 `META.SSHHELPER` 發布 logical helper ID 和 type；endpoint 與 credential detail 仍保持私有。見[SSHHelper 章](05_resources/sshhelper.md)及[Runtime Context 欄位清單](03_runtime_context.md)。
 
 ### Topology 與 secrets
 

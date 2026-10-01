@@ -17,7 +17,6 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import att.template.DocumentValue;
 import att.template.TypedValueFormatter;
 import java.time.Duration;
 import java.time.Instant;
@@ -324,10 +323,8 @@ public final class MqHelperExecutor {
     private void validateRequestPayload(Object payload, Object format) {
         boolean structured = payload instanceof Map || payload instanceof Iterable
                 || payload != null && payload.getClass().isArray();
-        if (payload instanceof DocumentValue && format != null)
-            throw new IllegalArgumentException("requestFormat cannot be combined with a Render DocumentValue");
         if (structured && format == null) throw new IllegalArgumentException("A Map/List MQ payload requires requestFormat");
-        if (!structured && !(payload instanceof DocumentValue) && format != null)
+        if (!structured && format != null)
             throw new IllegalArgumentException("requestFormat is valid only for a Map/List MQ payload");
         if (format != null && !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(String.valueOf(format)))
             throw new IllegalArgumentException("requestFormat must be text, json, yaml, or xml");
@@ -335,7 +332,6 @@ public final class MqHelperExecutor {
 
     private byte[] payloadBytes(Object payload, Object format, MqHelperConfig helper) throws Exception {
         java.nio.charset.Charset charset = MqCcsid.charset(helper.charset());
-        if (payload instanceof DocumentValue) return ((DocumentValue) payload).text().getBytes(charset);
         if (payload instanceof byte[]) return ((byte[]) payload).clone();
         boolean structured = payload instanceof Map || payload instanceof Iterable
                 || payload != null && payload.getClass().isArray();

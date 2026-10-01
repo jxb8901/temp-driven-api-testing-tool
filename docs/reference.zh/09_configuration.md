@@ -18,11 +18,11 @@
 
 Action timeout 覆盖 Tool descriptor timeout，Tool timeout 覆盖全局 timeout。sidecar、stage、Template 不拥有 timeout/retry 默认。CLI 的 `--output-dir` 和 `--run-id` 会在一次命令中覆盖相应默认值。一个层级中合法的字段，若放在别的层级中也会被拒绝。
 
-### ATT 3.6.0 多环境 Profile 选择
+### ATT 3.6.2 多环境 Profile 选择
 
 `att-config/v2.10` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper descriptor lists。各綁定方式見 resource chapters。
 
-ATT 3.6.0 使用一份 common `att-config/v2.10` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
+ATT 3.6.2 使用一份 common `att-config/v2.10` 加上 `environments` map 选择环境；不通过修改 Action 或增加环境专用 Tool ID 来选择环境。SIT、UAT、PREPROD 及 production-like 环境之间，Action 只保留稳定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -69,7 +69,6 @@ actions:
   renderRequest:
     type: render
     payload: payment/request.json
-    templateFormat: json
 
   queryOrder:
     type: db
@@ -124,7 +123,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-ATT 3.6.0 使用以下現行 resource/config schema。現行 JSON Schema 位於 schemas/；歷史定義封存於 schemas/history，不代表舊版本仍有 runtime compatibility。
+ATT 3.6.2 使用以下現行 resource/config schema。現行 JSON Schema 位於 schemas/；歷史定義封存於 schemas/history，不代表舊版本仍有 runtime compatibility。
 
 | Artifact | 現行 schema |
 |---|---|
@@ -137,7 +136,7 @@ ATT 3.6.0 使用以下現行 resource/config schema。現行 JSON Schema 位於 
 | Workbook sidecar | att-sidecar/v2.2 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Load scenario | att-load/v1.3 |
+| Load scenario | att-load/v1.4 |
 
 schemas/catalog.yaml 是 authoritative catalog。Package validation 會檢查 catalog registrations；這不會令封存 schema 成為可執行 contract。Unsupported active schema version 會失敗並提供 migration guidance。
 
@@ -240,7 +239,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 
 | Action | 必填字段 | Typed-result contract |
 |---|---|---|
-| render | payload | 返回 DocumentValue；没有结果文件或 targetFiles。 |
+| render | payload | 返回原樣 String；沒有結果檔或 targetFiles。 |
 | tool | call | 发布 Tool/helper 的 native result。Command stdout parsing 使用 stdoutFormat。 |
 | db | db 及 query/update 其中一个区块 | 发布 native typed DB result。 |
 | assert | assert | 按条件记录 PASS/FAIL。 |
@@ -248,7 +247,7 @@ validate、docs、snapshot 与 dry-run 都不会打开 DB Connection。dbhelper 
 | assign | name/expression | 将 typed value 发布至 EXEC.VARS。 |
 | flow | use | 在嵌套 Action scope 执行 Flow。 |
 
-共用 Action result.format/path/overwrite 已移除。Render 使用 templateFormat 标记 DocumentValue。HTTP/MQ responseFormat 负责 ingress parsing；requestFormat 只供抽象 Map/List payload。字段、范例、evidence 行为与迁移见[动作与型别化值](14_actions.md)。
+共用 Action result.format/path/overwrite 已移除。Render 返回原樣 String，不附帶 format metadata。HTTP/MQ responseFormat 负责 ingress parsing；requestFormat 只供抽象 Map/List payload。字段、范例、evidence 行为与迁移见[动作与型别化值](14_actions.md)。
 
 ### 工具契约
 
@@ -269,7 +268,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.6.1",
+  "attVersion": "3.6.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

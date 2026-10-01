@@ -1,12 +1,11 @@
 schemaVersion: att-template/v3.3
 name: PAYMENT_INVOKE
-description: Render payment request XML as a DocumentValue and invoke the payment API.
+description: Render payment request XML as a String and invoke the payment API.
 
 actions:
   renderRequest:
     type: render
     payload: payload.xml
-    templateFormat: auto
 
   logRequest:
     type: log

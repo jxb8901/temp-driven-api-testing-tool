@@ -79,6 +79,17 @@ public final class SshCommandRunner {
                 new ArrayList<String>(logicalArgv), "mwiede/jsch");
     }
 
+    Execution runRaw(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot)
+            throws IOException, InterruptedException {
+        if (localAvailable.getAsBoolean()) {
+            List<String> argv = openSshArgv(ssh, remoteCommand, projectRoot);
+            return new Execution(commandRunner.run(argv, timeout, projectRoot), argv, "openssh");
+        }
+        if (warned.compareAndSet(false, true)) warningOutput.println(FALLBACK_WARNING);
+        return new Execution(javaClient.run(ssh, remoteCommand, timeout, projectRoot),
+                java.util.Collections.singletonList(remoteCommand), "mwiede/jsch");
+    }
+
     public static boolean localSshAvailable() {
         String path = System.getenv("PATH");
         if (path == null) return false;
