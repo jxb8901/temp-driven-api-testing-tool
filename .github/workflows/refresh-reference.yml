@@ -20,7 +20,7 @@ jobs:
           java-version: '8'
           cache: maven
       - name: Verify MQ regression tests
-        run: mvn -B -ntp -Dtest=RetryConditionTest,RetryWhenRuntimeTest,MqHelperExecutorTest,DirectDbActionRetryRuntimeTest,StageTemplateRunnerTest,PackageValidatorTest,PooledMqHelperExecutorTest test
+        run: mvn -B -ntp -Dtest=RetryConditionTest,RetryWhenRuntimeTest,MqHelperExecutorTest,DirectDbActionRetryRuntimeTest,StageTemplateRunnerTest,PackageValidatorTest,PooledMqHelperExecutorTest,LoadCrossModeTest test
       - name: Install pinned Pandoc
         run: |
           curl --fail --location --silent --show-error \

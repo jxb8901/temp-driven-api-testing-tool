@@ -41,6 +41,7 @@ class RetryConditionTest {
         Map<String,Object> output = new LinkedHashMap<String,Object>();
         output.put("status", "TIMEOUT"); output.put("attempt", 1);
         context.beginAction(output);
+        context.setActionOutput(output);
         assertTrue(RetryCondition.evaluate("#{${output.status} == 'TIMEOUT' AND ${output.attempt} == 1}", context));
         output.put("attempt", 2);
         assertFalse(RetryCondition.evaluate("#{${output.attempt} == 1}", context));
