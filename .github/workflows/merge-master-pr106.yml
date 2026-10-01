@@ -1,0 +1,90 @@
+name: Merge master into PR106
+
+on:
+  push:
+    branches:
+      - feature/att-3.6.1-issues-89-100-101-102
+    paths:
+      - .github/workflows/merge-master-pr106.yml
+
+permissions:
+  contents: write
+
+jobs:
+  merge-master:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Merge latest master and resolve conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          PR_HEAD=$(git rev-parse HEAD)
+          echo "PR_HEAD=$PR_HEAD" >> "$GITHUB_ENV"
+          set +e
+          git merge --no-edit -X theirs origin/master
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "Resolving remaining conflicts in favor of current master structure"
+            git diff --name-only --diff-filter=U | while IFS= read -r path; do
+              if git cat-file -e "origin/master:$path" 2>/dev/null; then
+                git checkout --theirs -- "$path"
+                git add -- "$path"
+              else
+                git rm -- "$path"
+              fi
+            done
+            git commit --no-edit
+          fi
+      - name: Reapply current PR documentation contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          roots = [Path('README.md'), Path('docs'), Path('examples')]
+          files = []
+          for root in roots:
+              if root.is_file():
+                  files.append(root)
+              elif root.exists():
+                  files.extend(p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.md','.yaml','.yml','.json','.xml'})
+          for p in files:
+              rel = p.as_posix()
+              if '/history/' in rel or '/appendices/migrations.md' in rel or '/appendices/compatibility.md' in rel:
+                  continue
+              try:
+                  text = p.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              new = text.replace('ATT V3.6.1', 'ATT V3.6.2').replace('ATT 3.6.1', 'ATT 3.6.2')
+              new = new.replace('att-load/v1.3', 'att-load/v1.4').replace('Load v1.3', 'Load v1.4')
+              if new != text:
+                  p.write_text(new, encoding='utf-8')
+          PY
+          python3 tools/build_reference_manual.py
+      - name: Verify merged branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp clean verify
+          python3 tools/verify_documentation.py
+          git diff --check
+      - name: Commit generated merge resolutions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Resolve PR #106 documentation conflicts after merging master"
+          fi
+      - name: Push merged branch
+        run: git push origin HEAD:feature/att-3.6.1-issues-89-100-101-102
