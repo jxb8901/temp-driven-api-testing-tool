@@ -74,16 +74,16 @@ class CliDiscoveryTest {
     private Path fixture() throws Exception {
         Path root = temp.resolve("project");
         TestSchemas.install(root);
-        write(root, "templates/TARGET/template.yaml", "schemaVersion: att-template/v3.3\nname: TARGET\n"
+        write(root, "templates/TARGET/template.yaml", "schemaVersion: att-template/v3.4\nname: TARGET\n"
                 + "description: discovery target\nactions:\n  show: {type: log, message: ready}\n");
         write(root, "templates/TARGET/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {value: ready}\n");
-        write(root, "templates/NO_SIDECAR/template.yaml", "schemaVersion: att-template/v3.3\nname: NO_SIDECAR\n"
+        write(root, "templates/NO_SIDECAR/template.yaml", "schemaVersion: att-template/v3.4\nname: NO_SIDECAR\n"
                 + "description: no sidecar\nactions:\n  show: {type: log, message: ready}\n");
-        write(root, "templates/LOAD_ONLY/template.yaml", "schemaVersion: att-template/v3.3\nname: LOAD_ONLY\n"
+        write(root, "templates/LOAD_ONLY/template.yaml", "schemaVersion: att-template/v3.4\nname: LOAD_ONLY\n"
                 + "description: Load-only bootstrap root\nactions:\n  show: {type: log, message: ready}\n");
         write(root, "templates/LOAD_ONLY/debug.yaml", "schemaVersion: att-debug/v1.1\nvars:\n"
                 + "  userId: '${EXEC.LOAD.USER_ID}'\n");
-        write(root, "templates/flows/group/flow/flow.yaml", "schemaVersion: att-flow/v3.3\nid: group.flow.v1\n"
+        write(root, "templates/flows/group/flow/flow.yaml", "schemaVersion: att-flow/v3.4\nid: group.flow.v1\n"
                 + "name: Flow\ndescription: discovery flow\nactions:\n  show: {type: log, message: ready}\n");
         Files.createDirectories(root.resolve("output"));
         Files.delete(root.resolve("output"));

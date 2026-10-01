@@ -32,23 +32,22 @@ evidence:
 
 Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
 
-#### 傳送已表示或抽象值
+#### 傳送 Render String 或抽象值
 
-Render output 是 DocumentValue，可直接傳入 payload：
+Render output 是 String，可直接傳入 payload：
 
 ~~~yaml
 renderRequest:
   type: render
   payload: payload/request.xml
-  templateFormat: xml
 send:
   type: tool
   call: "#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}"
 ~~~
 
-ATT 使用配置的 MQ charset/CCSID 編碼完全相同的渲染文字，不會 parse/serialize。DocumentValue 不應提供 requestFormat。Document format 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
+ATT 使用配置的 MQ charset/CCSID 編碼完全相同的渲染文字，不會 parse/serialize。String 不應提供 requestFormat。Render 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
 
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。DocumentValue + requestFormat 及 String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；Render 不建立檔案或 targetFiles。
+Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；Render 不建立檔案或 targetFiles。
 
 #### Evidence、response parsing 與 Load
 
@@ -56,7 +55,7 @@ MQ evidence 可包含有界 transport metadata，例如 helper/instance identity
 
 Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Appendix C](../appendices/migrations.md)。
 
-共用 DocumentValue 與 typed-result 契約見[Action 與型別化值](../14_actions.md)。
+共用 typed-result 契約見[Action 與型別化值](../14_actions.md)。
 
 ### Descriptor configuration
 

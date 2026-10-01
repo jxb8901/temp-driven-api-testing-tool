@@ -26,7 +26,7 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 
 ### META 欄位清單與生命週期
 
-公開 META root 只包含下表列出的 `PROJECT`、`SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER` 和 `HTTPHELPER`。META 只包含描述欄位。元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
+公開 META root 只包含下表列出的 `PROJECT`、`SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。META 只包含描述欄位。元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
 
 | 公開路徑 | 意義、type 與範例 | Mode 與可用時機 | Scope 與缺席時機 |
 |---|---|---|---|
@@ -57,8 +57,10 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 | META.MQHELPER.type | Resource 類型；String，`mqhelper`。 | 與 META.MQHELPER.id 相同。 | 返回後無外層 scope 時缺席。 |
 | META.HTTPHELPER.id | Logical HTTPHelper ID；String，例如 `payment`。 | Run、Debug、Load 的 HTTPHelper operation 期間。 | Invocation scope；push/restore，返回後無外層 scope 時缺席。 |
 | META.HTTPHELPER.type | Resource 類型；String，`httphelper`。 | 與 META.HTTPHELPER.id 相同。 | 返回後無外層 scope 時缺席。 |
+| META.SSHHELPER.id | Logical SSHHelper ID；String，例如 `application`。 | Run、Debug、Load 的 SSH Resource Helper operation 期間。 | Invocation scope；push/restore，返回後無外層 scope 時缺席。 |
+| META.SSHHELPER.type | Resource 類型；String，`sshhelper`。 | 與 META.SSHHELPER.id 相同。 | 返回後無外層 scope 時缺席。 |
 
-META.SSHHELPER 不是公開欄位。SSH connection 與 credential settings 留在 Tool invocation 內部。META.TOOL 可識別 active Tool；SSH endpoint、user、identity file、credentials 不會公開在 META。
+META.SSHHELPER 只公開 logical helper ID 和 resource type。SSH endpoint、user、identity file、credentials 留在 executor 內部，不會公開在 META。
 
 ATT 會遞迴過濾 password、secret、token、authorization/cookie、API key、private key 等 secret-bearing keys。Expressions 與 adapters 可讀 META，但不能修改。
 

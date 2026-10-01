@@ -7,7 +7,7 @@ Each contract has one semantic owner:
 | Contract | Owner |
 |---|---|
 | Testcase / Workbook / Sidecar / Snapshot / Stage / Template / Flow authoring | Test Authoring |
-| Ordered Action execution, typed results, DocumentValue, Log, Assign and collector shape | Actions |
+| Ordered Action execution, typed results, Log, Assign and collector shape | Actions |
 | EXEC / META inventory, scope and lifetime | Runtime and Context |
 | Expression grammar, typed evaluation, operators and built-ins | Expressions |
 | Mode inputs, bootstrap scope, identity and output lifecycle | Run / Debug / Load |

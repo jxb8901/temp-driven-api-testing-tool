@@ -26,7 +26,7 @@ EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing di
 
 ### META field inventory and lifecycle
 
-The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, and `HTTPHELPER` as listed below. META contains descriptive fields only. A path may be absent when its component is not active.
+The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER` as listed below. META contains descriptive fields only. A path may be absent when its component is not active.
 
 | Public path | Meaning, type and example | Modes and availability | Scope and when absent |
 |---|---|---|---|
@@ -57,8 +57,10 @@ The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `F
 | META.MQHELPER.type | Resource kind; String, `mqhelper`. | Same availability as META.MQHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
 | META.HTTPHELPER.id | Logical HTTPHelper ID; String, e.g. `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.HTTPHELPER.type | Resource kind; String, `httphelper`. | Same availability as META.HTTPHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
+| META.SSHHELPER.id | Logical SSHHelper ID; String, e.g. `application`. | Run, Debug, Load during an SSH Resource Helper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.SSHHELPER.type | Resource kind; String, `sshhelper`. | Same availability as META.SSHHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
 
-META.SSHHELPER is not public. SSH connection and credential settings stay private to Tool invocation. META.TOOL may identify the active Tool, but SSH endpoint, user, identity file and credentials are not META fields.
+META.SSHHELPER exposes only the logical helper ID and resource type. SSH endpoint, user, identity file and credentials stay private to the executor and are not META fields.
 
 ATT recursively filters credential-bearing keys such as password, secret, token, authorization/cookie, API key and private key. Expressions and adapters can read META but cannot mutate it.
 

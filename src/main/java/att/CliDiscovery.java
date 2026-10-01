@@ -6,7 +6,6 @@ import att.config.ToolConfig;
 import att.core.ExecutionOptions;
 import att.debug.DebugEngine;
 import att.flow.FlowRegistry;
-import att.load.LoadProfileLoader;
 import att.load.LoadScenario;
 import att.load.LoadScenarioLoader;
 import att.load.LoadTarget;
@@ -82,8 +81,10 @@ public final class CliDiscovery {
         Map<String, Object> profile = new LinkedHashMap<String, Object>();
         profile.put("path", relative(canonicalRoot, profilePath));
         try {
-            Map<String, Object> policy = new LoadProfileLoader(canonicalRoot).loadDefault();
+            Map<String, Object> policy = new LoadScenarioLoader(canonicalRoot).loadDefaultPolicy();
             profile.put("available", policy != null);
+            profile.put("kind", "policy-only");
+            profile.put("executable", Boolean.FALSE);
             result.put("profile", profile);
             List<String> quickCommands = new ArrayList<String>();
             if (policy != null) {

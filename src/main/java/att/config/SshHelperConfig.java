@@ -13,16 +13,26 @@ public final class SshHelperConfig {
     private final String description;
     private final String strategy;
     private final int maxConcurrency;
+    private final int connectTimeoutMs;
+    private final int commandTimeoutMs;
     private final Map<String, SshConfig> instances;
     private final AtomicInteger next = new AtomicInteger();
 
     public SshHelperConfig(String id, String name, String description, String strategy,
                            int maxConcurrency, Map<String, SshConfig> instances) {
+        this(id, name, description, strategy, maxConcurrency, 10000, 60000, instances);
+    }
+
+    public SshHelperConfig(String id, String name, String description, String strategy,
+                           int maxConcurrency, int connectTimeoutMs, int commandTimeoutMs,
+                           Map<String, SshConfig> instances) {
         this.id = id;
         this.name = name;
         this.description = description;
         this.strategy = strategy;
         this.maxConcurrency = maxConcurrency;
+        this.connectTimeoutMs = connectTimeoutMs;
+        this.commandTimeoutMs = commandTimeoutMs;
         this.instances = Collections.unmodifiableMap(new LinkedHashMap<String, SshConfig>(instances));
         if (this.instances.isEmpty()) throw new IllegalArgumentException("SSH helper requires instances");
     }
@@ -32,6 +42,8 @@ public final class SshHelperConfig {
     public String description() { return description; }
     public String strategy() { return strategy; }
     public int maxConcurrency() { return maxConcurrency; }
+    public int connectTimeoutMs() { return connectTimeoutMs; }
+    public int commandTimeoutMs() { return commandTimeoutMs; }
     public Map<String, SshConfig> instances() { return instances; }
 
     public String select(String effectiveStrategy) {

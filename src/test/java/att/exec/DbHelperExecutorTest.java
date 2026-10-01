@@ -284,19 +284,19 @@ class DbHelperExecutorTest {
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.add(new TemplateAction("query", map("type", "db", "db", "orders",
                 "query", map("sqlFile", "sql/orders.sql", "params", Collections.<Object>singletonList("${CASE.customerId}"))),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         actions.add(new TemplateAction("queryText", map("type", "db", "db", "orders",
-                "query", map("sql", "select ONE", "params", Collections.emptyList())), "att-template/v3.3"));
+                "query", map("sql", "select ONE", "params", Collections.emptyList())), "att-template/v3.4"));
         actions.add(new TemplateAction("assign", map("type", "assign", "name", "orders",
                 "expression", "#{db.orders.query(sql='select ONE', params=[${CASE.customerId}, 'OPEN'])}"),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         actions.add(new TemplateAction("scalar", map("type", "assign", "name", "orderId",
-                "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"), "att-template/v3.3"));
+                "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"), "att-template/v3.4"));
         actions.add(new TemplateAction("printRows", map("type", "log",
-                "value", "${ACTIONS.queryText.output.result}", "format", "sqlplus"), "att-template/v3.3"));
+                "value", "${ACTIONS.queryText.output.result}", "format", "sqlplus"), "att-template/v3.4"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, executor))
-                .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v3.3"), context, log);
+                .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v3.4"), context, log);
         assertEquals(5, results.size());
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS),
                 Arrays.asList(results.get(0).status(), results.get(1).status(), results.get(2).status(),
@@ -367,11 +367,11 @@ class DbHelperExecutorTest {
 
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.add(new TemplateAction("scalar", map("type", "tool", "call", "#{orders.id()}"),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         actions.add(new TemplateAction("close", map("type", "tool", "call", "#{orders.close(status='DONE')}"),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         List<ValidationResult> results = new StageTemplateRunner(engine).execute("verify",
-                new StageTemplate("DB facade", tempDir, actions, "att-template/v3.3"), context, log);
+                new StageTemplate("DB facade", tempDir, actions, "att-template/v3.4"), context, log);
         assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
         assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
         assertEquals("A100", context.resolve("ACTIONS.scalar.output.result"));

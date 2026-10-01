@@ -18,7 +18,7 @@ stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再�
 
 #### Call-backed Tool
 
-Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
+Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP/SSH operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
 
 ~~~yaml
 tools:
@@ -31,7 +31,7 @@ tools:
         required: true
 ~~~
 
-Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ parsing 由 transport boundary 管理。
+Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ/SSH parsing 或 transfer 由各自 transport boundary 管理。
 
 Action result 規則見[Action 與型別化值](../14_actions.md)；typed result/evidence 的區分見[Operation Result and Evidence](operation_result.md)。
 

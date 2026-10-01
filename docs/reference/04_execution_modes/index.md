@@ -1,6 +1,6 @@
 ## 06 Execution Modes
 
-Run, Debug and Load are peer adapters over the same reusable Template/Flow/Tool/DB/MQ execution semantics.
+Run, Debug and Load are peer adapters over the same reusable Template/Flow/Tool/DB/MQ/HTTP/SSH execution semantics.
 
 | Mode | `EXEC.ID` | Unit of execution | Primary result location |
 |---|---|---|---|

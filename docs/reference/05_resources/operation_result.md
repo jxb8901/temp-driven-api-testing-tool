@@ -8,7 +8,7 @@ Operation
 └── evidence     # bounded execution/transport metadata
 ~~~
 
-The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. Render returns DocumentValue as described in [Actions and Typed Values](../14_actions.md).
+The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. Render returns the exact rendered String as described in [Actions and Typed Values](../14_actions.md).
 
 Resource evidence can include low-cost metadata. A helper may also configure an optional human-readable snapshot:
 

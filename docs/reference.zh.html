@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.6.1 使用手冊與參考</title>
+  <title>ATT V3.6.2 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.6.1 使用手冊與參考</h1>
+<h1 class="title">ATT V3.6.2 使用手冊與參考</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v361-使用手冊與參考"
-id="toc-att-v361-使用手冊與參考">ATT V3.6.1 使用手冊與參考</a>
+<li><a href="#att-v362-使用手冊與參考"
+id="toc-att-v362-使用手冊與參考">ATT V3.6.2 使用手冊與參考</a>
 <ul>
 <li><a href="#01-概覽與-product-model"
 id="toc-01-概覽與-product-model">01 概覽與 Product Model</a>
@@ -271,8 +271,8 @@ id="toc-03-actions-與-typed-values">03 Actions 與 Typed Values</a>
 <li><a href="#action-類型" id="toc-action-類型">Action 類型</a></li>
 <li><a href="#區分邏輯值與表示方式"
 id="toc-區分邏輯值與表示方式">區分邏輯值與表示方式</a></li>
-<li><a href="#render-與-documentvalue"
-id="toc-render-與-documentvalue">Render 與 DocumentValue</a></li>
+<li><a href="#render-回傳-string" id="toc-render-回傳-string">Render
+回傳 String</a></li>
 <li><a href="#tooldb-與-flow-結果" id="toc-tooldb-與-flow-結果">Tool、DB
 與 Flow 結果</a></li>
 <li><a href="#tool-evidence-collector"
@@ -473,8 +473,9 @@ Compatibility 與 Deprecated Aliases</a></li>
 <li><a href="#appendix-c--migration-notes"
 id="toc-appendix-c--migration-notes">Appendix C — Migration Notes</a>
 <ul>
-<li><a href="#移除欄位與遷移"
-id="toc-移除欄位與遷移">移除欄位與遷移</a></li>
+<li><a href="#historical-schema-migration"
+id="toc-historical-schema-migration">Historical schema
+migration</a></li>
 <li><a href="#debug-schema-migration"
 id="toc-debug-schema-migration">Debug schema migration</a></li>
 <li><a href="#environment-profile-migration"
@@ -497,8 +498,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v361-使用手冊與參考">ATT V3.6.1 使用手冊與參考</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.6.1 Status:
+<h1 id="att-v362-使用手冊與參考">ATT V3.6.2 使用手冊與參考</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.6.2 Status:
 規範性使用者文件；由模組化來源自動生成</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -538,7 +539,7 @@ SSHHelper。</p>
 <tr class="odd">
 <td>Run</td>
 <td>workbook Testcase 與 Stage selector</td>
-<td>Template、Flow、Tool、DB/MQ</td>
+<td>Template、Flow、Tool、DB/MQ/HTTP/SSH</td>
 </tr>
 <tr class="even">
 <td>Debug</td>
@@ -547,8 +548,8 @@ SSHHelper。</p>
 </tr>
 <tr class="odd">
 <td>Load</td>
-<td><code>att-load/v1.3</code> scenario</td>
-<td>重複執行單一 Template、Flow 或 Tool target</td>
+<td><code>att-load/v1.4</code> scenario</td>
+<td>重複執行一個或多個 Template、Flow 或 Tool workload</td>
 </tr>
 </tbody>
 </table>
@@ -857,21 +858,20 @@ Template 路徑。絕對路徑、部分路徑、以及逃逸出
 href="reference.zh/08_reliability_execution_control.md">Reliability</a>。</p>
 <h3 id="23-template">2.3 Template</h3>
 <p>只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用
-att-template/v3.3。每個 Template 都需要非空且有序的 actions map，以及
+att-template/v3.4。每個 Template 都需要非空且有序的 actions map，以及
 description。</p>
-<p>每個 Action 依類型使用不同契約。Render 回傳
-DocumentValue，不寫入檔案。Tool/DB/HTTP/MQ action 發布原生型別化
-operation result。Log 將 typed value 格式化為人類可讀內容。Assign
-將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。</p>
-<p>完整欄位、範例、typed result/evidence model、DocumentValue
-行為、HTTP/MQ boundary 與 migration guidance，請參閱<a
-href="reference.zh/14_actions.md">Action 與型別化值</a>。<a
-href="reference.zh/07_expressions.md">Expressions and Built-ins</a>
-定義共用 expression language；<a
+<p>每個 Action 依類型使用不同契約。Render 回傳原樣
+String，不寫入檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation
+result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至
+EXEC.VARS；Flow 在巢狀 Action scope 執行。</p>
+<p>完整欄位、範例、typed result/evidence model、HTTP/MQ/SSH boundary 與
+migration guidance，請參閱<a href="reference.zh/14_actions.md">Action
+與型別化值</a>。<a href="reference.zh/07_expressions.md">Expressions and
+Built-ins</a> 定義共用 expression language；<a
 href="reference.zh/04_execution_modes/load.md">Load</a> 定義 ID
 initialization scope。</p>
 <h3 id="24-flow">2.4 Flow</h3>
-<p>Flow 是可重用的 Template logic，使用 <code>att-flow/v3.3</code>，並由
+<p>Flow 是可重用的 Template logic，使用 <code>att-flow/v3.4</code>，並由
 <code>flow.yaml</code> 定義。必填欄位為
 <code>schemaVersion</code>、versioned canonical <code>id</code>（例如
 <code>common.payment.v1</code>）、<code>name</code>、<code>description</code>
@@ -898,10 +898,10 @@ lifetime；environment selection 由 <a
 href="reference.zh/09_configuration.md">Configuration</a> 定義。</p>
 <h2 id="03-actions-與-typed-values">03 Actions 與 Typed Values</h2>
 <p>本章定義 ATT 現行 Action 契約。Template 使用
-att-template/v3.3。每個完成的 Action 都會在 output.result
+att-template/v3.4。每個完成的 Action 都會在 output.result
 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite
-物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper
-章節。</p>
+物件。Resource 配置請參閱
+Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。</p>
 <h3 id="action-類型">Action 類型</h3>
 <table>
 <thead>
@@ -915,8 +915,8 @@ att-template/v3.3。每個完成的 Action 都會在 output.result
 <tr class="odd">
 <td>render</td>
 <td>payload</td>
-<td>將範本檔渲染為 DocumentValue；多來源時回傳以相對路徑為 key 的
-DocumentValue map。不解析文件，也不寫入結果檔。</td>
+<td>將範本檔渲染為原樣 String；多來源時回傳以相對路徑為 key 的 String
+map。不解析內容，也不寫入結果檔。</td>
 </tr>
 <tr class="even">
 <td>tool</td>
@@ -980,8 +980,8 @@ result、Log file 與 Log fields 不屬於現行契約。</p>
 </tr>
 <tr class="odd">
 <td>Render 輸出</td>
-<td>templateFormat</td>
-<td>標示範本所產生的 representation。</td>
+<td><code>String</code></td>
+<td>保留範本產生的原始字元。</td>
 </tr>
 <tr class="even">
 <td>透過 HTTP/MQ 傳送抽象 Map/List</td>
@@ -997,19 +997,16 @@ result、Log file 與 Log fields 不屬於現行契約。</p>
 </table>
 <p>DB result 本身已是型別化值。Tool、Action、Template、Flow 和
 expression results 在 ATT 中傳遞時均保留型別。</p>
-<h3 id="render-與-documentvalue">Render 與 DocumentValue</h3>
-<p>Render 回傳已表示的文件。DocumentValue 帶有 format 及完全一致的
-rendered text：</p>
+<h3 id="render-回傳-string">Render 回傳 String</h3>
+<p>Render 回傳完全一致的 rendered String：</p>
 <div class="sourceCode" id="cb8"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
-<p>單一來源會令 output.result 成為 DocumentValue。多來源則回傳以
-template root 相對來源路徑為 key 的有序 map。templateFormat 支援
-auto、text、json、yaml、xml。auto 依副檔名選擇：.json 為
-json、.yaml/.yml 為 yaml、.xml 為 xml，其他為 text。</p>
-<p>DocumentValue.text 是權威表示。ATT 不會將它解析成可導航的
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span></code></pre></div>
+<p>單一來源會令 output.result 成為 String。多來源則回傳以 template root
+相對來源路徑為 key 的有序 String map。副檔名不會影響結果；Render
+不會推斷或附加 format、parse、pretty-print、normalize 或改寫內容。</p>
+<p>String 本身就是權威表示。ATT 不會將它解析成可導航的
 map/tree，也不會在傳輸前 pretty-print、normalize 或改寫。Render
 不建立檔案，也不暴露
 output.targetFiles。若要存取結構化資料，請使用原本的型別化 Context
@@ -1020,20 +1017,18 @@ output.result.amount。</p>
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
 <span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
-<p>MQ 請將 DocumentValue 傳給 payload。DocumentValue 不可搭配
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<p>HTTP/MQ 請將 Render String 直接傳給 body/payload。String 不可搭配
 requestFormat。Resource 使用其配置的 charset/CCSID
-編碼原文。DocumentValue.format 不會設定 MQMD.Format，也不會覆蓋由
-resource 管理的 HTTP Content-Type。</p>
+編碼原文；Content-Type 與 MQ transport metadata 仍由 resource 管理。</p>
 <p>requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body
-必須明確指定格式，例如 requestFormat=json。DocumentValue 與
-requestFormat 同時出現會失敗，確保已表示文件不會被靜默
-parse/serialize。只有 resource 呼叫明確定義 file 參數時，raw file input
-才仍可使用；Render 不會建立 handoff file。</p>
+必須明確指定格式，例如 requestFormat=json。String 與 requestFormat
+同時出現會失敗，確保 Render 不會被靜默 parse/serialize。只有 resource
+呼叫明確定義 file 參數時，raw file input 才仍可使用；Render 不會建立
+handoff file。</p>
 <h3 id="tooldb-與-flow-結果">Tool、DB 與 Flow 結果</h3>
 <p>Command-backed Tool 在 Tool descriptor 宣告 stdoutFormat：</p>
 <div class="sourceCode" id="cb10"><pre
@@ -1042,7 +1037,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href=
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
 <span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
 <p>stdoutFormat 是 ingress parser；stdout 只解析一次成為
-output.result，並非輸出序列化設定。Call-backed Tool 及 DB/HTTP/MQ
+output.result，並非輸出序列化設定。Call-backed Tool 及 DB/HTTP/MQ/SSH
 operation 保留 native implementation 回傳的型別。</p>
 <p>DB action 使用 db 及 query 或 update 其中一個區塊。SQL、bind
 parameters、transaction controls 和 DB evidence 依 DB action 與 DBHelper
@@ -1117,9 +1112,8 @@ failure 不會改變 primary logical result。若資料是後續 assertion
 要使用的正常 business/test value，應使用普通 Tool/Log/Assign
 Action，而非 evidence collector。</p>
 <p>Collector result 遵守一般 typed-result 規則。放在 evidence
-下不代表會轉成 String；Map、List 和 <code>DocumentValue</code>
-均保留型別，匹配格式時保留 <code>DocumentValue</code> 的權威原文。在
-Load 中，明確要求的 collector execution 與 helper
+下不代表會轉成 String；Map、List 和 Render <code>String</code>
+均保留型別。在 Load 中，明確要求的 collector execution 與 helper
 <code>evidence.output</code> serialization 是兩件事；resource-output
 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除
 author-requested collector。</p>
@@ -1141,10 +1135,9 @@ expression 保留原始型別；map/list
 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format
 時必須提供 value。</p>
 <p>同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化
-value。output.result 是最終字串。DocumentValue 未指定 format
-或指定相同格式時會保留權威原文；衝突格式會失敗，不會轉換。Log
-不讀取檔案，也沒有 fields map。需要結構化日誌時，將 typed map/list 放到
-value。</p>
+value。output.result 是最終字串。Render String 會原樣輸出；Log
+不會推斷或附加 document format，也不會讀取檔案或使用 fields
+map。需要結構化日誌時，將 typed map/list 放到 value。</p>
 <h3 id="expressions-與變數-scope">Expressions 與變數 scope</h3>
 <p>Action expression 使用一般 ATT expression engine。完整 ${...} 或
 #{...} expression 保留結果型別；expression 放在一般字串內才會成為
@@ -1230,7 +1223,7 @@ evidence。</td>
 </tr>
 </tbody>
 </table>
-<p>String、Number、Boolean、null、Map、List、DocumentValue 等值跨越
+<p>String、Number、Boolean、null、Map、List 等值跨越
 Action/Template/Flow boundary 時都保留原型別。</p>
 <h2 id="04-runtime-與-context-model">04 Runtime 與 Context Model</h2>
 <p>Run、Debug、Load 共用 canonical EXEC/META expression model。EXEC 透過
@@ -1324,8 +1317,8 @@ timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression
 root。</p>
 <h3 id="meta-欄位清單與生命週期">META 欄位清單與生命週期</h3>
 <p>公開 META root 只包含下表列出的
-<code>PROJECT</code>、<code>SOURCE</code>、<code>TARGET</code>、<code>TEMPLATE</code>、<code>FLOW</code>、<code>TOOL</code>、<code>DBHELPER</code>、<code>MQHELPER</code>
-和 <code>HTTPHELPER</code>。META 只包含描述欄位。元件在目前 mode/scope
+<code>PROJECT</code>、<code>SOURCE</code>、<code>TARGET</code>、<code>TEMPLATE</code>、<code>FLOW</code>、<code>TOOL</code>、<code>DBHELPER</code>、<code>MQHELPER</code>、<code>HTTPHELPER</code>
+和 <code>SSHHELPER</code>。META 只包含描述欄位。元件在目前 mode/scope
 尚未 active 時，相應路徑可能不存在。</p>
 <table>
 <thead>
@@ -1515,11 +1508,23 @@ Flow/Tool target 使用已解析的 synthetic wrapper。</td>
 <td>與 META.HTTPHELPER.id 相同。</td>
 <td>返回後無外層 scope 時缺席。</td>
 </tr>
+<tr class="even">
+<td>META.SSHHELPER.id</td>
+<td>Logical SSHHelper ID；String，例如 <code>application</code>。</td>
+<td>Run、Debug、Load 的 SSH Resource Helper operation 期間。</td>
+<td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
+</tr>
+<tr class="odd">
+<td>META.SSHHELPER.type</td>
+<td>Resource 類型；String，<code>sshhelper</code>。</td>
+<td>與 META.SSHHELPER.id 相同。</td>
+<td>返回後無外層 scope 時缺席。</td>
+</tr>
 </tbody>
 </table>
-<p>META.SSHHELPER 不是公開欄位。SSH connection 與 credential settings
-留在 Tool invocation 內部。META.TOOL 可識別 active Tool；SSH
-endpoint、user、identity file、credentials 不會公開在 META。</p>
+<p>META.SSHHELPER 只公開 logical helper ID 和 resource type。SSH
+endpoint、user、identity file、credentials 留在 executor
+內部，不會公開在 META。</p>
 <p>ATT 會遞迴過濾 password、secret、token、authorization/cookie、API
 key、private key 等 secret-bearing keys。Expressions 與 adapters 可讀
 META，但不能修改。</p>
@@ -1556,9 +1561,9 @@ engine：</p>
 calls、list literals、括號、一元運算、算術、比較、like、in、null
 檢查及布林邏輯。</li>
 </ul>
-<p>完整 expression 會保留回傳型別，例如 Number、Boolean、Map、List 或
-DocumentValue；expression 放在一般文字中會產生 String。請使用 canonical
-EXEC/META paths；optional lookup 在路徑尾端加問號。</p>
+<p>完整 expression 會保留回傳型別，例如 Number、Boolean、Map 或
+List；expression 放在一般文字中會產生 String。請使用 canonical EXEC/META
+paths；optional lookup 在路徑尾端加問號。</p>
 <div class="sourceCode" id="cb18"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{${EXEC.INPUT.amount} &gt; 0}&quot;</span></span>
 <span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}&quot;</span></span></code></pre></div>
@@ -1823,8 +1828,8 @@ null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的
 Context path 會提供結構化 diagnostic；見<a
 href="reference.zh/12_validation_diagnostics.md">Validation</a>。</p>
 <h2 id="06-execution-modes">06 Execution Modes</h2>
-<p>Run、Debug、Load 是同級 adapter，共用相同的 Template/Flow/Tool/DB/MQ
-執行語義。</p>
+<p>Run、Debug、Load 是同級 adapter，共用相同的
+Template/Flow/Tool/DB/MQ/HTTP/SSH 執行語義。</p>
 <table>
 <thead>
 <tr class="header">
@@ -2211,10 +2216,11 @@ Context 節點；Stage 歷史仍由舊的 <code>CASE.STAGES</code>
 <code>output/debug/&lt;debugId&gt;/case.log</code>、<code>result.yaml</code>
 和 <code>artifacts/case.yaml</code>。</p>
 <h3 id="63-load-模式">6.3 Load 模式</h3>
-<p>ATT 接受 att-load/v1.3 scenario。Scenario 有一個或多個 workload；每個
+<p>ATT 接受 att-load/v1.4 scenario。Scenario 有一個或多個 workload；每個
 workload 固定一個 Template、Flow 或 Tool target，並配置自己的
-inputs、bootstrap vars 與 pacing。Scheduler 啟動前會驗證 scenario 與所有
-target。</p>
+inputs、bootstrap vars 與 pacing。Root defaults 可供多個 workload
+共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證 scenario
+與所有 target。</p>
 <p>不帶 scenario 執行 <code>./att.sh load</code>，會發現
 <code>load/</code> 下有效的完整 Load descriptor。只考慮宣告
 <code>schemaVersion: att-load/*</code> 的 YAML；其他 YAML
@@ -2222,7 +2228,7 @@ target。</p>
 resolve 並驗證 target，但不啟動 scheduler 或呼叫 resource。</p>
 <h4 id="scenario-結構">Scenario 結構</h4>
 <div class="sourceCode" id="cb34"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.3</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.4</span></span>
 <span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a><span class="fu">workloads</span><span class="kw">:</span></span>
 <span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> payment</span></span>
 <span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">target</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">type</span><span class="kw">:</span><span class="at"> template</span><span class="kw">,</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> PAYMENT_INVOKE</span><span class="kw">}</span></span>
@@ -2351,7 +2357,7 @@ failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival
 不建立 iteration evidence。</p>
 <p>evidence.resources.output 支援 inherit（預設）或 none。none
 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed
-result、stdoutFormat/responseFormat parsing、Render DocumentValue 與
+result、stdoutFormat/responseFormat parsing、Render String 與
 requestFormat 行為。Load 將 resource output 延至 iteration
 被保留後才處理；metrics-only iteration 不做 business-output formatting
 或 evidence file I/O。</p>
@@ -2361,10 +2367,10 @@ report/index.html。Report 對 retained execution 顯示
 EXEC.ID、workload/target identity、status、timing；有保留 case.log
 時提供 link。Aggregate latency percentile 由 aggregate latency collector
 計算，不會平均 workload percentile。</p>
-<p>Root thresholds 套用於 aggregate run；workload thresholds 套用於個別
-workload。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit
-2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於
-SUT error。</p>
+<p>Root thresholds 只套用於 aggregate run；workload thresholds
+只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit
+1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳
+ERROR/exit 3。Generator drop 不屬於 SUT error。</p>
 <h4 id="cli-與範例">CLI 與範例</h4>
 <p>單一 workload 可用
 --users、--arrival-rate、--warmup、--ramp-up、--duration、--ramp-down、--think-time、--max-concurrent
@@ -2377,21 +2383,21 @@ Tool 的 <code>arg.name=value</code>，或僅限 Template/Flow 的
 <code>input.customer.ids[0]=42</code>。重複賦值依序套用，最後一個值生效；解析
 override 時不會評估 ATT expression。多 workload scenario 會拒絕未限定的
 override。</p>
-<p>可選的 <code>load/load.yaml</code> 使用
-<code>att-load-profile/v1.0</code>，只含 policy，不含 target、inputs 或
-Tool arguments。它提供預設 <code>load</code> policy，並可選擇包含
+<p>可選的 <code>load/load.yaml</code> 使用現行
+<code>att-load/v1.4</code> policy-only descriptor，不含 target、inputs
+或 Tool arguments。它提供預設 <code>load</code> policy，並可選擇包含
 <code>execution</code>、<code>thresholds</code>、<code>evidence</code>
 和 <code>seed</code>。明確 CLI pacing 會覆蓋
-profile。<code>load --debug template|flow|tool &lt;id&gt;</code> 會將
+policy。<code>load --debug template|flow|tool &lt;id&gt;</code> 會將
 sidecar 的 <code>inputs</code>、<code>vars</code> 或 Tool
 <code>arguments</code> promotion 成暫時的單一 workload
 scenario，然後使用正常 Load validation、scheduler 和 evidence
-pipeline；不會先執行 Debug。沒有 profile 時，請在 CLI 提供完整
+pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整
 policy，例如 <code>--users 2 --duration 10s</code>（arrival-rate 還需要
 <code>--max-concurrent</code> 和 <code>--overload-policy</code>）。</p>
-<p>Policy 範例（複製到 <code>load/load.yaml</code>）：</p>
+<p>Policy descriptor 範例（複製到 <code>load/load.yaml</code>）：</p>
 <div class="sourceCode" id="cb36"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load-profile/v1.0</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.4</span></span>
 <span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
 <span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
 <span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
@@ -2411,7 +2417,7 @@ migration 見 <a href="reference.zh/appendices/migrations.md">Appendix
 C</a>。</p>
 <h3 id="load-execution-id-initialization">Load execution ID
 initialization</h3>
-<p>Load 使用 att-load/v1.3。設定 execution.execIdFormat 時，ATT 在每個
+<p>Load 使用 att-load/v1.4。設定 execution.execIdFormat 時，ATT 在每個
 iteration initialization 使用一般 ${...} / #{...} engine
 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及
 output path 發布後評估。</p>
@@ -2441,12 +2447,15 @@ href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
 <h2 id="07-resources-與-integrations">07 Resources 與 Integrations</h2>
 <p>Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級
 integration/resource 類型。SSHHelper 為 command-backed Tool
-提供路由；它們最終收斂到 common operation-result/evidence contract。</p>
+提供路由，也提供
+<code>ssh.&lt;helperId&gt;.execute|upload|download</code> Resource
+Helper operation；它們最終收斂到 common operation-result/evidence
+contract。</p>
 <pre class="text"><code>Tool      -&gt; process/call operation --\
 DBHelper  -&gt; JDBC operation ----------+--&gt; Action output
 MQHelper  -&gt; MQ operation ------------/
 HTTPHelper -&gt; HTTP operation ---------/
-SSHHelper -&gt; Tool SSH routing --------/</code></pre>
+SSHHelper -&gt; SSH routing 或 Resource Helper /</code></pre>
 <p>Resource ID 是 Template/expression 或 Tool group 所引用的 logical
 contract。Environment profile 可把相同 DB/MQ/HTTP/SSH logical ID
 綁定到不同 descriptor，無需修改 Action YAML。</p>
@@ -2458,10 +2467,10 @@ Evidence</h3>
 └── evidence     # 有界的 execution/transport metadata</code></pre>
 <p>Action 在 output.result 發布最後的 operation value。Action
 status、assertion detail、diagnostic、attempts 描述執行，不會取代
-business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ response
-使用 responseFormat；DB operation 回傳 native typed value。Render 回傳
-DocumentValue，詳見<a href="reference.zh/14_actions.md">Action
-與型別化值</a>。</p>
+business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH
+response 或 stdout 使用各自的 responseFormat；DB operation 回傳 native
+typed value。Render 回傳原樣 String，詳見<a
+href="reference.zh/14_actions.md">Action 與型別化值</a>。</p>
 <p>Resource evidence 可包含低成本 metadata。Helper 也可選擇配置人類可讀
 snapshot：</p>
 <div class="sourceCode" id="cb42"><pre
@@ -2494,9 +2503,9 @@ typed value 發布於
 output.result。此欄位不控制人類可讀日誌或檔案輸出。Exit code、有界
 stdout/stderr preview 和 process artifacts 都屬於 evidence。</p>
 <h4 id="call-backed-tool">Call-backed Tool</h4>
-<p>Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP operation，其
-native typed return value 發布於 output.result。Call-backed descriptor
-不宣告 stdoutFormat。</p>
+<p>Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP/SSH
+operation，其 native typed return value 發布於
+output.result。Call-backed descriptor 不宣告 stdoutFormat。</p>
 <div class="sourceCode" id="cb44"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
 <span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queryOrder</span><span class="kw">:</span></span>
@@ -2508,8 +2517,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href=
 <span id="cb44-8"><a href="#cb44-8" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
 <p>Tool invocation 沒有 result.format/path/overwrite
 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於
-Log 或配置的 evidence output。HTTP/MQ parsing 由 transport boundary
-管理。</p>
+Log 或配置的 evidence output。HTTP/MQ/SSH parsing 或 transfer 由各自
+transport boundary 管理。</p>
 <p>Action result 規則見<a href="reference.zh/14_actions.md">Action
 與型別化值</a>；typed result/evidence 的區分見<a
 href="reference.zh/05_resources/operation_result.md">Operation Result
@@ -2878,24 +2887,23 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb51-1"><a href=
 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed
 value 發布於 output.result。responseFormat 負責 ingress
 parsing；Log.format 和 evidence.output.format 只控制 presentation。</p>
-<h4 id="傳送已表示或抽象值">傳送已表示或抽象值</h4>
-<p>Render output 是 DocumentValue，可直接傳入 payload：</p>
+<h4 id="傳送-render-string-或抽象值">傳送 Render String 或抽象值</h4>
+<p>Render output 是 String，可直接傳入 payload：</p>
 <div class="sourceCode" id="cb52"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
 <span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb52-6"><a href="#cb52-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb52-7"><a href="#cb52-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb52-6"><a href="#cb52-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
 <p>ATT 使用配置的 MQ charset/CCSID 編碼完全相同的渲染文字，不會
-parse/serialize。DocumentValue 不應提供 requestFormat。Document format
-不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。</p>
+parse/serialize。String 不應提供 requestFormat。Render 不會設定
+MQMD.Format；MQ transport metadata 仍由 resource 管理。</p>
 <p>Map/List 是抽象結構化值，需指定
 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request},
-requestFormat=json。DocumentValue + requestFormat 及 String +
-requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file
-input；Render 不建立檔案或 targetFiles。</p>
+requestFormat=json。String + requestFormat 會被拒絕。payload 與 file
+互斥。file 可用於明確的 raw file input；Render 不建立檔案或
+targetFiles。</p>
 <h4 id="evidenceresponse-parsing-與-load">Evidence、response parsing 與
 Load</h4>
 <p>MQ evidence 可包含有界 transport metadata，例如 helper/instance
@@ -2909,8 +2917,8 @@ parsing 不變。</p>
 requestReply.responseFormat；send 不解析 reply。Instance selection 與
 pool limits 屬於 descriptor。Schema migration 見 <a
 href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
-<p>共用 DocumentValue 與 typed-result 契約見<a
-href="reference.zh/14_actions.md">Action 與型別化值</a>。</p>
+<p>共用 typed-result 契約見<a href="reference.zh/14_actions.md">Action
+與型別化值</a>。</p>
 <h3 id="descriptor-configuration">Descriptor configuration</h3>
 <table>
 <thead>
@@ -3007,29 +3015,27 @@ responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援
 auto、text、json、yaml、xml。解析後的 native value 發布於
 output.result。可選 evidence.output 是有長度上限的人類可讀
 snapshot，不會改變該值。</p>
-<h4 id="request-body-與-documentvalue">Request body 與
-DocumentValue</h4>
-<p>Render Action 回傳包含 format 和權威渲染文字的
-DocumentValue，可直接傳入 body：</p>
+<h4 id="request-body-與-render-string">Request body 與 Render
+String</h4>
+<p>Render Action 回傳原樣 String，可直接傳入 body：</p>
 <div class="sourceCode" id="cb54"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
 <span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
 <span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb54-5"><a href="#cb54-5" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
-<span id="cb54-6"><a href="#cb54-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb54-7"><a href="#cb54-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(path=&#39;/v1/payments&#39;, body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
-<p>HTTP 在 charset encoding boundary 傳送完全相同的 DocumentValue
-text，不會 parse/serialize。DocumentValue 不可搭配 requestFormat。</p>
+<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
+<span id="cb54-5"><a href="#cb54-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb54-6"><a href="#cb54-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(path=&#39;/v1/payments&#39;, body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<p>HTTP 在 charset encoding boundary 傳送完全相同的 String，不會
+parse/serialize。String 不可搭配 requestFormat。</p>
 <p>Map/List 是抽象結構化值，需明確指定 requestFormat，例如
 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援
-text、json、yaml、xml，且只用於 Map/List。DocumentValue + requestFormat
-及 String + requestFormat 會被拒絕。body 和 file 互斥；file 是 HTTP call
-明確支援的 raw file input。Render 不建立結果檔，也沒有 targetFiles。</p>
-<p>DocumentValue.format 不會覆蓋由 resource 管理的 HTTP
-Content-Type。需要特定 media type 時請配置 contentType/header。Request
-charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action
-result/Log formatting 分開。</p>
+text、json、yaml、xml，且只用於 Map/List。String + requestFormat
+會被拒絕。body 和 file 互斥；file 是 HTTP call 明確支援的 raw file
+input。Render 不建立結果檔，也沒有 targetFiles。</p>
+<p>Render String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定
+media type 時請配置 contentType/header。Request charset/header 與
+response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting
+分開。</p>
 <h4 id="failure-與-evidence">Failure 與 evidence</h4>
 <p>Transport/protocol、response-parse failures 屬 operational
 error。已收到的 4xx/5xx 是 completed response，可對 statusCode 做
@@ -3038,9 +3044,147 @@ status、content type、byte counts、response format 與
 duration。Credentials/payload 不會隱式保存。Load 可用
 evidence.resources.output: none 略過可選 resource output
 formatting，或將其延至 iteration evidence 保留時。</p>
-<p>共用 DocumentValue 與 typed-result 契約見<a
-href="reference.zh/14_actions.md">Action 與型別化值</a>。</p>
+<p>共用 typed-result 契約見<a href="reference.zh/14_actions.md">Action
+與型別化值</a>。</p>
 <h3 id="76-sshhelper邏輯-ssh-目標">7.6 SSHHelper：邏輯 SSH 目標</h3>
+<h4 id="ssh-resource-helper-operation">SSH Resource Helper
+operation</h4>
+<p>SSHHelper 也支援在一般 <code>type: tool</code> Action 中使用共用
+Resource Helper
+形式：<code>ssh.&lt;helperId&gt;.execute</code>、<code>ssh.&lt;helperId&gt;.upload</code>
+及 <code>ssh.&lt;helperId&gt;.download</code>。Helper ID 是邏輯
+ID；native Resource Helper call 使用
+<code>single</code>、<code>random</code> 或 <code>roundRobin</code>
+選取一個實體 instance。Native Resource Helper call 不支援
+<code>selection.strategy: all</code>，會在 validation
+時拒絕；<code>all</code> 只供 command-backed Tool fan-out
+使用。這些呼叫會在未建立 SSH connection 前完成驗證，並共用 helper
+的並發上限及 identity 遮蔽規則。</p>
+<div class="sourceCode" id="cb55"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">health</span><span class="kw">:</span></span>
+<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a>      #{ssh.application.execute(</span>
+<span id="cb55-6"><a href="#cb55-6" aria-hidden="true" tabindex="-1"></a>        command=&#39;systemctl is-active example.service&#39;,</span>
+<span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a>        stdoutFormat=&#39;text&#39;,</span>
+<span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a>        timeoutMs=5000</span>
+<span id="cb55-9"><a href="#cb55-9" aria-hidden="true" tabindex="-1"></a>      )}</span>
+<span id="cb55-10"><a href="#cb55-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uploadRequest</span><span class="kw">:</span></span>
+<span id="cb55-11"><a href="#cb55-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb55-12"><a href="#cb55-12" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb55-13"><a href="#cb55-13" aria-hidden="true" tabindex="-1"></a>      #{ssh.application.upload(</span>
+<span id="cb55-14"><a href="#cb55-14" aria-hidden="true" tabindex="-1"></a>        remotePath=&#39;/srv/app/request.json&#39;,</span>
+<span id="cb55-15"><a href="#cb55-15" aria-hidden="true" tabindex="-1"></a>        payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb55-16"><a href="#cb55-16" aria-hidden="true" tabindex="-1"></a>        overwrite=true</span>
+<span id="cb55-17"><a href="#cb55-17" aria-hidden="true" tabindex="-1"></a>      )}</span>
+<span id="cb55-18"><a href="#cb55-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">downloadResponse</span><span class="kw">:</span></span>
+<span id="cb55-19"><a href="#cb55-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb55-20"><a href="#cb55-20" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb55-21"><a href="#cb55-21" aria-hidden="true" tabindex="-1"></a>      #{ssh.application.download(</span>
+<span id="cb55-22"><a href="#cb55-22" aria-hidden="true" tabindex="-1"></a>        remotePath=&#39;/srv/app/response.json&#39;,</span>
+<span id="cb55-23"><a href="#cb55-23" aria-hidden="true" tabindex="-1"></a>        localPath=&#39;ssh/response.json&#39;,</span>
+<span id="cb55-24"><a href="#cb55-24" aria-hidden="true" tabindex="-1"></a>        overwrite=true</span>
+<span id="cb55-25"><a href="#cb55-25" aria-hidden="true" tabindex="-1"></a>      )}</span></code></pre></div>
+<p><code>execute</code> 需要 <code>command</code>，可接受
+<code>stdoutFormat: text|json|yaml|xml</code> 及
+<code>timeoutMs</code>。<code>text</code> 原樣回傳 stdout
+String；structured format 會把 stdout 解析為原生
+Map/List/scalar。Timeout、遠端 non-zero exit 或 parse failure 會回傳不同
+category 的 operation error，並保留有界 stderr、exit code、byte count 及
+transport evidence。Resource SSH 的 non-zero exit 會令 operation
+失敗，與下文 legacy command-backed Tool 的 fan-out 契約不同。</p>
+<p><code>upload</code> 需要 <code>remotePath</code>，以及
+<code>localPath</code>／<code>payload</code> 二選一。Local file 必須是
+package 或目前 Case output 內的 regular non-symlink file。Payload
+必須解析為 String 或 byte array；Map/List
+會被拒絕，不會隱式序列化。Remote absolute path 可用；upload 的
+<code>overwrite</code> 預設為 <code>true</code>。</p>
+<p><code>download</code> 需要 <code>remotePath</code> 及
+Case-output-relative 的 <code>localPath</code>。ATT 先寫入 temporary
+file，再移入受控 Case output directory；不會解析下載 bytes。Download 的
+<code>overwrite</code> 預設為 <code>false</code>，已有檔案必須明確使用
+<code>overwrite: true</code>。Typed result 是包含 remote path、保留後
+local path 及 byte count 的 transfer summary。</p>
+<p>三種 operation 只接受 named arguments。Unknown
+operation/helper/argument、重複 argument、錯誤 format／timeout、缺少
+required field、upload source 衝突及不安全 local path
+都會在外部執行前驗證失敗。Runtime evidence 包含 logical helper、選定
+instance、host/port、operation、transport、時間及 transfer/command
+詳情；command input 和 represented payload 不會複製到 evidence。由
+environment 提供的 identity path 仍會遮蔽。</p>
+<p>Native SSH failure 在 invocation <code>error.category</code> 和
+<code>SSH.error.category</code> 發布穩定分類：</p>
+<table>
+<thead>
+<tr class="header">
+<th>Category</th>
+<th>意義</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>SSH_CONNECTION_ERROR</code></td>
+<td>非 timeout 的 connection、host verification 或 channel setup
+失敗；backend 無法可靠識別 authentication 時亦使用此類別。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_AUTH_ERROR</code></td>
+<td>Java backend 識別到 authentication
+rejection/cancellation，或無法初始化配置的 identity。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_TRANSPORT_ERROR</code></td>
+<td>OpenSSH 回傳 255；可能是 connection/authentication failure，亦可能是
+remote command 自己 exit 255。ATT 保留 stderr 及 exit
+code，不依本地化訊息猜測。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_TIMEOUT</code> / <code>SSH_POOL_TIMEOUT</code></td>
+<td>Operation/connect deadline 或 concurrency wait 到期。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_REMOTE_EXIT</code></td>
+<td>Remote command 完成但 exit 非零（OpenSSH 255 使用上述類別）。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_RESULT_PARSE_ERROR</code></td>
+<td>stdout parsing 失敗。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_UPLOAD_ERROR</code> / <code>SSH_DOWNLOAD_ERROR</code></td>
+<td>Connection setup 後對應 transfer 失敗，包括 remote
+permission、missing path 或 protocol error。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_PATH</code> / <code>SSH_ARGUMENT</code></td>
+<td>Local containment/security check 或 argument validation 失敗。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_INTERRUPTED</code></td>
+<td>Caller 中斷 operation。</td>
+</tr>
+</tbody>
+</table>
+<p>Transfer connection/channel failure 保留
+<code>phase: connect|channel</code>；timeout evidence 亦保留相應 timeout
+budget。所有 failure 都保留選定 operation 與實際 transport。Transfer
+error 仍不可自動 timeout replay。</p>
+<p>Native Resource Helper call 使用一個 absolute Action deadline，涵蓋
+concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP
+transfer。Per-call <code>timeoutMs</code> 或 helper
+<code>timeouts.commandTimeoutMs</code> 只設定 operation limit，不能延長
+enclosing Action deadline。<code>timeouts.connectTimeoutMs</code>
+只在剩餘 deadline 內限制 connection establishment，不會額外增加
+operation
+時間。<code>execute</code>、<code>upload</code>、<code>download</code>
+都遵守此契約。Native <code>execute</code> 的 <code>SSH_TIMEOUT</code> 與
+<code>SSH_POOL_TIMEOUT</code> 可使用 Action
+<code>retryOn: [TIMEOUT]</code>；native <code>upload</code> 與
+<code>download</code> 會拒絕 timeout retry，因為重播 transfer
+可能重複副作用。SFTP Action 會在 deadline 到達時返回，但 concurrency
+lease 會由 cleanup worker 持有，直到 transfer worker 與 transport
+終止。</p>
 <p>SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在
 Tool group 中寫入實體主機。<code>att-sshhelper/v1.0</code> YAML
 descriptor 含 <code>id</code>、可選
@@ -3054,59 +3198,60 @@ instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設
 <code>[A-Za-z_][A-Za-z0-9_-]*</code>，忽略大小寫後不可重複。無效
 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy
 都會在 SSH 執行前失敗。</p>
-<div class="sourceCode" id="cb55"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/sshhelpers/sit/application.yaml</span></span>
-<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-sshhelper/v1.0</span></span>
-<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> application</span></span>
-<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Application servers</span></span>
-<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> SIT application tier</span></span>
-<span id="cb55-6"><a href="#cb55-6" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">user</span><span class="kw">:</span><span class="at"> deploy</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">22</span><span class="kw">,</span><span class="at"> </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;${ENV:APP_SSH_KEY}&#39;</span><span class="kw">}</span></span>
-<span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">}</span></span>
-<span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a><span class="fu">fanout</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxConcurrency</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">}</span></span>
-<span id="cb55-9"><a href="#cb55-9" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
-<span id="cb55-10"><a href="#cb55-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app1.example</span><span class="kw">}</span></span>
-<span id="cb55-11"><a href="#cb55-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app2</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app2.example</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">2222</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb56"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/sshhelpers/sit/application.yaml</span></span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-sshhelper/v1.0</span></span>
+<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> application</span></span>
+<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Application servers</span></span>
+<span id="cb56-5"><a href="#cb56-5" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> SIT application tier</span></span>
+<span id="cb56-6"><a href="#cb56-6" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">user</span><span class="kw">:</span><span class="at"> deploy</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">22</span><span class="kw">,</span><span class="at"> </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;${ENV:APP_SSH_KEY}&#39;</span><span class="kw">}</span></span>
+<span id="cb56-7"><a href="#cb56-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">}</span></span>
+<span id="cb56-8"><a href="#cb56-8" aria-hidden="true" tabindex="-1"></a><span class="fu">fanout</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxConcurrency</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">}</span></span>
+<span id="cb56-9"><a href="#cb56-9" aria-hidden="true" tabindex="-1"></a><span class="fu">timeouts</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span><span class="kw">,</span><span class="at"> </span><span class="fu">commandTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">60000</span><span class="kw">}</span></span>
+<span id="cb56-10"><a href="#cb56-10" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
+<span id="cb56-11"><a href="#cb56-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app1.example</span><span class="kw">}</span></span>
+<span id="cb56-12"><a href="#cb56-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app2</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app2.example</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">2222</span><span class="kw">}</span></span></code></pre></div>
 <p>在 <code>att-config/v2.10</code> 的全域或
 <code>environments.&lt;NAME&gt;.sshhelpers</code> 列出 descriptor
 路徑。目前 package 使用 config v2.10 與 Tool Group
 v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group
 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT
 綁定兩臺，Tool／Action 不必修改：</p>
-<div class="sourceCode" id="cb56"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/config.yaml</span></span>
-<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
-<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
-<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/tools/application.yaml</span><span class="kw">]</span></span>
-<span id="cb56-5"><a href="#cb56-5" aria-hidden="true" tabindex="-1"></a><span class="fu">environments</span><span class="kw">:</span></span>
-<span id="cb56-6"><a href="#cb56-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">SIT</span><span class="kw">:</span></span>
-<span id="cb56-7"><a href="#cb56-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sshhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/sshhelpers/sit/application.yaml</span><span class="kw">]</span></span>
-<span id="cb56-8"><a href="#cb56-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
-<span id="cb56-9"><a href="#cb56-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sshhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/sshhelpers/uat/application.yaml</span><span class="kw">]</span></span></code></pre></div>
 <div class="sourceCode" id="cb57"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/sshhelpers/uat/application.yaml</span></span>
-<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-sshhelper/v1.0</span></span>
-<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> application</span></span>
-<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">user</span><span class="kw">:</span><span class="at"> deploy</span><span class="kw">,</span><span class="at"> </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;${ENV:APP_SSH_KEY}&#39;</span><span class="kw">}</span></span>
-<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> all</span><span class="kw">}</span></span>
-<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="fu">fanout</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxConcurrency</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">}</span></span>
-<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
-<span id="cb57-8"><a href="#cb57-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> uat-app1.example</span><span class="kw">}</span></span>
-<span id="cb57-9"><a href="#cb57-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app2</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> uat-app2.example</span><span class="kw">}</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/config.yaml</span></span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/tools/application.yaml</span><span class="kw">]</span></span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a><span class="fu">environments</span><span class="kw">:</span></span>
+<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">SIT</span><span class="kw">:</span></span>
+<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sshhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/sshhelpers/sit/application.yaml</span><span class="kw">]</span></span>
+<span id="cb57-8"><a href="#cb57-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
+<span id="cb57-9"><a href="#cb57-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">sshhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/sshhelpers/uat/application.yaml</span><span class="kw">]</span></span></code></pre></div>
 <div class="sourceCode" id="cb58"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/tools/application.yaml</span></span>
-<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-tool-group/v2.9</span></span>
-<span id="cb58-3"><a href="#cb58-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> app</span></span>
-<span id="cb58-4"><a href="#cb58-4" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Application tools</span></span>
-<span id="cb58-5"><a href="#cb58-5" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> Remote application inspection</span></span>
-<span id="cb58-6"><a href="#cb58-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span><span class="kw">:</span></span>
-<span id="cb58-7"><a href="#cb58-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">helper</span><span class="kw">:</span><span class="at"> application</span></span>
-<span id="cb58-8"><a href="#cb58-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> all</span><span class="kw">}</span><span class="co"> # 可選 group override</span></span>
-<span id="cb58-9"><a href="#cb58-9" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb58-10"><a href="#cb58-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">status</span><span class="kw">:</span></span>
-<span id="cb58-11"><a href="#cb58-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span></span>
-<span id="cb58-12"><a href="#cb58-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Print service status</span></span>
-<span id="cb58-13"><a href="#cb58-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">systemctl</span><span class="kw">,</span><span class="at"> is-active</span><span class="kw">,</span><span class="at"> example.service</span><span class="kw">]</span></span>
-<span id="cb58-14"><a href="#cb58-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">}</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/sshhelpers/uat/application.yaml</span></span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-sshhelper/v1.0</span></span>
+<span id="cb58-3"><a href="#cb58-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> application</span></span>
+<span id="cb58-4"><a href="#cb58-4" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">user</span><span class="kw">:</span><span class="at"> deploy</span><span class="kw">,</span><span class="at"> </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;${ENV:APP_SSH_KEY}&#39;</span><span class="kw">}</span></span>
+<span id="cb58-5"><a href="#cb58-5" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> all</span><span class="kw">}</span><span class="co"> # 只供 command-backed Tool fan-out；native ssh.application.* 會拒絕 all</span></span>
+<span id="cb58-6"><a href="#cb58-6" aria-hidden="true" tabindex="-1"></a><span class="fu">fanout</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxConcurrency</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">}</span></span>
+<span id="cb58-7"><a href="#cb58-7" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
+<span id="cb58-8"><a href="#cb58-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> uat-app1.example</span><span class="kw">}</span></span>
+<span id="cb58-9"><a href="#cb58-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app2</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> uat-app2.example</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb59"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/tools/application.yaml</span></span>
+<span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-tool-group/v2.9</span></span>
+<span id="cb59-3"><a href="#cb59-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> app</span></span>
+<span id="cb59-4"><a href="#cb59-4" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Application tools</span></span>
+<span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> Remote application inspection</span></span>
+<span id="cb59-6"><a href="#cb59-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span><span class="kw">:</span></span>
+<span id="cb59-7"><a href="#cb59-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">helper</span><span class="kw">:</span><span class="at"> application</span></span>
+<span id="cb59-8"><a href="#cb59-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> all</span><span class="kw">}</span><span class="co"> # 可選 group override</span></span>
+<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb59-10"><a href="#cb59-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">status</span><span class="kw">:</span></span>
+<span id="cb59-11"><a href="#cb59-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Status</span></span>
+<span id="cb59-12"><a href="#cb59-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Print service status</span></span>
+<span id="cb59-13"><a href="#cb59-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">systemctl</span><span class="kw">,</span><span class="at"> is-active</span><span class="kw">,</span><span class="at"> example.service</span><span class="kw">]</span></span>
+<span id="cb59-14"><a href="#cb59-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">result</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span><span class="kw">}</span></span></code></pre></div>
 <p>Action 仍呼叫 <code>app.status</code>。先在本機／CI secret
 environment 把 <code>APP_SSH_KEY</code>
 設為可讀私鑰的<strong>路徑</strong>，再分別以
@@ -3115,19 +3260,25 @@ environment 把 <code>APP_SSH_KEY</code>
 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 <code>ssh</code>
 只能是直接目標（<code>host</code>、<code>user</code>、可選
 <code>port</code>／<code>identityFile</code>）或邏輯目標（<code>helper</code>、可選
-<code>selection</code>），不可混用。Call-backed Tool 不支援 SSH。現行
-Tool Group schema 為 v2.9。Command-backed Tool 使用
+<code>selection</code>），不可混用。Call-backed Tool 可在 primary
+<code>type: tool</code> operation 中呼叫 native SSH Resource
+Helper。現行 Tool Group schema 為 v2.9。Command-backed Tool 使用
 <code>stdoutFormat</code>（<code>text|json|yaml|xml</code>）設定 stdout
 parsing；call-backed Tool 保留 native result type。舊 config/group
-schema 僅供 migration reference。SSH routing detail 不會發布為
-<code>META.SSHHELPER</code>；公開 META 欄位及原因請見<a
-href="reference.zh/03_runtime_context.md">Runtime
-Context</a>。Action／per-call 層沒有 strategy override。</p>
-<p>Strategy 優先序：group override，再到 helper 預設。單 instance 不需
-strategy（<code>single</code>）；多 instance
-必須指定。<code>random</code> 均勻選一臺，<code>roundRobin</code> 以
-thread-safe 循環計數器選一臺，明確的 <code>all</code>
-在並發上限內對每臺各執行一次。<strong><code>all</code>
+schema 僅供 migration reference。SSH Resource Helper call 只發布
+<code>META.SSHHELPER.id</code> 與
+<code>.type</code>；endpoint、user、identity file、credentials
+仍保持私有。Resource call 沒有 Action／per-call strategy
+override；selection 由 helper configuration 決定。</p>
+<p>Strategy 優先序：group override，再到 helper 預設。Native Resource
+Helper call 中，單 instance 不需 strategy（<code>single</code>）；多
+instance 只支援 <code>random</code> 或
+<code>roundRobin</code>，<code>all</code>
+會被拒絕，不會靜默選一臺。Command-backed Tool routing 才支援
+<code>all</code>：<code>random</code>
+均勻選一臺，<code>roundRobin</code> 以 thread-safe
+循環計數器選一臺，明確的 <code>all</code>
+在並發上限內對每臺各執行一次。<strong>Command-backed <code>all</code>
 會在每臺主機產生副作用</strong>；只用於整組執行均安全的命令。不會隱式
 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個
 <code>all</code> 呼叫會重做，並非只重試某臺。每臺依 Action／Tool／全域
@@ -3139,7 +3290,8 @@ OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH
 scalar／object。Evidence 新增
 <code>sshHelper</code>、<code>instance</code>、<code>host</code>、<code>selectionStrategy</code>、<code>selectionSource</code>（<code>helper</code>
 或 <code>toolGroup</code>）、transport、起訖／持續時間、exit
-code、輸出及錯誤。<code>all</code> 時 <code>output.result</code> 包含
+code、輸出及錯誤。只有 command-backed Tool fan-out 使用
+<code>all</code>；此時 <code>output.result</code> 包含
 <code>sshHelper</code>、有效
 <code>selectionStrategy</code>、<code>selectionSource</code>，以及依
 descriptor 順序以 ID 為 key 的 <code>instances</code>；每筆有
@@ -3160,7 +3312,7 @@ stderr（包括串流寫入的 Case log 診斷）及 exception evidence
 診斷；解析後的業務 stdout 不變，因此命令不可輸出私鑰路徑。</p>
 <p>遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把
 host/user/port/key 搬到 helper descriptor，在每個環境綁定，將 group 升到
-v2.7，以 <code>ssh: {helper: application}</code> 取代實體
+v2.9，以 <code>ssh: {helper: application}</code> 取代實體
 <code>ssh</code>，逐一驗證環境。Action 不需重寫。Inventory
 discovery、Action 層指定主機、分散式交易、跨主機 failover 與
 orchestration 均不在此 schema 範圍。</p>
@@ -3184,8 +3336,8 @@ semantics，而不是隱藏 failure。</p>
 <h3 id="timeout">Timeout</h3>
 <p>Timeout 依 backend 支援能力終止或放棄 operation，並記錄
 diagnostic/evidence。Timeout 是 operational failure，不是 assertion
-false。Tool timeout 與 resource-specific DB/MQ limit 分別由其 resource
-contract 定義。</p>
+false。Tool timeout 與 resource-specific DB/MQ/HTTP/SSH limit 分別由其
+resource contract 定義。</p>
 <h3 id="retry-與-attempts">Retry 與 attempts</h3>
 <p>在支援 retry 的位置，一個 logical Action 可以擁有多個 attempt。Retry
 policy 決定哪些 operation failure 可重試。最後／勝出的 operation 成為
@@ -3213,7 +3365,7 @@ Action error。若收集的值是 business/test data，而不是 pre-assertion
 診斷資料，應使用普通 Tool/Log/Assign Action。</p>
 <h3 id="transactionresource-lifecycle">Transaction/resource
 lifecycle</h3>
-<p>DB transaction finalization 與 DB/MQ resource cleanup 在相應
+<p>DB transaction finalization 與 DB/MQ/HTTP/SSH resource cleanup 在相應
 execution lifecycle boundary 進行。它們可能影響 operation
 success/diagnostic，但屬 internal resource state，不是 public Context
 namespace。</p>
@@ -3403,23 +3555,23 @@ Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like
 設置、<code>toolGroups</code> 和 global <code>tools</code>
 registry。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以
 DB/MQ 示範：</p>
-<div class="sourceCode" id="cb62"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb62-1"><a href="#cb62-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/config.yaml</span></span>
-<span id="cb62-2"><a href="#cb62-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
-<span id="cb62-3"><a href="#cb62-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span><span class="co">                 # default；--env 会覆盖</span></span>
-<span id="cb62-4"><a href="#cb62-4" aria-hidden="true" tabindex="-1"></a><span class="fu">templates</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> templates</span><span class="kw">}</span></span>
-<span id="cb62-5"><a href="#cb62-5" aria-hidden="true" tabindex="-1"></a><span class="fu">testcase</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> testcase</span><span class="kw">}</span></span>
-<span id="cb62-6"><a href="#cb62-6" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span></span>
-<span id="cb62-7"><a href="#cb62-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/sample.yaml</span></span>
-<span id="cb62-8"><a href="#cb62-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/fpp.yaml</span></span>
-<span id="cb62-9"><a href="#cb62-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/orders-db.yaml</span></span>
-<span id="cb62-10"><a href="#cb62-10" aria-hidden="true" tabindex="-1"></a><span class="fu">environments</span><span class="kw">:</span></span>
-<span id="cb62-11"><a href="#cb62-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">SIT</span><span class="kw">:</span></span>
-<span id="cb62-12"><a href="#cb62-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/sit/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb62-13"><a href="#cb62-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/sit/payment.yaml</span><span class="kw">]</span></span>
-<span id="cb62-14"><a href="#cb62-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
-<span id="cb62-15"><a href="#cb62-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/uat/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb62-16"><a href="#cb62-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/uat/payment.yaml</span><span class="kw">]</span></span></code></pre></div>
+<div class="sourceCode" id="cb63"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/config.yaml</span></span>
+<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
+<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span><span class="co">                 # default；--env 会覆盖</span></span>
+<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a><span class="fu">templates</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> templates</span><span class="kw">}</span></span>
+<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a><span class="fu">testcase</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> testcase</span><span class="kw">}</span></span>
+<span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span></span>
+<span id="cb63-7"><a href="#cb63-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/sample.yaml</span></span>
+<span id="cb63-8"><a href="#cb63-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/fpp.yaml</span></span>
+<span id="cb63-9"><a href="#cb63-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> config/tools/orders-db.yaml</span></span>
+<span id="cb63-10"><a href="#cb63-10" aria-hidden="true" tabindex="-1"></a><span class="fu">environments</span><span class="kw">:</span></span>
+<span id="cb63-11"><a href="#cb63-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">SIT</span><span class="kw">:</span></span>
+<span id="cb63-12"><a href="#cb63-12" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/sit/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb63-13"><a href="#cb63-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/sit/payment.yaml</span><span class="kw">]</span></span>
+<span id="cb63-14"><a href="#cb63-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
+<span id="cb63-15"><a href="#cb63-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/uat/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb63-16"><a href="#cb63-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/uat/payment.yaml</span><span class="kw">]</span></span></code></pre></div>
 <p>可把 <code>config/environments/sit.yaml</code> 和
 <code>config/environments/uat.yaml</code> 作為 common registry
 的遷移來源，包括 <code>invokePaymentApi</code> 以及
@@ -3433,31 +3585,30 @@ channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制�
 <a
 href="../examples/environments/README.md"><code>examples/environments/README.md</code></a>。</p>
 <p>兩種環境使用完全相同的 Action 定義：</p>
-<div class="sourceCode" id="cb63"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
-<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payment/request.json</span></span>
-<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb63-7"><a href="#cb63-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queryOrder</span><span class="kw">:</span></span>
-<span id="cb63-8"><a href="#cb63-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
-<span id="cb63-9"><a href="#cb63-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">db</span><span class="kw">:</span><span class="at"> orders</span></span>
-<span id="cb63-10"><a href="#cb63-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">query</span><span class="kw">:</span></span>
-<span id="cb63-11"><a href="#cb63-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;select * from orders where order_id = ?&quot;</span></span>
-<span id="cb63-12"><a href="#cb63-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">params</span><span class="kw">:</span></span>
-<span id="cb63-13"><a href="#cb63-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.orderId}&quot;</span></span>
-<span id="cb63-14"><a href="#cb63-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb63-15"><a href="#cb63-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">paymentRequest</span><span class="kw">:</span></span>
-<span id="cb63-16"><a href="#cb63-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb63-17"><a href="#cb63-17" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb63-18"><a href="#cb63-18" aria-hidden="true" tabindex="-1"></a>      #{mq.payment.request(</span>
-<span id="cb63-19"><a href="#cb63-19" aria-hidden="true" tabindex="-1"></a>        requestQueue=&#39;PAYMENT.REQUEST&#39;,</span>
-<span id="cb63-20"><a href="#cb63-20" aria-hidden="true" tabindex="-1"></a>        replyQueue=&#39;PAYMENT.REPLY&#39;,</span>
-<span id="cb63-21"><a href="#cb63-21" aria-hidden="true" tabindex="-1"></a>        payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
-<span id="cb63-22"><a href="#cb63-22" aria-hidden="true" tabindex="-1"></a>        responseFormat=&#39;xml&#39;,</span>
-<span id="cb63-23"><a href="#cb63-23" aria-hidden="true" tabindex="-1"></a>        waitMs=5000</span>
-<span id="cb63-24"><a href="#cb63-24" aria-hidden="true" tabindex="-1"></a>      )}</span></code></pre></div>
+<div class="sourceCode" id="cb64"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
+<span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb64-3"><a href="#cb64-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb64-4"><a href="#cb64-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payment/request.json</span></span>
+<span id="cb64-5"><a href="#cb64-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb64-6"><a href="#cb64-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queryOrder</span><span class="kw">:</span></span>
+<span id="cb64-7"><a href="#cb64-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> db</span></span>
+<span id="cb64-8"><a href="#cb64-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">db</span><span class="kw">:</span><span class="at"> orders</span></span>
+<span id="cb64-9"><a href="#cb64-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">query</span><span class="kw">:</span></span>
+<span id="cb64-10"><a href="#cb64-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">sql</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;select * from orders where order_id = ?&quot;</span></span>
+<span id="cb64-11"><a href="#cb64-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">params</span><span class="kw">:</span></span>
+<span id="cb64-12"><a href="#cb64-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.orderId}&quot;</span></span>
+<span id="cb64-13"><a href="#cb64-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb64-14"><a href="#cb64-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">paymentRequest</span><span class="kw">:</span></span>
+<span id="cb64-15"><a href="#cb64-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb64-16"><a href="#cb64-16" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb64-17"><a href="#cb64-17" aria-hidden="true" tabindex="-1"></a>      #{mq.payment.request(</span>
+<span id="cb64-18"><a href="#cb64-18" aria-hidden="true" tabindex="-1"></a>        requestQueue=&#39;PAYMENT.REQUEST&#39;,</span>
+<span id="cb64-19"><a href="#cb64-19" aria-hidden="true" tabindex="-1"></a>        replyQueue=&#39;PAYMENT.REPLY&#39;,</span>
+<span id="cb64-20"><a href="#cb64-20" aria-hidden="true" tabindex="-1"></a>        payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb64-21"><a href="#cb64-21" aria-hidden="true" tabindex="-1"></a>        responseFormat=&#39;xml&#39;,</span>
+<span id="cb64-22"><a href="#cb64-22" aria-hidden="true" tabindex="-1"></a>        waitMs=5000</span>
+<span id="cb64-23"><a href="#cb64-23" aria-hidden="true" tabindex="-1"></a>      )}</span></code></pre></div>
 <p>根級 <code>environment</code> 是 default profile；大小寫不敏感的
 <code>--env</code> 會覆蓋它。Profile 中的
 <code>dbhelpers</code>、<code>mqhelpers</code>、<code>sshhelpers</code>
@@ -3465,25 +3616,25 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href=
 common list；不支持 generic recursive merge，其他 profile
 字段都會被拒絕。未知 profile 名稱會在 validation 或 external execution
 前失敗。四種執行模式使用同一個 selector：</p>
-<div class="sourceCode" id="cb64"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="co"># SIT</span></span>
-<span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--package</span></span>
-<span id="cb64-3"><a href="#cb64-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--all</span></span>
-<span id="cb64-4"><a href="#cb64-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT</span>
-<span id="cb64-5"><a href="#cb64-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT</span>
-<span id="cb64-6"><a href="#cb64-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb64-7"><a href="#cb64-7" aria-hidden="true" tabindex="-1"></a><span class="co"># UAT</span></span>
-<span id="cb64-8"><a href="#cb64-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--package</span></span>
-<span id="cb64-9"><a href="#cb64-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--all</span></span>
-<span id="cb64-10"><a href="#cb64-10" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT</span>
-<span id="cb64-11"><a href="#cb64-11" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT</span></code></pre></div>
+<div class="sourceCode" id="cb65"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="co"># SIT</span></span>
+<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--package</span></span>
+<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--all</span></span>
+<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT</span>
+<span id="cb65-5"><a href="#cb65-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT</span>
+<span id="cb65-6"><a href="#cb65-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb65-7"><a href="#cb65-7" aria-hidden="true" tabindex="-1"></a><span class="co"># UAT</span></span>
+<span id="cb65-8"><a href="#cb65-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--package</span></span>
+<span id="cb65-9"><a href="#cb65-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--all</span></span>
+<span id="cb65-10"><a href="#cb65-10" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT</span>
+<span id="cb65-11"><a href="#cb65-11" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT</span></code></pre></div>
 <p>CI 對每個目標環境分別執行 <code>validate --package</code> 和
 <code>run --all</code>：</p>
-<div class="sourceCode" id="cb65"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--package</span></span>
-<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--all</span></span>
-<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--package</span></span>
-<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--all</span></span></code></pre></div>
+<div class="sourceCode" id="cb66"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--package</span></span>
+<span id="cb66-2"><a href="#cb66-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--all</span></span>
+<span id="cb66-3"><a href="#cb66-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--package</span></span>
+<span id="cb66-4"><a href="#cb66-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="at">--all</span></span></code></pre></div>
 <p>這個設計使 Testcase、Template、Flow 和 Action 可以從 SIT promotion 到
 UAT，不需要編輯；selected config 在 execution 前定義完整 resource
 registry，因此 validation 也是 deterministic
@@ -3513,35 +3664,35 @@ registrations；封存 schema 不會成為 active runtime contract。完整矩�
 <h3 id="global-configuration">Global configuration</h3>
 <p>以下 configuration example 與 field table 和英文版共用相同
 contract；欄位名與 literal values 保留英文。</p>
-<div class="sourceCode" id="cb66"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
-<span id="cb66-2"><a href="#cb66-2" aria-hidden="true" tabindex="-1"></a><span class="fu">outputDirectory</span><span class="kw">:</span><span class="at"> output</span></span>
-<span id="cb66-3"><a href="#cb66-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
-<span id="cb66-4"><a href="#cb66-4" aria-hidden="true" tabindex="-1"></a><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
-<span id="cb66-5"><a href="#cb66-5" aria-hidden="true" tabindex="-1"></a><span class="fu">caseLog</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">yamlAnchors</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
-<span id="cb66-6"><a href="#cb66-6" aria-hidden="true" tabindex="-1"></a><span class="fu">testcase</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> testcase</span><span class="kw">}</span></span>
-<span id="cb66-7"><a href="#cb66-7" aria-hidden="true" tabindex="-1"></a><span class="fu">templates</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> templates</span><span class="kw">}</span></span>
-<span id="cb66-8"><a href="#cb66-8" aria-hidden="true" tabindex="-1"></a><span class="fu">run</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">default</span><span class="kw">:</span><span class="at"> timestamp</span><span class="kw">,</span><span class="at"> </span><span class="fu">timestampFormat</span><span class="kw">:</span><span class="at"> yyyyMMdd-HHmmss</span><span class="kw">}}</span></span>
-<span id="cb66-9"><a href="#cb66-9" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span></span>
-<span id="cb66-10"><a href="#cb66-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">processOutput</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">memoryLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">65536</span><span class="kw">,</span><span class="at"> </span><span class="fu">artifactLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">104857600</span><span class="kw">}</span></span>
-<span id="cb66-11"><a href="#cb66-11" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb66-12"><a href="#cb66-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> append-to-copy</span></span>
-<span id="cb66-13"><a href="#cb66-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span>
-<span id="cb66-14"><a href="#cb66-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
-<span id="cb66-15"><a href="#cb66-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">html</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogInlineLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">32768</span><span class="kw">}</span></span>
-<span id="cb66-16"><a href="#cb66-16" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">junit</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogEmbedThresholdBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10240</span><span class="kw">}</span></span>
-<span id="cb66-17"><a href="#cb66-17" aria-hidden="true" tabindex="-1"></a><span class="fu">xml</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">namespaceMode</span><span class="kw">:</span><span class="at"> ignore</span><span class="kw">}</span></span>
-<span id="cb66-18"><a href="#cb66-18" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/tools/database.yaml</span><span class="kw">]</span></span>
-<span id="cb66-19"><a href="#cb66-19" aria-hidden="true" tabindex="-1"></a><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb66-20"><a href="#cb66-20" aria-hidden="true" tabindex="-1"></a><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb66-21"><a href="#cb66-21" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
-<span id="cb66-22"><a href="#cb66-22" aria-hidden="true" tabindex="-1"></a><span class="fu">environments</span><span class="kw">:</span></span>
-<span id="cb66-23"><a href="#cb66-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">SIT</span><span class="kw">:</span></span>
-<span id="cb66-24"><a href="#cb66-24" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/sit/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb66-25"><a href="#cb66-25" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/sit/payment.yaml</span><span class="kw">]</span></span>
-<span id="cb66-26"><a href="#cb66-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
-<span id="cb66-27"><a href="#cb66-27" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/uat/orders.yaml</span><span class="kw">]</span></span>
-<span id="cb66-28"><a href="#cb66-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/uat/payment.yaml</span><span class="kw">]</span></span></code></pre></div>
+<div class="sourceCode" id="cb67"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="fu">outputDirectory</span><span class="kw">:</span><span class="at"> output</span></span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="fu">environment</span><span class="kw">:</span><span class="at"> SIT</span></span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a><span class="fu">caseLog</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">yamlAnchors</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="kw">}</span></span>
+<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="fu">testcase</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> testcase</span><span class="kw">}</span></span>
+<span id="cb67-7"><a href="#cb67-7" aria-hidden="true" tabindex="-1"></a><span class="fu">templates</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">root</span><span class="kw">:</span><span class="at"> templates</span><span class="kw">}</span></span>
+<span id="cb67-8"><a href="#cb67-8" aria-hidden="true" tabindex="-1"></a><span class="fu">run</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">default</span><span class="kw">:</span><span class="at"> timestamp</span><span class="kw">,</span><span class="at"> </span><span class="fu">timestampFormat</span><span class="kw">:</span><span class="at"> yyyyMMdd-HHmmss</span><span class="kw">}}</span></span>
+<span id="cb67-9"><a href="#cb67-9" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span></span>
+<span id="cb67-10"><a href="#cb67-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">processOutput</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">memoryLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">65536</span><span class="kw">,</span><span class="at"> </span><span class="fu">artifactLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">104857600</span><span class="kw">}</span></span>
+<span id="cb67-11"><a href="#cb67-11" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb67-12"><a href="#cb67-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">mode</span><span class="kw">:</span><span class="at"> append-to-copy</span></span>
+<span id="cb67-13"><a href="#cb67-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span>
+<span id="cb67-14"><a href="#cb67-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">columns</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
+<span id="cb67-15"><a href="#cb67-15" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">html</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogInlineLimitBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">32768</span><span class="kw">}</span></span>
+<span id="cb67-16"><a href="#cb67-16" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">junit</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">caseLogEmbedThresholdBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10240</span><span class="kw">}</span></span>
+<span id="cb67-17"><a href="#cb67-17" aria-hidden="true" tabindex="-1"></a><span class="fu">xml</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">namespaceMode</span><span class="kw">:</span><span class="at"> ignore</span><span class="kw">}</span></span>
+<span id="cb67-18"><a href="#cb67-18" aria-hidden="true" tabindex="-1"></a><span class="fu">toolGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/tools/database.yaml</span><span class="kw">]</span></span>
+<span id="cb67-19"><a href="#cb67-19" aria-hidden="true" tabindex="-1"></a><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb67-20"><a href="#cb67-20" aria-hidden="true" tabindex="-1"></a><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb67-21"><a href="#cb67-21" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
+<span id="cb67-22"><a href="#cb67-22" aria-hidden="true" tabindex="-1"></a><span class="fu">environments</span><span class="kw">:</span></span>
+<span id="cb67-23"><a href="#cb67-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">SIT</span><span class="kw">:</span></span>
+<span id="cb67-24"><a href="#cb67-24" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/sit/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb67-25"><a href="#cb67-25" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/sit/payment.yaml</span><span class="kw">]</span></span>
+<span id="cb67-26"><a href="#cb67-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
+<span id="cb67-27"><a href="#cb67-27" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/uat/orders.yaml</span><span class="kw">]</span></span>
+<span id="cb67-28"><a href="#cb67-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/uat/payment.yaml</span><span class="kw">]</span></span></code></pre></div>
 <table>
 <thead>
 <tr class="header">
@@ -3822,16 +3973,16 @@ id="configreportfilenamepattern"><code>config.report.fileNamePattern</code></h3>
 <code>${suiteName}</code>，無論它用於文本插值還是內建函數參數。ATT
 沒有定義其他通用 non-runtime/configuration expression roots。call 內的裸
 <code>suiteName</code> 會被拒絕。合法示例包括：</p>
-<div class="sourceCode" id="cb67"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
-<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
-<p>以及：</p>
 <div class="sourceCode" id="cb68"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
-<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
-<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
-<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
-<span id="cb68-5"><a href="#cb68-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">report</span><span class="kw">:</span></span>
+<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}.result.xlsx&quot;</span></span></code></pre></div>
+<p>以及：</p>
+<div class="sourceCode" id="cb69"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;result-${suiteName}.xlsx&quot;</span></span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ATT-${suiteName}-report.xlsx&quot;</span></span>
+<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${suiteName}-${suiteName}.xlsx&quot;</span></span>
+<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{upper(${suiteName})}.result.xlsx&quot;</span></span>
+<span id="cb69-5"><a href="#cb69-5" aria-hidden="true" tabindex="-1"></a><span class="fu">fileNamePattern</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{concat(&#39;ATT-&#39;, #{lower(${suiteName})})}.xlsx&quot;</span></span></code></pre></div>
 <p>但不支持如
 <code>${RUN_ID}</code>、<code>${WORKBOOK_ID}</code>、<code>${ENVIRONMENT}</code>、<code>${EXEC.INPUT.caseId}</code>
 等運行時值引用。</p>
@@ -4215,11 +4366,11 @@ concurrency，不會在單一 run 內增加 Case worker。<code>--profile</code>
 diagnostics。</p>
 <p>Load 以 scenario 為基礎；明確提供的 workload option
 會先覆蓋對應欄位，再重新驗證 effective scenario：</p>
-<div class="sourceCode" id="cb69"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
-<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
-<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
-<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
+<div class="sourceCode" id="cb70"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
+<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
+<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
+<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
 <p>無 target 的 <code>debug</code> 和 <code>load</code> 是唯讀
 discovery。Debug 會驗證可執行 target，但不呼叫 Tool，也不建立
 output。Load 只掃描宣告 <code>att-load/*</code> 的 YAML、驗證
@@ -4237,27 +4388,27 @@ index，例如
 ATT expression；shell 可能展開的值要加引號。<code>arg.*</code> 僅適用
 Tool，<code>vars.*</code> 僅適用 Template/Flow。多 workload Load
 scenario 會拒絕未限定的 override。</p>
-<p>可選的 <code>load/load.yaml</code> 使用
-<code>att-load-profile/v1.0</code>，只放 policy，不能包含 target 或
-business inputs。它可設定 <code>load</code>，以及可選的
+<p>可選的 <code>load/load.yaml</code> 使用現行 policy-only
+<code>att-load/v1.4</code>，不能包含 target 或 business inputs。它可設定
+<code>load</code>，以及可選的
 <code>execution</code>、<code>thresholds</code>、<code>evidence</code>
 和 <code>seed</code>。<code>load --debug</code> 會將 sidecar
 <code>inputs</code> promotion 到 <code>EXEC.INPUT</code>、Template/Flow
 <code>vars</code> promotion 到 bootstrap <code>EXEC.VARS</code>，或將
 Tool <code>arguments</code> 傳入 Tool call，之後使用正常 Load
 validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI
-pacing 會覆蓋 profile。沒有 profile 時，請在命令列提供完整 policy：</p>
-<div class="sourceCode" id="cb70"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load-profile/v1.0</span></span>
-<span id="cb70-2"><a href="#cb70-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
-<span id="cb70-3"><a href="#cb70-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
-<span id="cb70-4"><a href="#cb70-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
+pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：</p>
 <div class="sourceCode" id="cb71"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug</span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load</span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> template PAYMENT_INVOKE</span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> tool fpp.invokeApi <span class="at">--users</span> 1 <span class="at">--duration</span> 10s <span class="at">--set</span> arg.requestId=42</span>
-<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 4 <span class="at">--duration</span> 5s <span class="at">--set</span> input.customer.ids<span class="pp">[</span><span class="ss">0</span><span class="pp">]</span>=42</span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.4</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb72"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug</span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load</span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> template PAYMENT_INVOKE</span>
+<span id="cb72-4"><a href="#cb72-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> tool fpp.invokeApi <span class="at">--users</span> 1 <span class="at">--duration</span> 10s <span class="at">--set</span> arg.requestId=42</span>
+<span id="cb72-5"><a href="#cb72-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 4 <span class="at">--duration</span> 5s <span class="at">--set</span> input.customer.ids<span class="pp">[</span><span class="ss">0</span><span class="pp">]</span>=42</span></code></pre></div>
 <p>重複的
 <code>--set &lt;input|arg|vars&gt;.&lt;path&gt;=&lt;yaml-value&gt;</code>
 會在 expression evaluation 前以安全 YAML 型別覆寫
@@ -4265,9 +4416,9 @@ definition。<code>debug</code>、單 workload Load scenario，以及
 <code>load --debug template|flow|tool &lt;id&gt;</code> 都支援。Quick
 Load 會使用可選的 <code>load/load.yaml</code>；若沒有 profile，請在
 command line 提供完整 policy。例如：</p>
-<div class="sourceCode" id="cb72"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span>
-<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 2 <span class="at">--duration</span> 10s <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 2 <span class="at">--duration</span> 10s <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span></code></pre></div>
 <p>完整 workload override 為
 <code>--users</code>、<code>--arrival-rate</code>、<code>--warmup</code>、<code>--ramp-up</code>、<code>--duration</code>、<code>--ramp-down</code>、<code>--think-time</code>、<code>--max-concurrent</code>
 和 <code>--overload-policy</code>；<code>--think-time</code> 只適用
@@ -4307,13 +4458,13 @@ description 與 <code>expected</code> 的有序 LF 聯接；Actual
 Tool result。使用 <code>onFailure: continue</code> 時，primary Action
 可以維持 <code>PASS</code>，而 collector 會獨立記錄為
 <code>ERROR</code>：</p>
-<div class="sourceCode" id="cb74"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">appLog</span><span class="kw">:</span></span>
-<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a>      #{ssh.app.execute(command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;)}</span>
-<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
-<span id="cb74-6"><a href="#cb74-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span></code></pre></div>
+<div class="sourceCode" id="cb75"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a>      #{ssh.app.execute(command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;)}</span>
+<span id="cb75-5"><a href="#cb75-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb75-6"><a href="#cb75-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span></code></pre></div>
 <p>請查看
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;collectorId&gt;</code>（或等價的
 <code>ACTIONS</code> compatibility view）。Record 包含
@@ -4529,8 +4680,8 @@ launcher、Java SSH negotiation 與 stack-trace policy 見 <a
 href="reference.zh/appendices/limits_defaults.md">Appendix D</a>。</p>
 <h3 id="先從-validation-開始">先從 validation 開始</h3>
 <p>每次修改 workbook、sidecar、template、helper 或 tool 後執行：</p>
-<div class="sourceCode" id="cb75"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb76"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>針對單一環境可執行
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>。ATT
 僅接受 <a href="reference.zh/appendices/schema_matrix.md">Appendix A</a>
@@ -4657,27 +4808,27 @@ package 模式。</p>
 描述符、命令字符串、stdout 或 stderr。優先使用 Tool
 腳本中經批准的祕密注入方式。在共享報表和歸檔前進行審查。</p>
 <h3 id="validation-json-合約">Validation JSON 合約</h3>
-<div class="sourceCode" id="cb76"><pre
-class="sourceCode json"><code class="sourceCode json"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.6.1&quot;</span><span class="fu">,</span></span>
-<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
-<span id="cb76-5"><a href="#cb76-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
-<span id="cb76-6"><a href="#cb76-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
-<span id="cb76-7"><a href="#cb76-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
-<span id="cb76-8"><a href="#cb76-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
-<span id="cb76-9"><a href="#cb76-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
-<span id="cb76-10"><a href="#cb76-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
-<span id="cb76-11"><a href="#cb76-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
-<span id="cb76-12"><a href="#cb76-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
-<span id="cb76-13"><a href="#cb76-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb76-14"><a href="#cb76-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb76-15"><a href="#cb76-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb76-16"><a href="#cb76-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
-<span id="cb76-17"><a href="#cb76-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
-<span id="cb76-18"><a href="#cb76-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
-<span id="cb76-19"><a href="#cb76-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
-<span id="cb76-20"><a href="#cb76-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb77"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.6.2&quot;</span><span class="fu">,</span></span>
+<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
+<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
+<span id="cb77-7"><a href="#cb77-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
+<span id="cb77-8"><a href="#cb77-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
+<span id="cb77-9"><a href="#cb77-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
+<span id="cb77-10"><a href="#cb77-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
+<span id="cb77-11"><a href="#cb77-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
+<span id="cb77-12"><a href="#cb77-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
+<span id="cb77-13"><a href="#cb77-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb77-14"><a href="#cb77-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb77-15"><a href="#cb77-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb77-16"><a href="#cb77-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
+<span id="cb77-17"><a href="#cb77-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
+<span id="cb77-18"><a href="#cb77-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
+<span id="cb77-19"><a href="#cb77-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
+<span id="cb77-20"><a href="#cb77-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
 <p>每個診斷都包含
 <code>code</code>、<code>severity</code>、<code>message</code>、<code>file</code>、<code>field</code>、<code>sheet</code>、<code>row</code>、<code>column</code>、<code>template</code>、<code>action</code>
 和 <code>suggestion</code>。不適用的字段為 <code>null</code>。當 package
@@ -4706,11 +4857,11 @@ Action，調用鏈說明 Template 如何到達該位置。Tool 與 DB evidence
 <h2 id="13-ci打包與運維">13 CI、打包與運維</h2>
 <p>ATT 支援 source-tree development 以及 offline release package。</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb77"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb78"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> 會執行 release gate、重新生成 modular Reference
 Manual、建立 application jar 與 release/source archive，並驗證 packaged
 launcher。Reference generation 另外需要 Python 3 與 Pandoc。</p>
@@ -4783,11 +4934,11 @@ truth：<code>schemas/catalog.yaml</code>）：</p>
 </tr>
 <tr class="odd">
 <td>Template</td>
-<td>att-template/v3.3</td>
+<td>att-template/v3.4</td>
 </tr>
 <tr class="even">
 <td>Flow</td>
-<td>att-flow/v3.3</td>
+<td>att-flow/v3.4</td>
 </tr>
 <tr class="odd">
 <td>Debug input</td>
@@ -4795,7 +4946,7 @@ truth：<code>schemas/catalog.yaml</code>）：</p>
 </tr>
 <tr class="even">
 <td>Load scenario</td>
-<td>att-load/v1.3</td>
+<td>att-load/v1.4</td>
 </tr>
 <tr class="odd">
 <td>Load summary</td>
@@ -4817,10 +4968,6 @@ truth：<code>schemas/catalog.yaml</code>）：</p>
 <td>JUnit XML</td>
 <td>att-junit/v2.1</td>
 </tr>
-<tr class="even">
-<td>Load policy profile</td>
-<td>att-load-profile/v1.0</td>
-</tr>
 </tbody>
 </table>
 <p>本次調整的 resource/config schema 舊版本已移至
@@ -4841,13 +4988,13 @@ warning；若舊語義與 scope isolation 或 common result/evidence contract
 衝突，就不建立 alias。Deprecated CLI/authoring form 只有在使用者仍需要
 migration path 時才保留在其 owner chapter 或 CHANGELOG。</p>
 <h2 id="appendix-c--migration-notes">Appendix C — Migration Notes</h2>
-<p>ATT 3.6.0 將型別化 operation result、外部 parsing、渲染文件、outbound
-transport 和人類可讀 evidence 分開。</p>
+<p>ATT 3.6.2 將型別化 operation result、外部 parsing、渲染
+String、outbound transport 和人類可讀 evidence 分開。</p>
 <table>
 <thead>
 <tr class="header">
 <th>舊欄位／模型</th>
-<th>3.6.0 遷移方式</th>
+<th>3.6.2 遷移方式</th>
 </tr>
 </thead>
 <tbody>
@@ -4862,16 +5009,16 @@ value；沒有隱式檔案替代方案。</td>
 </tr>
 <tr class="odd">
 <td>Render result.format/path 或 renderAs/saveAs</td>
-<td>改用 templateFormat。Render 回傳含原文的
-DocumentValue，不建立結果檔或 targetFiles。</td>
+<td>移除舊欄位。Render 回傳原樣 String，不建立結果檔或
+targetFiles。</td>
 </tr>
 <tr class="even">
 <td>透過 targetFiles 傳遞 Render 檔案</td>
-<td>直接將 DocumentValue 傳入 HTTP body 或 MQ payload。</td>
+<td>直接將 Render String 傳入 HTTP body 或 MQ payload。</td>
 </tr>
 <tr class="odd">
 <td>在 Render output 使用 requestFormat</td>
-<td>移除。requestFormat 僅供抽象 Map/List；DocumentValue + requestFormat
+<td>移除。requestFormat 僅供抽象 Map/List；String + requestFormat
 會失敗。</td>
 </tr>
 <tr class="even">
@@ -4896,28 +5043,33 @@ contracts。</td>
 </tbody>
 </table>
 <p>Render 直接傳到 HTTP 的例子：</p>
-<div class="sourceCode" id="cb78"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb78-5"><a href="#cb78-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb78-6"><a href="#cb78-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb78-7"><a href="#cb78-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
-<p>抽象 typed value 必須明確使用 requestFormat：</p>
 <div class="sourceCode" id="cb79"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
-<p>Load scenario 請將舊 single-target/v1.1 格式遷移為 att-load/v1.2
-workloads，再把 schemaVersion 升至 att-load/v1.3 以啟用 workload
-vars。<code>inputs</code> 仍對應 EXEC.INPUT；<code>vars</code> 在每個
-execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target
-啟動前評估。完整 reference 保留 native type，dependency
-不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層
-execution.execIdFormat 仍在 initialization 使用一般 expression engine
-求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate
-沒有此欄位。</p>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<p>抽象 typed value 必須明確使用 requestFormat：</p>
+<div class="sourceCode" id="cb80"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+<p>Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader
+遷移，再把 schemaVersion 升至 att-load/v1.4。Root defaults 可供多個
+workload 共用；每個 workload 的
+<code>inputs</code>、<code>vars</code>、load policy 及 execution
+設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload
+thresholds 必須在各 workload 宣告，不會從 root 繼承。<code>inputs</code>
+仍對應 EXEC.INPUT；<code>vars</code> 在每個 execution 的 EXEC.ID 與
+EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native
+type，dependency 不受宣告順序影響；循環及 external/stateful calls
+會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般
+expression engine 求值一次；closed workload 可用
+EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。</p>
+<p>歷史的 <code>att-load-profile/v1.0</code> policy file 僅供 migration
+使用：使用前請改寫為現行 policy-only <code>att-load/v1.4</code>
+descriptor；它不是現行 <code>load/load.yaml</code> 範例。</p>
 <p>Unsupported schema version 會在 execution 前失敗並提供 migration
 guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部
 resource。詳見<a href="reference.zh/14_actions.md">Action
@@ -4925,39 +5077,46 @@ resource。詳見<a href="reference.zh/14_actions.md">Action
 Context 模型</a>、<a href="reference.zh/04_execution_modes/load.md">Load
 模式</a>與<a href="reference.zh/appendices/schema_matrix.md">Schema
 矩陣</a>。</p>
-<h3 id="移除欄位與遷移">移除欄位與遷移</h3>
-<p>ATT 3.6.0 每種 resource 只接受現行 schema。歷史版本存放於
-schemas/history，不是 active contract。</p>
+<h3 id="historical-schema-migration">Historical schema migration</h3>
+<p>ATT 3.6.2 使用 <code>att-template/v3.4</code> 與
+<code>att-flow/v3.4</code> 作為現行 Render contract。已發布的
+<code>att-template/v3.3</code> 與 <code>att-flow/v3.3</code> 定義保留於
+<code>schemas/history/</code>，不是 active contract。遷移這些 descriptor
+時，先將 schema version 改為 v3.4，再套用以下欄位變更。</p>
 <table>
 <thead>
 <tr class="header">
-<th>舊配置</th>
-<th>3.6.0 形式</th>
+<th>Historical configuration</th>
+<th>3.6.2 形式</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
+<td><code>att-template/v3.3</code> 或 <code>att-flow/v3.3</code></td>
+<td>改為相應 v3.4 schema，再遷移已移除的 Render 欄位。</td>
+</tr>
+<tr class="even">
 <td>Command Tool result.format</td>
 <td>Tool descriptor stdoutFormat</td>
 </tr>
-<tr class="even">
-<td>Render result.format/path/overwrite 或 renderAs/saveAs</td>
-<td>使用 templateFormat；將 output.result 當作
-DocumentValue；沒有隱式檔案替代方案</td>
-</tr>
 <tr class="odd">
+<td>Render result.format/path/overwrite 或 renderAs/saveAs</td>
+<td>移除舊 persistence 欄位。Render 將原樣 String 放入
+output.result，不會隱式建立結果檔。</td>
+</tr>
+<tr class="even">
 <td>Log file</td>
 <td>將 typed value 直接傳入 Log.value</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>Log fields</td>
 <td>將 typed map/list 放入 Log.value，並指定 Log.format</td>
 </tr>
-<tr class="odd">
-<td>Render targetFiles handoff 至 HTTP/MQ</td>
-<td>將 DocumentValue 直接作為 HTTP body 或 MQ payload</td>
-</tr>
 <tr class="even">
+<td>Render targetFiles handoff 至 HTTP/MQ</td>
+<td>將 Render String 直接作為 HTTP body 或 MQ payload</td>
+</tr>
+<tr class="odd">
 <td>在 Render result 使用 requestFormat</td>
 <td>移除；requestFormat 留給抽象 Map/List</td>
 </tr>
@@ -5014,12 +5173,12 @@ record 的 <code>result</code>，且不保證保留
 field；每個保留的 text field 限制為 1024 字元。<code>inputOmitted</code>
 和 truncation flag 表示省略或截斷的 evidence。 Free-form
 message、stderr、per-instance error 和 cleanup warning 會在固定 budget
-內 redact string、DocumentValue text 和 array input；最多檢查 256 個
-input node、8192 個 token 字元，每個 token 最多 1024 字元。Byte array
-最多處理 128 byte（UTF-8、Base64、hex 和 Java decimal rendering），其他
-array 最多 64 個 element；char array 最多 1024 字元。超出任一
-budget、private token 少於 4 字元或遇到未知 input type 時，會用安全
-marker 省略所有 free-form failure detail（包括 upstream-truncated secret
+內 redact string、typed text 和 array input；最多檢查 256 個 input
+node、8192 個 token 字元，每個 token 最多 1024 字元。Byte array 最多處理
+128 byte（UTF-8、Base64、hex 和 Java decimal rendering），其他 array
+最多 64 個 element；char array 最多 1024 字元。超出任一 budget、private
+token 少於 4 字元或遇到未知 input type 時，會用安全 marker 省略所有
+free-form failure detail（包括 upstream-truncated secret
 prefix/head-tail echo），並設置 <code>inputRedactionLimited</code> 和
 <code>failureDetailsOmitted</code>。超過 1024 字元的 free-form field
 也會被省略並標記 truncated；structured metadata 繼續保留。Structured

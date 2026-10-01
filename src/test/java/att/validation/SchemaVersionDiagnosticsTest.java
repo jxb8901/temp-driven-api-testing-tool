@@ -20,7 +20,7 @@ class SchemaVersionDiagnosticsTest {
         write("testcase/payment.yaml", "schemaVersion: att-sidecar/v2.1\nid: payment\nexcel: {sheet: Cases, caseId: CaseID, tags: Tags}\nstages: [{key: invoke, template: PAYMENT_INVOKE}]\n");
         write("templates/flows/payment/flow.yaml", "schemaVersion: att-flow/v3.0\nid: payment.flow.v1\nname: Payment\ndescription: Legacy flow\nactions:\n  note: {type: log, message: ok}\n");
         write("templates/payment/template.yaml", "schemaVersion: att-template/v3.1\ndescription: Legacy template\nactions:\n  note: {type: log, message: ok}\n");
-        write("templates/current/template.yaml", "schemaVersion: att-template/v3.3\ndescription: Current template\nactions:\n  note: {type: log, message: ok}\n");
+        write("templates/current/template.yaml", "schemaVersion: att-template/v3.4\ndescription: Current template\nactions:\n  note: {type: log, message: ok}\n");
         write("config/tools/legacy.yaml", "schemaVersion: att-tool-group/v2.7\nid: legacy\nname: Legacy\ndescription: Legacy tools\ntools:\n  ping: {name: Ping, description: Ping, command: 'echo ok'}\n");
         write("config/config.yaml", "schemaVersion: att-config/v2.8\n");
         write("config/mqhelpers/legacy.yaml", "schemaVersion: att-mqhelper/v1.0\nid: legacy\nname: Legacy MQ\ndescription: Legacy MQ helper\nconnection: {queueManager: QM1, host: localhost, port: 1414, channel: APP.SVRCONN}\n");

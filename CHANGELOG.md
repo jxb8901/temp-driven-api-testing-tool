@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.2 - 2026-10-01
+
+- Follow up issues #89, #100, #101 and #102.
+- Unify Load descriptors on `att-load/v1.4`, return Render results as `String`, and retain direct Case Log links only when evidence is retained.
+
 ## 3.6.1 - 2026-09-30
 
 - Preserve evidence collector root causes, structured resource evidence, diagnostics, and retry history for continue/stop handling (issue #94).

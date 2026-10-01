@@ -78,6 +78,8 @@ public class ToolInvoker {
     }
 
     public ToolConfig tool(String name) { return config.tool(name); }
+    public Path projectRoot() { return projectRoot; }
+    public FrameworkConfig config() { return config; }
     public long effectiveTimeoutMs(String toolName, Long actionTimeoutMs) {
         if (actionTimeoutMs != null) return actionTimeoutMs.longValue();
         ToolConfig tool = config.tool(toolName);

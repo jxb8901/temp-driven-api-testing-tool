@@ -69,7 +69,7 @@ class DebugEngineTest {
 
         Files.createDirectories(project.resolve("templates/INPUT"));
         Files.write(project.resolve("templates/INPUT/template.yaml"), (
-                "schemaVersion: att-template/v3.3\nname: INPUT\ndescription: input override\nactions:\n"
+                "schemaVersion: att-template/v3.4\nname: INPUT\ndescription: input override\nactions:\n"
                         + "  show: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/INPUT/debug.yaml"),
                 "schemaVersion: att-debug/v1.1\ninputs: {amount: 7}\n".getBytes(StandardCharsets.UTF_8));
@@ -114,10 +114,10 @@ class DebugEngineTest {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/WRAPPER"));
         Files.write(project.resolve("templates/WRAPPER/template.yaml"), (
-                "schemaVersion: att-template/v3.3\nname: WRAPPER\ndescription: nested flow bootstrap\nactions:\n"
+                "schemaVersion: att-template/v3.4\nname: WRAPPER\ndescription: nested flow bootstrap\nactions:\n"
                         + "  nested: {type: flow, use: debug.echo.v1}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/debug/echo/flow.yaml"), (
-                "schemaVersion: att-flow/v3.3\nid: debug.echo.v1\nname: Debug Echo\ndescription: vars flow\nactions:\n"
+                "schemaVersion: att-flow/v3.4\nid: debug.echo.v1\nname: Debug Echo\ndescription: vars flow\nactions:\n"
                         + "  echo: {type: log, message: 'seed=${EXEC.VARS.seed}|amount=${EXEC.INPUT.amount}'}\n")
                 .getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/WRAPPER/debug.yaml"),
@@ -159,7 +159,7 @@ class DebugEngineTest {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/VARS"));
         Files.write(project.resolve("templates/VARS/template.yaml"), (
-                "schemaVersion: att-template/v3.3\nname: VARS\ndescription: Debug vars\nactions:\n"
+                "schemaVersion: att-template/v3.4\nname: VARS\ndescription: Debug vars\nactions:\n"
                         + "  before:\n    type: log\n    message: 'before=${EXEC.VARS.refNo}|${EXEC.VARS.retryCount}|${EXEC.VARS.order.id}|${EXEC.INPUT.amount}'\n"
                         + "  replace:\n    type: assign\n    name: refNo\n    expression: REF002\n"
                         + "  after:\n    type: log\n    message: 'after=${EXEC.VARS.refNo}'\n").getBytes(StandardCharsets.UTF_8));
@@ -184,13 +184,13 @@ class DebugEngineTest {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/BOOTSTRAP"));
         Files.write(project.resolve("templates/BOOTSTRAP/template.yaml"), (
-                "schemaVersion: att-template/v3.3\nname: BOOTSTRAP\ndescription: typed bootstrap\nactions:\n"
+                "schemaVersion: att-template/v3.4\nname: BOOTSTRAP\ndescription: typed bootstrap\nactions:\n"
                         + "  before:\n    type: log\n    message: 'before=${EXEC.VARS.amount}|${EXEC.VARS.twice}|${EXEC.VARS.label}|${EXEC.VARS.cli}|${EXEC.VARS.templateName}'\n"
                         + "  nested:\n    type: flow\n    use: debug.echo.v1\n"
                         + "  replace:\n    type: assign\n    name: amount\n    expression: ${EXEC.INPUT.amount}\n"
                         + "  after:\n    type: log\n    message: 'after=${EXEC.VARS.amount}'\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/debug/echo/flow.yaml"), (
-                "schemaVersion: att-flow/v3.3\nid: debug.echo.v1\nname: Debug Echo\ndescription: bootstrap flow\nactions:\n"
+                "schemaVersion: att-flow/v3.4\nid: debug.echo.v1\nname: Debug Echo\ndescription: bootstrap flow\nactions:\n"
                         + "  echo:\n    type: log\n    message: 'nested=${EXEC.VARS.cli}'\n").getBytes(StandardCharsets.UTF_8));
         Path input = project.resolve("templates/BOOTSTRAP/debug.yaml");
         Files.write(input, ("schemaVersion: att-debug/v1.1\ninputs: {amount: 21}\nvars:\n"
@@ -329,7 +329,7 @@ class DebugEngineTest {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/SLOW"));
         Files.write(project.resolve("templates/SLOW/template.yaml"), (
-                "schemaVersion: att-template/v3.3\nname: SLOW\ndescription: slow debug\nactions:\n"
+                "schemaVersion: att-template/v3.4\nname: SLOW\ndescription: slow debug\nactions:\n"
                         + "  wait:\n    type: tool\n    call: '#{slow()}'\n").getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/SLOW/debug.yaml"),
                 "schemaVersion: att-debug/v1.1\ncase: {caseName: slow}\n".getBytes(StandardCharsets.UTF_8));
@@ -419,10 +419,10 @@ class DebugEngineTest {
         Files.createDirectories(project.resolve("templates/BROKEN"));
         Files.createDirectories(project.resolve("templates/flows/debug/echo"));
         Files.write(project.resolve("templates/SIMPLE/template.yaml"), (
-                "schemaVersion: att-template/v3.3\nname: SIMPLE\ndescription: Simple debug template\nactions:\n  log:\n    type: log\n    message: 'value=${EXEC.INPUT.value}'\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: Simple debug template\nactions:\n  log:\n    type: log\n    message: 'value=${EXEC.INPUT.value}'\n" ).getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/BROKEN/template.yaml"), "not: [valid\n".getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/debug/echo/flow.yaml"), (
-                "schemaVersion: att-flow/v3.3\nid: debug.echo.v1\nname: Debug Echo\ndescription: Debug Echo\nactions:\n  echo:\n    type: log\n    message: 'debug=${CASE.inputs.message}'\n" ).getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-flow/v3.4\nid: debug.echo.v1\nname: Debug Echo\ndescription: Debug Echo\nactions:\n  echo:\n    type: log\n    message: 'debug=${CASE.inputs.message}'\n" ).getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(project.resolve("output"));
         return project;
     }

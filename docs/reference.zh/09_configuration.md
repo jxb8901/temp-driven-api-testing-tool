@@ -69,7 +69,6 @@ actions:
   renderRequest:
     type: render
     payload: payment/request.json
-    templateFormat: json
 
   queryOrder:
     type: db

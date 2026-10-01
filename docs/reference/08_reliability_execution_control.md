@@ -12,7 +12,7 @@ An assertion evaluates a boolean condition after the Action's primary work at th
 
 ### Timeout
 
-Timeout terminates or abandons the operation according to the supported backend and records diagnostic/evidence. Timeout is an operational failure; it is not an assertion false result. Tool timeout behavior and resource-specific DB/MQ limits are documented in their resource contracts.
+Timeout terminates or abandons the operation according to the supported backend and records diagnostic/evidence. Timeout is an operational failure; it is not an assertion false result. Tool timeout behavior and resource-specific DB/MQ/HTTP/SSH limits are documented in their resource contracts.
 
 ### Retry and attempts
 
@@ -26,7 +26,7 @@ Collectors run once per primary attempt. The top-level collector node represents
 
 ### Transaction/resource lifecycle
 
-DB transaction finalization and DB/MQ resource cleanup occur at the appropriate execution lifecycle boundary. These mechanisms can affect operation success/diagnostics but are internal resource state, not public Context namespaces.
+DB transaction finalization and DB/MQ/HTTP/SSH resource cleanup occur at the appropriate execution lifecycle boundary. These mechanisms can affect operation success/diagnostics but are internal resource state, not public Context namespaces.
 
 ### Aggregation
 

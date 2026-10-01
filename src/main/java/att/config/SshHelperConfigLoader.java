@@ -41,7 +41,7 @@ public final class SshHelperConfigLoader {
 
     private SshHelperConfig parse(Map<?, ?> map) {
         SchemaSupport.requireVersion(map, "att-sshhelper/v1.0", "sshhelper");
-        SchemaSupport.rejectUnknown(map, "sshhelper", "schemaVersion", "id", "name", "description", "defaults", "instances", "selection", "fanout");
+        SchemaSupport.rejectUnknown(map, "sshhelper", "schemaVersion", "id", "name", "description", "defaults", "instances", "selection", "fanout", "timeouts");
         String id = identifier(map.get("id"), "sshhelper.id");
         String name = optional(map.get("name"), "sshhelper.name");
         String description = optional(map.get("description"), "sshhelper.description");
@@ -54,6 +54,9 @@ public final class SshHelperConfigLoader {
         if (!strategy.isEmpty() && !strategy.matches("random|roundRobin|all")) throw new IllegalArgumentException("Invalid SSH selection strategy: " + strategy);
         Map<?, ?> fanout = section(map.get("fanout"), "sshhelper.fanout", "maxConcurrency");
         int maxConcurrency = number(fanout.get("maxConcurrency"), 4, 1, 256, "sshhelper.fanout.maxConcurrency");
+        Map<?, ?> timeouts = section(map.get("timeouts"), "sshhelper.timeouts", "connectTimeoutMs", "commandTimeoutMs");
+        int connectTimeoutMs = number(timeouts.get("connectTimeoutMs"), 10000, 1, 3600000, "sshhelper.timeouts.connectTimeoutMs");
+        int commandTimeoutMs = number(timeouts.get("commandTimeoutMs"), 60000, 1, 3600000, "sshhelper.timeouts.commandTimeoutMs");
         if (!(map.get("instances") instanceof List) || ((List<?>) map.get("instances")).isEmpty()) throw new IllegalArgumentException("sshhelper.instances must be non-empty");
         Map<String, SshConfig> instances = new LinkedHashMap<String, SshConfig>();
         Set<String> keys = new LinkedHashSet<String>();
@@ -77,7 +80,8 @@ public final class SshHelperConfigLoader {
             instances.put(instanceId, new SshConfig(host, user, port, identity, fromEnvironment));
         }
         if (instances.size() > 1 && strategy.isEmpty()) throw new IllegalArgumentException("sshhelper.selection.strategy is required for multiple instances");
-        return new SshHelperConfig(id, name, description, strategy.isEmpty() ? "single" : strategy, maxConcurrency, instances);
+        return new SshHelperConfig(id, name, description, strategy.isEmpty() ? "single" : strategy,
+                maxConcurrency, connectTimeoutMs, commandTimeoutMs, instances);
     }
 
     private static Map<?, ?> section(Object value, String field, String... allowed) {

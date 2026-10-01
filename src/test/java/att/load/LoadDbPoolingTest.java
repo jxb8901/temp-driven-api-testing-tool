@@ -166,19 +166,19 @@ class LoadDbPoolingTest {
     private StageTemplate template(List<TemplateAction> actions) throws Exception {
         Path directory = tempDir.resolve("project/templates/DB");
         Files.createDirectories(directory);
-        return new StageTemplate("DB", directory, actions, "att-template/v3.3", directory.resolve("template.yaml"));
+        return new StageTemplate("DB", directory, actions, "att-template/v3.4", directory.resolve("template.yaml"));
     }
 
     private List<TemplateAction> singleQuery() {
         return Collections.singletonList(new TemplateAction("query", map(
-                "type", "db", "db", "orders", "query", map("sql", "select ONE")), "att-template/v3.3"));
+                "type", "db", "db", "orders", "query", map("sql", "select ONE")), "att-template/v3.4"));
     }
 
     private List<TemplateAction> twoQueries() {
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.addAll(singleQuery());
         actions.add(new TemplateAction("queryAgain", map(
-                "type", "db", "db", "orders", "query", map("sql", "select ONE")), "att-template/v3.3"));
+                "type", "db", "db", "orders", "query", map("sql", "select ONE")), "att-template/v3.4"));
         return actions;
     }
 

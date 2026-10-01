@@ -78,12 +78,19 @@ public final class FrameworkRunner {
                 att.load.LoadScenario scenario;
                 if (options.loadDebug()) {
                     java.util.Map<String, Object> promoted = new att.debug.DebugEngine(root, config).loadBootstrapInputForLoad(options);
-                    java.util.Map<String, Object> quickPolicy = new att.load.LoadProfileLoader(root).loadDefault();
+                    java.util.Map<String, Object> quickPolicy = loader.loadDefaultPolicy();
                     scenario = loader.fromDebugInput((Path) promoted.get("source"), options.debugTargetType(),
                             options.debugTargetId(), castMap(promoted.get("inputs")), castMap(promoted.get("vars")),
                             castMap(promoted.get("arguments")), quickPolicy, options);
                 } else {
                     scenario = loader.load(options.loadScenario(), att.load.LoadOverrides.from(options));
+                }
+                if (scenario.policyOnly()) {
+                    throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.LOAD_INVALID,
+                            "Load descriptor is policy-only and cannot be executed directly",
+                            "The descriptor contains load defaults but no workloads target.",
+                            scenario.source() == null ? null : scenario.source().toString(), "workloads", null, null, null,
+                            null, null, "Use load --debug with a Template, Flow, or Tool target, or add a workloads list.", null);
                 }
                 att.load.LoadTarget target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
                 new att.load.LoadTargetValidator(root, config).validate(scenario, target);
