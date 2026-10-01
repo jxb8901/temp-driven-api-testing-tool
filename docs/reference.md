@@ -236,7 +236,7 @@ This chapter defines the active ATT action contract. Templates use att-template/
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. |
 | db | db and exactly one query/update block | Returns the DB operation's typed value and evidence. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
-| log | message or value | Formats a typed value for the Case log. Its fields are level, message, value and format. |
+| log | message or value | Formats a typed value for the Case log. Its fields are message, value and format. |
 | assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
 | flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
 
@@ -385,13 +385,12 @@ Log is a presentation action and therefore has its own format field:
 ~~~yaml
 logOrder:
   type: log
-  level: INFO
   message: "Order response"
   value: "${EXEC.ACTIONS.callOrder.output.result}"
   format: yaml
 ~~~
 
-level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
+Log is a plain Case-log entry. The `level` field was removed; delete it. Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
 When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A project-file String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 
@@ -588,13 +587,6 @@ Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`,
 | `date.systimestamp` | Return system-zone timestamp, optionally formatted | `#{date.systimestamp(format='yyyyMMdd-HHmmssXXX')}` |
 | `date.format` | Format an ISO-8601 value | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `date.add` | Add a calendar/time amount | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `file.exists` | Test whether a regular file exists | `#{file.exists(${EXEC.INPUT.requestText})}` |
-| `file.directoryExists` | Test whether a directory exists | `#{file.directoryExists(${EXEC.OUTPUT_DIR})}` |
-| `file.size` | Return regular-file size in bytes | `#{file.size(${EXEC.INPUT.requestText})}` |
-| `file.mkdirs` | Create a directory tree and return its absolute path | `#{file.mkdirs(${EXEC.INPUT.archiveDirectory})}` |
-| `file.copy` | Copy a regular file and return the target path | `#{file.copy(${EXEC.INPUT.requestText}, ${EXEC.INPUT.backupFile}, true)}` |
-| `file.move` | Move a regular file and return the target path | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
-| `file.delete` | Delete a non-directory file | `#{file.delete(${EXEC.INPUT.temporaryFile}, true)}` |
 | `misc.string` | Convert a value to text | `#{misc.string(value=${EXEC.INPUT.amount})}` |
 | `misc.number` | Parse and normalize a number | `#{misc.number(value='12.50')}` |
 | `misc.boolean` | Convert true/false, yes/no, or 1/0 | `#{misc.boolean(yes)}` |
@@ -602,8 +594,6 @@ Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`,
 | `misc.nvl` | Return a default for null/empty text | `#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}` |
 | `misc.iif` | Select one of two values from a boolean | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
 | `misc.randomChoice` | Return one of 1–1000 input values | `#{misc.randomChoice('A', 'B', 'C')}` |
-| `misc.dbText` | Format one stable typed DB result as SQL*Plus-style text | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
-| `prettyPrint` / `format.pretty` | Deterministically format a Map/List/array tree | `#{prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
 
 #### `seq.next` run-scoped sequences
 
@@ -632,15 +622,15 @@ The single-value `str.upper/lower/trim/ltrim/rtrim/length` and `misc.string/numb
 
 `sysdate()` returns `yyyy-MM-dd`. `systimestamp()` returns `yyyy-MM-dd'T'HH:mm:ss.SSSXXX`; both use the JVM system zone at invocation time. Each accepts zero arguments or one positional/named `format` argument using a locale-independent Java `DateTimeFormatter` pattern. Blank, invalid, or incompatible patterns are `ATT-BUILTIN-001` errors that identify the function, argument, supplied value, and formatter cause. `formatDate` accepts ISO local dates, local date-times, offset/zoned timestamps, and UTC instants, then applies the same pattern rules. `zoneId` accepts an IANA name such as `Asia/Hong_Kong` or an offset such as `+08:00`; it converts instant/offset/zoned values and attaches a zone to a local date-time. `dateAdd` preserves the input ISO shape and accepts singular/plural `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, or `millisecond`; incompatible combinations such as hours plus a date-only value are errors.
 
-Filesystem built-ins resolve relative paths against the ATT JVM working directory and return normalized absolute paths from create/copy/move operations. Existence and size functions accept only their documented regular-file or directory type and do not follow the final symbolic link. Copy and move reject symbolic-link sources/targets, create missing target parents, and default `overwrite` to `false`; an existing target is an error unless `overwrite=true`. `deleteFile` rejects directories, may delete a file or symbolic link itself, and defaults `missingOk` to `false`. Filesystem errors produce action ERROR and these in-process operations create no TOOL process artifacts.
+
 
 `randomChoice` accepts either a complete positional list or consistently named values, preserves the selected value's type, and rejects zero, more than 1000, or mixed-style inputs. Selection is deliberately non-deterministic and is intended for test-data variation, not cryptography or reproducible sampling.
 
-`dbText` accepts exactly one positional argument or named `value`. The value must be a stable query/update result returned by a direct DB Action, DB expression, or DB-backed Tool. It uses exactly the same deterministic formatter as DB `output.result` text presentation and has no JDBC, transaction, connection, or cache side effects.
 
-`prettyPrint` accepts exactly one positional argument or named `value`. It formats Maps, Lists, Iterables, arrays, scalars, and null with two-space indentation. Linked and sorted Maps retain their iteration order; other Map keys are sorted by text. Strings are quoted and escaped, cycles and excessive depth are marked, output is bounded, and the source object is not modified.
 
-Use built-ins for in-process transformations, time values, DB-result formatting, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins occupy reserved framework packages. Configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+
+
+
 
 Typical expressions:
 
@@ -654,6 +644,8 @@ assert: "(${EXEC.INPUT.channel} == 'MOBILE') and (${EXEC.INPUT.amount} <= 1000)"
 ### Expression scope and errors
 
 This chapter defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/05_resources/tools.md), [Load execIdFormat and vars](reference/04_execution_modes/load.md), [Debug vars](reference/04_execution_modes/debug.md), and [report filenames](reference/09_configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/12_validation_diagnostics.md).
+
+Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read project content with `&{...}` and inspect or change remote files with SSHHelper `stat`, `mkdirs`, `move`, and `delete`; use `upload`/`download` for transfers. ATT local output remains framework-owned. Removed calls fail with migration guidance.
 
 ## 06 Execution Modes
 
@@ -1330,10 +1322,14 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 | `statement` | defaults | `timeoutSeconds` defaults to 30, integer 1–3600 |
 | `transaction` | defaults | `scope: case|statement`, `onEnd: commit|rollback`; defaults `case`/`rollback` |
 | `result` | defaults | `maxRows` 1000, `maxCellBytes` 1048576, `maxBytes` 10485760; positive bounded integers |
-| `evidence` | defaults | `sql: full|hash` defaults full; `parameters: values|types|masked` defaults values |
+| `evidence` | defaults | `sql: full\|hash` defaults full; `parameters: values\|types\|masked` defaults values; optional `output: {format: json\|yaml\|xml\|text\|sqlplus, maxChars: 10000}` |
 | `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `connectionTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize`, timeout is at least 250ms |
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [DBHelper](reference/05_resources/dbhelper.md) for Action, expression, result, security, and lifecycle behaviour.
+
+DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
+
+The `waitForOrder` query above needs no following Log Action: configure its DBHelper with `evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}` to retain an automatic SQL*Plus-style row snapshot. `sql` controls SQL evidence, `parameters` controls parameter representation, and `output` controls human-readable presentation only. Assertions and later Actions still read typed rows; `db.<id>.query`/`scalar` use the same policy.
 
 ### 7.4 MQHelper
 
@@ -1412,6 +1408,8 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
 
+DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
+
 ### 7.5 HTTPHelper
 
 HTTPHelper is an environment-bound HTTP resource. The selected config profile binds a stable logical helper ID to its base URL. Descriptors use att-httphelper/v1.1.
@@ -1461,11 +1459,13 @@ Transport/protocol and response-parse failures are operational errors. A receive
 
 See [Actions and Typed Values](reference/14_actions.md) for the shared project-file String and typed-result contract.
 
+DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
+
 ### 7.6 SSHHelper: logical SSH targets
 
 #### SSH Resource Helper operations
 
-SSHHelper also exposes the common Resource Helper form inside a normal `type: tool` Action: `ssh.<helperId>.execute`, `ssh.<helperId>.upload`, and `ssh.<helperId>.download`. The helper ID is logical; native Resource Helper calls select one physical instance using `single`, `random`, or `roundRobin`. `selection.strategy: all` is rejected for native Resource Helper calls; it is reserved for command-backed Tool fan-out. These calls are validated without opening an SSH connection, and they share the helper's concurrency bound and redacted identity handling.
+SSHHelper also exposes the common Resource Helper form inside a normal `type: tool` Action: `ssh.<helperId>.execute`, `ssh.<helperId>.upload`, `ssh.<helperId>.download`, `ssh.<helperId>.stat`, `ssh.<helperId>.mkdirs`, `ssh.<helperId>.move`, and `ssh.<helperId>.delete`. The helper ID is logical; native Resource Helper calls select one physical instance using `single`, `random`, or `roundRobin`. `selection.strategy: all` is rejected for native Resource Helper calls; it is reserved for command-backed Tool fan-out. These calls are validated without opening an SSH connection, and they share the helper's concurrency bound and redacted identity handling.
 
 ```yaml
 actions:
@@ -1501,7 +1501,7 @@ actions:
 
 `download` requires an absolute or relative `remotePath` and a Case-output-relative `localPath`. ATT writes through a temporary file and moves it into the controlled Case output directory; it does not parse the downloaded bytes. Download overwrite defaults to `false`, and an existing destination must be explicitly replaced with `overwrite: true`. The typed result is a transfer summary containing remote path, retained local path and byte count.
 
-All three operations accept only named arguments. Unknown operations, helper IDs, arguments, duplicate arguments, invalid formats, invalid timeout values, missing required fields, upload source conflicts and unsafe local paths fail validation before external execution. Runtime evidence contains the logical helper, selected instance, host/port, operation, transport, timing and transfer/command details; command input and represented payload content are not copied into evidence. Environment-supplied identity paths remain redacted.
+All operations accept only named arguments. Unknown operations, helper IDs, arguments, duplicate arguments, invalid formats, invalid timeout values, missing required fields, upload source conflicts and unsafe local paths fail validation before external execution. Runtime evidence contains the logical helper, selected instance, host/port, operation, transport, timing and transfer/command details; command input and represented payload content are not copied into evidence. Environment-supplied identity paths remain redacted.
 
 Native SSH failures expose stable categories in both invocation `error.category` and `SSH.error.category`:
 
@@ -1590,6 +1590,8 @@ For a single selected host, parsed `output.result` remains the legacy scalar/obj
 Environment-supplied identity paths are redacted from argv, transport stderr (including streamed Case-log diagnostics), and exception evidence for both single-host and `all` execution. This no-recording guarantee applies to ATT metadata and transport diagnostics; parsed business stdout remains unchanged, so commands must not print secret paths.
 
 Migration: leave direct SSH unchanged if one physical target suffices. To migrate, move its host/user/port/key into a helper descriptor, bind that descriptor per environment, upgrade the group to v2.9, replace physical `ssh` with `ssh: {helper: application}`, and validate each environment. Actions stay unchanged. Inventory discovery, per-Action host override, distributed transactions, cross-host failover and orchestration are out of scope.
+
+`stat(remotePath='/srv/app/result.xml')` uses SFTP lstat and returns typed `{path, exists}` plus `type: file|directory|other`, file `size`, and available ISO `modifiedAt`. A missing path is normal `exists: false`; permission/auth/transport errors still fail. `mkdirs(remotePath='/srv/app/archive')` creates parents, succeeds for an existing directory, and rejects a non-directory. `move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)` renames on the same selected host; source must exist and replacing a target requires explicit overwrite. It neither stages bytes locally nor pre-deletes the target; servers unable to overwrite fail explicitly. `delete(remotePath='/srv/app/tmp.xml', missingOk=false)` supports regular files and empty directories; missingOk is explicit, and non-empty directories, recursive arguments, and wildcard/backslash paths are rejected. All operations accept named arguments and optional `timeoutMs`, sharing selection, concurrency, deadlines, host verification, redacted identity, and Run/Debug/Load execution. Filesystem errors use `SSH_STAT_ERROR`, `SSH_MKDIRS_ERROR`, `SSH_MOVE_ERROR`, or `SSH_DELETE_ERROR`. There is no remote copy API; use explicit `execute(command='cp /srv/app/a /srv/app/b')` when needed. Project files use `&{...}`; ATT manages local output.
 
 ## 08 Reliability and Execution Control
 

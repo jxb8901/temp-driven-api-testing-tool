@@ -2,6 +2,10 @@
 
 ## 3.6.2 - 2026-10-01
 
+- Remove presentation-only dbText/prettyPrint aliases and user-authored Log.level; migrate to typed Log value + format and plain Case-log entries (#109).
+- Remove local file built-ins/aliases and add typed SSHHelper SFTP stat, mkdirs, move and non-recursive delete using the existing selection, concurrency, timeout and identity handling (#110).
+- Document shared DB/MQ/HTTP evidence.output presentation, retain automatic Case-log visibility and deferred Load materialization, and redact credentials before formatting/truncation (#111).
+
 - Add native SSH Resource Helper `execute`, `upload`, and `download` operations with typed stdout, bounded concurrency, one Action deadline, stable error categories, redacted diagnostics, controlled transfer paths, and timeout retry for `execute` only (issue #89).
 - Unify current Load descriptors on `att-load/v1.4`, preserve historical v1.3 threshold semantics, and keep policy-only Quick Load descriptors non-executable (issue #102).
 - Link retained Load evidence and Case Logs safely in portable reports, including canonical path containment and symlink-escape checks (issue #100).

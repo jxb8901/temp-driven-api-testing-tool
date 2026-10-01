@@ -26,7 +26,7 @@ public final class ResourceOutputConfig {
         return render(value, java.util.Collections.<String>emptyList());
     }
     public Map<String, Object> render(Object value, java.util.List<String> secrets) {
-        String text = new att.template.TypedValueFormatter().format(value, format);
+        String text = new att.template.TypedValueFormatter().format(value, format, secrets);
         java.util.List<String> ordered = new java.util.ArrayList<String>(secrets);
         ordered.removeIf(item -> item == null || item.isEmpty());
         ordered.sort((left, right) -> Integer.compare(right.length(), left.length()));

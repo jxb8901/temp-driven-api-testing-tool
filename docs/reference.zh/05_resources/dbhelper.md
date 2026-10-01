@@ -62,7 +62,11 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 | `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小於 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
 | `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感業務數據 |
+| `evidence.output` | 不啟用 | `format: json\|yaml\|xml\|text\|sqlplus`；`maxChars` 預設 10000（1–1000000） |
 | `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
 
 validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
 
+DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
+
+以上 `waitForOrder` query 無需後續 Log Action。DBHelper 設定 `evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}` 即會自動保留 SQL*Plus-style row snapshot；`sql` 決定 SQL evidence，`parameters` 決定 parameter representation，`output` 只控制人類可讀顯示。Assertion 和後續 Action 仍直接讀取 typed rows；`db.<id>.query`／`scalar` 亦遵循相同 policy。

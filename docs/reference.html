@@ -997,8 +997,8 @@ actual are optional diagnostic values.</td>
 <tr class="even">
 <td>log</td>
 <td>message or value</td>
-<td>Formats a typed value for the Case log. Its fields are level,
-message, value and format.</td>
+<td>Formats a typed value for the Case log. Its fields are message,
+value and format.</td>
 </tr>
 <tr class="odd">
 <td>assign</td>
@@ -1212,17 +1212,17 @@ field:</p>
 <div class="sourceCode" id="cb16"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
 <span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
-<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
-<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
-<p>level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR.
-At least one of message or value is required. message is rendered as
-text. value accepts any typed value, including nested maps/lists. Exact
-${...} and #{...} expressions preserve their native types; map/list
-children are evaluated recursively without converting numbers, booleans,
-nulls or nested values to strings. format accepts text, json, yaml, xml
-or sqlplus and controls only the emitted Case-log string. When format is
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
+<p>Log is a plain Case-log entry. The <code>level</code> field was
+removed; delete it. Internal diagnostic severity remains separate. At
+least one of message or value is required. message is rendered as text.
+value accepts any typed value, including nested maps/lists. Exact ${...}
+and #{...} expressions preserve their native types; map/list children
+are evaluated recursively without converting numbers, booleans, nulls or
+nested values to strings. format accepts text, json, yaml, xml or
+sqlplus and controls only the emitted Case-log string. When format is
 present, value is required.</p>
 <p>When both message and value are supplied, Log emits the message, a
 newline, then the formatted value. output.result is that emitted string.
@@ -1875,84 +1875,39 @@ text</td>
 <td><code>#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}</code></td>
 </tr>
 <tr class="odd">
-<td><code>file.exists</code></td>
-<td>Test whether a regular file exists</td>
-<td><code>#{file.exists(${EXEC.INPUT.requestText})}</code></td>
-</tr>
-<tr class="even">
-<td><code>file.directoryExists</code></td>
-<td>Test whether a directory exists</td>
-<td><code>#{file.directoryExists(${EXEC.OUTPUT_DIR})}</code></td>
-</tr>
-<tr class="odd">
-<td><code>file.size</code></td>
-<td>Return regular-file size in bytes</td>
-<td><code>#{file.size(${EXEC.INPUT.requestText})}</code></td>
-</tr>
-<tr class="even">
-<td><code>file.mkdirs</code></td>
-<td>Create a directory tree and return its absolute path</td>
-<td><code>#{file.mkdirs(${EXEC.INPUT.archiveDirectory})}</code></td>
-</tr>
-<tr class="odd">
-<td><code>file.copy</code></td>
-<td>Copy a regular file and return the target path</td>
-<td><code>#{file.copy(${EXEC.INPUT.requestText}, ${EXEC.INPUT.backupFile}, true)}</code></td>
-</tr>
-<tr class="even">
-<td><code>file.move</code></td>
-<td>Move a regular file and return the target path</td>
-<td><code>#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}</code></td>
-</tr>
-<tr class="odd">
-<td><code>file.delete</code></td>
-<td>Delete a non-directory file</td>
-<td><code>#{file.delete(${EXEC.INPUT.temporaryFile}, true)}</code></td>
-</tr>
-<tr class="even">
 <td><code>misc.string</code></td>
 <td>Convert a value to text</td>
 <td><code>#{misc.string(value=${EXEC.INPUT.amount})}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.number</code></td>
 <td>Parse and normalize a number</td>
 <td><code>#{misc.number(value='12.50')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.boolean</code></td>
 <td>Convert true/false, yes/no, or 1/0</td>
 <td><code>#{misc.boolean(yes)}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.coalesce</code></td>
 <td>Return first non-blank value</td>
 <td><code>#{misc.coalesce(${EXEC.INPUT.optional}, 'N/A')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.nvl</code></td>
 <td>Return a default for null/empty text</td>
 <td><code>#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>misc.iif</code></td>
 <td>Select one of two values from a boolean</td>
 <td><code>#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>misc.randomChoice</code></td>
 <td>Return one of 1–1000 input values</td>
 <td><code>#{misc.randomChoice('A', 'B', 'C')}</code></td>
-</tr>
-<tr class="odd">
-<td><code>misc.dbText</code></td>
-<td>Format one stable typed DB result as SQL*Plus-style text</td>
-<td><code>#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}</code></td>
-</tr>
-<tr class="even">
-<td><code>prettyPrint</code> / <code>format.pretty</code></td>
-<td>Deterministically format a Map/List/array tree</td>
-<td><code>#{prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}</code></td>
 </tr>
 </tbody>
 </table>
@@ -2086,41 +2041,11 @@ accepts singular/plural <code>year</code>, <code>month</code>,
 <code>minute</code>, <code>second</code>, or <code>millisecond</code>;
 incompatible combinations such as hours plus a date-only value are
 errors.</p>
-<p>Filesystem built-ins resolve relative paths against the ATT JVM
-working directory and return normalized absolute paths from
-create/copy/move operations. Existence and size functions accept only
-their documented regular-file or directory type and do not follow the
-final symbolic link. Copy and move reject symbolic-link sources/targets,
-create missing target parents, and default <code>overwrite</code> to
-<code>false</code>; an existing target is an error unless
-<code>overwrite=true</code>. <code>deleteFile</code> rejects
-directories, may delete a file or symbolic link itself, and defaults
-<code>missingOk</code> to <code>false</code>. Filesystem errors produce
-action ERROR and these in-process operations create no TOOL process
-artifacts.</p>
 <p><code>randomChoice</code> accepts either a complete positional list
 or consistently named values, preserves the selected value's type, and
 rejects zero, more than 1000, or mixed-style inputs. Selection is
 deliberately non-deterministic and is intended for test-data variation,
 not cryptography or reproducible sampling.</p>
-<p><code>dbText</code> accepts exactly one positional argument or named
-<code>value</code>. The value must be a stable query/update result
-returned by a direct DB Action, DB expression, or DB-backed Tool. It
-uses exactly the same deterministic formatter as DB
-<code>output.result</code> text presentation and has no JDBC,
-transaction, connection, or cache side effects.</p>
-<p><code>prettyPrint</code> accepts exactly one positional argument or
-named <code>value</code>. It formats Maps, Lists, Iterables, arrays,
-scalars, and null with two-space indentation. Linked and sorted Maps
-retain their iteration order; other Map keys are sorted by text. Strings
-are quoted and escaped, cycles and excessive depth are marked, output is
-bounded, and the source object is not modified.</p>
-<p>Use built-ins for in-process transformations, time values, DB-result
-formatting, and simple local file operations; use tools when filesystem
-work needs process evidence or for network, database, system
-integration, or complex reusable logic. Built-ins occupy reserved
-framework packages. Configuration cannot load custom Java classes.
-Invalid arguments produce action ERROR.</p>
 <p>Typical expressions:</p>
 <div class="sourceCode" id="cb20"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.INPUT.amount} &gt; 0&quot;</span></span>
@@ -2139,6 +2064,18 @@ path to return null; malformed syntax and illegal scope access still
 fail. Expression syntax and missing required Context paths produce
 structured diagnostics; see <a
 href="reference/12_validation_diagnostics.md">Validation</a>.</p>
+<p>Removed APIs: <code>dbText</code>/<code>misc.dbText</code>,
+<code>prettyPrint</code>/<code>misc.prettyPrint</code>/<code>format.pretty</code>,
+all local <code>file.*</code> built-ins and their legacy aliases. Keep
+DB results typed and migrate display calls to Log <code>value:
+${EXEC.ACTIONS.queryOrders.output.result}</code> with <code>format:
+sqlplus</code>; use <code>format: json</code> or <code>yaml</code> for
+Maps/Lists. Read project content with <code>&amp;{...}</code> and
+inspect or change remote files with SSHHelper <code>stat</code>,
+<code>mkdirs</code>, <code>move</code>, and <code>delete</code>; use
+<code>upload</code>/<code>download</code> for transfers. ATT local
+output remains framework-owned. Removed calls fail with migration
+guidance.</p>
 <h2 id="06-execution-modes">06 Execution Modes</h2>
 <p>Run, Debug and Load are peer adapters over the same reusable
 Template/Flow/Tool/DB/MQ/HTTP/SSH execution semantics.</p>
@@ -3210,7 +3147,9 @@ root and contains one <code>att-dbhelper/v2.6</code> object:</p>
 <tr class="even">
 <td><code>evidence</code></td>
 <td>defaults</td>
-<td>`sql: full</td>
+<td><code>sql: full|hash</code> defaults full; <code>parameters:
+values|types|masked</code> defaults values; optional <code>output:
+{format: json|yaml|xml|text|sqlplus, maxChars: 10000}</code></td>
 </tr>
 <tr class="odd">
 <td><code>pool</code></td>
@@ -3232,6 +3171,32 @@ case. <code>connection.isolation</code> is <code>driverDefault</code>,
 missing variables are errors. See <a
 href="reference/05_resources/dbhelper.md">DBHelper</a> for Action,
 expression, result, security, and lifecycle behaviour.</p>
+<p>DB/MQ/HTTP share the optional <code>evidence.output: {format: json,
+maxChars: 10000}</code> presentation policy. Supported formats are
+<code>text</code>, <code>json</code>, <code>yaml</code>,
+<code>xml</code>, and <code>sqlplus</code>; <code>sqlplus</code>
+requires a DB query/update result. <code>maxChars</code> defaults to
+10000 and accepts 1–1000000. Credentials are redacted before
+deterministic character truncation; snapshots contain
+<code>format</code>, <code>text</code>, and <code>truncated</code>.
+Formatting failure adds only a bounded <code>outputError</code> and
+changes neither typed <code>output.result</code> nor operation status.
+Normal Run/Debug invocations automatically include the snapshot in
+Action evidence and the Case log, without an extra Log Action; SQL,
+parameters, MQ payload metadata, and HTTP status/header diagnostics keep
+their own contracts. Load defers formatting until an iteration is
+retained, then materializes <code>resource-output.yaml</code>;
+<code>evidence.resources.output: none</code> skips it entirely.
+Presentation never introduces credential values into evidence.</p>
+<p>The <code>waitForOrder</code> query above needs no following Log
+Action: configure its DBHelper with <code>evidence: {sql: full,
+parameters: masked, output: {format: sqlplus, maxChars: 10000}}</code>
+to retain an automatic SQL*Plus-style row snapshot. <code>sql</code>
+controls SQL evidence, <code>parameters</code> controls parameter
+representation, and <code>output</code> controls human-readable
+presentation only. Assertions and later Actions still read typed rows;
+<code>db.&lt;id&gt;.query</code>/<code>scalar</code> use the same
+policy.</p>
 <h3 id="74-mqhelper">7.4 MQHelper</h3>
 <p>MQHelper is a logical IBM MQ resource with one or more physical
 instances. Current descriptors use att-mqhelper/v1.2. Connection
@@ -3380,6 +3345,23 @@ validation.</p>
 <p>The machine-readable field constraints remain in <a
 href="../schemas/att-mqhelper-v1.2.schema.json">the active MQ
 schema</a>.</p>
+<p>DB/MQ/HTTP share the optional <code>evidence.output: {format: json,
+maxChars: 10000}</code> presentation policy. Supported formats are
+<code>text</code>, <code>json</code>, <code>yaml</code>,
+<code>xml</code>, and <code>sqlplus</code>; <code>sqlplus</code>
+requires a DB query/update result. <code>maxChars</code> defaults to
+10000 and accepts 1–1000000. Credentials are redacted before
+deterministic character truncation; snapshots contain
+<code>format</code>, <code>text</code>, and <code>truncated</code>.
+Formatting failure adds only a bounded <code>outputError</code> and
+changes neither typed <code>output.result</code> nor operation status.
+Normal Run/Debug invocations automatically include the snapshot in
+Action evidence and the Case log, without an extra Log Action; SQL,
+parameters, MQ payload metadata, and HTTP status/header diagnostics keep
+their own contracts. Load defers formatting until an iteration is
+retained, then materializes <code>resource-output.yaml</code>;
+<code>evidence.resources.output: none</code> skips it entirely.
+Presentation never introduces credential values into evidence.</p>
 <h3 id="75-httphelper">7.5 HTTPHelper</h3>
 <p>HTTPHelper is an environment-bound HTTP resource. The selected config
 profile binds a stable logical helper ID to its base URL. Descriptors
@@ -3441,6 +3423,23 @@ set evidence.resources.output: none to skip optional resource-output
 formatting, or defer it until the iteration evidence is retained.</p>
 <p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
 for the shared project-file String and typed-result contract.</p>
+<p>DB/MQ/HTTP share the optional <code>evidence.output: {format: json,
+maxChars: 10000}</code> presentation policy. Supported formats are
+<code>text</code>, <code>json</code>, <code>yaml</code>,
+<code>xml</code>, and <code>sqlplus</code>; <code>sqlplus</code>
+requires a DB query/update result. <code>maxChars</code> defaults to
+10000 and accepts 1–1000000. Credentials are redacted before
+deterministic character truncation; snapshots contain
+<code>format</code>, <code>text</code>, and <code>truncated</code>.
+Formatting failure adds only a bounded <code>outputError</code> and
+changes neither typed <code>output.result</code> nor operation status.
+Normal Run/Debug invocations automatically include the snapshot in
+Action evidence and the Case log, without an extra Log Action; SQL,
+parameters, MQ payload metadata, and HTTP status/header diagnostics keep
+their own contracts. Load defers formatting until an iteration is
+retained, then materializes <code>resource-output.yaml</code>;
+<code>evidence.resources.output: none</code> skips it entirely.
+Presentation never introduces credential values into evidence.</p>
 <h3 id="76-sshhelper-logical-ssh-targets">7.6 SSHHelper: logical SSH
 targets</h3>
 <h4 id="ssh-resource-helper-operations">SSH Resource Helper
@@ -3448,8 +3447,12 @@ operations</h4>
 <p>SSHHelper also exposes the common Resource Helper form inside a
 normal <code>type: tool</code> Action:
 <code>ssh.&lt;helperId&gt;.execute</code>,
-<code>ssh.&lt;helperId&gt;.upload</code>, and
-<code>ssh.&lt;helperId&gt;.download</code>. The helper ID is logical;
+<code>ssh.&lt;helperId&gt;.upload</code>,
+<code>ssh.&lt;helperId&gt;.download</code>,
+<code>ssh.&lt;helperId&gt;.stat</code>,
+<code>ssh.&lt;helperId&gt;.mkdirs</code>,
+<code>ssh.&lt;helperId&gt;.move</code>, and
+<code>ssh.&lt;helperId&gt;.delete</code>. The helper ID is logical;
 native Resource Helper calls select one physical instance using
 <code>single</code>, <code>random</code>, or <code>roundRobin</code>.
 <code>selection.strategy: all</code> is rejected for native Resource
@@ -3505,7 +3508,7 @@ downloaded bytes. Download overwrite defaults to <code>false</code>, and
 an existing destination must be explicitly replaced with
 <code>overwrite: true</code>. The typed result is a transfer summary
 containing remote path, retained local path and byte count.</p>
-<p>All three operations accept only named arguments. Unknown operations,
+<p>All operations accept only named arguments. Unknown operations,
 helper IDs, arguments, duplicate arguments, invalid formats, invalid
 timeout values, missing required fields, upload source conflicts and
 unsafe local paths fail validation before external execution. Runtime
@@ -3736,6 +3739,29 @@ v2.9, replace physical <code>ssh</code> with
 Actions stay unchanged. Inventory discovery, per-Action host override,
 distributed transactions, cross-host failover and orchestration are out
 of scope.</p>
+<p><code>stat(remotePath='/srv/app/result.xml')</code> uses SFTP lstat
+and returns typed <code>{path, exists}</code> plus <code>type:
+file|directory|other</code>, file <code>size</code>, and available ISO
+<code>modifiedAt</code>. A missing path is normal <code>exists:
+false</code>; permission/auth/transport errors still fail.
+<code>mkdirs(remotePath='/srv/app/archive')</code> creates parents,
+succeeds for an existing directory, and rejects a non-directory.
+<code>move(sourcePath='/srv/app/out.xml',
+targetPath='/srv/app/archive/out.xml', overwrite=false)</code> renames
+on the same selected host; source must exist and replacing a target
+requires explicit overwrite. It neither stages bytes locally nor
+pre-deletes the target; servers unable to overwrite fail explicitly.
+<code>delete(remotePath='/srv/app/tmp.xml', missingOk=false)</code>
+supports regular files and empty directories; missingOk is explicit, and
+non-empty directories, recursive arguments, and wildcard/backslash paths
+are rejected. All operations accept named arguments and optional
+<code>timeoutMs</code>, sharing selection, concurrency, deadlines, host
+verification, redacted identity, and Run/Debug/Load execution.
+Filesystem errors use <code>SSH_STAT_ERROR</code>,
+<code>SSH_MKDIRS_ERROR</code>, <code>SSH_MOVE_ERROR</code>, or
+<code>SSH_DELETE_ERROR</code>. There is no remote copy API; use explicit
+<code>execute(command='cp /srv/app/a /srv/app/b')</code> when needed.
+Project files use <code>&amp;{...}</code>; ATT manages local output.</p>
 <h2 id="08-reliability-and-execution-control">08 Reliability and
 Execution Control</h2>
 <p>This chapter owns cross-cutting public execution behavior.</p>

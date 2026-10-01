@@ -36,6 +36,50 @@ import static org.junit.jupiter.api.Assertions.*;
 class MqHelperExecutorTest {
     @TempDir Path tempDir;
 
+    @Test void mqSharesCredentialSafePresentationAndLoadDeferral() throws Exception {
+        att.TestSchemas.install(tempDir);
+        Files.write(tempDir.resolve("mq.yaml"), ("schemaVersion: att-mqhelper/v1.2\n"
+                + "id: broker\nname: Broker\ndescription: Test broker\n"
+                + "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: APP, password: private-mq-token}\n"
+                + "instances: [{id: one}]\nevidence: {payload: metadata, output: {format: json, maxChars: 10000}}\n").getBytes("UTF-8"));
+        Map<String, MqHelperConfig> helpers = new att.config.MqHelperConfigLoader()
+                .load(Collections.singletonList("mq.yaml"), tempDir);
+        FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+                Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
+                null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
+        for (String mode : new String[]{"run", "load"}) {
+            Path caseDir = tempDir.resolve(mode); Files.createDirectories(caseDir);
+            CaseRuntimeContext runtime = new CaseRuntimeContext(new TestCase(1, "g", "s", "C", Collections.emptyList(),
+                    Collections.emptyMap(), Collections.emptyMap(), null), caseDir, "E", "R", tempDir, caseDir.resolve("case.log"),
+                    mode, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+            runtime.beginStage(new StageCaseData("invoke", "T", Collections.emptyMap()), "T", tempDir);
+            FakeFactory factory = new FakeFactory();
+            factory.reply = new MqTransport.Message(new byte[]{1}, null, "{\"count\":3,\"echo\":\"private-mq-token\"}".getBytes("UTF-8"));
+            TemplateAction action = new TemplateAction("receive", map("type", "tool",
+                    "call", "#{mq.broker.receive(queue='REPLY.Q', responseFormat='json')}"));
+            try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, configured),
+                        null, new MqHelperExecutor(tempDir, configured, factory), new att.template.DefaultBuiltInProvider()))
+                        .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), runtime, log);
+                assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+            }
+            assertEquals(3, runtime.resolve("ACTIONS.receive.output.result.count"));
+            assertEquals("private-mq-token", runtime.resolve("ACTIONS.receive.output.result.echo"));
+            Object output = runtime.resolve("ACTIONS.receive.output.evidence.mq.invocations[0].output");
+            if ("load".equals(mode)) {
+                assertNull(output); assertFalse(Files.exists(caseDir.resolve("resource-output.yaml")));
+                runtime.materializeResourceOutputs(caseDir);
+                String retained = new String(Files.readAllBytes(caseDir.resolve("resource-output.yaml")), "UTF-8");
+                assertTrue(retained.contains("[REDACTED_SECRET]")); assertFalse(retained.contains("private-mq-token"));
+            } else {
+                assertTrue(String.valueOf(output).contains("[REDACTED_SECRET]"));
+                assertFalse(String.valueOf(output).contains("private-mq-token"));
+            }
+            String log = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+            assertFalse(log.contains("private-mq-token"));
+        }
+    }
+
     @Test void sendPreservesPayloadBytesAndNeverCopiesPayloadIntoEvidence() throws Exception {
         Path caseDir = tempDir.resolve("case"); Files.createDirectories(caseDir);
         Path payload = tempDir.resolve("payload.bin");

@@ -36,7 +36,9 @@ class SftpFilesystemOperationsTest {
         java.lang.reflect.Constructor<SftpATTRS> constructor = SftpATTRS.class.getDeclaredConstructor();
         constructor.setAccessible(true);
         SftpATTRS value = constructor.newInstance();
-        value.setPERMISSIONS(directory ? 0040755 : 0100644); value.setSIZE(size); value.setACMODTIME(0, 1790850000);
+        value.setPERMISSIONS(0755);
+        java.lang.reflect.Field permissions = SftpATTRS.class.getDeclaredField("permissions"); permissions.setAccessible(true);
+        permissions.setInt(value, directory ? 0040755 : 0100644); value.setSIZE(size); value.setACMODTIME(0, 1790850000);
         return value;
     }
     static Map<String, Object> args(Object... values) {

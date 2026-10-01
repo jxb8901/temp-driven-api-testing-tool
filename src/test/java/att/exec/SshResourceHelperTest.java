@@ -510,11 +510,11 @@ class SshResourceHelperTest {
     }
 
     @Test void filesystemDeadlineCancelsTheSameSftpTransport() throws Exception {
-        AtomicBoolean closed = new AtomicBoolean();
+        CountDownLatch closed = new CountDownLatch(1);
         FakeTransfer transfer = new FakeTransfer() {
             @Override public Map<String, Object> filesystem(SshConfig target, String operation, Map<String, Object> arguments,
                     Duration connectTimeout, Duration timeout, Path project, SshTransferCancellation cancellation) throws Exception {
-                cancellation.register(() -> closed.set(true));
+                cancellation.register(() -> closed.countDown());
                 Thread.sleep(10000);
                 return map("exists", true);
             }
@@ -523,7 +523,46 @@ class SshResourceHelperTest {
                 .execute("application", "stat", map("remotePath", "/x"), context(), 1000L, "timeout", null);
         assertFalse(result.executionSuccess());
         assertEquals("SSH_TIMEOUT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
-        assertTrue(closed.get());
+        assertTrue(closed.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test void validatesFilesystemContractsAndExecutesTheSameTypedStatThroughTheActionEngine() throws Exception {
+        FakeTransfer transfer = new FakeTransfer() {
+            @Override public Map<String, Object> filesystem(SshConfig target, String operation, Map<String, Object> arguments,
+                    Duration connectTimeout, Duration timeout, Path project, SshTransferCancellation cancellation) {
+                return map("path", arguments.get("remotePath"), "exists", false);
+            }
+        };
+        SshResourceExecutor executor = executor(new CommandResult(0, "", "", false), transfer);
+        java.lang.reflect.Field configured = SshResourceExecutor.class.getDeclaredField("config"); configured.setAccessible(true);
+        FrameworkConfig config = (FrameworkConfig) configured.get(executor);
+        att.validation.PackageValidator validator = new att.validation.PackageValidator(root, config);
+        java.lang.reflect.Method validate = att.validation.PackageValidator.class.getDeclaredMethod("validateSshCall",
+                att.template.ToolCallParser.ParsedCall.class, FrameworkConfig.class); validate.setAccessible(true);
+        att.template.ToolCallParser parser = new att.template.ToolCallParser();
+        for (String call : new String[] {
+                "#{ssh.application.stat(remotePath='/missing')}",
+                "#{ssh.application.mkdirs(remotePath=${EXEC.INPUT.path}, timeoutMs=5000)}",
+                "#{ssh.application.move(sourcePath='/a', targetPath='/b', overwrite=false)}",
+                "#{ssh.application.delete(remotePath='/a', missingOk=true)}" })
+            assertDoesNotThrow(() -> validate.invoke(validator, parser.parse(call), config));
+        for (String call : new String[] {
+                "#{ssh.application.stat('/x')}", "#{ssh.application.stat()}", "#{ssh.missing.stat(remotePath='/x')}",
+                "#{ssh.application.move(sourcePath='/a')}", "#{ssh.application.move(sourcePath='/a', targetPath='/b', overwrite='yes')}",
+                "#{ssh.application.delete(remotePath='/x', missingOk='true')}", "#{ssh.application.delete(remotePath='/x', recursive=true)}",
+                "#{ssh.application.stat(remotePath='/*')}", "#{ssh.application.stat(remotePath='/x', timeoutMs=0)}",
+                "#{ssh.application.copy(sourcePath='/a', targetPath='/b')}" })
+            assertThrows(java.lang.reflect.InvocationTargetException.class, () -> validate.invoke(validator, parser.parse(call), config));
+        CaseRuntimeContext context = context(); context.beginStage(new StageCaseData("invoke", "T", Collections.emptyMap()), "T", root);
+        TemplateAction action = new TemplateAction("inspect", map("type", "tool", "call", "#{ssh.application.stat(remotePath='/missing')}",
+                "assert", "#{${output.result.exists} == false}"));
+        try (CaseExecutionLog log = new CaseExecutionLog(root.resolve("stat.log"))) {
+            List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, null, null, null,
+                    executor, new DefaultBuiltInProvider())).execute("invoke", new StageTemplate("T", root, Collections.singletonList(action)), context, log);
+            assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        }
+        assertEquals(false, context.resolve("ACTIONS.inspect.output.result.exists"));
+        assertTrue(new String(Files.readAllBytes(root.resolve("stat.log")), "UTF-8").contains("sftp"));
     }
 
     private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer) {
