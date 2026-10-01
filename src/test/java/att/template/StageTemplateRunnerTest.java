@@ -1456,7 +1456,8 @@ class StageTemplateRunnerTest {
                 map("status", "ERROR"), false, ActionExecutionResult.evidence("http", http)));
         Map<?, ?> httpNode = (Map<?, ?>) ((List<?>) ((Map<?, ?>) projectedHttp.evidence().get("http")).get("invocations")).get(0);
         assertEquals("POST", httpNode.get("method"));
-        assertEquals(safeUrl, httpNode.get("url"));
+        assertEquals("https://api.example", httpNode.get("url"));
+        assertEquals(Boolean.TRUE, httpNode.get("urlPathOmitted"));
         assertEquals(503, httpNode.get("statusCode"));
         assertFalse(httpNode.containsKey("body"));
         assertFalse(httpNode.containsKey("query"));

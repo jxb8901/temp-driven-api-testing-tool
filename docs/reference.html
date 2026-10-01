@@ -4384,11 +4384,14 @@ used as <code>error.message</code> or restored as the failed
 <code>result</code>. MQ resource nodes and error summaries retain
 <code>completionCode</code>, <code>reasonCode</code>, and bounded
 symbolic <code>reason</code>. Safe location metadata includes HTTP
-<code>method</code>/executor-sanitized <code>url</code> (without query),
-and MQ <code>queueManager</code>, <code>physicalInstance</code>,
+<code>method</code> and the <code>url</code> origin (scheme/host/port
+only), and MQ <code>queueManager</code>, <code>physicalInstance</code>,
 <code>host</code>, <code>port</code>, <code>channel</code>, and
-<code>transport</code>; URLs additionally follow the free-text
-input-redaction/omission policy.</p>
+<code>transport</code>. HTTP evidence does not carry resolved request
+inputs, so failed collector URLs always omit path, query, fragment, and
+user info, with <code>urlPathOmitted</code> identifying omitted
+components; no raw input is added. URLs that cannot be safely parsed or
+exceed the budget are omitted with a safe marker.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
 Earlier failed collector records remain available after a later

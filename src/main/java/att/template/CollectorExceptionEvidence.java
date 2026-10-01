@@ -31,7 +31,7 @@ final class CollectorExceptionEvidence {
         "durationMs", "timeoutMs", "groupId", "toolKey", "sshHelper", "instance",
         "host", "sshPort", "sshTransport", "selectionStrategy", "selectionSource",
         "httpHelper", "mqHelper", "dbHelper", "db", "helper", "helperId", "operation", "completionCode", "reasonCode", "reason", "statusCode",
-        "method", "url", "queueManager", "physicalInstance", "port", "channel", "transport",
+        "method", "url", "urlPathOmitted", "queueManager", "physicalInstance", "port", "channel", "transport",
         "message", "error", "cleanupWarning", "timeoutSeconds", "toolTimeoutMs", "effectiveTimeoutSeconds",
         "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated",
         "stdoutArtifactTruncated", "stderrArtifactTruncated", "stderr", "stdout"
@@ -176,7 +176,8 @@ final class CollectorExceptionEvidence {
             if (value instanceof String) {
                 boolean freeForm = "url".equals(field) || "stdout".equals(field) || "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field)
                         || "message".equals(field) || "detail".equals(field) || "hint".equals(field);
-                target.put(field, freeForm ? freeText((String) value, redaction, target, field, truncatedDetails(source)) : bound((String) value));
+                target.put(field, "url".equals(field) ? httpOrigin((String) value, target)
+                        : freeForm ? freeText((String) value, redaction, target, field, truncatedDetails(source)) : bound((String) value));
                 if (((String) value).length() > TEXT_LIMIT) {
                     target.put(field + "Truncated", Boolean.TRUE);
                     target.put("evidenceTruncated", Boolean.TRUE);
@@ -186,6 +187,25 @@ final class CollectorExceptionEvidence {
             }
         }
         return target;
+    }
+
+    /** HTTP evidence does not carry resolved request input; only the origin is provably public here. */
+    private static String httpOrigin(String value, Map<String, Object> target) {
+        try {
+            if (value.length() > TEXT_LIMIT) throw new IllegalArgumentException("URL exceeds public budget");
+            java.net.URI uri = new java.net.URI(value);
+            if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    || uri.getHost() == null) throw new IllegalArgumentException("Invalid HTTP origin");
+            if ((uri.getRawPath() != null && !uri.getRawPath().isEmpty()) || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || uri.getRawUserInfo() != null) {
+                target.put("urlPathOmitted", Boolean.TRUE);
+            }
+            return new java.net.URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), null, null, null).toASCIIString();
+        } catch (java.net.URISyntaxException | IllegalArgumentException invalid) {
+            target.put("urlPathOmitted", Boolean.TRUE);
+            target.put("failureDetailsOmitted", Boolean.TRUE);
+            return OMITTED_TEXT;
+        }
     }
 
     private static String freeText(String value, Redaction redaction, Map<String, Object> target, String field, boolean truncated) {
