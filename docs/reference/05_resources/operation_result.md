@@ -1,4 +1,4 @@
-### 5.5 Operation Result and Evidence
+### 7.1 Operation Result and Evidence
 
 ATT keeps an operation's logical result separate from execution evidence:
 

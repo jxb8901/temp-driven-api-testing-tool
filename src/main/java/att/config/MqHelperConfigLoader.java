@@ -52,7 +52,7 @@ public final class MqHelperConfigLoader {
                     att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                             declaredVersion, currentVersion);
                     throw new IllegalArgumentException("Unsupported MQ helper schemaVersion '" + map.get("schemaVersion")
-                            + "'; ATT 3.6.0 supports only " + currentVersion + ". See docs/reference/appendices/migrations.md.");
+                            + "'; ATT supports only " + currentVersion + ". See docs/reference/appendices/migrations.md.");
                 }
                 Path schema = schema(projectRoot, map);
                 String declared = String.valueOf(map.get("schemaVersion"));

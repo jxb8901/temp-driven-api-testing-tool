@@ -1,6 +1,6 @@
-## 14 Actions and Typed Values
+## 03 Actions and Typed Values
 
-This chapter defines the active ATT 3.6.0 action contract. Templates use att-template/v3.3. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
+This chapter defines the active ATT action contract. Templates use att-template/v3.3. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
 
 ### Action types
 
@@ -110,7 +110,7 @@ callPayment:
       timeoutMs: 10000
       onFailure: continue
   assert: >-
-    ${output.replyReceived} == true
+    ${output.result.replyReceived} == true
 ```
 
 While the containing Action, including its assertion, is active, use these paths:
@@ -189,19 +189,21 @@ evidence:
 
 This adds a bounded human-readable snapshot beside operation metadata; it does not change output.result or response parsing. In Load, evidence.resources.output accepts inherit (default) or none. none skips resource-output formatting and file materialization. Metrics-only iterations create no execution directory. When iteration evidence is retained, eligible resource output is formatted lazily into that workspace.
 
-### Removed fields and migration
+### Action output and evidence paths
 
-ATT 3.6.0 accepts only the current schema for each resource. Historical versions are archived under schemas/history and are not active contracts.
-
-| Old configuration | 3.6.0 form |
+| Path | Meaning and availability |
 |---|---|
-| Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite or renderAs/saveAs | templateFormat; consume output.result as DocumentValue; no implicit file replacement |
-| Log file | Pass a typed value to Log.value |
-| Log fields | Put a typed map/list in Log.value and select Log.format |
-| Render targetFiles handoff to HTTP/MQ | Pass DocumentValue directly as HTTP body or MQ payload |
-| requestFormat on rendered output | Remove it; reserve requestFormat for abstract Map/List values |
+| `output.result` | Primary typed Action result while the Action is active, including its assertion. |
+| `output.evidence.collectors.<id>.result` | Typed result of an active Tool evidence collector. |
+| `output.evidence.collectors.<id>.status` | Collector `PASS`/`ERROR` status while the Action is active. |
+| `output.evidence.collectors.<id>.error` | Bounded failure summary with a non-blank `message` when the collector fails. |
+| `output.evidence.collectors.<id>.evidence` | Preserved bounded/redacted underlying Tool/resource evidence, including resource identity and native failure fields when supplied. |
+| `EXEC.ACTIONS.<actionId>.output.result` | Published primary typed result after the Action completes. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | Published final/winning collector result. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | Published final/winning collector status. |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | Published collector failure summary and preserved operation evidence. |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | Failure summary and underlying evidence for that specific collector attempt. |
 
-Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.
+Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
-See [Runtime and Context Model](03_runtime_context.md) for META lifecycle and [Load Mode](04_execution_modes/load.md) for execution identity and retained evidence paths.

@@ -1,6 +1,6 @@
-### 14.1 Schema and Version Matrix
+## Appendix A — Schema and Version Matrix
 
-ATT 3.6.0 active schemas:
+Active schemas (source of truth: `schemas/catalog.yaml`):
 
 | Artifact | Active schema |
 |---|---|
@@ -20,5 +20,8 @@ ATT 3.6.0 active schemas:
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
 | CI summary | att-ci-summary/v2.1 |
+| JUnit XML | att-junit/v2.1 |
+| Load policy profile | att-load-profile/v1.0 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
+

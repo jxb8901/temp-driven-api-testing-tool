@@ -46,6 +46,11 @@ def manifest():
              if line.strip() and not line.lstrip().startswith("#")]
     if not items or len(items) != len(set(items)):
         raise SystemExit("Reference manifest must be non-empty and contain unique paths")
+    for item in items:
+        if (item.startswith("/") or "\\" in item or
+                any(part in ("", ".", "..") for part in item.split("/")) or
+                not item.endswith(".md")):
+            raise SystemExit("Invalid Reference manifest entry: " + item)
     return items
 
 
