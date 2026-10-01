@@ -4342,15 +4342,25 @@ Resource identity and fields such as SSH helper/instance, command, exit
 code, bounded stderr, MQ reason codes, HTTP status, parser diagnostics,
 and timeout details remain under <code>evidence</code> when provided by
 the executor. For thrown Tool exceptions, the public projection omits
-raw input, payload, argv, and output fields, redacts input values from
+raw input, payload, argv, output, and resolved command text, and does
+not guarantee <code>parserDiagnostic</code>; the command/parser details
+above apply to other executor evidence, redacts input values from
 retained text, and limits each retained text field to 1024 characters.
 <code>inputOmitted</code> and truncation flags identify omitted or
 bounded evidence. Free-form messages, stderr, per-instance errors, and
-cleanup warnings redact string, DocumentValue text, and array inputs;
-byte arrays are covered as UTF-8, Base64, hexadecimal, and Java decimal
-array renderings. Structured status, category, and resource identity are
-only length-bounded. SSH fan-out retains bounded metadata, errors, and
-stderr for up to 64 instances, prioritizing failures;
+cleanup warnings redact string, DocumentValue text, and array inputs
+within a fixed budget: 256 input nodes, 8192 token characters, and 1024
+characters per token. Byte arrays are limited to 128 bytes (UTF-8,
+Base64, hexadecimal, and Java decimal renderings), other arrays to 64
+elements, and char arrays to 1024 characters. Exceeding any budget or
+encountering an unknown input type omits all free-form failure details
+with a safe marker, including upstream-truncated secret prefixes or
+head/tail echoes, and sets <code>inputRedactionLimited</code> and
+<code>failureDetailsOmitted</code>. Free-form fields longer than 1024
+characters are also omitted and marked truncated; structured metadata
+remains available. Structured status, category, and resource identity
+are only length-bounded. SSH fan-out retains bounded metadata, errors,
+and stderr for up to 64 instances, prioritizing failures;
 <code>instanceCount</code> and <code>instancesTruncated</code> identify
 the total and omitted instances.</p>
 <p>For retries, inspect

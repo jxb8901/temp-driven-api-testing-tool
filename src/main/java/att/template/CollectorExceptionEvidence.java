@@ -17,9 +17,14 @@ import java.util.Set;
 final class CollectorExceptionEvidence {
     static final int TEXT_LIMIT = 1024;
     static final int INSTANCE_LIMIT = 64;
+    static final int INPUT_NODE_LIMIT = 256;
+    static final int TOKEN_CHARACTER_LIMIT = 8192;
+    static final int BINARY_LIMIT = 128;
+    static final int ARRAY_LIMIT = 64;
+    static final String OMITTED_TEXT = "[REDACTED_SECRET] [FAILURE_DETAILS_OMITTED]";
     private static final String[] FIELDS = {
         "id", "type", "name", "implementation", "status", "category", "exitCode",
-        "inputOmitted", "evidenceTruncated", "messageTruncated", "instancesTruncated", "instanceCount",
+        "inputOmitted", "inputRedactionLimited", "failureDetailsOmitted", "evidenceTruncated", "messageTruncated", "instancesTruncated", "instanceCount",
         "durationMs", "timeoutMs", "groupId", "toolKey", "sshHelper", "instance",
         "host", "sshPort", "sshTransport", "selectionStrategy", "selectionSource",
         "httpHelper", "mqHelper", "dbHelper", "reasonCode", "statusCode",
@@ -31,7 +36,7 @@ final class CollectorExceptionEvidence {
         "startedAt", "endedAt", "error", "stderr", "cleanupWarning",
         "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated",
         "stdoutArtifactTruncated", "stderrArtifactTruncated", "evidenceTruncated",
-        "errorTruncated", "cleanupWarningTruncated"
+        "errorTruncated", "cleanupWarningTruncated", "failureDetailsOmitted"
     };
 
     private CollectorExceptionEvidence() {}
@@ -39,11 +44,12 @@ final class CollectorExceptionEvidence {
     static ToolExecutionException project(ToolExecutionException failure) {
         Map<String, Object> source = failure.evidence();
         if (source == null) source = Collections.emptyMap();
-        List<String> privateValues = new ArrayList<String>();
-        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
-        collectInputValues(source.get("input"), privateValues, visited);
-        privateValues.sort((left, right) -> Integer.compare(right.length(), left.length()));
-        Map<String, Object> evidence = fields(source, FIELDS, privateValues);
+        Redaction redaction = new Redaction();
+        redaction.limited = Boolean.TRUE.equals(source.get("inputRedactionLimited"));
+        redaction.collect(source.get("input"));
+        redaction.tokens.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        Map<String, Object> evidence = fields(source, FIELDS, redaction);
+        if (redaction.limited) evidence.put("inputRedactionLimited", Boolean.TRUE);
         Object instances = source.get("instances");
         if (instances instanceof Map) {
             Map<?, ?> hosts = (Map<?, ?>) instances;
@@ -55,7 +61,7 @@ final class CollectorExceptionEvidence {
                     Map<?, ?> host = (Map<?, ?>) entry.getValue();
                     if (failures == "PASS".equals(host.get("status"))) continue;
                     if (projected.size() >= INSTANCE_LIMIT) break;
-                    projected.put(bound((String) entry.getKey()), fields(host, INSTANCE_FIELDS, privateValues));
+                    projected.put(bound((String) entry.getKey()), fields(host, INSTANCE_FIELDS, redaction));
                 }
             }
             evidence.put("instances", projected);
@@ -66,24 +72,25 @@ final class CollectorExceptionEvidence {
             }
         }
         if (source.containsKey("input")) evidence.put("inputOmitted", Boolean.TRUE);
-        String message = text(failure.getMessage(), privateValues);
+        String message = freeText(failure.getMessage(), redaction, evidence, "message");
         String category = bound(failure.category());
         evidence.put("category", category);
         evidence.put("message", message);
-        markTruncated(evidence, "message", failure.getMessage(), privateValues);
         // Do not let diagnostic traversal republish details from the private cause chain.
         return new ToolExecutionException(category, message, evidence, failure.exitCode(), null);
     }
 
-    private static Map<String, Object> fields(Map<?, ?> source, String[] names, List<String> privateValues) {
+    private static Map<String, Object> fields(Map<?, ?> source, String[] names, Redaction redaction) {
         Map<String, Object> target = new LinkedHashMap<String, Object>();
         for (String field : names) {
             Object value = source.get(field);
             if (value instanceof String) {
                 boolean freeForm = "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field);
-                List<String> tokens = freeForm ? privateValues : Collections.<String>emptyList();
-                target.put(field, text((String) value, tokens));
-                markTruncated(target, field, (String) value, tokens);
+                target.put(field, freeForm ? freeText((String) value, redaction, target, field) : bound((String) value));
+                if (((String) value).length() > TEXT_LIMIT) {
+                    target.put(field + "Truncated", Boolean.TRUE);
+                    target.put("evidenceTruncated", Boolean.TRUE);
+                }
             } else if (value instanceof Number || value instanceof Boolean) {
                 target.put(field, value);
             }
@@ -91,59 +98,106 @@ final class CollectorExceptionEvidence {
         return target;
     }
 
-    private static void markTruncated(Map<String, Object> target, String field, String value, List<String> tokens) {
-        if (value != null && redact(value, tokens).length() > TEXT_LIMIT) {
-            target.put(field + "Truncated", Boolean.TRUE);
-            target.put("evidenceTruncated", Boolean.TRUE);
-        }
-    }
-
-    private static void collectInputValues(Object value, List<String> values, Set<Object> visited) {
-        if (value instanceof String) {
-            if (!((String) value).isEmpty()) values.add((String) value);
-        } else if (value instanceof DocumentValue) {
-            collectInputValues(((DocumentValue) value).text(), values, visited);
-        } else if (value instanceof byte[]) {
-            byte[] bytes = (byte[]) value;
-            // Binary inputs: cover decoded UTF-8, Base64, hex and Java's decimal array rendering.
-            collectInputValues(new String(bytes, StandardCharsets.UTF_8), values, visited);
-            collectInputValues(Base64.getEncoder().encodeToString(bytes), values, visited);
-            StringBuilder hex = new StringBuilder();
-            for (byte part : bytes) hex.append(String.format("%02x", part & 0xff));
-            collectInputValues(hex.toString(), values, visited);
-            collectInputValues(hex.toString().toUpperCase(java.util.Locale.ROOT), values, visited);
-            collectInputValues(Arrays.toString(bytes), values, visited);
-        } else if (value instanceof char[]) {
-            collectInputValues(new String((char[]) value), values, visited);
-        } else if (value instanceof Map && visited.add(value)) {
-            for (Object nested : ((Map<?, ?>) value).values()) collectInputValues(nested, values, visited);
-        } else if (value instanceof Iterable && visited.add(value)) {
-            for (Object nested : (Iterable<?>) value) collectInputValues(nested, values, visited);
-        } else if (value != null && value.getClass().isArray() && visited.add(value)) {
-            if (value.getClass().getComponentType().isPrimitive()) {
-                List<Object> elements = new ArrayList<Object>();
-                for (int index = 0; index < Array.getLength(value); index++) elements.add(Array.get(value, index));
-                collectInputValues(elements.toString(), values, visited);
+    private static String freeText(String value, Redaction redaction, Map<String, Object> target, String field) {
+        if (value == null || value.isEmpty()) return "";
+        // Full-value substitution cannot prove that an upstream-truncated echo is safe.
+        // Omit details when private inputs cannot be completely inspected within the budget.
+        // Also avoid scanning/materializing oversized diagnostic strings.
+        if (redaction.limited || value.length() > TEXT_LIMIT) {
+            target.put("failureDetailsOmitted", Boolean.TRUE);
+            if (value.length() > TEXT_LIMIT) {
+                target.put(field + "Truncated", Boolean.TRUE);
+                target.put("evidenceTruncated", Boolean.TRUE);
             }
-            for (int index = 0; index < Array.getLength(value); index++) {
-                collectInputValues(Array.get(value, index), values, visited);
-            }
+            return OMITTED_TEXT;
         }
-    }
-
-    private static String redact(String value, List<String> privateValues) {
-        if (value == null) return "";
         String safe = value;
-        for (String privateValue : privateValues) safe = safe.replace(privateValue, "[REDACTED_SECRET]");
-        return safe;
+        for (String token : redaction.tokens) {
+            safe = safe.replace(token, "[REDACTED_SECRET]");
+            if (safe.length() > TEXT_LIMIT) {
+                target.put(field + "Truncated", Boolean.TRUE);
+                target.put("evidenceTruncated", Boolean.TRUE);
+                target.put("failureDetailsOmitted", Boolean.TRUE);
+                return OMITTED_TEXT;
+            }
+        }
+        return bound(safe);
+    }
+
+    /** A bounded inspection; exceeding any budget fails closed for free-form details. */
+    private static final class Redaction {
+        final List<String> tokens = new ArrayList<String>();
+        final Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
+        int nodes;
+        int characters;
+        boolean limited;
+
+        void token(String value) {
+            if (limited || value == null || value.isEmpty()) return;
+            if (value.length() > TEXT_LIMIT || characters + value.length() > TOKEN_CHARACTER_LIMIT) {
+                limited = true;
+                return;
+            }
+            characters += value.length();
+            tokens.add(value);
+        }
+
+        void collect(Object value) {
+            if (limited || value == null) return;
+            if (++nodes > INPUT_NODE_LIMIT) { limited = true; return; }
+            if (value instanceof String) {
+                token((String) value);
+            } else if (value instanceof DocumentValue) {
+                token(((DocumentValue) value).text());
+            } else if (value instanceof byte[]) {
+                byte[] bytes = (byte[]) value;
+                if (bytes.length > BINARY_LIMIT) { limited = true; return; }
+                token(new String(bytes, StandardCharsets.UTF_8));
+                token(Base64.getEncoder().encodeToString(bytes));
+                StringBuilder hex = new StringBuilder(bytes.length * 2);
+                for (byte part : bytes) hex.append(String.format("%02x", part & 0xff));
+                token(hex.toString());
+                token(hex.toString().toUpperCase(java.util.Locale.ROOT));
+                token(Arrays.toString(bytes));
+            } else if (value instanceof char[]) {
+                char[] chars = (char[]) value;
+                if (chars.length > TEXT_LIMIT) { limited = true; return; }
+                token(new String(chars));
+            } else if (value instanceof Map && visited.add(value)) {
+                for (Object nested : ((Map<?, ?>) value).values()) {
+                    collect(nested);
+                    if (limited) break;
+                }
+            } else if (value instanceof Iterable && visited.add(value)) {
+                for (Object nested : (Iterable<?>) value) {
+                    collect(nested);
+                    if (limited) break;
+                }
+            } else if (value.getClass().isArray() && visited.add(value)) {
+                int length = Array.getLength(value);
+                if (length > ARRAY_LIMIT) { limited = true; return; }
+                if (value.getClass().getComponentType().isPrimitive()) {
+                    List<Object> elements = new ArrayList<Object>(length);
+                    for (int index = 0; index < length; index++) elements.add(Array.get(value, index));
+                    token(elements.toString());
+                } else {
+                    for (int index = 0; index < length; index++) {
+                        collect(Array.get(value, index));
+                        if (limited) break;
+                    }
+                }
+            } else if (!(value instanceof Map) && !(value instanceof Iterable)) {
+                // Unknown typed input may have an arbitrary or expensive representation.
+                // Scalar values are bounded by their built-in representations.
+                if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long
+                        || value instanceof Float || value instanceof Double || value instanceof Boolean) token(String.valueOf(value));
+                else limited = true;
+            }
+        }
     }
 
     private static String bound(String value) {
         if (value == null) return "";
         return value.length() > TEXT_LIMIT ? value.substring(0, TEXT_LIMIT - 14) + "...[TRUNCATED]" : value;
-    }
-
-    private static String text(String value, List<String> privateValues) {
-        return bound(redact(value, privateValues));
     }
 }

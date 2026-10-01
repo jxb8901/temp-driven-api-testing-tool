@@ -1115,6 +1115,92 @@ class StageTemplateRunnerTest {
         assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
     }
 
+    @Test void longPrivateInputsNeverPublishUpstreamTruncatedEchoes() throws Exception {
+        StringBuilder value = new StringBuilder();
+        for (int index = 0; index < 2000; index++) value.append("secret-").append(index).append('-');
+        final String secret = value.toString();
+        assertTrue(secret.length() > 20000);
+        for (final String echo : Arrays.asList(secret.substring(0, 2000),
+                secret.substring(0, 128) + "...[CAPTURE_TRUNCATED]..." + secret.substring(secret.length() - 128))) {
+            for (String mode : Arrays.asList("continue", "stop")) {
+                Path caseDir = tempDir.resolve("long-secret-" + echo.length() + "-" + mode);
+                Files.createDirectories(caseDir);
+                TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+                CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+                context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+                UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null) {
+                    @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext runtime,
+                            CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs,
+                            boolean overwrite, boolean bypassCache) throws Exception {
+                        if (!call.startsWith("#{fail(")) return super.executeToolAttempt(call, runtime, log,
+                                invocationId, timeoutMs, saveAs, overwrite, bypassCache);
+                        throw new ToolExecutionException("TIMEOUT", "Timed out: " + echo,
+                                map("input", map("token", secret), "status", "TIMEOUT", "sshHelper", "app",
+                                        "instance", "one", "timeoutMs", 50L, "stderr", echo,
+                                        "instances", map("one", map("status", "TIMEOUT", "error", echo,
+                                                "stderr", echo, "cleanupWarning", echo))),
+                                null, new IllegalStateException(echo));
+                    }
+                };
+                TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                        "evidence", map("private", map("call", "#{fail()}", "onFailure", mode))));
+                List<ValidationResult> results;
+                try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                    results = new StageTemplateRunner(engine).execute("invoke",
+                            new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                }
+                assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+                String path = "ACTIONS.call.output.evidence.collectors.private";
+                assertEquals("TIMEOUT", context.resolve(path + ".status"));
+                assertEquals("TIMEOUT", context.resolve(path + ".error.category"));
+                assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, context.resolve(path + ".error.message"));
+                String invocation = path + ".evidence.tool.invocations[0]";
+                assertEquals(Boolean.TRUE, context.resolve(invocation + ".inputRedactionLimited"));
+                assertEquals(Boolean.TRUE, context.resolve(invocation + ".failureDetailsOmitted"));
+                assertEquals("app", context.resolve(invocation + ".sshHelper"));
+                assertEquals(50L, context.resolve(invocation + ".timeoutMs"));
+                assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, context.resolve(invocation + ".instances.one.error"));
+                String published = att.validation.JsonSupport.write(context.resolve(path));
+                String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+                for (String fragment : Arrays.asList(secret.substring(0, 64), secret.substring(secret.length() - 64))) {
+                    assertFalse(published.contains(fragment));
+                    assertFalse(caseLog.contains(fragment));
+                    assertFalse(results.get(0).message().contains(fragment));
+                }
+            }
+        }
+    }
+
+    @Test void oversizedBinaryAndArrayInputsUseBoundedFailClosedProjection() {
+        byte[] bytes = new byte[8 * 1024 * 1024];
+        Arrays.fill(bytes, (byte) 's');
+        int[] numbers = new int[1024 * 1024];
+        Arrays.fill(numbers, 917);
+        Iterable<Object> endless = () -> new Iterator<Object>() {
+            @Override public boolean hasNext() { return true; }
+            @Override public Object next() { return "private"; }
+        };
+        for (Object input : Arrays.asList(bytes, numbers, endless,
+                Collections.nCopies(20, String.join("", Collections.nCopies(512, "x"))))) {
+            assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+                ToolExecutionException projected = CollectorExceptionEvidence.project(new ToolExecutionException(
+                        "TIMEOUT", "ssssssssssssssss",
+                        map("input", input, "status", "TIMEOUT", "stderr", "ssssssssssssssss",
+                                "instances", map("one", map("status", "TIMEOUT", "error", "private"))),
+                        null, null));
+                assertEquals(Boolean.TRUE, projected.evidence().get("inputRedactionLimited"));
+                assertEquals(Boolean.TRUE, projected.evidence().get("failureDetailsOmitted"));
+                assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, projected.getMessage());
+                assertEquals("TIMEOUT", projected.category());
+                assertEquals("TIMEOUT", projected.evidence().get("status"));
+                assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, projected.evidence().get("stderr"));
+                assertTrue(att.validation.JsonSupport.write(projected.evidence()).length() < 2000);
+                assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
+            });
+        }
+    }
+
     private final class PrivateCollectorEngine extends UnifiedTemplateEngine {
         private PrivateCollectorEngine() { super(null, new PrivateCollectorBuiltIns()); }
         @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,
