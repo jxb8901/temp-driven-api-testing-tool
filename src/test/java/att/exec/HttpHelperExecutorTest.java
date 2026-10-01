@@ -189,8 +189,10 @@ class HttpHelperExecutorTest {
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) invalidFormat.operationResult().outputMetadata().get("error")).get("type"));
             assertEquals(before, hits.get());
 
+            // This checks parsing, so allow scheduling headroom instead of testing a one-second deadline.
             ToolInvocationResult parseError = http.execute("paymentApi", "get",
-                    args("path", "/status", "responseFormat", "json"), context, 1000L, "bad-json", "text");
+                    args("path", "/status", "responseFormat", "json", "readTimeoutMs", 10000),
+                    context, 10000L, "bad-json", "text");
             assertEquals("HTTP_RESULT_PARSE_ERROR", ((Map<?, ?>) parseError.operationResult().outputMetadata().get("error")).get("type"));
             assertFalse(parseError.operationResult().outputMetadata().toString().contains("missing"));
             assertEquals(404, parseError.operationResult().outputMetadata().get("statusCode"));
