@@ -397,28 +397,45 @@ public final class CaseRuntimeContext {
         if (segments.isEmpty()) throw new IllegalArgumentException("Context path must contain at least one segment");
     }
 
-    /** Returns whether an EXEC.INPUT path exists in the supplied typed input tree. A terminal null is present. */
-    public static boolean containsInputPath(Map<?, ?> input, String path) {
+    /** Result of statically probing a path beneath EXEC.INPUT. */
+    enum InputPathStatus { FOUND, MISSING, NULL_INTERMEDIATE, INVALID_PATH }
+
+    /** Probes EXEC.INPUT with the same map/list traversal distinctions used by runtime Context lookup. */
+    static InputPathStatus probeInputPath(Map<?, ?> input, String path) {
         final java.util.List<Segment> segments;
         try { segments = parsePath(requiredReferencePath(path)); }
-        catch (RuntimeException invalidPath) { return false; }
+        catch (RuntimeException invalidPath) { return InputPathStatus.INVALID_PATH; }
         if (segments.size() < 2 || !"EXEC".equalsIgnoreCase(segments.get(0).key)
-                || !"INPUT".equalsIgnoreCase(segments.get(1).key)) return false;
+                || !"INPUT".equalsIgnoreCase(segments.get(1).key)) return InputPathStatus.INVALID_PATH;
         Object current = input == null ? java.util.Collections.emptyMap() : input;
         for (int index = 2; index < segments.size(); index++) {
+            if (current == null) return InputPathStatus.NULL_INTERMEDIATE;
             Segment segment = segments.get(index);
             if (current instanceof Map && segment.index == null) {
                 Map<?, ?> map = (Map<?, ?>) current;
-                if (!map.containsKey(segment.key)) return false;
+                if (!map.containsKey(segment.key)) return InputPathStatus.MISSING;
                 current = map.get(segment.key);
             } else if (current instanceof java.util.List && segment.index != null) {
                 java.util.List<?> list = (java.util.List<?>) current;
-                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return false;
+                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return InputPathStatus.MISSING;
                 current = list.get(segment.index.intValue());
-            } else return false;
-            if (current == null && index + 1 < segments.size()) return false;
+            } else return InputPathStatus.INVALID_PATH;
+            if (current == null && index + 1 < segments.size()) return InputPathStatus.NULL_INTERMEDIATE;
         }
-        return true;
+        return InputPathStatus.FOUND;
+    }
+
+    /** Compatibility predicate for callers that only need an existence check. */
+    public static boolean containsInputPath(Map<?, ?> input, String path) {
+        return probeInputPath(input, path) == InputPathStatus.FOUND;
+    }
+
+    /** Returns the top-level EXEC.VARS key selected by a parsed Context path, if any. */
+    static String executionVariableName(String path) {
+        java.util.List<Segment> segments = parsePath(requiredReferencePath(path));
+        if (segments.size() < 3 || !"EXEC".equalsIgnoreCase(segments.get(0).key)
+                || !"VARS".equalsIgnoreCase(segments.get(1).key) || segments.get(2).index != null) return null;
+        return segments.get(2).key;
     }
 
     private Resolution resolution(String path) {

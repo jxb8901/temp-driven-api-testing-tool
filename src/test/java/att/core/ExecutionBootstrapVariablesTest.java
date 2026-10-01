@@ -20,7 +20,8 @@ class ExecutionBootstrapVariablesTest {
     @Test void evaluatesTypedTreesAndOrderIndependentDependenciesAgainstInitializedContext() throws Exception {
         CaseRuntimeContext context = context("EXEC-12");
         Map<String, Object> definitions = new LinkedHashMap<String, Object>();
-        definitions.put("derived", "${EXEC.VARS.base}");
+        definitions.put("derived", "${EXEC.VARS['base']}");
+        definitions.put("expressionDerived", "#{${EXEC.VARS['base']} + 1}");
         definitions.put("rendered", "REQ-${EXEC.ID}");
         definitions.put("arithmetic", "#{${EXEC.INPUT.amount} * 2}");
         definitions.put("nested", mapOf("amount", "${EXEC.INPUT.amount}", "list", Arrays.asList("${EXEC.INPUT.amount}", "item-${EXEC.ID}")));
@@ -30,6 +31,7 @@ class ExecutionBootstrapVariablesTest {
 
         assertEquals(12L, ((Number) context.require("EXEC.VARS.base")).longValue());
         assertEquals(12L, ((Number) context.require("EXEC.VARS.derived")).longValue());
+        assertEquals(13L, ((Number) context.require("EXEC.VARS.expressionDerived")).longValue());
         assertEquals("REQ-EXEC-12", context.require("EXEC.VARS.rendered"));
         assertEquals(24L, ((Number) context.require("EXEC.VARS.arithmetic")).longValue());
         Map<?, ?> nested = (Map<?, ?>) context.require("EXEC.VARS.nested");
@@ -39,6 +41,22 @@ class ExecutionBootstrapVariablesTest {
         assertEquals("ATT", context.require("EXEC.VARS.pure"));
         context.assignCaseVariable("base", "replaced");
         assertEquals("replaced", context.require("EXEC.VARS.base"));
+    }
+
+    @Test void probesInputPathsAsFoundMissingNullIntermediateOrStructurallyInvalid() {
+        Map<String, Object> input = mapOf("customer", "C001", "nullable", null,
+                "profile", mapOf("id", "C002"), "items", Arrays.asList("first"));
+
+        assertEquals(CaseRuntimeContext.InputPathStatus.FOUND,
+                CaseRuntimeContext.probeInputPath(input, "EXEC.INPUT.profile.id"));
+        assertEquals(CaseRuntimeContext.InputPathStatus.MISSING,
+                CaseRuntimeContext.probeInputPath(input, "EXEC.INPUT.profile.absent"));
+        assertEquals(CaseRuntimeContext.InputPathStatus.NULL_INTERMEDIATE,
+                CaseRuntimeContext.probeInputPath(input, "EXEC.INPUT.nullable.id?"));
+        assertEquals(CaseRuntimeContext.InputPathStatus.INVALID_PATH,
+                CaseRuntimeContext.probeInputPath(input, "EXEC.INPUT.customer.id?"));
+        assertEquals(CaseRuntimeContext.InputPathStatus.INVALID_PATH,
+                CaseRuntimeContext.probeInputPath(input, "EXEC.INPUT.items.key?"));
     }
 
     @Test void permitsExplicitNullAndMakesEachEvaluationOwnItsMutableTree() throws Exception {

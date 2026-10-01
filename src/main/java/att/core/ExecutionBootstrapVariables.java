@@ -14,13 +14,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** Resolves pure, typed EXEC.VARS definitions after execution identity is ready and before actions start. */
 public final class ExecutionBootstrapVariables {
-    private static final Pattern VARIABLE = Pattern.compile("EXEC\\.VARS\\.([A-Za-z_][A-Za-z0-9_]*)");
-
     private ExecutionBootstrapVariables() { }
 
     public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine) {
@@ -116,8 +112,8 @@ public final class ExecutionBootstrapVariables {
         } else if (value instanceof String) {
             for (String path : parsePaths(engine, (String) value, field, validation)) {
                 validatePath(path, field, validation);
-                Matcher matcher = VARIABLE.matcher(path);
-                if (matcher.find()) refs.add(matcher.group(1));
+                String variable = CaseRuntimeContext.executionVariableName(path);
+                if (variable != null) refs.add(variable);
             }
         }
     }
@@ -165,6 +161,10 @@ public final class ExecutionBootstrapVariables {
         catch (RuntimeException error) {
             throw validation.invalid("Invalid optional Context path '" + path + "': " + error.getMessage(), field);
         }
+        try { CaseRuntimeContext.validateReferencePath(requiredPath); }
+        catch (RuntimeException error) {
+            throw validation.invalid("Invalid Context path '" + path + "': " + error.getMessage(), field);
+        }
         String upper = requiredPath.toUpperCase(java.util.Locale.ROOT);
         if (upper.equals("EXEC.ACTIONS") || upper.startsWith("EXEC.ACTIONS.") || upper.startsWith("EXEC.ACTIONS[")
                 || upper.equals("ACTIONS") || upper.startsWith("ACTIONS.") || upper.startsWith("ACTIONS[")
@@ -179,16 +179,21 @@ public final class ExecutionBootstrapVariables {
                 || upper.equals("EXEC.STARTED_AT") || upper.equals("EXEC.RUN_STARTED_AT")
                 || inputPath
                 || upper.equals("EXEC.LOAD") || upper.startsWith("EXEC.LOAD.") || upper.startsWith("EXEC.LOAD[")
-                || upper.startsWith("EXEC.VARS.")
+                || upper.startsWith("EXEC.VARS.") || upper.startsWith("EXEC.VARS[")
                 || upper.equals("META.PROJECT") || upper.startsWith("META.PROJECT.") || upper.startsWith("META.PROJECT[")
                 || upper.equals("META.SOURCE") || upper.startsWith("META.SOURCE.") || upper.startsWith("META.SOURCE[")
                 || upper.equals("META.TARGET") || upper.startsWith("META.TARGET.") || upper.startsWith("META.TARGET[")
                 || upper.equals("META.TEMPLATE") || upper.startsWith("META.TEMPLATE.") || upper.startsWith("META.TEMPLATE[");
         if (!allowed) throw validation.invalid("Context path '" + path + "' is not an initialized bootstrap root", field);
-        boolean optionalInputReference = CaseRuntimeContext.isOptionalReference(path);
-        if (inputPath && validation.checkInputReferences && !optionalInputReference
-                && !CaseRuntimeContext.containsInputPath(validation.inputs, path))
-            throw validation.invalid("Bootstrap expression references missing input '" + path + "'", field);
+        if (inputPath && validation.checkInputReferences) {
+            CaseRuntimeContext.InputPathStatus status = CaseRuntimeContext.probeInputPath(validation.inputs, path);
+            boolean optional = CaseRuntimeContext.isOptionalReference(path);
+            if (status == CaseRuntimeContext.InputPathStatus.INVALID_PATH)
+                throw validation.invalid("Bootstrap expression references structurally invalid input path '"
+                        + path + "'", field);
+            if (!optional && status != CaseRuntimeContext.InputPathStatus.FOUND)
+                throw validation.invalid("Bootstrap expression references missing input '" + path + "'", field);
+        }
     }
 
     private static String join(List<String> names) {

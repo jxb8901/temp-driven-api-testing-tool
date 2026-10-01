@@ -204,6 +204,29 @@ class LoadCrossModeTest {
         assertNull(result.context().require("EXEC.VARS.region"));
     }
 
+    @Test void optionalStructurallyInvalidInputPathFailsBeforeLoadSchedulerStarts() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        Path source = write(project, "load/optional-invalid-input-path.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: invalidPath\n    target: {type: template, id: SHARED}\n"
+                + "    inputs: {value: ready, customer: C001}\n"
+                + "    vars:\n      customerId: '${EXEC.INPUT.customer.id?}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget seedTarget = new LoadTargetResolver(project, config).resolve(scenario);
+        Path output = temp.resolve("invalid-input-path-output");
+
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor seed = new IterationExecutor(project, config, seedTarget, resources, output);
+            att.validation.DiagnosticException diagnostic = assertThrows(att.validation.DiagnosticException.class,
+                    () -> LoadRunCoordinator.runFrom(scenario, seed, "invalid-input-path-run", null, output));
+            assertEquals("workloads[0].vars.customerId", diagnostic.field());
+            assertTrue(diagnostic.detail().contains("structurally invalid input path"), diagnostic.format());
+        }
+        assertFalse(Files.exists(output.resolve("load/invalid-input-path-run")),
+                "preflight failure must happen before a workload scheduler creates run output");
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> map(Object value) {
         return value instanceof Map ? (Map<String, Object>) value : Collections.<String, Object>emptyMap();
