@@ -23,7 +23,8 @@ public final class LoadTargetValidator {
                     : "workloads[" + workload.sourceIndex() + "].vars";
             try {
                 att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine, scenario.inputs(),
-                        scenario.source(), varsField, att.validation.DiagnosticCodes.LOAD_INVALID);
+                        scenario.source(), varsField, att.validation.DiagnosticCodes.LOAD_INVALID,
+                        att.core.ExecutionBootstrapVariables.Scope.LOAD);
             } catch (att.validation.DiagnosticException error) {
                 throw error.withDetail("workloadId: " + workload.id());
             }

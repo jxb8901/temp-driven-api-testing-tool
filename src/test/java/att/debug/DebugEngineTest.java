@@ -293,6 +293,25 @@ class DebugEngineTest {
         assertTrue(strict.diagnostic().detail().contains("missing input"), strict.diagnostic().format());
     }
 
+    @Test void debugBootstrapRejectsLoadOnlyRootsDuringPreflight() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        Path sidecar = project.resolve("templates/SIMPLE/debug.yaml");
+        for (String reference : new String[]{"${EXEC.LOAD.USER_ID}", "${EXEC.LOAD}"}) {
+            Files.write(sidecar, ("schemaVersion: att-debug/v1.1\nvars:\n  loadValue: '" + reference + "'\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            DebugEngine.Result result = run(project, config, "template", "SIMPLE", "--output-dir",
+                    temp.resolve("debug-load-root-" + Math.abs(reference.hashCode())).toString());
+
+            assertEquals(ResultStatus.INVALID, result.status(), reference);
+            assertNotNull(result.diagnostic());
+            assertEquals("vars.loadValue", result.diagnostic().field());
+            assertTrue(result.diagnostic().detail().contains("not an initialized bootstrap root"),
+                    result.diagnostic().format());
+        }
+    }
+
     @Test void missingSidecarIsDiagnosticAndDoesNotTouchNormalRunOutput() throws Exception {
         Path project = fixtureWithoutSidecars();
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,

@@ -65,6 +65,22 @@ class ExecutionBootstrapVariablesTest {
         assertEquals("vars.value", numericVarsSelector.field());
     }
 
+    @Test void loadRootIsAvailableOnlyInLoadBootstrapScope() {
+        for (String reference : Arrays.asList("${EXEC.LOAD.USER_ID}", "${EXEC.LOAD}")) {
+            Map<String, Object> definition = mapOf("value", reference);
+            att.validation.DiagnosticException debug = assertThrows(att.validation.DiagnosticException.class,
+                    () -> ExecutionBootstrapVariables.validate(definition, engine(), Collections.<String, Object>emptyMap(),
+                            null, "vars", att.validation.DiagnosticCodes.DEBUG_INVALID,
+                            ExecutionBootstrapVariables.Scope.DEBUG));
+            assertEquals("vars.value", debug.field());
+            assertTrue(debug.detail().contains("not an initialized bootstrap root"), debug.detail());
+
+            assertDoesNotThrow(() -> ExecutionBootstrapVariables.validate(definition, engine(),
+                    Collections.<String, Object>emptyMap(), null, "vars", att.validation.DiagnosticCodes.LOAD_INVALID,
+                    ExecutionBootstrapVariables.Scope.LOAD));
+        }
+    }
+
     @Test void probesInputPathsAsFoundMissingNullIntermediateOrStructurallyInvalid() {
         Map<String, Object> input = mapOf("customer", "C001", "nullable", null,
                 "profile", mapOf("id", "C002"), "items", Arrays.asList("first"));

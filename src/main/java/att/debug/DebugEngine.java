@@ -53,7 +53,8 @@ public final class DebugEngine {
 
     /** Reads and validates a Debug sidecar for in-memory Load promotion without executing the target. */
     public Map<String, Object> loadBootstrapInputForLoad(ExecutionOptions options) throws Exception {
-        DebugInput input = loadInput(options, options.debugTargetType(), options.debugTargetId());
+        DebugInput input = loadInput(options, options.debugTargetType(), options.debugTargetId(),
+                att.core.ExecutionBootstrapVariables.Scope.LOAD);
         Map<String, Object> promoted = new LinkedHashMap<String, Object>();
         promoted.put("source", input.path);
         promoted.put("inputs", input.inputs);
@@ -80,7 +81,7 @@ public final class DebugEngine {
             UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
-                    "vars", DiagnosticCodes.DEBUG_INVALID);
+                    "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
         }
         new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                 resolved.flows, input.path, "debug", input.inputs, input.vars);
@@ -148,7 +149,7 @@ public final class DebugEngine {
             UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
-                    "vars", DiagnosticCodes.DEBUG_INVALID);
+                    "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             if (options.verbose() && !options.quiet())
                 consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
                         + " case=" + testCase.caseId() + " resolved=" + input.path);
@@ -163,7 +164,8 @@ public final class DebugEngine {
             context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
             context.setLegacyInputsView(input.inputs);
             if ("template".equals(targetType) || "flow".equals(targetType))
-                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine);
+                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
+                        att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             context.put("CASE.environment", config.environment());
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
@@ -280,6 +282,11 @@ public final class DebugEngine {
     }
 
     private DebugInput loadInput(ExecutionOptions options, String type, String id) throws Exception {
+        return loadInput(options, type, id, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
+    }
+
+    private DebugInput loadInput(ExecutionOptions options, String type, String id,
+                                 att.core.ExecutionBootstrapVariables.Scope bootstrapScope) throws Exception {
         Path path = options.debugInput() == null ? autoInput(type, id) : resolveInput(options.debugInput());
         if (!Files.isRegularFile(path) || Files.isSymbolicLink(path))
             throw debugError("Debug input file does not exist: " + path, "Create the sidecar file or pass --input <path>.");
@@ -312,11 +319,11 @@ public final class DebugEngine {
             UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             if (rawVars != null && !(rawVars instanceof Map))
-                validateDebugVariables(rawVars, type, path, inputs, bootstrapEngine);
+                validateDebugVariables(rawVars, type, path, inputs, bootstrapEngine, bootstrapScope);
             Map<String, Object> vars = DebugInput.map(rawVars);
             inputs = att.core.CliSetOverrides.apply(inputs, overrides, "input");
             vars = att.core.CliSetOverrides.apply(vars, overrides, "vars");
-            vars = validateDebugVariables(vars, type, path, inputs, bootstrapEngine);
+            vars = validateDebugVariables(vars, type, path, inputs, bootstrapEngine, bootstrapScope);
             if (map.containsKey("inputs") || att.core.CliSetOverrides.hasNamespace(overrides, "input")) map.put("inputs", inputs);
             if (map.containsKey("vars") || att.core.CliSetOverrides.hasNamespace(overrides, "vars")) map.put("vars", vars);
             Map<String, Object> effectiveToolArguments = null;
@@ -396,7 +403,8 @@ public final class DebugEngine {
 
     private Map<String, Object> validateDebugVariables(Object raw, String targetType, Path path,
                                                         Map<String, Object> inputs,
-                                                        UnifiedTemplateEngine bootstrapEngine) {
+                                                        UnifiedTemplateEngine bootstrapEngine,
+                                                        att.core.ExecutionBootstrapVariables.Scope bootstrapScope) {
         if (raw != null && !(raw instanceof Map)) {
             DiagnosticException error = new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
                     "Invalid debug.vars", "vars must be a YAML object/map", path.toString(), "vars",
@@ -417,7 +425,7 @@ public final class DebugEngine {
             return vars;
         }
         return att.core.ExecutionBootstrapVariables.validate(vars, bootstrapEngine, inputs, path,
-                "vars", DiagnosticCodes.DEBUG_INVALID);
+                "vars", DiagnosticCodes.DEBUG_INVALID, bootstrapScope);
     }
 
     private void appendError(CaseExecutionLog log, DiagnosticException error) {

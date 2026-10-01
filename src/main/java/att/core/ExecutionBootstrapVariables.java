@@ -19,17 +19,27 @@ import java.util.Set;
 public final class ExecutionBootstrapVariables {
     private ExecutionBootstrapVariables() { }
 
+    /** Execution mode controls which framework roots are initialized before bootstrap evaluation. */
+    public enum Scope { DEBUG, LOAD }
+
     public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine) {
-        return validate(definitions, engine, null, null, "vars", DiagnosticCodes.DEBUG_INVALID);
+        return validate(definitions, engine, null, null, "vars", DiagnosticCodes.DEBUG_INVALID, Scope.DEBUG);
     }
 
     /** Validates definitions against statically available inputs and attaches YAML field provenance. */
     public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine,
                                                Map<String, Object> inputs, Path source, String fieldPrefix,
                                                String diagnosticCode) {
+        return validate(definitions, engine, inputs, source, fieldPrefix, diagnosticCode, Scope.DEBUG);
+    }
+
+    /** Validates definitions against the initialized roots available to the selected execution mode. */
+    public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine,
+                                               Map<String, Object> inputs, Path source, String fieldPrefix,
+                                               String diagnosticCode, Scope scope) {
         Map<String, Object> vars = definitions == null ? new LinkedHashMap<String, Object>() : definitions;
         Validation validation = new Validation(inputs, source, fieldPrefix, diagnosticCode,
-                inputs != null || source != null);
+                inputs != null || source != null, scope);
         for (Map.Entry<String, Object> entry : vars.entrySet()) {
             String name = entry.getKey();
             String field = validation.variableField(name);
@@ -47,13 +57,19 @@ public final class ExecutionBootstrapVariables {
 
     public static void evaluate(Map<String, Object> definitions, CaseRuntimeContext context,
                                 UnifiedTemplateEngine engine) throws Exception {
-        Map<String, Object> vars = validate(definitions, engine);
+        evaluate(definitions, context, engine, Scope.DEBUG);
+    }
+
+    public static void evaluate(Map<String, Object> definitions, CaseRuntimeContext context,
+                                UnifiedTemplateEngine engine, Scope scope) throws Exception {
+        Map<String, Object> vars = validate(definitions, engine, null, null, "vars",
+                DiagnosticCodes.DEBUG_INVALID, scope);
         Map<String, Set<String>> dependencies = dependencies(vars, engine,
-                new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false));
+                new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false, scope));
         List<String> order = new ArrayList<String>();
         Set<String> visited = new LinkedHashSet<String>();
         Set<String> active = new LinkedHashSet<String>();
-        Validation validation = new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false);
+        Validation validation = new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false, scope);
         for (String name : vars.keySet()) visit(name, dependencies, visited, active, order, validation);
 
         Set<String> published = new LinkedHashSet<String>();
@@ -186,7 +202,7 @@ public final class ExecutionBootstrapVariables {
             } else if ("VARS".equals(child)) {
                 allowed = segments.size() >= 3 && keyAt(segments, 2) != null;
             } else if ("LOAD".equals(child)) {
-                allowed = true;
+                allowed = validation.scope == Scope.LOAD;
             } else if (isOneOf(child, "ID", "RUN_ID", "OUTPUT_DIR", "STARTED_AT", "RUN_STARTED_AT")) {
                 allowed = segments.size() == 2;
             }
@@ -229,14 +245,16 @@ public final class ExecutionBootstrapVariables {
         private final String fieldPrefix;
         private final String diagnosticCode;
         private final boolean checkInputReferences;
+        private final Scope scope;
 
         private Validation(Map<String, Object> inputs, Path source, String fieldPrefix, String diagnosticCode,
-                           boolean checkInputReferences) {
+                           boolean checkInputReferences, Scope scope) {
             this.inputs = inputs;
             this.source = source;
             this.fieldPrefix = fieldPrefix == null || fieldPrefix.trim().isEmpty() ? "vars" : fieldPrefix;
             this.diagnosticCode = diagnosticCode == null ? DiagnosticCodes.DEBUG_INVALID : diagnosticCode;
             this.checkInputReferences = checkInputReferences;
+            this.scope = scope == null ? Scope.DEBUG : scope;
         }
 
         private String variableField(String name) { return fieldPrefix + "." + name; }

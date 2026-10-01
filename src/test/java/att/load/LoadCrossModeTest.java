@@ -78,7 +78,7 @@ class LoadCrossModeTest {
                 + "name: SHARED\ndescription: bootstrap fixture\nactions:\n"
                 + "  check:\n    type: log\n    message: 'value=${EXEC.VARS.refNo}|id=${EXEC.VARS.executionId}'\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {amount: 17}\n"
-                + "vars: {refNo: sidecar, executionId: '${EXEC.ID}'}\n");
+                + "vars: {refNo: sidecar, executionId: '${EXEC.ID}', loadUser: '${EXEC.LOAD.USER_ID}'}\n");
         ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "SHARED",
                 "--input", "templates/SHARED/debug.yaml", "--users", "1", "--duration", "1s",
                 "--run-id", "bootstrap-load", "--output-dir", temp.resolve("load-output").toString(),
@@ -100,6 +100,8 @@ class LoadCrossModeTest {
             assertEquals(17L, ((Number) first.context().require("EXEC.VARS.refNo")).longValue());
             assertEquals(first.context().resolve("EXEC.ID"), first.context().resolve("EXEC.VARS.executionId"));
             assertEquals(second.context().resolve("EXEC.ID"), second.context().resolve("EXEC.VARS.executionId"));
+            assertEquals("VU-1", first.context().resolve("EXEC.VARS.loadUser"));
+            assertEquals("VU-1", second.context().resolve("EXEC.VARS.loadUser"));
             assertNotEquals(first.context().resolve("EXEC.VARS.executionId"), second.context().resolve("EXEC.VARS.executionId"));
             assertTrue(String.valueOf(first.context().resolve("EXEC.ACTIONS.check.output.result")).contains("value=17|id="));
         }
@@ -189,6 +191,7 @@ class LoadCrossModeTest {
         Path source = write(project, "load/optional-bootstrap-input.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "  - id: optional\n    target: {type: template, id: OPTIONAL}\n    inputs: {}\n"
                 + "    vars:\n      customerId: '${EXEC.INPUT.customerId?}'\n"
+                + "      loadUser: '${EXEC.LOAD.USER_ID}'\n"
                 + "      region: '#{${EXEC.INPUT.region?}}'\n"
                 + "    load: {users: 1, duration: 1s}\n");
         LoadScenario scenario = new LoadScenarioLoader(project).load(source);
@@ -202,6 +205,7 @@ class LoadCrossModeTest {
         assertEquals(ResultStatus.PASS, result.status());
         assertNull(result.context().require("EXEC.VARS.customerId"));
         assertNull(result.context().require("EXEC.VARS.region"));
+        assertEquals("VU-1", result.context().require("EXEC.VARS.loadUser"));
     }
 
     @Test void optionalStructurallyInvalidInputPathFailsBeforeLoadSchedulerStarts() throws Exception {

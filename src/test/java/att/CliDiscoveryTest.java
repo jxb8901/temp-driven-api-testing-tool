@@ -28,6 +28,8 @@ class CliDiscoveryTest {
         assertTrue(withSidecar.containsKey("sidecar"));
         assertTrue(String.valueOf(withSidecar.get("command")).contains("debug template"));
         assertFalse(targets.stream().anyMatch(target -> "NO_SIDECAR".equals(target.get("id"))));
+        assertFalse(targets.stream().anyMatch(target -> "LOAD_ONLY".equals(target.get("id"))),
+                "Debug discovery must not advertise a sidecar that depends on Load-only roots");
         assertTrue(targets.stream().allMatch(target -> Files.isRegularFile(Paths.get(String.valueOf(target.get("sidecar"))))));
         assertFalse(Files.exists(root.resolve("output")), "discovery must not create Debug output");
     }
@@ -75,6 +77,10 @@ class CliDiscoveryTest {
         write(root, "templates/TARGET/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {value: ready}\n");
         write(root, "templates/NO_SIDECAR/template.yaml", "schemaVersion: att-template/v3.3\nname: NO_SIDECAR\n"
                 + "description: no sidecar\nactions:\n  show: {type: log, message: ready}\n");
+        write(root, "templates/LOAD_ONLY/template.yaml", "schemaVersion: att-template/v3.3\nname: LOAD_ONLY\n"
+                + "description: Load-only bootstrap root\nactions:\n  show: {type: log, message: ready}\n");
+        write(root, "templates/LOAD_ONLY/debug.yaml", "schemaVersion: att-debug/v1.1\nvars:\n"
+                + "  userId: '${EXEC.LOAD.USER_ID}'\n");
         write(root, "templates/flows/group/flow/flow.yaml", "schemaVersion: att-flow/v3.3\nid: group.flow.v1\n"
                 + "name: Flow\ndescription: discovery flow\nactions:\n  show: {type: log, message: ready}\n");
         Files.createDirectories(root.resolve("output"));
