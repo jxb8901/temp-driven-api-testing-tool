@@ -56,7 +56,8 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
             jsch.setKnownHosts(knownHosts.toString());
             if (!ssh.identityFile().isEmpty()) jsch.addIdentity(identityFile(ssh, projectRoot).toString());
         } catch (JSchException e) {
-            throw new IOException("Unable to initialize Java SSH authentication: " + e.getMessage(), e);
+            throw new SshResourceExecutor.SshOperationException("SSH_AUTH_ERROR",
+                    "Unable to initialize Java SSH authentication: " + e.getMessage(), e);
         }
 
         Session session = null;

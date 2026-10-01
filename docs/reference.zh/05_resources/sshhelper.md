@@ -40,6 +40,22 @@ actions:
 
 三種 operation 只接受 named arguments。Unknown operation/helper/argument、重複 argument、錯誤 format／timeout、缺少 required field、upload source 衝突及不安全 local path 都會在外部執行前驗證失敗。Runtime evidence 包含 logical helper、選定 instance、host/port、operation、transport、時間及 transfer/command 詳情；command input 和 represented payload 不會複製到 evidence。由 environment 提供的 identity path 仍會遮蔽。
 
+Native SSH failure 在 invocation `error.category` 和 `SSH.error.category` 發布穩定分類：
+
+| Category | 意義 |
+|---|---|
+| `SSH_CONNECTION_ERROR` | 非 timeout 的 connection、host verification 或 channel setup 失敗；backend 無法可靠識別 authentication 時亦使用此類別。 |
+| `SSH_AUTH_ERROR` | Java backend 識別到 authentication rejection/cancellation，或無法初始化配置的 identity。 |
+| `SSH_TRANSPORT_ERROR` | OpenSSH 回傳 255；可能是 connection/authentication failure，亦可能是 remote command 自己 exit 255。ATT 保留 stderr 及 exit code，不依本地化訊息猜測。 |
+| `SSH_TIMEOUT` / `SSH_POOL_TIMEOUT` | Operation/connect deadline 或 concurrency wait 到期。 |
+| `SSH_REMOTE_EXIT` | Remote command 完成但 exit 非零（OpenSSH 255 使用上述類別）。 |
+| `SSH_RESULT_PARSE_ERROR` | stdout parsing 失敗。 |
+| `SSH_UPLOAD_ERROR` / `SSH_DOWNLOAD_ERROR` | Connection setup 後對應 transfer 失敗，包括 remote permission、missing path 或 protocol error。 |
+| `SSH_PATH` / `SSH_ARGUMENT` | Local containment/security check 或 argument validation 失敗。 |
+| `SSH_INTERRUPTED` | Caller 中斷 operation。 |
+
+Transfer connection/channel failure 保留 `phase: connect|channel`；timeout evidence 亦保留相應 timeout budget。所有 failure 都保留選定 operation 與實際 transport。Transfer error 仍不可自動 timeout replay。
+
 Native Resource Helper call 使用一個 absolute Action deadline，涵蓋 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP transfer。Per-call `timeoutMs` 或 helper `timeouts.commandTimeoutMs` 只設定 operation limit，不能延長 enclosing Action deadline。`timeouts.connectTimeoutMs` 只在剩餘 deadline 內限制 connection establishment，不會額外增加 operation 時間。`execute`、`upload`、`download` 都遵守此契約。Native `execute` 的 `SSH_TIMEOUT` 與 `SSH_POOL_TIMEOUT` 可使用 Action `retryOn: [TIMEOUT]`；native `upload` 與 `download` 會拒絕 timeout retry，因為重播 transfer 可能重複副作用。SFTP Action 會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker 持有，直到 transfer worker 與 transport 終止。
 
 SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在 Tool group 中寫入實體主機。`att-sshhelper/v1.0` YAML descriptor 含 `id`、可選 `name`／`description`、可選 `defaults`（`user`、`port`、`identityFile`）、非空有序 `instances`、可選 `selection.strategy` 和 `fanout.maxConcurrency`（預設 4、範圍 1–256）。每個 instance 需有 `id`／`host`，`user` 必須由 instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設 22，必須在 1–65535。Helper 和 instance ID 符合 `[A-Za-z_][A-Za-z0-9_-]*`，忽略大小寫後不可重複。無效 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy 都會在 SSH 執行前失敗。

@@ -98,7 +98,9 @@ public final class SshResourceExecutor {
             Thread.currentThread().interrupt();
             return failure(name, id, safeInput, started, helper, target, "SSH_INTERRUPTED", "SSH operation was interrupted", log, interrupted);
         } catch (Exception error) {
-            String category = error instanceof SshOperationException ? ((SshOperationException) error).category : "SSH_ERROR";
+            String category = error instanceof SshOperationException ? ((SshOperationException) error).category
+                    : ("upload".equals(operation) ? "SSH_UPLOAD_ERROR"
+                    : "download".equals(operation) ? "SSH_DOWNLOAD_ERROR" : "SSH_CONNECTION_ERROR");
             String message = safeError(error, target);
             if (log != null && !(error instanceof SshOperationException && "SSH_ARGUMENT".equals(category)))
                 InternalExceptionLogger.logIfInternal(log, "ssh." + operation, error, identityRedactions(target));
@@ -117,8 +119,17 @@ public final class SshResourceExecutor {
         if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format)))
             throw argument("stdoutFormat must be text, json, yaml, or xml", "SSH_ARGUMENT");
         Instant started = Instant.now();
-        SshCommandRunner.Execution execution = commandRunner.runRaw(target, connectDuration(helper, deadlineNanos),
-                remainingDuration(deadlineNanos), command, projectRoot);
+        SshCommandRunner.Execution execution;
+        try {
+            execution = commandRunner.runRaw(target, connectDuration(helper, deadlineNanos),
+                    remainingDuration(deadlineNanos), command, projectRoot);
+        } catch (SshOperationException error) {
+            throw error;
+        } catch (IOException error) {
+            throw operation("SSH command transport failed: " + safeError(error, target),
+                    authenticationFailure(error) ? "SSH_AUTH_ERROR" : "SSH_CONNECTION_ERROR",
+                    commonEvidence(helper, target, "execute", commandRunner.transportName(), started), error);
+        }
         CommandResult commandResult = execution.result();
         String stdout = commandResult.stdout();
         String stderr = redact(commandResult.stderr(), target);
@@ -137,6 +148,9 @@ public final class SshResourceExecutor {
         evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
         evidence.put("stderr", stderr);
         if (commandResult.timedOut()) throw operation("SSH command timed out", "SSH_TIMEOUT", evidence);
+        // OpenSSH reserves 255 for transport errors, but a remote command can also exit 255.
+        if ("openssh".equals(execution.transport()) && commandResult.exitCode() == 255)
+            throw operation("SSH transport failed or remote command exited with code 255", "SSH_TRANSPORT_ERROR", evidence);
         if (commandResult.exitCode() != 0)
             throw operation("SSH command exited with code " + commandResult.exitCode(), "SSH_REMOTE_EXIT", evidence);
         Object parsed;
@@ -596,6 +610,18 @@ public final class SshResourceExecutor {
         return new SshOperationException(category, message, cause, evidence);
     }
 
+    static boolean authenticationFailure(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (!(cause instanceof JSchException)) continue;
+            String message = cause.getMessage();
+            if (message == null) continue;
+            String normalized = message.toLowerCase(Locale.ROOT);
+            if (normalized.startsWith("auth fail") || normalized.startsWith("auth cancel")
+                    || normalized.startsWith("userauth fail")) return true;
+        }
+        return false;
+    }
+
     static final class SshOperationException extends IOException {
         private final String category;
         private final Map<String, Object> evidence;
@@ -735,12 +761,24 @@ final class JschSshTransferClient implements SshTransferClient {
     private Connection open(SshConfig ssh, Path projectRoot, Duration connectTimeout, Duration timeout,
                             SshTransferCancellation cancellation) throws Exception {
         if (!Files.isRegularFile(knownHosts) || Files.isSymbolicLink(knownHosts) || !Files.isReadable(knownHosts))
-            throw new IOException("Java SSH transfer requires a readable non-symlink known_hosts file");
-        JSch jsch = new JSch(); jsch.setKnownHosts(knownHosts.toString());
+            throw new SshResourceExecutor.SshOperationException("SSH_CONNECTION_ERROR",
+                    "Java SSH transfer requires a readable non-symlink known_hosts file", null);
+        JSch jsch = new JSch();
+        try {
+            jsch.setKnownHosts(knownHosts.toString());
+        } catch (JSchException error) {
+            throw new SshResourceExecutor.SshOperationException("SSH_CONNECTION_ERROR",
+                    "Unable to initialize SSH host verification", error);
+        }
         if (!ssh.identityFile().isEmpty()) {
             Path identity = Paths.get(ssh.identityFile());
             if (!identity.isAbsolute()) identity = projectRoot.resolve(identity).normalize();
-            jsch.addIdentity(identity.toString());
+            try {
+                jsch.addIdentity(identity.toString());
+            } catch (JSchException error) {
+                throw new SshResourceExecutor.SshOperationException("SSH_AUTH_ERROR",
+                        "Unable to initialize SSH authentication", error);
+            }
         }
         Session session = jsch.getSession(ssh.user(), ssh.host(), ssh.port());
         session.setConfig("StrictHostKeyChecking", "yes");
@@ -784,7 +822,12 @@ final class JschSshTransferClient implements SshTransferClient {
                         connecting ? "SSH transfer connection timed out" : "SSH transfer channel setup timed out",
                         error, evidence);
             }
-            throw error;
+            Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+            evidence.put("phase", connecting ? "connect" : "channel");
+            throw new SshResourceExecutor.SshOperationException(
+                    SshResourceExecutor.authenticationFailure(error) ? "SSH_AUTH_ERROR" : "SSH_CONNECTION_ERROR",
+                    connecting ? "SSH transfer connection failed" : "SSH transfer channel setup failed",
+                    error, evidence);
         }
     }
 

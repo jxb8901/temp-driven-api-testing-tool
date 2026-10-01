@@ -368,6 +368,110 @@ class SshResourceHelperTest {
         assertTrue(result.executionSuccess());
     }
 
+    @Test void nonTimeoutSftpConnectionFailureHasConnectionCategoryForBothOperations() throws Exception {
+        Path knownHosts = root.resolve("refused_known_hosts");
+        Files.write(knownHosts, new byte[0]);
+        // A bound socket that is not listening deterministically refuses local connections.
+        try (java.net.Socket reserved = new java.net.Socket()) {
+            reserved.bind(new java.net.InetSocketAddress("127.0.0.1", 0));
+            SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false),
+                    new JschSshTransferClient(knownHosts), "single",
+                    Collections.singletonMap("one", new SshConfig("127.0.0.1", "deploy", reserved.getLocalPort(), "")),
+                    1, 1000, null);
+            for (String operation : new String[]{"upload", "download"}) {
+                Map<String, Object> input = "upload".equals(operation)
+                        ? map("remotePath", "/srv/value", "payload", "value")
+                        : map("remotePath", "/srv/value", "localPath", "refused.txt");
+                ToolInvocationResult result = executor.execute("application", operation, input,
+                        context(), 5000L, "ssh-refused-" + operation,
+                        new CaseExecutionLog(root.resolve("refused-" + operation + ".log")));
+                assertFalse(result.executionSuccess());
+                assertEquals("SSH_CONNECTION_ERROR", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+                Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+                assertEquals("SSH_CONNECTION_ERROR", ((Map<?, ?>) evidence.get("error")).get("category"));
+                assertEquals("connect", evidence.get("phase"));
+                assertEquals(operation, evidence.get("operation"));
+                assertEquals("sftp", evidence.get("transport"));
+            }
+        }
+    }
+
+    @Test void commandAuthenticationFailureRetainsItsCategoryThroughTheBoundary() throws Exception {
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> {
+                    throw new IOException("SSH execution failed", new com.jcraft.jsch.JSchException("Auth fail"));
+                }, System.err);
+        ToolInvocationResult result = executor(new CommandResult(0, "unused", "", false), null,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
+                1, 1000, runner).execute("application", "execute", map("command", "health"),
+                context(), 5000L, "ssh-auth", new CaseExecutionLog(root.resolve("auth.log")));
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_AUTH_ERROR", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        assertEquals("SSH_AUTH_ERROR", ((Map<?, ?>) ((Map<?, ?>) result.invocation().get("SSH")).get("error")).get("category"));
+    }
+
+    @Test void sftpIdentityInitializationFailureHasAuthenticationCategory() throws Exception {
+        Path knownHosts = root.resolve("identity_known_hosts");
+        Files.write(knownHosts, new byte[0]);
+        ToolInvocationResult result = executor(new CommandResult(0, "unused", "", false),
+                new JschSshTransferClient(knownHosts), "single",
+                Collections.singletonMap("one", new SshConfig("127.0.0.1", "deploy", 22,
+                        root.resolve("missing-private-key").toString())),
+                1, 1000, null).execute("application", "upload", map("remotePath", "/srv/value", "payload", "value"),
+                context(), 5000L, "ssh-identity", new CaseExecutionLog(root.resolve("identity.log")));
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_AUTH_ERROR", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        assertEquals("sftp", ((Map<?, ?>) result.invocation().get("SSH")).get("transport"));
+    }
+
+    @Test void sftpTransferFailuresHaveOperationSpecificCategories() throws Exception {
+        SshTransferClient failed = new FakeTransfer() {
+            @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath,
+                    boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
+                throw new com.jcraft.jsch.SftpException(com.jcraft.jsch.ChannelSftp.SSH_FX_PERMISSION_DENIED, "permission denied");
+            }
+            @Override public long download(SshConfig target, String remotePath, Path localPath,
+                    boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
+                throw new com.jcraft.jsch.SftpException(com.jcraft.jsch.ChannelSftp.SSH_FX_NO_SUCH_FILE, "remote missing");
+            }
+        };
+        SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false), failed);
+        for (String operation : new String[]{"upload", "download"}) {
+            Map<String, Object> input = "upload".equals(operation)
+                    ? map("remotePath", "/srv/value", "payload", "value")
+                    : map("remotePath", "/srv/value", "localPath", "failed.txt");
+            String category = "upload".equals(operation) ? "SSH_UPLOAD_ERROR" : "SSH_DOWNLOAD_ERROR";
+            ToolInvocationResult result = executor.execute("application", operation, input,
+                    context(), 1000L, "ssh-failed-" + operation,
+                    new CaseExecutionLog(root.resolve("failed-" + operation + ".log")));
+            assertFalse(result.executionSuccess());
+            assertEquals(category, ((Map<?, ?>) result.invocation().get("error")).get("category"));
+            Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+            assertEquals(category, ((Map<?, ?>) evidence.get("error")).get("category"));
+            assertEquals(operation, evidence.get("operation"));
+            assertEquals("sftp", evidence.get("transport"));
+        }
+    }
+
+    @Test void openSshExit255HasDocumentedAmbiguousTransportCategory() throws Exception {
+        CommandRunner commandRunner = new CommandRunner() {
+            @Override public CommandResult run(List<String> argv, Duration timeout, Path project) {
+                return new CommandResult(255, "", "Permission denied (publickey).", false);
+            }
+        };
+        SshCommandRunner runner = new SshCommandRunner(commandRunner, () -> true,
+                (target, command, timeout, project) -> new CommandResult(0, "", "", false), System.err);
+        ToolInvocationResult result = executor(new CommandResult(0, "unused", "", false), null,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
+                1, 1000, runner).execute("application", "execute", map("command", "health"),
+                context(), 5000L, "ssh-openssh", new CaseExecutionLog(root.resolve("openssh.log")));
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_TRANSPORT_ERROR", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+        assertEquals("openssh", evidence.get("transport"));
+        assertEquals(255, evidence.get("exitCode"));
+    }
+
     private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer) {
         return executor(commandResult, transfer, "single",
                 Collections.singletonMap("one", new SshConfig("example.test", "deploy", 22, "")));
