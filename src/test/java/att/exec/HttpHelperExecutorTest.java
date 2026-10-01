@@ -296,20 +296,23 @@ class HttpHelperExecutorTest {
                 + "evidence: {output: {format: json, maxChars: 10000}}\n").getBytes(StandardCharsets.UTF_8));
         FrameworkConfig configured = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root, "SIT");
         Map<String, Object> value = args("count", 3, "credentialEcho", "private-http-token");
+        CaseRuntimeContext runtime = context();
+        runtime.beginStage(new StageCaseData("invoke", "T", args("body", value)), "T", root);
+        TemplateAction action = new TemplateAction("echo", args("type", "tool", "timeoutMs", 10000,
+                "call", "#{http.paymentApi.post(path='/echo', body=${EXEC.INPUT.body}, requestFormat='json', responseFormat='json', readTimeoutMs=10000)}"));
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, configured);
              CaseExecutionLog log = new CaseExecutionLog(root.resolve("output.log"))) {
-            ToolInvocationResult result = http.execute("paymentApi", "post",
-                    args("path", "/echo", "body", value, "requestFormat", "json", "responseFormat", "json"),
-                    context(), 10000L, "http-output", null, log);
-            assertTrue(result.executionSuccess(), String.valueOf(result.invocation()));
-            assertEquals(3, ((Number) ((Map<?, ?>) result.output()).get("count")).intValue());
-            assertEquals("private-http-token", ((Map<?, ?>) result.output()).get("credentialEcho"));
-            Map<?, ?> node = (Map<?, ?>) ((java.util.List<?>) ((Map<?, ?>) result.evidence().get("http")).get("invocations")).get(0);
-            Map<?, ?> output = (Map<?, ?>) node.get("output");
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, configured),
+                    null, null, http, new att.template.DefaultBuiltInProvider());
+            ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
+                    new StageTemplate("T", root, Collections.singletonList(action)), runtime, log).get(0);
+            assertEquals(ResultStatus.PASS, result.status(), result.message());
+            assertEquals(3, ((Number) runtime.resolve("ACTIONS.echo.output.result.count")).intValue());
+            assertEquals("private-http-token", runtime.resolve("ACTIONS.echo.output.result.credentialEcho"));
+            Map<?, ?> output = (Map<?, ?>) runtime.resolve("ACTIONS.echo.output.evidence.http.invocations[0].output");
             assertEquals("json", output.get("format")); assertEquals(false, output.get("truncated"));
             assertFalse(String.valueOf(output.get("text")).contains("private-http-token"));
             assertTrue(String.valueOf(output.get("text")).contains("[REDACTED_SECRET]"));
-            log.appendToolInvocation("HTTP output", result.invocation());
         }
         String log = new String(Files.readAllBytes(root.resolve("output.log")), StandardCharsets.UTF_8);
         assertTrue(log.contains("[REDACTED_SECRET]")); assertFalse(log.contains("private-http-token"));
