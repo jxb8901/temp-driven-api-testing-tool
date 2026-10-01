@@ -227,7 +227,7 @@ Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs 
 
 ## 03 Actions and Typed Values
 
-This chapter defines the active ATT action contract. Templates use att-template/v3.4. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
+This chapter defines the active ATT action contract. Templates use att-template/v3.4. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
 
 ### Action types
 
