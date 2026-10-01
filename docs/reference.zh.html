@@ -338,6 +338,9 @@ id="toc-tool-定義中的-command-表達式">Tool 定義中的 <code>command</co
 <li><a href="#tool-定義中的-call-表達式"
 id="toc-tool-定義中的-call-表達式">Tool 定義中的 <code>call</code>
 表達式</a></li>
+<li><a href="#inline-tool-descriptor-fields"
+id="toc-inline-tool-descriptor-fields">Inline Tool descriptor
+fields</a></li>
 <li><a href="#73-dbhelper" id="toc-73-dbhelper">7.3 DBHelper</a></li>
 <li><a href="#dbhelper-配置" id="toc-dbhelper-配置">Dbhelper
 配置</a></li>
@@ -2639,6 +2642,37 @@ call，不是 Case 全局變量；<code>CASE</code>／<code>ACTIONS</code> 等
 root 在定義中不可見。Inline SQL 與 package-contained SQL file 內容都在此
 scope render，测试數據仍應放在 <code>params</code> 並使用 JDBC
 <code>?</code>。</p>
+<h3 id="inline-tool-descriptor-fields">Inline Tool descriptor
+fields</h3>
+<p>Global <code>tools</code> and Tool-group <code>tools</code> entries
+use the same Tool contract:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Object</th>
+<th>Allowed properties</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>tools.&lt;key&gt;</code></td>
+<td><code>name</code>, <code>description</code>, exactly one of
+<code>command</code>/<code>call</code>, optional <code>arguments</code>;
+command Tools require <code>stdoutFormat</code>, call-backed Tools may
+use <code>cache</code>; <code>x-*</code></td>
+</tr>
+<tr class="even">
+<td>call-backed <code>tools.&lt;key&gt;.cache</code></td>
+<td>required `scope: case</td>
+</tr>
+<tr class="odd">
+<td><code>arguments.&lt;key&gt;</code></td>
+<td><code>name</code>, <code>description</code>, <code>required</code>,
+optional <code>argName</code>, <code>argNameMode</code>,
+<code>delimit</code>, <code>x-*</code></td>
+</tr>
+</tbody>
+</table>
 <h3 id="73-dbhelper">7.3 DBHelper</h3>
 <p>DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用
 <code>schemaVersion: att-dbhelper/v2.6</code> 和穩定 logical
@@ -3725,23 +3759,6 @@ resource descriptor lists</td>
 <td><code>ssh</code></td>
 <td><code>host</code>, <code>user</code>, <code>port</code>,
 <code>identityFile</code></td>
-</tr>
-<tr class="even">
-<td><code>tools.&lt;key&gt;</code></td>
-<td><code>name</code>, <code>description</code>, exactly one of
-<code>command</code>/<code>call</code>, optional <code>arguments</code>;
-command Tools require <code>stdoutFormat</code>, call-backed Tools may
-use <code>cache</code>; <code>x-*</code></td>
-</tr>
-<tr class="odd">
-<td>call-backed <code>tools.&lt;key&gt;.cache</code></td>
-<td>required `scope: case</td>
-</tr>
-<tr class="even">
-<td><code>arguments.&lt;key&gt;</code></td>
-<td><code>name</code>, <code>description</code>, <code>required</code>,
-optional <code>argName</code>, <code>argNameMode</code>,
-<code>delimit</code>, <code>x-*</code></td>
 </tr>
 </tbody>
 </table>
