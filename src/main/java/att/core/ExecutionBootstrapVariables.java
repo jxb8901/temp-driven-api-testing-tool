@@ -155,6 +155,7 @@ public final class ExecutionBootstrapVariables {
             for (String path : parsePaths(engine, text, field, validation)) validatePath(path, field, validation);
             try {
                 for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) {
+                    DefaultBuiltInProvider.rejectRemoved(call.name());
                     if (!DefaultBuiltInProvider.isSafeForBootstrap(call.name()))
                         throw validation.invalid("Bootstrap expressions may call only safe built-ins; rejected call '"
                                 + call.name() + "'", field);

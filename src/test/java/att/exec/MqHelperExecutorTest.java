@@ -47,7 +47,7 @@ class MqHelperExecutorTest {
         FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
                 Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
                 null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
-        for (String mode : new String[]{"run", "load"}) {
+        for (String mode : new String[]{"testcase", "load"}) {
             Path caseDir = tempDir.resolve(mode); Files.createDirectories(caseDir);
             CaseRuntimeContext runtime = new CaseRuntimeContext(new TestCase(1, "g", "s", "C", Collections.emptyList(),
                     Collections.emptyMap(), Collections.emptyMap(), null), caseDir, "E", "R", tempDir, caseDir.resolve("case.log"),
@@ -63,7 +63,7 @@ class MqHelperExecutorTest {
                         .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), runtime, log);
                 assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
             }
-            assertEquals(3, runtime.resolve("ACTIONS.receive.output.result.count"));
+            assertEquals(3, ((Number) runtime.resolve("ACTIONS.receive.output.result.count")).intValue());
             assertEquals("private-mq-token", runtime.resolve("ACTIONS.receive.output.result.echo"));
             Object output = runtime.resolve("ACTIONS.receive.output.evidence.mq.invocations[0].output");
             if ("load".equals(mode)) {

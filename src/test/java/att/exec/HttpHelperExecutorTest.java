@@ -302,7 +302,7 @@ class HttpHelperExecutorTest {
                     args("path", "/echo", "body", value, "requestFormat", "json", "responseFormat", "json"),
                     context(), 10000L, "http-output", null, log);
             assertTrue(result.executionSuccess(), String.valueOf(result.invocation()));
-            assertEquals(3, ((Map<?, ?>) result.output()).get("count"));
+            assertEquals(3, ((Number) ((Map<?, ?>) result.output()).get("count")).intValue());
             assertEquals("private-http-token", ((Map<?, ?>) result.output()).get("credentialEcho"));
             Map<?, ?> node = (Map<?, ?>) ((java.util.List<?>) ((Map<?, ?>) result.evidence().get("http")).get("invocations")).get(0);
             Map<?, ?> output = (Map<?, ?>) node.get("output");

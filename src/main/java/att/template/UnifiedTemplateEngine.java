@@ -293,6 +293,7 @@ public class UnifiedTemplateEngine {
             @Override public Object context(String path) { return context.require(path); }
             @Override public Object contextOptional(String path) { return context.requireOptional(path); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                DefaultBuiltInProvider.rejectRemoved(name);
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
             @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
@@ -1043,6 +1044,7 @@ public class UnifiedTemplateEngine {
                 return optional ? context.requireOptional(path) : context.require(path);
             }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                DefaultBuiltInProvider.rejectRemoved(name);
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
             @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
@@ -1133,6 +1135,7 @@ public class UnifiedTemplateEngine {
             @Override public Object context(String path) { return context.require(path); }
             @Override public Object contextOptional(String path) { return context.requireOptional(path); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                DefaultBuiltInProvider.rejectRemoved(name);
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
             @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
@@ -1155,6 +1158,7 @@ public class UnifiedTemplateEngine {
                 @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
                 @Override public Object contextOptional(String path) { return requireScoped(values, path, true); }
                 @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                DefaultBuiltInProvider.rejectRemoved(name);
                     if (!builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
                         throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + name);
                     }
@@ -1184,6 +1188,7 @@ public class UnifiedTemplateEngine {
             @Override public Object context(String path) { return requireScoped(values, path, missingAsEmpty); }
             @Override public Object contextOptional(String path) { return requireScoped(values, path, true); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                DefaultBuiltInProvider.rejectRemoved(name);
                 if (!builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
                     throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + name);
                 }
