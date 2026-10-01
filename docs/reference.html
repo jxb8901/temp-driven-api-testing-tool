@@ -1759,6 +1759,13 @@ with a null value, and use <code>#{number(...)}</code> when invalid
 numeric text should become an explicit evaluation error instead of a
 string comparison.</p>
 <h3 id="built-in-functions">Built-in functions</h3>
+<p>Only authored file-expression nodes are executable. Context values,
+Tool results and file output remain literal Strings even when they
+contain <code>&amp;{...}</code>. Embedded Context paths and calls follow
+the enclosing Action's normal ordering, scope and resource validation
+rules. Nested <code>&amp;{...}</code> inside project-file content,
+including inside <code>#{...}</code> arguments, is rejected in v1 in
+Run, Debug, validation and Load snapshot discovery.</p>
 <p>Built-ins are called with <code>#{...}</code>. Canonical names use
 framework-owned <code>str.*</code>, <code>date.*</code>,
 <code>file.*</code>, <code>misc.*</code>, and <code>seq.*</code>
