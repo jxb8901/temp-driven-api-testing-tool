@@ -648,9 +648,13 @@ public class StageTemplateRunner {
                     throw new IllegalArgumentException("MQ operations may only be the primary call of a type: tool Action");
                 }
                 String invocationId = context.qualifiedActionId(action.id()) + ".evidence." + collector.id() + "." + attempt;
-                // Collectors publish their own record after projection; executors must not log raw output first.
-                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(collector.call(), context, null,
-                        invocationId, collector.timeoutMs(), "", false, true);
+                // Satisfy the executor log contract without publishing unprojected process/resource output.
+                att.exec.ToolInvocationResult result;
+                try (CaseExecutionLog executorLog = CaseExecutionLog.discarding(log == null
+                        ? context.caseOutputDirectory().resolve("case.log") : log.path())) {
+                    result = templateEngine.executeToolAttempt(collector.call(), context, executorLog,
+                            invocationId, collector.timeoutMs(), "", false, true);
+                }
                 Object status = result.invocation().get("status");
                 boolean passed = result.executionSuccess() && "PASS".equalsIgnoreCase(String.valueOf(status));
                 if (!passed) result = CollectorExceptionEvidence.project(result);
