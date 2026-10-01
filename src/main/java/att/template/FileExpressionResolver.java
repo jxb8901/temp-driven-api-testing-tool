@@ -185,6 +185,8 @@ public final class FileExpressionResolver {
     }
 
     private CompiledFilePlan compilePlan(String authoredPath, Path sourceDirectory, Path canonical, String source) {
+        if (source.contains("&{"))
+            throw new IllegalArgumentException("Nested project-file expressions are not supported in v1: " + canonical);
         List<Segment> segments = new ArrayList<Segment>();
         int cursor = 0;
         while (cursor < source.length()) {
@@ -367,6 +369,8 @@ public final class FileExpressionResolver {
         public String authoredPath() { return authoredPath; }
         public Path sourceDirectory() { return sourceDirectory; }
         public Path file() { return file; }
+        /** Authored source for normal Context scope/order and call-contract validation. */
+        public String source() { return source; }
         public long sourceBytes() { return source.getBytes(StandardCharsets.UTF_8).length; }
         public boolean isStatic() { return staticConstant; }
         public List<String> filePaths() { return filePaths; }

@@ -15,6 +15,47 @@ class PackageValidatorTest {
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
+    @Test void projectFileContextReferencesFollowActionOrderingAndScopeRules() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        String[] sources = {"${EXEC.ACTIONS.later.output.result}", "#{str.concat(a=${EXEC.ACTIONS.missing.output.result})}",
+                "${output.result}", "${CASE.STAGES.invoke.result}"};
+        for (int index = 0; index < sources.length; index++) {
+            String file = "invalid" + index + ".txt";
+            Files.write(tempDir.resolve(file), sources[index].getBytes("UTF-8"));
+            StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
+                    new TemplateAction("first", map("type", "assign", "name", "first", "expression", "&{" + file + "}"), att.Version.TEMPLATE_SCHEMA),
+                    new TemplateAction("later", map("type", "assign", "name", "later", "expression", "ok"), att.Version.TEMPLATE_SCHEMA)), att.Version.TEMPLATE_SCHEMA);
+            java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> contract.invoke(new PackageValidator(tempDir, config), template, config));
+            assertNotNull(DiagnosticException.find(error.getCause()), error.getCause().getMessage());
+        }
+        Files.write(tempDir.resolve("valid.txt"), "${EXEC.ACTIONS.earlier.output.result}".getBytes("UTF-8"));
+        StageTemplate valid = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("earlier", map("type", "assign", "name", "earlier", "expression", "ok"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("later", map("type", "assign", "name", "later", "expression", "&{valid.txt}"), att.Version.TEMPLATE_SCHEMA)), att.Version.TEMPLATE_SCHEMA);
+        assertDoesNotThrow(() -> contract.invoke(new PackageValidator(tempDir, config), valid, config));
+    }
+
+    @Test void projectFileCallsFollowNormalToolAndHelperValidation() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        String[] sources = {"#{unknown.tool()}", "#{db.unknown.query(sql='select 1', params=[])}",
+                "#{ssh.unknown.execute(command='health')}"};
+        for (int index = 0; index < sources.length; index++) {
+            String file = "unknown" + index + ".txt";
+            Files.write(tempDir.resolve(file), sources[index].getBytes("UTF-8"));
+            StageTemplate template = new StageTemplate("T", tempDir, Collections.singletonList(
+                    new TemplateAction("read", map("type", "assign", "name", "read", "expression", "&{" + file + "}"), att.Version.TEMPLATE_SCHEMA)), att.Version.TEMPLATE_SCHEMA);
+            assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> contract.invoke(new PackageValidator(tempDir, config), template, config));
+        }
+    }
+
     private static Map<String,Object> map(Object... values) {
         Map<String,Object> result = new LinkedHashMap<String,Object>();
         for (int index = 0; index < values.length; index += 2) {
