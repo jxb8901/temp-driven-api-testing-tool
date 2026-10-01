@@ -33,21 +33,22 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.4。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy、execution 設定及 thresholds 會覆蓋相應 root 值。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
+Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.4。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
 
 Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../14_actions.md)、[Runtime 與 Context 模型](../03_runtime_context.md)、[Load 模式](../04_execution_modes/load.md)與[Schema 矩陣](schema_matrix.md)。
 
-### 移除欄位與遷移
+### Historical schema migration
 
-ATT 3.6.0 每種 resource 只接受現行 schema。歷史版本存放於 schemas/history，不是 active contract。
+ATT 3.6.2 使用 `att-template/v3.4` 與 `att-flow/v3.4` 作為現行 Render contract。已發布的 `att-template/v3.3` 與 `att-flow/v3.3` 定義保留於 `schemas/history/`，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.4，再套用以下欄位變更。
 
-| 舊配置 | 3.6.0 形式 |
+| Historical configuration | 3.6.2 形式 |
 |---|---|
+| `att-template/v3.3` 或 `att-flow/v3.3` | 改為相應 v3.4 schema，再遷移已移除的 Render 欄位。 |
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite 或 renderAs/saveAs | 使用 templateFormat；將 output.result 當作 DocumentValue；沒有隱式檔案替代方案 |
+| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Render 將原樣 String 放入 output.result，不會隱式建立結果檔。 |
 | Log file | 將 typed value 直接傳入 Log.value |
 | Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ | 將 DocumentValue 直接作為 HTTP body 或 MQ payload |
+| Render targetFiles handoff 至 HTTP/MQ | 將 Render String 直接作為 HTTP body 或 MQ payload |
 | 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List |
 
 Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。

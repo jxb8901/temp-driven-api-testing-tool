@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -169,6 +170,55 @@ class SshResourceHelperTest {
         assertEquals("SSH_TIMEOUT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
         assertTrue(elapsedMs < 1000L, "transfer exceeded absolute deadline: " + elapsedMs + "ms");
         release.countDown();
+    }
+
+    @Test void stubbornSftpTransferKeepsPermitUntilWorkerStops() throws Exception {
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch interrupted = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final AtomicBoolean postTimeoutSideEffect = new AtomicBoolean();
+        SshTransferClient stubborn = new FakeTransfer() {
+            @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath,
+                                          boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
+                entered.countDown();
+                while (true) {
+                    try {
+                        release.await();
+                        break;
+                    } catch (InterruptedException ignored) {
+                        interrupted.countDown();
+                    }
+                }
+                postTimeoutSideEffect.set(true);
+                return 0L;
+            }
+        };
+        SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), stubborn,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
+                1, 10000, null);
+        Path source = root.resolve("stubborn.txt");
+        Files.write(source, "stubborn".getBytes(StandardCharsets.UTF_8));
+        FutureTask<ToolInvocationResult> first = new FutureTask<ToolInvocationResult>(() -> executor.execute(
+                "application", "upload", map("remotePath", "/srv/stubborn", "localPath", source.toString()),
+                context(), 60L, "ssh-stubborn-1", new CaseExecutionLog(root.resolve("stubborn-1.log"))));
+        Thread firstThread = new Thread(first, "ssh-stubborn-first");
+        firstThread.start();
+
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertTrue(interrupted.await(1, TimeUnit.SECONDS));
+        assertFalse(first.isDone(), "timeout must wait for the transfer worker to stop");
+        ToolInvocationResult second = executor.execute("application", "upload",
+                map("remotePath", "/srv/second", "payload", "second"), context(), 60L,
+                "ssh-stubborn-2", new CaseExecutionLog(root.resolve("stubborn-2.log")));
+        assertFalse(second.executionSuccess());
+        assertEquals("SSH_POOL_TIMEOUT", ((Map<?, ?>) second.invocation().get("error")).get("category"));
+        assertFalse(postTimeoutSideEffect.get(), "transfer must not complete a side effect while timeout is pending");
+
+        release.countDown();
+        ToolInvocationResult firstResult = first.get(1, TimeUnit.SECONDS);
+        assertFalse(firstResult.executionSuccess());
+        assertEquals("SSH_TIMEOUT", ((Map<?, ?>) firstResult.invocation().get("error")).get("category"));
+        assertTrue(postTimeoutSideEffect.get());
     }
 
     @Test void uploadsAndDownloadsOnlyThroughControlledCaseOutput() throws Exception {

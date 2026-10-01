@@ -153,6 +153,21 @@ class LoadScenarioTest {
         assertTrue(missingPolicy.getMessage().contains("Quick Load needs a policy"), missingPolicy.getMessage());
     }
 
+    @Test void currentV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("load"));
+        write(project, "load/load.yaml", "schemaVersion: att-load/v1.4\n"
+                + "load: {users: 2, duration: 10s}\n"
+                + "execution: {thinkTime: 250ms}\n"
+                + "evidence: {mode: failures}\n");
+
+        Map<String, Object> policy = new LoadScenarioLoader(project).loadDefaultPolicy();
+
+        assertEquals("att-load/v1.4", policy.get("schemaVersion"));
+        assertFalse(policy.containsKey("workloads"));
+        assertEquals(2, ((Number) ((Map<?, ?>) policy.get("load")).get("users")).intValue());
+    }
+
     @Test void validatesBothWorkloadModelsAndExplicitOverridesWin() throws Exception {
         Path project = project();
         Path closed = write(project, "closed.yaml", "schemaVersion: att-load/v1.0\n"
@@ -206,21 +221,24 @@ class LoadScenarioTest {
         assertEquals(">= 5700/m", arrivalPerMinuteThresholdScenario.thresholds().get("achievedArrivalRate"));
     }
 
-    @Test void currentV14RootDefaultsMergeIntoWorkloadsAndCliOverridesWin() throws Exception {
+    @Test void currentV14RootDefaultsMergeIntoWorkloadsButRootThresholdsStayAggregateOnly() throws Exception {
         Path project = project();
         Path scenarioFile = write(project, "v14-defaults.yaml", "schemaVersion: att-load/v1.4\n"
                 + "load: {duration: 5s, warmup: 1s}\n"
                 + "execution: {thinkTime: 10ms, execIdFormat: '${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}'}\n"
                 + "thresholds: {p95: '< 100ms'}\n"
                 + "workloads:\n"
-                + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 3}\n"
+                + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 3}\n    thresholds: {p99: '< 200ms'}\n"
                 + "  - id: second\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 2}\n");
         LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
         assertEquals(3, scenario.workload("first").users());
         assertEquals(2, scenario.workload("second").users());
         assertEquals(1000L, scenario.workload("second").warmup().toMillis());
         assertEquals(10L, scenario.workload("second").thinkTimePolicy().min().toMillis());
-        assertEquals("< 100ms", scenario.workload("first").thresholds().get("p95"));
+        assertEquals("< 100ms", scenario.thresholds().get("p95"));
+        assertEquals("< 200ms", scenario.workload("first").thresholds().get("p99"));
+        assertFalse(scenario.workload("first").thresholds().containsKey("p95"));
+        assertTrue(scenario.workload("second").thresholds().isEmpty());
         assertEquals("${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}", scenario.execIdFormat());
 
         Path singleFile = write(project, "v14-single.yaml", "schemaVersion: att-load/v1.4\n"

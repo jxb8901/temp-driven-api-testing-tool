@@ -66,7 +66,7 @@ public final class LoadScenarioLoader {
                 att.validation.SchemaMigrationGuidance.verify(schema, currentSchema, map, version, Version.LOAD_SCHEMA_CURRENT);
             }
             SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_CURRENT, "load scenario");
-            return semanticCurrent(source, map, true, !normalizeHistoricalV13);
+            return semanticCurrent(source, map, true);
         } catch (DiagnosticException e) {
             throw e;
         } catch (SemanticFailure e) {
@@ -108,7 +108,7 @@ public final class LoadScenarioLoader {
         String version = string(map.get("schemaVersion"), "schemaVersion");
         if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
             JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json"), map);
-            LoadScenario scenario = semanticCurrent(source, map, false, true);
+            LoadScenario scenario = semanticCurrent(source, map, false);
             if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
             return map;
         }
@@ -121,7 +121,7 @@ public final class LoadScenarioLoader {
         for (String field : new String[]{"load", "execution", "thresholds", "evidence", "seed"})
             if (map.containsKey(field)) migrated.put(field, map.get(field));
         JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json"), migrated);
-        semanticCurrent(source, migrated, false, true);
+        semanticCurrent(source, migrated, false);
         return migrated;
     }
 
@@ -165,7 +165,7 @@ public final class LoadScenarioLoader {
         root.put("workloads", java.util.Collections.<Object>singletonList(workload));
         try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json"), root); }
         catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
-        return semanticCurrent(source, root, false, true);
+        return semanticCurrent(source, root, false);
     }
 
     private DiagnosticException quickLoadFailure(Path source, String field, String detail) {
@@ -181,8 +181,7 @@ public final class LoadScenarioLoader {
         Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put(key, value); return result;
     }
 
-    private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario,
-                                         boolean inheritRootThresholds) {
+    private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario) {
         List<Object> raw = root.containsKey("workloads") ? list(root.get("workloads"), "workloads") : Collections.<Object>emptyList();
         Map<String, Object> rootLoad = mapOptional(root.get("load"), "load");
         Map<String, Object> rootExecution = mapOptional(root.get("execution"), "execution");
@@ -211,8 +210,7 @@ public final class LoadScenarioLoader {
             if (!WORKLOAD_ID.matcher(id).matches()) throw failure(prefix + ".id", "workload id must match [A-Za-z0-9][A-Za-z0-9._-]*");
             if (!ids.add(id)) throw failure(prefix + ".id", "duplicate workload id '" + id + "'");
             Map<String, Object> localThresholds = mapOptional(map.get("thresholds"), prefix + ".thresholds");
-            Map<String, Object> thresholds = inheritRootThresholds
-                    ? mergeMaps(rootThresholds, localThresholds) : localThresholds;
+            Map<String, Object> thresholds = localThresholds;
             Map<String, Object> effective = new LinkedHashMap<String, Object>(map);
             effective.put("load", mergeMaps(rootLoad, mapOptional(map.get("load"), prefix + ".load")));
             effective.put("execution", mergeMaps(workloadExecutionDefaults, mapOptional(map.get("execution"), prefix + ".execution")));

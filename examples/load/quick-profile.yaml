@@ -1,4 +1,4 @@
-schemaVersion: att-load-profile/v1.0
+schemaVersion: att-load/v1.4
 load:
   users: 2
   duration: 10s

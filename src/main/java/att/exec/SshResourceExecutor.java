@@ -34,7 +34,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutionException;
@@ -203,10 +202,10 @@ public final class SshResourceExecutor {
         String mode;
         if (hasLocal) {
             Path local = resolveExistingLocal(requiredString(input.get("localPath"), "localPath"), context);
-            bytes = transferWithDeadline(new Callable<Long>() {
-                @Override public Long call() throws Exception {
+            bytes = transferWithDeadline(new TransferOperation<Long>() {
+                @Override public Long call(SshTransferCancellation cancellation) throws Exception {
                     return transferClient.upload(target, local, null, remotePath, overwrite,
-                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot);
+                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
                 }
             }, deadlineNanos).longValue();
             mode = "local-file";
@@ -217,10 +216,10 @@ public final class SshResourceExecutor {
             else if (payload instanceof CharSequence) content = String.valueOf(payload).getBytes(StandardCharsets.UTF_8);
             else throw argument("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation", "SSH_ARGUMENT");
             final byte[] represented = content;
-            bytes = transferWithDeadline(new Callable<Long>() {
-                @Override public Long call() throws Exception {
+            bytes = transferWithDeadline(new TransferOperation<Long>() {
+                @Override public Long call(SshTransferCancellation cancellation) throws Exception {
                     return transferClient.upload(target, null, represented, remotePath, overwrite,
-                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot);
+                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
                 }
             }, deadlineNanos).longValue();
             mode = "represented-payload";
@@ -250,10 +249,10 @@ public final class SshResourceExecutor {
         boolean overwrite = bool(input.get("overwrite"), false, "overwrite");
         Path local = resolveDestination(localText, context, overwrite);
         Instant started = Instant.now();
-        long bytes = transferWithDeadline(new Callable<Long>() {
-            @Override public Long call() throws Exception {
+        long bytes = transferWithDeadline(new TransferOperation<Long>() {
+            @Override public Long call(SshTransferCancellation cancellation) throws Exception {
                 return transferClient.download(target, remotePath, local, overwrite,
-                        connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot);
+                        connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
             }
         }, deadlineNanos).longValue();
         Map<String, Object> evidence = commonEvidence(helper, target, "download", "sftp", started);
@@ -369,17 +368,20 @@ public final class SshResourceExecutor {
                 ? Duration.ofMillis(helper.connectTimeoutMs()) : remaining;
     }
 
-    private <T> T transferWithDeadline(Callable<T> operation, long deadlineNanos) throws Exception {
+    private <T> T transferWithDeadline(TransferOperation<T> operation, long deadlineNanos) throws Exception {
         long remaining = remainingNanos(deadlineNanos);
         if (remaining <= 0L) throw operation("SSH transfer timed out", "SSH_TIMEOUT", null);
-        FutureTask<T> task = new FutureTask<T>(operation);
+        TransferCancellation cancellation = new TransferCancellation();
+        FutureTask<T> task = new FutureTask<T>(() -> operation.call(cancellation));
         Thread worker = new Thread(task, "att-ssh-transfer");
         worker.setDaemon(true);
         worker.start();
         try {
             return task.get(remaining, TimeUnit.NANOSECONDS);
         } catch (TimeoutException timeout) {
+            cancellation.cancel();
             task.cancel(true);
+            awaitTransferWorker(worker);
             throw operation("SSH transfer timed out", "SSH_TIMEOUT", null, timeout);
         } catch (ExecutionException failure) {
             Throwable cause = failure.getCause();
@@ -387,9 +389,20 @@ public final class SshResourceExecutor {
             if (cause instanceof Error) throw (Error) cause;
             throw new IOException(String.valueOf(cause), cause);
         } catch (InterruptedException interrupted) {
+            cancellation.cancel();
             task.cancel(true);
+            awaitTransferWorker(worker);
             throw interrupted;
         }
+    }
+
+    private void awaitTransferWorker(Thread worker) {
+        boolean interrupted = false;
+        while (worker.isAlive()) {
+            try { worker.join(); }
+            catch (InterruptedException ignored) { interrupted = true; }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     private Path resolveExistingLocal(String value, CaseRuntimeContext context) throws IOException {
@@ -479,6 +492,45 @@ public final class SshResourceExecutor {
     private String safeError(Throwable error, SshConfig target) { return redact(error == null ? "SSH operation failed" : String.valueOf(error.getMessage()), target); }
     private long elapsed(Instant started) { return Duration.between(started, Instant.now()).toMillis(); }
     private String operationName(String name) { String[] parts = name.split("\\.", -1); return parts.length == 3 ? parts[2] : "unknown"; }
+    private interface TransferOperation<T> {
+        T call(SshTransferCancellation cancellation) throws Exception;
+    }
+
+    private static final class TransferCancellation implements SshTransferCancellation {
+        private final Set<Runnable> closers = new LinkedHashSet<Runnable>();
+        private volatile boolean cancelled;
+
+        @Override public void register(Runnable closer) {
+            if (closer == null) return;
+            boolean closeNow;
+            synchronized (this) {
+                closeNow = cancelled;
+                if (!closeNow) closers.add(closer);
+            }
+            if (closeNow) closeQuietly(closer);
+        }
+
+        @Override public synchronized void unregister(Runnable closer) {
+            if (closer != null) closers.remove(closer);
+        }
+
+        @Override public void cancel() {
+            List<Runnable> active;
+            synchronized (this) {
+                if (cancelled) return;
+                cancelled = true;
+                active = new ArrayList<Runnable>(closers);
+            }
+            for (Runnable closer : active) closeQuietly(closer);
+        }
+
+        @Override public boolean isCancelled() { return cancelled; }
+
+        private static void closeQuietly(Runnable closer) {
+            try { closer.run(); } catch (RuntimeException ignored) { }
+        }
+    }
+
     private static boolean bool(Object value, boolean fallback, String field) throws SshOperationException {
         if (value == null) return fallback;
         if (!(value instanceof Boolean)) throw argument(field + " must be boolean", "SSH_ARGUMENT");
@@ -516,12 +568,29 @@ interface SshTransferClient {
                         Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
         return upload(target, source, payload, remotePath, overwrite, timeout, projectRoot);
     }
+    default long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
+                        Duration connectTimeout, Duration timeout, Path projectRoot,
+                        SshTransferCancellation cancellation) throws Exception {
+        return upload(target, source, payload, remotePath, overwrite, connectTimeout, timeout, projectRoot);
+    }
     long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
                   Duration timeout, Path projectRoot) throws Exception;
     default long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
                           Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
         return download(target, remotePath, localPath, overwrite, timeout, projectRoot);
     }
+    default long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
+                          Duration connectTimeout, Duration timeout, Path projectRoot,
+                          SshTransferCancellation cancellation) throws Exception {
+        return download(target, remotePath, localPath, overwrite, connectTimeout, timeout, projectRoot);
+    }
+}
+
+interface SshTransferCancellation {
+    default void register(Runnable closer) { }
+    default void unregister(Runnable closer) { }
+    default void cancel() { }
+    default boolean isCancelled() { return false; }
 }
 
 /** SFTP transfer implementation used for represented payloads and file transfers. */
@@ -529,10 +598,12 @@ final class JschSshTransferClient implements SshTransferClient {
     private static final class Connection {
         private final Session session;
         private final ChannelSftp channel;
+        private final Runnable closer;
 
-        private Connection(Session session, ChannelSftp channel) {
+        private Connection(Session session, ChannelSftp channel, Runnable closer) {
             this.session = session;
             this.channel = channel;
+            this.closer = closer;
         }
     }
 
@@ -547,10 +618,18 @@ final class JschSshTransferClient implements SshTransferClient {
 
     @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
                                  Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
+        return upload(ssh, source, payload, remotePath, overwrite, connectTimeout, timeout, projectRoot, null);
+    }
+
+    @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
+                                 Duration connectTimeout, Duration timeout, Path projectRoot,
+                                 SshTransferCancellation cancellation) throws Exception {
+        SshTransferCancellation token = cancellation == null ? new SshTransferCancellation() { } : cancellation;
         Connection connection = null;
         try {
-            connection = open(ssh, projectRoot, connectTimeout, timeout);
+            connection = open(ssh, projectRoot, connectTimeout, timeout, token);
             ChannelSftp channel = connection.channel;
+            if (token.isCancelled()) throw new IOException("Java SSH transfer cancelled");
             if (!overwrite && exists(channel, remotePath)) throw new IOException("Remote destination exists: " + remotePath);
             if (source != null) {
                 channel.put(source.toString(), remotePath, ChannelSftp.OVERWRITE);
@@ -559,7 +638,12 @@ final class JschSshTransferClient implements SshTransferClient {
             byte[] bytes = payload == null ? new byte[0] : payload;
             channel.put(new ByteArrayInputStream(bytes), remotePath, ChannelSftp.OVERWRITE);
             return bytes.length;
-        } finally { if (connection != null) close(connection.channel, connection.session); }
+        } finally {
+            if (connection != null) {
+                token.unregister(connection.closer);
+                close(connection.channel, connection.session);
+            }
+        }
     }
 
     @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
@@ -569,13 +653,21 @@ final class JschSshTransferClient implements SshTransferClient {
 
     @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
                                    Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
+        return download(ssh, remotePath, localPath, overwrite, connectTimeout, timeout, projectRoot, null);
+    }
+
+    @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
+                                   Duration connectTimeout, Duration timeout, Path projectRoot,
+                                   SshTransferCancellation cancellation) throws Exception {
+        SshTransferCancellation token = cancellation == null ? new SshTransferCancellation() { } : cancellation;
         if (Files.exists(localPath) && !overwrite) throw new IOException("Local destination exists: " + localPath);
         Path parent = localPath.getParent();
         Path temporary = Files.createTempFile(parent == null ? Paths.get(".") : parent, ".att-ssh-", ".part");
         Connection connection = null;
         try {
-            connection = open(ssh, projectRoot, connectTimeout, timeout);
+            connection = open(ssh, projectRoot, connectTimeout, timeout, token);
             ChannelSftp channel = connection.channel;
+            if (token.isCancelled()) throw new IOException("Java SSH transfer cancelled");
             channel.get(remotePath, temporary.toString());
             long size = Files.size(temporary);
             try {
@@ -587,16 +679,16 @@ final class JschSshTransferClient implements SshTransferClient {
             }
             return size;
         } finally {
-            if (connection != null) close(connection.channel, connection.session);
+            if (connection != null) {
+                token.unregister(connection.closer);
+                close(connection.channel, connection.session);
+            }
             Files.deleteIfExists(temporary);
         }
     }
 
-    private Connection open(SshConfig ssh, Path projectRoot, Duration timeout) throws Exception {
-        return open(ssh, projectRoot, timeout, timeout);
-    }
-
-    private Connection open(SshConfig ssh, Path projectRoot, Duration connectTimeout, Duration timeout) throws Exception {
+    private Connection open(SshConfig ssh, Path projectRoot, Duration connectTimeout, Duration timeout,
+                            SshTransferCancellation cancellation) throws Exception {
         if (!Files.isRegularFile(knownHosts) || Files.isSymbolicLink(knownHosts) || !Files.isReadable(knownHosts))
             throw new IOException("Java SSH transfer requires a readable non-symlink known_hosts file");
         JSch jsch = new JSch(); jsch.setKnownHosts(knownHosts.toString());
@@ -608,14 +700,35 @@ final class JschSshTransferClient implements SshTransferClient {
         Session session = jsch.getSession(ssh.user(), ssh.host(), ssh.port());
         session.setConfig("StrictHostKeyChecking", "yes");
         session.setConfig("PreferredAuthentications", "publickey,gssapi-with-mic");
-        long deadline = System.nanoTime() + timeout.toNanos();
-        long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeout.toNanos());
-        session.connect(remainingMillis(connectDeadline));
-        session.setTimeout(remainingMillis(deadline));
-        ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
-        channel.connect(remainingMillis(deadline));
-        session.setTimeout(remainingMillis(deadline));
-        return new Connection(session, channel);
+        final Runnable sessionCloser = new Runnable() {
+            @Override public void run() { close(null, session); }
+        };
+        cancellation.register(sessionCloser);
+        try {
+            if (cancellation.isCancelled()) throw new IOException("Java SSH transfer cancelled");
+            long deadline = System.nanoTime() + timeout.toNanos();
+            long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeout.toNanos());
+            session.connect(remainingMillis(connectDeadline));
+            session.setTimeout(remainingMillis(deadline));
+            ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
+            channel.connect(remainingMillis(deadline));
+            session.setTimeout(remainingMillis(deadline));
+            final Runnable connectionCloser = new Runnable() {
+                @Override public void run() { close(channel, session); }
+            };
+            cancellation.unregister(sessionCloser);
+            cancellation.register(connectionCloser);
+            if (cancellation.isCancelled()) {
+                cancellation.unregister(connectionCloser);
+                close(channel, session);
+                throw new IOException("Java SSH transfer cancelled");
+            }
+            return new Connection(session, channel, connectionCloser);
+        } catch (Exception error) {
+            cancellation.unregister(sessionCloser);
+            close(null, session);
+            throw error;
+        }
     }
 
     private static int remainingMillis(long deadline) throws IOException {
@@ -630,7 +743,7 @@ final class JschSshTransferClient implements SshTransferClient {
     }
 
     private void close(ChannelSftp channel, Session session) {
-        if (channel != null && channel.isConnected()) channel.disconnect();
-        if (session != null && session.isConnected()) session.disconnect();
+        if (channel != null) channel.disconnect();
+        if (session != null) session.disconnect();
     }
 }

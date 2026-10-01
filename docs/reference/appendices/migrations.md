@@ -33,21 +33,22 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-For Load, migrate old single-target or v1.1 scenarios through the historical v1.2/v1.3 loaders, then change the schemaVersion to att-load/v1.4. Root defaults may be shared by multiple workloads; each workload's `inputs`, `vars`, load policy, execution settings and thresholds override the corresponding root values. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. The optional top-level execution.execIdFormat still uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it.
+For Load, migrate old single-target or v1.1 scenarios through the historical v1.2/v1.3 loaders, then change the schemaVersion to att-load/v1.4. Root defaults may be shared by multiple workloads; each workload's `inputs`, `vars`, load policy and execution settings override the corresponding root values. Top-level thresholds remain aggregate-only; workload thresholds are declared per workload and are not inherited from the root. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. The optional top-level execution.execIdFormat still uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it.
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../14_actions.md), [Runtime and Context Model](../03_runtime_context.md), [Load Mode](../04_execution_modes/load.md) and [Schema Matrix](schema_matrix.md).
 
-### Removed fields and migration
+### Historical schema migration
 
-ATT 3.6.0 accepts only the current schema for each resource. Historical versions are archived under schemas/history and are not active contracts.
+ATT 3.6.2 uses `att-template/v3.4` and `att-flow/v3.4` as the current Render contract. The published `att-template/v3.3` and `att-flow/v3.3` definitions remain under `schemas/history/` and are not active contracts. When migrating those descriptors, change their schema versions to v3.4 and apply the field changes below.
 
-| Old configuration | 3.6.0 form |
+| Historical configuration | 3.6.2 form |
 |---|---|
+| `att-template/v3.3` or `att-flow/v3.3` | Change to the corresponding v3.4 schema, then migrate removed Render fields. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite or renderAs/saveAs | templateFormat; consume output.result as DocumentValue; no implicit file replacement |
+| Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. Render returns the exact String in output.result and creates no implicit result file. |
 | Log file | Pass a typed value to Log.value |
 | Log fields | Put a typed map/list in Log.value and select Log.format |
-| Render targetFiles handoff to HTTP/MQ | Pass DocumentValue directly as HTTP body or MQ payload |
+| Render targetFiles handoff to HTTP/MQ | Pass the Render String directly as HTTP body or MQ payload |
 | requestFormat on rendered output | Remove it; reserve requestFormat for abstract Map/List values |
 
 Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.

@@ -501,8 +501,8 @@ Compatibility and Deprecated Aliases</a></li>
 <li><a href="#appendix-c--migration-notes"
 id="toc-appendix-c--migration-notes">Appendix C — Migration Notes</a>
 <ul>
-<li><a href="#removed-fields-and-migration"
-id="toc-removed-fields-and-migration">Removed fields and
+<li><a href="#historical-schema-migration"
+id="toc-historical-schema-migration">Historical schema
 migration</a></li>
 <li><a href="#debug-schema-migration"
 id="toc-debug-schema-migration">Debug schema migration</a></li>
@@ -2645,10 +2645,12 @@ retained executions, workload/target identity, status, timing and
 case.log links when available. Aggregate latency percentiles use the
 aggregate latency collector; ATT does not average workload
 percentiles.</p>
-<p>Top-level thresholds apply to the aggregate run; workload thresholds
-apply to one workload. Threshold failure returns FAIL/exit 1. Invalid
-config/target returns exit 2; runtime/infrastructure errors return
-ERROR/exit 3. Generator drops are not SUT errors.</p>
+<p>Top-level thresholds apply only to the aggregate run; workload
+thresholds apply only to their individual workload. Root thresholds are
+not inherited into workload thresholds. Threshold failure returns
+FAIL/exit 1. Invalid config/target returns exit 2;
+runtime/infrastructure errors return ERROR/exit 3. Generator drops are
+not SUT errors.</p>
 <h4 id="cli-and-examples">CLI and examples</h4>
 <p>For one workload, options such as --users, --arrival-rate, --warmup,
 --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent
@@ -2662,23 +2664,23 @@ practical, for example <code>input.customer.ids[0]=42</code>. Duplicate
 assignments apply in order (last wins). ATT expressions are not
 evaluated during option parsing. Unqualified overrides are rejected for
 multi-workload scenarios.</p>
-<p><code>load/load.yaml</code> is an optional
-<code>att-load-profile/v1.0</code> policy file with no target, inputs or
-Tool arguments. It contains the default <code>load</code> policy and may
-also declare <code>execution</code>, <code>thresholds</code>,
+<p><code>load/load.yaml</code> is an optional current
+<code>att-load/v1.4</code> policy-only descriptor with no target, inputs
+or Tool arguments. It contains the default <code>load</code> policy and
+may also declare <code>execution</code>, <code>thresholds</code>,
 <code>evidence</code> and <code>seed</code>. Explicit CLI pacing values
-override the profile.
+override the policy.
 <code>load --debug template|flow|tool &lt;id&gt;</code> promotes the
 selected sidecar's <code>inputs</code>, <code>vars</code> or Tool
 <code>arguments</code> into a transient single-workload scenario and
 then uses the regular Load validation, scheduler and evidence pipeline;
-Debug execution is not run first. With no profile, provide a complete
-CLI policy such as <code>--users 2 --duration 10s</code> (arrival-rate
-also requires <code>--max-concurrent</code> and
+Debug execution is not run first. With no policy, provide a complete CLI
+policy such as <code>--users 2 --duration 10s</code> (arrival-rate also
+requires <code>--max-concurrent</code> and
 <code>--overload-policy</code>).</p>
-<p>Example policy profile (copy to <code>load/load.yaml</code>):</p>
+<p>Example policy descriptor (copy to <code>load/load.yaml</code>):</p>
 <div class="sourceCode" id="cb33"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load-profile/v1.0</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.4</span></span>
 <span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
 <span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
 <span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
@@ -3395,10 +3397,12 @@ normal <code>type: tool</code> Action:
 <code>ssh.&lt;helperId&gt;.execute</code>,
 <code>ssh.&lt;helperId&gt;.upload</code>, and
 <code>ssh.&lt;helperId&gt;.download</code>. The helper ID is logical;
-the configured helper selects one physical instance using its descriptor
-strategy. These calls are validated without opening an SSH connection,
-and they share the helper's concurrency bound and redacted identity
-handling.</p>
+native Resource Helper calls select one physical instance using
+<code>single</code>, <code>random</code>, or <code>roundRobin</code>.
+<code>selection.strategy: all</code> is rejected for native Resource
+Helper calls; it is reserved for command-backed Tool fan-out. These
+calls are validated without opening an SSH connection, and they share
+the helper's concurrency bound and redacted identity handling.</p>
 <div class="sourceCode" id="cb58"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="fu">actions</span><span class="kw">:</span></span>
 <span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">health</span><span class="kw">:</span></span>
@@ -3456,6 +3460,16 @@ evidence contains the logical helper, selected instance, host/port,
 operation, transport, timing and transfer/command details; command input
 and represented payload content are not copied into evidence.
 Environment-supplied identity paths remain redacted.</p>
+<p>Native Resource Helper calls use one absolute Action deadline
+covering concurrency-pool wait, connection and channel setup, and
+command or SFTP transfer. A per-call <code>timeoutMs</code> or helper
+<code>timeouts.commandTimeoutMs</code> sets the operation limit but
+cannot extend the enclosing Action deadline.
+<code>timeouts.connectTimeoutMs</code> caps connection establishment
+within the remaining deadline; it does not add time to the operation.
+The timeout applies to <code>execute</code>, <code>upload</code>, and
+<code>download</code>, and timed-out SFTP transport is closed before the
+concurrency lease is released.</p>
 <p>SSHHelper routes a command-backed Tool to a stable logical
 application-server ID instead of embedding a physical host in the Tool
 group. The <code>att-sshhelper/v1.0</code> YAML descriptor contains
@@ -3480,9 +3494,10 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb59-1"><a href=
 <span id="cb59-6"><a href="#cb59-6" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">user</span><span class="kw">:</span><span class="at"> deploy</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">22</span><span class="kw">,</span><span class="at"> </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;${ENV:APP_SSH_KEY}&#39;</span><span class="kw">}</span></span>
 <span id="cb59-7"><a href="#cb59-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">}</span></span>
 <span id="cb59-8"><a href="#cb59-8" aria-hidden="true" tabindex="-1"></a><span class="fu">fanout</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxConcurrency</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">}</span></span>
-<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
-<span id="cb59-10"><a href="#cb59-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app1.example</span><span class="kw">}</span></span>
-<span id="cb59-11"><a href="#cb59-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app2</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app2.example</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">2222</span><span class="kw">}</span></span></code></pre></div>
+<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a><span class="fu">timeouts</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span><span class="kw">,</span><span class="at"> </span><span class="fu">commandTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">60000</span><span class="kw">}</span></span>
+<span id="cb59-10"><a href="#cb59-10" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
+<span id="cb59-11"><a href="#cb59-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app1.example</span><span class="kw">}</span></span>
+<span id="cb59-12"><a href="#cb59-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app2</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> sit-app2.example</span><span class="kw">,</span><span class="at"> </span><span class="fu">port</span><span class="kw">:</span><span class="at"> </span><span class="dv">2222</span><span class="kw">}</span></span></code></pre></div>
 <p>Bind descriptor paths globally or in
 <code>environments.&lt;NAME&gt;.sshhelpers</code> of
 <code>att-config/v2.10</code>. Current packages use config v2.10 and
@@ -3505,7 +3520,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb61-1"><a href=
 <span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-sshhelper/v1.0</span></span>
 <span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> application</span></span>
 <span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">user</span><span class="kw">:</span><span class="at"> deploy</span><span class="kw">,</span><span class="at"> </span><span class="fu">identityFile</span><span class="kw">:</span><span class="at"> </span><span class="st">&#39;${ENV:APP_SSH_KEY}&#39;</span><span class="kw">}</span></span>
-<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> all</span><span class="kw">}</span></span>
+<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> all</span><span class="kw">}</span><span class="co"> # command-backed Tool fan-out only; native ssh.application.* rejects all</span></span>
 <span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a><span class="fu">fanout</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">maxConcurrency</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">}</span></span>
 <span id="cb61-7"><a href="#cb61-7" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
 <span id="cb61-8"><a href="#cb61-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> app1</span><span class="kw">,</span><span class="at"> </span><span class="fu">host</span><span class="kw">:</span><span class="at"> uat-app1.example</span><span class="kw">}</span></span>
@@ -3545,15 +3560,18 @@ only <code>META.SSHHELPER.id</code> and <code>.type</code>; endpoint,
 user, identity file and credentials remain private. Resource calls have
 no Action- or per-call strategy override; selection remains helper
 configuration.</p>
-<p>Strategy precedence is group override then helper default. One
-instance works without a strategy (<code>single</code>); multiple
-instances require one. <code>random</code> selects one uniformly,
-<code>roundRobin</code> selects one via a thread-safe cyclic counter,
-and explicit <code>all</code> executes every listed instance once with
-bounded parallelism. <strong><code>all</code> has side effects on every
-host</strong>: use only commands safe across the entire group. There is
-no implicit fan-out, cross-host retry, or failover. If an author
-configures an Action timeout retry, the whole <code>all</code>
+<p>Strategy precedence is group override then helper default. For native
+Resource Helper calls, one instance works without a strategy
+(<code>single</code>), multiple instances require <code>random</code> or
+<code>roundRobin</code>, and <code>all</code> is rejected rather than
+silently selecting one host. For command-backed Tool routing,
+<code>random</code> selects one uniformly, <code>roundRobin</code>
+selects one via a thread-safe cyclic counter, and explicit
+<code>all</code> executes every listed instance once with bounded
+parallelism. <strong>Command-backed <code>all</code> has side effects on
+every host</strong>: use only commands safe across the entire group.
+There is no implicit fan-out, cross-host retry, or failover. If an
+author configures an Action timeout retry, the whole <code>all</code>
 invocation is repeated, not just one host. Each host gets the
 Action/Tool/global timeout; interruption cancels active OpenSSH
 processes or Java SSH sessions. Both transports receive the same
@@ -3565,8 +3583,9 @@ the legacy scalar/object value. Evidence adds <code>sshHelper</code>,
 <code>instance</code>, <code>host</code>,
 <code>selectionStrategy</code>, <code>selectionSource</code>
 (<code>helper</code> or <code>toolGroup</code>), transport,
-start/end/duration, exit code, output and errors. For <code>all</code>,
-<code>output.result</code> contains <code>sshHelper</code>, effective
+start/end/duration, exit code, output and errors. Only command-backed
+Tool fan-out uses <code>all</code>; its <code>output.result</code>
+contains <code>sshHelper</code>, effective
 <code>selectionStrategy</code>, <code>selectionSource</code>, and
 <code>instances</code> keyed in descriptor order. Every entry has
 <code>instance</code>, <code>host</code>, <code>port</code>,
@@ -4716,17 +4735,17 @@ could expand them. <code>arg.*</code> is Tool-only; <code>vars.*</code>
 is Template/Flow-only. Unqualified overrides are rejected for
 multi-workload Load scenarios.</p>
 <p><code>load/load.yaml</code> is an optional, policy-only
-<code>att-load-profile/v1.0</code> file. It may contain
-<code>load</code>, <code>execution</code>, <code>thresholds</code>,
-<code>evidence</code>, and <code>seed</code>, but no target or business
-inputs. <code>load --debug</code> promotes sidecar <code>inputs</code>
-to <code>EXEC.INPUT</code>, Template/Flow <code>vars</code> to bootstrap
+<code>att-load/v1.4</code> file. It may contain <code>load</code>,
+<code>execution</code>, <code>thresholds</code>, <code>evidence</code>,
+and <code>seed</code>, but no target or business inputs.
+<code>load --debug</code> promotes sidecar <code>inputs</code> to
+<code>EXEC.INPUT</code>, Template/Flow <code>vars</code> to bootstrap
 <code>EXEC.VARS</code>, or Tool <code>arguments</code> to the Tool call,
 then runs through the regular Load validator, scheduler, and evidence
-pipeline. Explicit CLI pacing fields override the profile. Without a
-profile, provide a complete policy on the command line; for example:</p>
+pipeline. Explicit CLI pacing fields override the policy. Without a
+policy, provide a complete policy on the command line; for example:</p>
 <div class="sourceCode" id="cb75"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load-profile/v1.0</span></span>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.4</span></span>
 <span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
 <span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
 <span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
@@ -5570,16 +5589,18 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb85-1"><a href=
 <p>For Load, migrate old single-target or v1.1 scenarios through the
 historical v1.2/v1.3 loaders, then change the schemaVersion to
 att-load/v1.4. Root defaults may be shared by multiple workloads; each
-workload's <code>inputs</code>, <code>vars</code>, load policy,
-execution settings and thresholds override the corresponding root
-values. <code>inputs</code> remains EXEC.INPUT; <code>vars</code> is
-evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are
-initialized and before the target starts. Exact references preserve
-native values, dependencies are order-independent, and cycles or
-external/stateful calls fail validation. The optional top-level
-execution.execIdFormat still uses the ordinary expression engine once
-during initialization; closed workloads may use EXEC.LOAD.USER_ID, while
-arrival-rate workloads do not have it.</p>
+workload's <code>inputs</code>, <code>vars</code>, load policy and
+execution settings override the corresponding root values. Top-level
+thresholds remain aggregate-only; workload thresholds are declared per
+workload and are not inherited from the root. <code>inputs</code>
+remains EXEC.INPUT; <code>vars</code> is evaluated after each
+execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the
+target starts. Exact references preserve native values, dependencies are
+order-independent, and cycles or external/stateful calls fail
+validation. The optional top-level execution.execIdFormat still uses the
+ordinary expression engine once during initialization; closed workloads
+may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have
+it.</p>
 <p>Unsupported schema versions fail before execution and include
 migration guidance. ATT does not auto-upgrade package files or invoke
 external resources to build the diagnostic. See <a
@@ -5587,40 +5608,48 @@ href="reference/14_actions.md">Actions and Typed Values</a>, <a
 href="reference/03_runtime_context.md">Runtime and Context Model</a>, <a
 href="reference/04_execution_modes/load.md">Load Mode</a> and <a
 href="reference/appendices/schema_matrix.md">Schema Matrix</a>.</p>
-<h3 id="removed-fields-and-migration">Removed fields and migration</h3>
-<p>ATT 3.6.0 accepts only the current schema for each resource.
-Historical versions are archived under schemas/history and are not
-active contracts.</p>
+<h3 id="historical-schema-migration">Historical schema migration</h3>
+<p>ATT 3.6.2 uses <code>att-template/v3.4</code> and
+<code>att-flow/v3.4</code> as the current Render contract. The published
+<code>att-template/v3.3</code> and <code>att-flow/v3.3</code>
+definitions remain under <code>schemas/history/</code> and are not
+active contracts. When migrating those descriptors, change their schema
+versions to v3.4 and apply the field changes below.</p>
 <table>
 <thead>
 <tr class="header">
-<th>Old configuration</th>
-<th>3.6.0 form</th>
+<th>Historical configuration</th>
+<th>3.6.2 form</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
+<td><code>att-template/v3.3</code> or <code>att-flow/v3.3</code></td>
+<td>Change to the corresponding v3.4 schema, then migrate removed Render
+fields.</td>
+</tr>
+<tr class="even">
 <td>Command Tool result.format</td>
 <td>Tool descriptor stdoutFormat</td>
 </tr>
-<tr class="even">
-<td>Render result.format/path/overwrite or renderAs/saveAs</td>
-<td>templateFormat; consume output.result as DocumentValue; no implicit
-file replacement</td>
-</tr>
 <tr class="odd">
+<td>Render result.format/path/overwrite or renderAs/saveAs</td>
+<td>Remove the old persistence fields. Render returns the exact String
+in output.result and creates no implicit result file.</td>
+</tr>
+<tr class="even">
 <td>Log file</td>
 <td>Pass a typed value to Log.value</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>Log fields</td>
 <td>Put a typed map/list in Log.value and select Log.format</td>
 </tr>
-<tr class="odd">
-<td>Render targetFiles handoff to HTTP/MQ</td>
-<td>Pass DocumentValue directly as HTTP body or MQ payload</td>
-</tr>
 <tr class="even">
+<td>Render targetFiles handoff to HTTP/MQ</td>
+<td>Pass the Render String directly as HTTP body or MQ payload</td>
+</tr>
+<tr class="odd">
 <td>requestFormat on rendered output</td>
 <td>Remove it; reserve requestFormat for abstract Map/List values</td>
 </tr>
