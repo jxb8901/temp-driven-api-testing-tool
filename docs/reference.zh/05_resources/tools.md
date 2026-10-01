@@ -53,7 +53,7 @@ Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `argu
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke a rendered payment request
+    description: Invoke a project-file payment request
     command:
       - ./tools/invoke_payment_api.sh
       - "${input.requestText}"
@@ -61,8 +61,8 @@ tools:
     stdoutFormat: json
     arguments:
       requestText:
-        name: Request File
-        description: Rendered XML request path
+        name: Request Body
+        description: Request body String
         required: true
       environment:
         name: Environment
@@ -70,7 +70,7 @@ tools:
         required: true
 ```
 
-每個 YAML command list item 在 render 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
+每個 YAML command list item 在 interpolation 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
 
 #### 引號、Context value 與 atomic argv
 

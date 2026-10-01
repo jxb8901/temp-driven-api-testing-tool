@@ -32,22 +32,23 @@ evidence:
 
 A Tool Action calls mq.<id>.send, mq.<id>.receive or mq.<id>.request as its primary operation. MQ reply bytes are decoded using received CCSID metadata when available, then parsed by responseFormat (text/json/yaml/xml). The parsed typed value is output.result. responseFormat owns ingress parsing; Log.format and evidence.output.format only control presentation.
 
-#### Sending Render strings and abstract values
+#### Sending project-file Strings and abstract values
 
-Render output is a String and can be passed directly as payload:
+A project-file expression produces a String and can be passed directly as payload:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{mq.payment.request(payload=${EXEC.VARS.requestText})}"
 ~~~
 
-ATT encodes the exact rendered text using the configured MQ charset/CCSID. It does not parse and reserialize the String. Do not supply requestFormat for a String Render result; MQ transport metadata remains resource-owned.
+ATT encodes the exact file text using the configured MQ charset/CCSID. It does not parse and reserialize the String. Do not supply requestFormat for a project-file String; MQ transport metadata remains resource-owned.
 
-A Map/List is an abstract structured value and requires requestFormat (text/json/yaml/xml), for example payload=${EXEC.INPUT.request}, requestFormat=json. String + requestFormat is rejected. payload and file are mutually exclusive. file remains available for explicit raw file input; Render does not create a file or targetFiles.
+A Map/List is an abstract structured value and requires requestFormat (text/json/yaml/xml), for example payload=${EXEC.INPUT.request}, requestFormat=json. String + requestFormat is rejected. payload and file are mutually exclusive. file remains available for explicit raw file input; a project-file expression does not create a file or targetFiles.
 
 #### Evidence, response parsing and Load
 

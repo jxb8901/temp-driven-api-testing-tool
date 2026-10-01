@@ -14,7 +14,25 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-依各欄位支援的形式使用 expression。Render 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](14_actions.md)。
+依各欄位支援的形式使用 expression。Project-file 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](14_actions.md)。
+
+### Project-file String expression
+
+`&{path}` 是 typed project-file expression。它只解析一個 regular UTF-8 檔案，並且一定回傳 `String`；不會推斷 document format、解析副檔名、展開 glob 或建立 output file。Path 相對於 canonical ATT project root。Descriptor-relative 的 `./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。
+
+Standalone value 或嵌入較大 expression 時，請使用 YAML string：
+
+~~~yaml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
+~~~
+
+檔案內的 `${...}` 與 `#{...}` 會在 file value 使用時編譯及求值。Run 與 Debug 會 cache compiled plan，並在 file fingerprint 改變時失效；Load 會為 scenario freeze 已驗證的 file identity、content 及 compiled plan。File output 不會再被當作新的 expression source 解析。
 
 ### 操作符
 

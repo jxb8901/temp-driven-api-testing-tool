@@ -33,6 +33,12 @@ public class StageTemplateRunner {
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this.templateEngine = templateEngine; this.flows = flows; }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
+        try (UnifiedTemplateEngine.SourceScope ignored = templateEngine.pushSourceDirectory(template.directory())) {
+            return executeScoped(stageName, template, context, log);
+        }
+    }
+
+    private List<ValidationResult> executeScoped(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         for (TemplateAction action : template.actions()) {
             Instant started = Instant.now();
@@ -180,7 +186,7 @@ public class StageTemplateRunner {
         appendProgress(log, "FLOW", flowEvent);
         String flowStatus = "ERROR";
         try {
-            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
             internal.addAll(execute(stageName + "." + action.id(), body, context, log));
             ResultStatus status = aggregateFlow(internal);
             flowStatus = status.name();

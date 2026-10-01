@@ -33,10 +33,12 @@ import java.util.stream.Stream;
 public final class PackageValidator {
     private final ToolCallParser callParser = new ToolCallParser();
     private final att.template.ExpressionEvaluator expressionEvaluator = new att.template.ExpressionEvaluator();
-    private final att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
+    private final att.template.UnifiedTemplateEngine expressionEngine;
+    private final att.template.FileExpressionResolver fileExpressions;
     private final att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
+    private final ThreadLocal<Path> validationSourceDirectories = new ThreadLocal<Path>();
     private final FrameworkConfig global;
     private final boolean windows;
     private final Set<String> skippedWindowsShellExecutableChecks = new LinkedHashSet<String>();
@@ -48,6 +50,8 @@ public final class PackageValidator {
 
     PackageValidator(Path projectRoot, FrameworkConfig global, boolean windows) {
         this.projectRoot = projectRoot; this.global = global; this.windows = windows;
+        this.expressionEngine = att.template.UnifiedTemplateEngine.forProject(projectRoot);
+        this.fileExpressions = new att.template.FileExpressionResolver(projectRoot);
     }
 
     /** Validates only the selected debug target and its Flow dependency closure. */
@@ -81,7 +85,7 @@ public final class PackageValidator {
             if (!visitedFlows.add(action.use())) continue;
             att.flow.FlowDefinition flow = flows.get(action.use());
             if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
-            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA,
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), flow.templateSchemaVersion(),
                     flow.directory().resolve("flow.yaml"));
             validateReferencedToolsClosure(body, config, visitedFlows);
         }
@@ -121,7 +125,7 @@ public final class PackageValidator {
             }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, projectRoot.resolve(global.templatesRoot()).resolve(reference).resolve("template.yaml"))); }
             for (att.flow.FlowDefinition flow : flows.all()) try {
-                StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
+                StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
                 addContextMigrationWarnings(diagnostics, body);
                 validateReferencedTools(body, global);
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
@@ -286,7 +290,7 @@ public final class PackageValidator {
                 att.flow.FlowDefinition target = flows.get(action.use());
                 if (target != null) {
                     StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(),
-                            att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                            target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                     validateReferencedTools(body, config, diagnostics, visitedFlows);
                 }
             }
@@ -299,6 +303,7 @@ public final class PackageValidator {
                                                FrameworkConfig config) {
         if (expression == null || expression.trim().isEmpty()) return;
         try {
+            validateFileExpressions(expression, template.directory());
             for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
         } catch (Exception error) {
             throw locateReferencedError(error, template, action, field, sourceFile);
@@ -824,6 +829,18 @@ public final class PackageValidator {
     private void validateTemplateActions(StageTemplate template, FrameworkConfig config,
                                          Set<String> actionIds, Set<String> completedActions,
                                          Set<String> assignmentNames) {
+        Path previousSourceDirectory = validationSourceDirectories.get();
+        validationSourceDirectories.set(template.directory());
+        try {
+            validateTemplateActionsInScope(template, config, actionIds, completedActions, assignmentNames);
+        } finally {
+            validationSourceDirectories.set(previousSourceDirectory);
+        }
+    }
+
+    private void validateTemplateActionsInScope(StageTemplate template, FrameworkConfig config,
+                                                Set<String> actionIds, Set<String> completedActions,
+                                                Set<String> assignmentNames) {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
           try {
@@ -832,6 +849,9 @@ public final class PackageValidator {
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
             if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if ("render".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
+                throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{project-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
+            }
             if (!"tool".equals(type) && action.raw().containsKey("evidence")) {
                 throw new IllegalArgumentException("Field 'evidence' is only supported for tool actions: " + action.id());
             }
@@ -848,6 +868,7 @@ public final class PackageValidator {
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
+                        validateFileExpressions(content, payload.getParent());
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false, action.id());
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
                     } catch (Exception e) {
@@ -885,6 +906,7 @@ public final class PackageValidator {
             }
             if ("flow".equals(type)) {
                 if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())
+                        && !att.Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4.equals(template.schemaVersion())
                         && !"att-template/v3.2".equals(template.schemaVersion())
                         && !att.Version.PREVIOUS_TEMPLATE_SCHEMA.equals(template.schemaVersion())) throw new IllegalArgumentException("Flow actions require " + att.Version.PREVIOUS_TEMPLATE_SCHEMA + " or " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
                 require(action.use(), "use is required for Flow action " + action.id());
@@ -934,7 +956,7 @@ public final class PackageValidator {
             }
             if ("flow".equals(type)) {
                 att.flow.FlowDefinition target = flows.get(action.use());
-                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                 // A Flow invocation owns a fresh Action namespace.  Its
                 // internal IDs are intentionally not compared with the parent
                 // Template or with another Flow invocation.
@@ -961,7 +983,7 @@ public final class PackageValidator {
             try {
                 if (("assert".equals(fields[index]) || "runWhen".equals(fields[index])) && !values[index].trim().isEmpty())
                     validateAssertionExpression(values[index], engine, config);
-                else { engine.validateValueSyntax(values[index]); engine.parseCalls(values[index]); }
+                else { engine.validateValueSyntax(values[index]); validateFileExpressions(values[index], template.directory()); engine.parseCalls(values[index]); }
             } catch (Exception error) {
                 throw att.config.YamlSupport.locate(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
                         "Invalid Action expression", error, null, null, "Correct the expression at the reported source location."),
@@ -1493,7 +1515,7 @@ public final class PackageValidator {
 
                 if ("flow".equalsIgnoreCase(action.type())) {
                     att.flow.FlowDefinition target = flows.get(action.use());
-                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                     context.beginFlow(action.use(), action.id());
                     try {
                         validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
@@ -1709,7 +1731,17 @@ public final class PackageValidator {
 
     private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         engine.validateValueSyntax(text);
+        validateFileExpressions(text, validationSourceDirectories.get());
         for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCall(call, config);
+    }
+
+    private void validateFileExpressions(String text, Path sourceDirectory) {
+        if (text == null || text.isEmpty()) return;
+        try {
+            for (String path : fileExpressions.extractReferences(text)) fileExpressions.compile(path, sourceDirectory);
+        } catch (Exception error) {
+            throw new IllegalArgumentException(error.getMessage(), error);
+        }
     }
 
     private void validateAssertionExpression(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {

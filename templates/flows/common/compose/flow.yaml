@@ -1,4 +1,4 @@
-schemaVersion: att-flow/v3.4
+schemaVersion: att-flow/v3.5
 id: common.compose.v1
 name: Compose Value
 description: V3.4.2 statically nested Flow composition with isolated Action scopes.

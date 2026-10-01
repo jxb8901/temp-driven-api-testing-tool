@@ -460,7 +460,7 @@ class PackageValidatorTest {
         Map<String,Object> render = new LinkedHashMap<String,Object>();
         render.put("type", "render"); render.put("payload", "request.txt");
         StageTemplate template = new StageTemplate("PAYMENT", tempDir,
-                Collections.singletonList(new TemplateAction("request", render)));
+                Collections.singletonList(new TemplateAction("request", render, "att-template/v3.4")), "att-template/v3.4");
         java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
         contract.setAccessible(true);
         java.lang.reflect.InvocationTargetException unknown = assertThrows(java.lang.reflect.InvocationTargetException.class,
@@ -1002,7 +1002,7 @@ class PackageValidatorTest {
         Map<String,Object> render = new LinkedHashMap<String,Object>();
         render.put("type", "render"); render.put("payload", "date.txt");
         StageTemplate template = new StageTemplate("DATES", tempDir,
-                Collections.singletonList(new TemplateAction("date", render)));
+                Collections.singletonList(new TemplateAction("date", render, "att-template/v3.4")), "att-template/v3.4");
         java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
         contract.setAccessible(true);
 

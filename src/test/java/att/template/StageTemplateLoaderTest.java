@@ -146,4 +146,20 @@ class StageTemplateLoaderTest {
         IllegalArgumentException invalidWith = assertThrows(IllegalArgumentException.class, () -> loader.load("array"));
         assertTrue(invalidWith.getMessage().contains("Unknown field") || invalidWith.getMessage().contains("with"), invalidWith.getMessage());
     }
+
+    @Test void currentV35RetiresRenderWhileHistoricalV34RemainsLoadable() throws Exception {
+        Path current = tempDir.resolve("templates/current-v35");
+        Path historical = tempDir.resolve("templates/historical-v34");
+        Files.createDirectories(current);
+        Files.createDirectories(historical);
+        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.5\nname: current\ndescription: current\nactions:\n"
+                + "  request: {type: render, payload: request.txt}\n").getBytes("UTF-8"));
+        Files.write(historical.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: historical\ndescription: historical\nactions:\n"
+                + "  request: {type: render, payload: request.txt}\n").getBytes("UTF-8"));
+        Files.write(historical.resolve("request.txt"), "historical".getBytes("UTF-8"));
+
+        StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
+        assertThrows(Exception.class, () -> loader.load("current-v35"));
+        assertEquals("render", loader.load("historical-v34").actions().get(0).type());
+    }
 }

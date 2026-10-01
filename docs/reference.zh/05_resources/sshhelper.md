@@ -19,7 +19,7 @@ actions:
     call: >-
       #{ssh.application.upload(
         remotePath='/srv/app/request.json',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         overwrite=true
       )}
   downloadResponse:

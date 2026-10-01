@@ -16,7 +16,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- render / assert / log / assign
+              |     |-- project-file expression / assert / log / assign
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -207,15 +207,15 @@ Stage `required`, `runWhen` and `onFailure` behavior is defined in [Reliability]
 
 ### 2.3 Template
 
-A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.4. Each Template has a non-empty ordered actions map and a required description.
+A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.5. Each Template has a non-empty ordered actions map and a required description.
 
-Each Action has a type-specific contract. Render returns the exact rendered String without writing a file. Tool/DB/HTTP/MQ/SSH actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
+Each Action has a type-specific contract. A project-file expression such as `&{templates/payment/request.xml}` returns the exact UTF-8 file content as a String without creating a file. Tool/DB/HTTP/MQ/SSH actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
 See [Actions and Typed Values](reference/14_actions.md) for the complete field list, examples, typed result/evidence model, HTTP/MQ/SSH boundaries and migration guidance. [Expressions and Built-ins](reference/07_expressions.md) covers the shared expression language; [Load](reference/04_execution_modes/load.md) owns ID initialization.
 
 ### 2.4 Flow
 
-A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.4`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/14_actions.md) owns Flow results and Assign behavior; [Context](reference/03_runtime_context.md) owns scope lifetime.
+A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.5`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/14_actions.md) owns Flow results and Assign behavior; [Context](reference/03_runtime_context.md) owns scope lifetime.
 
 ### 2.5 Authoring lifecycle
 
@@ -227,13 +227,12 @@ Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs 
 
 ## 03 Actions and Typed Values
 
-This chapter defines the active ATT action contract. Templates use att-template/v3.4. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
+This chapter defines the active ATT action contract. Templates use att-template/v3.5. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
 
 ### Action types
 
 | Type | Required fields | Result and behavior |
 |---|---|---|
-| render | payload | Renders template files into the exact `String` content, or a relative-path keyed map of `String` values for multiple sources. It does not parse, normalize or write a result file. |
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. |
 | db | db and exactly one query/update block | Returns the DB operation's typed value and evidence. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
@@ -251,40 +250,42 @@ ATT keeps the logical operation result separate from human or wire representatio
 |---|---|---|
 | Command Tool stdout | stdoutFormat | Parses external stdout into a typed result. |
 | HTTP/MQ response | responseFormat | Parses external response bytes into a typed result. |
-| Render output | `String` | Preserves the exact characters produced by the template. |
+| Project-file expression | `String` | Reads one safe UTF-8 project file and preserves its exact characters after expression evaluation. |
 | Abstract Map/List sent over HTTP/MQ | requestFormat | Serializes the value at the outbound boundary. |
 | Log or resource evidence | format / evidence.output.format | Produces a human-readable representation. |
 
 DB results are already typed values. Tool, Action, Template, Flow and expression results remain typed while they move through ATT.
 
-### Render returns String
+### Project-file expressions return String
 
-Render returns the exact rendered `String`:
+The current replacement for the historical Render Action is the typed project-file value expression `&{path}`. It always returns one `String`; it never infers a document format, parses an extension, expands a glob, or creates an output file:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+requestText:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 ~~~
 
-One source produces output.result as a `String`. Multiple sources produce an ordered map keyed by template-root-relative source paths, with a `String` for each value. File extensions have no effect: Render does not infer or attach a format, parse the content, reorder it, pretty-print it, normalize it, or rewrite it.
+`${...}` remains a Context reference and `#{...}` remains an expression/call. `&{...}` is a static, one-file locator; v1 has no glob or dynamic locator form. The locator is relative to the canonical ATT project root. A descriptor-relative `./` or `../` path is allowed only when its canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace and glob syntax fail validation.
 
-Render creates no file and exposes no output.targetFiles. Use the original typed Context value for structured access, such as EXEC.INPUT.amount or a prior action's output.result.amount.
+Ordinary UTF-8 files are returned unchanged. If the file contains `${...}` or `#{...}`, ATT compiles those nodes once and evaluates them for each execution; the compiled plan is immutable and dynamic values are not reparsed as a second template. Run and Debug reuse the plan until the file fingerprint changes. Load validates and captures the selected file identity, content and compiled dependency closure before scheduling, so active iterations see a stable snapshot.
 
-Pass Render output directly to HTTP or MQ:
+Use Assign when the String is reused by later Actions:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+requestText:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 sendRequest:
   type: tool
-  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
 ~~~
 
-For HTTP or MQ, pass the `String` as the body/payload. The resource encodes the exact text with its configured charset/CCSID. HTTP content type and MQ transport metadata remain resource-owned settings.
+For HTTP or MQ, pass the `String` as the body/payload. The resource encodes the exact text with its configured charset/CCSID. HTTP content type and MQ transport metadata remain resource-owned settings. `&{...}` is valid in Tool/Helper call arguments, Assign expressions, Log values and other typed value positions.
 
-requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with a `String` fails; a Render result is never silently parsed and serialized. A raw file input remains available only for resource calls that explicitly define a file argument; Render does not create a handoff file.
+requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with a `String` fails; a project-file result is never silently parsed and serialized. A raw file input remains available only for resource calls that explicitly define a file argument.
 
 ### Tool, DB and Flow results
 
@@ -322,7 +323,7 @@ callPayment:
   type: tool
   call: >-
     #{mq.payment.request(
-      payload=${EXEC.ACTIONS.renderRequest.output.result},
+      payload=${EXEC.VARS.requestText},
       responseFormat='xml'
     )}
   evidence:
@@ -375,7 +376,7 @@ When a Tool retries, collectors run for every primary attempt before that attemp
 
 `call` is required. `timeoutMs` is independent of the primary Tool timeout. `onFailure: continue` is the normal application-log pattern so a diagnostic collection failure does not hide the original business or assertion failure; `stop` makes the collector failure an Action error. Collector status and diagnostic remain observable, and collector failure never changes the primary logical result. Distinguish an evidence collector from an ordinary Tool/Log/Assign Action: use a collector for diagnostic data needed before the containing Tool assertion, and an ordinary Action when the collected value is normal business/test data for later assertions.
 
-Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or Render `String`; helper `evidence.output` is an explicit presentation boundary. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
+Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or project-file `String`; helper `evidence.output` is an explicit presentation boundary. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
 
 ### Log: typed value to Case log
 
@@ -392,7 +393,7 @@ logOrder:
 
 level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
-When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A Render String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
+When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A project-file String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 
 ### Expressions and variable scope
 
@@ -527,7 +528,25 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-Use the expression form supported by each field. Render content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/14_actions.md).
+Use the expression form supported by each field. Project-file content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/14_actions.md).
+
+### Project-file String expressions
+
+`&{path}` is a typed project-file expression. It resolves exactly one regular UTF-8 file and always returns a `String`; it never infers a document format, parses an extension, expands a glob or creates an output file. The path is relative to the canonical ATT project root. Descriptor-relative `./` and `../` paths are allowed only when their canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation.
+
+Use a YAML string when authoring a standalone value or embedding the locator in a larger expression:
+
+~~~yaml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
+~~~
+
+`${...}` and `#{...}` inside the file are compiled and evaluated when the file value is used. Run and Debug cache the compiled plan and invalidate it when the file fingerprint changes; Load freezes the validated file identity, content and compiled plan for the scenario. File output is not reparsed as a new expression source.
 
 ### Operators
 
@@ -935,7 +954,7 @@ A metrics-only iteration still has EXEC.ID but does not create a per-iteration e
 
 evidence.mode accepts metrics, failures, samples or all; the default is failures. sampleRate and maxSamples bound retained evidence. Dropped arrivals do not create iteration evidence.
 
-evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, exact Render String output and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
+evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, exact project-file String output and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
 
 #### Reports, metrics and thresholds
 
@@ -1023,7 +1042,7 @@ Operation
 └── evidence     # bounded execution/transport metadata
 ~~~
 
-The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. Render returns the exact rendered String as described in [Actions and Typed Values](reference/14_actions.md).
+The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. A project-file expression returns exact file text as a String, as described in [Actions and Typed Values](reference/14_actions.md).
 
 Resource evidence can include low-cost metadata. A helper may also configure an optional human-readable snapshot:
 
@@ -1036,7 +1055,7 @@ evidence:
 
 Evidence output supports json, yaml, xml, text and sqlplus. It is presentation only; it does not mutate or replace output.result. Secret-bearing values are filtered or omitted.
 
-Load scenarios may set evidence.resources.output to inherit (default) or none. none skips optional resource-output formatting/materialization. inherit defers formatting until a success sample or failure receives a retention slot. Metrics-only iterations do not serialize resource output or create an evidence workspace. Transport parsing and Render representation are unchanged.
+Load scenarios may set evidence.resources.output to inherit (default) or none. none skips optional resource-output formatting/materialization. inherit defers formatting until a success sample or failure receives a retention slot. Metrics-only iterations do not serialize resource output or create an evidence workspace. Transport parsing and project-file String representation are unchanged.
 
 ### 7.2 Tool
 
@@ -1093,7 +1112,7 @@ For example:
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke a rendered payment request
+    description: Invoke a project-file payment request
     command:
       - ./tools/invoke_payment_api.sh
       - "${input.requestText}"
@@ -1101,8 +1120,8 @@ tools:
     stdoutFormat: json
     arguments:
       requestText:
-        name: Request File
-        description: Rendered XML request path
+        name: Request Body
+        description: Request body String
         required: true
       environment:
         name: Environment
@@ -1115,7 +1134,7 @@ The action call is the boundary between the general Runtime Context and this res
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestText=${EXEC.ACTIONS.renderRequest.output.result}, environment=${EXEC.INPUT.environment})}"
+  call: "#{invokePaymentApi(requestText=${EXEC.VARS.requestText}, environment=${EXEC.INPUT.environment})}"
 ```
 
 The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
@@ -1235,8 +1254,8 @@ If an argument declares a non-empty `argName`, its placeholder must appear exact
 command: [./tools/invoke_payment_api.sh, "${input.requestText}"]
 arguments:
   requestText:
-    name: Request File
-    description: Rendered XML request path
+    name: Request Body
+    description: Project-file request body String
     required: true
     argName: --request
 ```
@@ -1348,22 +1367,23 @@ evidence:
 
 A Tool Action calls mq.<id>.send, mq.<id>.receive or mq.<id>.request as its primary operation. MQ reply bytes are decoded using received CCSID metadata when available, then parsed by responseFormat (text/json/yaml/xml). The parsed typed value is output.result. responseFormat owns ingress parsing; Log.format and evidence.output.format only control presentation.
 
-#### Sending Render strings and abstract values
+#### Sending project-file Strings and abstract values
 
-Render output is a String and can be passed directly as payload:
+A project-file expression produces a String and can be passed directly as payload:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{mq.payment.request(payload=${EXEC.VARS.requestText})}"
 ~~~
 
-ATT encodes the exact rendered text using the configured MQ charset/CCSID. It does not parse and reserialize the String. Do not supply requestFormat for a String Render result; MQ transport metadata remains resource-owned.
+ATT encodes the exact file text using the configured MQ charset/CCSID. It does not parse and reserialize the String. Do not supply requestFormat for a project-file String; MQ transport metadata remains resource-owned.
 
-A Map/List is an abstract structured value and requires requestFormat (text/json/yaml/xml), for example payload=${EXEC.INPUT.request}, requestFormat=json. String + requestFormat is rejected. payload and file are mutually exclusive. file remains available for explicit raw file input; Render does not create a file or targetFiles.
+A Map/List is an abstract structured value and requires requestFormat (text/json/yaml/xml), for example payload=${EXEC.INPUT.request}, requestFormat=json. String + requestFormat is rejected. payload and file are mutually exclusive. file remains available for explicit raw file input; a project-file expression does not create a file or targetFiles.
 
 #### Evidence, response parsing and Load
 
@@ -1413,30 +1433,31 @@ evidence:
 
 Call http.<id>.get/post/request as the primary call of a type: tool Action. Response bytes are parsed at this boundary using call responseFormat, the helper default, or Content-Type when auto is selected. Supported response formats are auto, text, json, yaml and xml. The parsed native value is output.result. Optional evidence.output is a bounded human-readable snapshot and never changes that value.
 
-#### Request bodies and Render String
+#### Request bodies and project-file Strings
 
-A Render Action returns the exact rendered String. Pass it directly as body:
+A project-file expression returns the exact UTF-8 file content as a String. Assign it once and pass it directly as the body:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 sendRequest:
   type: tool
-  call: "#{http.payment.post(path='/v1/payments', body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(path='/v1/payments', body=${EXEC.VARS.requestText})}"
 ~~~
 
-HTTP sends the exact String to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a String Render result with requestFormat.
+HTTP sends the exact String to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a project-file String with requestFormat.
 
-A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. String + requestFormat is rejected. body and file are mutually exclusive; file is explicit raw file input supported by the HTTP call. Render creates no result file and has no targetFiles.
+A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. String + requestFormat is rejected. body and file are mutually exclusive; file is explicit raw file input supported by the HTTP call. A project-file expression creates no result file and has no targetFiles.
 
-Render has no format metadata and does not set HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
+The project-file String has no format metadata and does not set HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
 
 #### Failure and evidence
 
 Transport/protocol and response-parse failures are operational errors. A received 4xx/5xx is a completed response and can be asserted through statusCode. HTTP evidence may include helper ID, method, safe URL, response status, content type, byte counts, response format and duration. Credentials and payloads are not implicitly stored. Load can set evidence.resources.output: none to skip optional resource-output formatting, or defer it until the iteration evidence is retained.
 
-See [Actions and Typed Values](reference/14_actions.md) for the shared String Render and typed-result contract.
+See [Actions and Typed Values](reference/14_actions.md) for the shared project-file String and typed-result contract.
 
 ### 7.6 SSHHelper: logical SSH targets
 
@@ -1459,7 +1480,7 @@ actions:
     call: >-
       #{ssh.application.upload(
         remotePath='/srv/app/request.json',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         overwrite=true
       )}
   downloadResponse:
@@ -1704,9 +1725,10 @@ The Action definitions remain identical:
 
 ```yaml
 actions:
-  renderRequest:
-    type: render
-    payload: payment/request.json
+  prepareRequest:
+    type: assign
+    name: requestText
+    expression: "&{templates/payment/request.json}"
 
   queryOrder:
     type: db
@@ -1722,7 +1744,7 @@ actions:
       #{mq.payment.request(
         requestQueue='PAYMENT.REQUEST',
         replyQueue='PAYMENT.REPLY',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         responseFormat='xml',
         waitMs=5000
       )}
@@ -1850,7 +1872,7 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; render glob matches remain below the template and resource file inputs and outputs must remain below their documented safe roots. ATT normalizes and checks root containment before reads and writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; project-file expressions use one canonical, regular UTF-8 file below the project root and reject absolute paths, globs, dynamic locators and symlink escapes. Resource file inputs and outputs must remain below their documented safe roots. ATT normalizes and checks root containment before reads and writes.
 
 ### Topology and secrets
 
@@ -2195,7 +2217,7 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in [Appendix A](reference/appendices/schema_matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file and YAML field location and provide migration guidance; they never rewrite descriptors. For example, remove an old Render `result.path` and pass the typed `output.result` value as described in [Actions and Typed Values](reference/14_actions.md). Unsupported versions fail before execution.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in [Appendix A](reference/appendices/schema_matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](reference/14_actions.md). Unsupported versions fail before execution.
 
 Current schemas are in [`schemas/`](../schemas); older definitions are under [`schemas/history/`](../schemas/history). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
@@ -2338,8 +2360,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.4 |
-| Flow | att-flow/v3.4 |
+| Template | att-template/v3.5 |
+| Flow | att-flow/v3.5 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
@@ -2358,30 +2380,36 @@ Deterministic legacy aliases may remain readable with migration warnings. Aliase
 
 ## Appendix C — Migration Notes
 
-ATT 3.6.2 separates typed operation results, external parsing, rendered strings, outbound transport and human-readable evidence.
+ATT 3.6.2 separates typed operation results, external parsing, project-file Strings, outbound transport and human-readable evidence.
 
 | Previous field/model | 3.6.2 migration |
 |---|---|
+| `att-template/v3.4` or `att-flow/v3.4` with `type: render` | Change the descriptor to the active v3.5 schema and replace each Render Action with an Assign that uses a project-file expression. Historical v3.4 descriptors remain loadable only through the historical schema path. |
+| `type: render` / `payload: path` | Use `type: assign`, a variable `name`, and `expression: "&{project-relative-file}"`; pass `${EXEC.VARS.<name>}` to the consumer. |
 | Command Tool result.format | Move the parsing choice to the Tool descriptor's stdoutFormat. |
 | Common Action result.format/path/overwrite | Remove it. output.result is the native logical typed value; no implicit file replacement exists. |
-| Render result.format/path or renderAs/saveAs | Remove the old format/persistence fields. Render returns the exact String and creates no result file or targetFiles. |
-| Render file handoff through targetFiles | Pass the Render String directly as HTTP body or MQ payload, or use an explicit resource file argument. |
-| requestFormat on rendered output | Remove it. requestFormat is only for abstract Map/List values; String + requestFormat fails. |
+| Render result.format/path or renderAs/saveAs | Remove the old format/persistence fields. The project-file expression returns the exact UTF-8 String and creates no result file or targetFiles. |
+| Render file handoff through targetFiles | Pass the project-file String directly as HTTP body or MQ payload, or use an explicit resource file argument. |
+| requestFormat on a project-file String | Remove it. requestFormat is only for abstract Map/List values; String + requestFormat fails. |
+| Dynamic or unsafe file locator | Replace it with one static project-relative file. Absolute paths, globs, dynamic locators, missing files, directories, non-UTF-8 bytes and symlink escapes are rejected. |
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
 | Older active resource/config schema versions | Use the active schema from [Appendix A](reference/appendices/schema_matrix.md) and migrate the fields above. Historical schemas are not active contracts. |
 
-A Render-to-HTTP example:
+A project-file String passed to HTTP:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
 ~~~
+
+The file is read as strict UTF-8 text. `${...}` and `#{...}` inside the file remain runtime expressions and are compiled without invoking external resources during validation. Run/Debug cache the compiled plan and invalidate it when the file fingerprint changes; Load freezes the validated file identity, content and plan for the scenario. File output is not reparsed as a new expression source.
 
 For an abstract value, use requestFormat explicitly:
 
@@ -2399,17 +2427,20 @@ Unsupported schema versions fail before execution and include migration guidance
 
 ### Historical schema migration
 
-ATT 3.6.2 uses `att-template/v3.4` and `att-flow/v3.4` as the current Render contract. The published `att-template/v3.3` and `att-flow/v3.3` definitions remain under `schemas/history/` and are not active contracts. When migrating those descriptors, change their schema versions to v3.4 and apply the field changes below.
+ATT 3.6.2 uses `att-template/v3.5` and `att-flow/v3.5` as the active schemas. The published `att-template/v3.4` and `att-flow/v3.4` definitions remain under `schemas/history/`; their historical Render Action is compatibility-only and is not part of the active contract. When migrating those descriptors, change their schema versions to v3.5 and apply the field changes below.
 
 | Historical configuration | 3.6.2 form |
 |---|---|
-| `att-template/v3.3` or `att-flow/v3.3` | Change to the corresponding v3.4 schema, then migrate removed Render fields. |
+| `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.5 and migrate the Render Action. |
+| Historical `type: render` | Replace it with an Assign whose expression is `"&{project-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. Render returns the exact String in output.result and creates no implicit result file. |
+| Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. The project-file expression returns the exact UTF-8 String and creates no implicit result file. |
 | Log file | Pass a typed value to Log.value |
 | Log fields | Put a typed map/list in Log.value and select Log.format |
-| Render targetFiles handoff to HTTP/MQ | Pass the Render String directly as HTTP body or MQ payload |
+| Render targetFiles handoff to HTTP/MQ | Pass the project-file String directly as HTTP body or MQ payload |
 | requestFormat on rendered output | Remove it; reserve requestFormat for abstract Map/List values |
+
+Project-file paths are relative to the canonical project root. `./` and `../` are allowed only when the canonical target remains inside that root. The v1 contract has no globs or dynamic locators; the target must be a regular strict-UTF-8 file.
 
 Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.
 

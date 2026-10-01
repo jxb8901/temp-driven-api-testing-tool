@@ -8,7 +8,7 @@ Operation
 └── evidence     # bounded execution/transport metadata
 ~~~
 
-The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. Render returns the exact rendered String as described in [Actions and Typed Values](../14_actions.md).
+The Action publishes the final operation value at output.result. Action status, assertion detail, diagnostic and attempts describe execution; they do not replace the business result. Command stdout is parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB operations return native typed values. A project-file expression returns exact file text as a String, as described in [Actions and Typed Values](../14_actions.md).
 
 Resource evidence can include low-cost metadata. A helper may also configure an optional human-readable snapshot:
 
@@ -21,4 +21,4 @@ evidence:
 
 Evidence output supports json, yaml, xml, text and sqlplus. It is presentation only; it does not mutate or replace output.result. Secret-bearing values are filtered or omitted.
 
-Load scenarios may set evidence.resources.output to inherit (default) or none. none skips optional resource-output formatting/materialization. inherit defers formatting until a success sample or failure receives a retention slot. Metrics-only iterations do not serialize resource output or create an evidence workspace. Transport parsing and Render representation are unchanged.
+Load scenarios may set evidence.resources.output to inherit (default) or none. none skips optional resource-output formatting/materialization. inherit defers formatting until a success sample or failure receives a retention slot. Metrics-only iterations do not serialize resource output or create an evidence workspace. Transport parsing and project-file String representation are unchanged.
