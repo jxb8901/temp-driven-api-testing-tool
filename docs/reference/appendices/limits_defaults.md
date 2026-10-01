@@ -4,7 +4,7 @@
 
 Use the owning schema/configuration chapter for normative field defaults. Important architectural limits include:
 
-- load V1 chooses exactly one workload model;
+- Load chooses exactly one workload model;
 - arrival-rate overload policy is `drop`;
 - Flow invocation receives a fresh Action scope and caller scope is restored on return;
 - `DIAG` is framework-owned evidence and is not part of the expression tree;

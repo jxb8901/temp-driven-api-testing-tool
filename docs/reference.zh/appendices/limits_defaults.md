@@ -4,7 +4,7 @@
 
 Normative field default 以其 owner schema/configuration chapter 為準。重要 architecture limit 包括：
 
-- load V1 必須二選一 workload model；
+- Load 必須二選一 workload model；
 - arrival-rate overload policy 為 `drop`；
 - 每次 Flow invocation 有新的 Action scope，返回後恢復 caller scope；
 - `DIAG` 是 framework-owned evidence，不屬於 expression tree；
