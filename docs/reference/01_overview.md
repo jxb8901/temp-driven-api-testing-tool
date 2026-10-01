@@ -24,8 +24,8 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 | Mode | Primary input | Reuses |
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ |
-| Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.2` scenario | one Template, Flow or Tool target repeatedly |
+| Debug | `att-debug/v1.1` sidecar or `--input` | one Template, Flow or Tool target |
+| Load | `att-load/v1.3` scenario | one Template, Flow or Tool target repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 

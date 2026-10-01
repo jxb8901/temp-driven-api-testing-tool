@@ -14,8 +14,8 @@ ATT 3.6.0 active schemas:
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Debug input | att-debug/v1.0 |
-| Load scenario | att-load/v1.2 |
+| Debug input | att-debug/v1.1 |
+| Load scenario | att-load/v1.3 |
 | Load summary | att-load-summary/v1.0 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |

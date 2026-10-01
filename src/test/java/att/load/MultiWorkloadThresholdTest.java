@@ -20,7 +20,7 @@ class MultiWorkloadThresholdTest {
         Path root = Paths.get("").toAbsolutePath().normalize();
         Path file = temp.resolve("thresholds.yaml");
         Files.write(file, (
-                "schemaVersion: att-load/v1.2\n"
+                "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n"
                 + "- id: constrained\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {arrivalRate: 10/s, duration: 250ms, maxConcurrent: 2, overloadPolicy: drop}\n"

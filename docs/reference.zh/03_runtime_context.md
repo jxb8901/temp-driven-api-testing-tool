@@ -2,6 +2,8 @@
 
 Run、Debug、Load 共用 canonical EXEC/META expression model。EXEC 透過 framework lifecycle 和明確的 input/variable/action publication 更新。META 是 curated、immutable、secret-safe 的描述資訊。
 
+Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` 寫入 `EXEC.INPUT`，Template/Flow 的 `vars` 會在 target 開始前 seed `EXEC.VARS`。v1.1 schema、typed literal 規則及受保護的 framework roots 請參考 [Standalone Debug](04_execution_modes/debug.md)。
+
 ### Identity roots
 
 | 路徑 | 意義與型別 | 可用時機 |
@@ -80,9 +82,17 @@ EXEC.INPUT 是 canonical input map。Stage 暫時 overlay Case input，完成後
 
 String、Number、Boolean、null、Map、List、DocumentValue 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
+### Execution bootstrap variables
+
+Debug sidecar 與現行 Load workload 可為 Template/Flow 提供 canonical 初始 `EXEC.VARS` tree。初始化順序為：解析及驗證 target/definitions；建立 `EXEC.RUN_ID`、`EXEC.INPUT`、`EXEC.LOAD`、穩定 META 與 timestamps；產生並發布 `EXEC.ID`；設定 `EXEC.OUTPUT_DIR`；評估 vars；最後啟動 Template/Flow。Debug 亦使用相同規則及已初始化 identity/output path。
+
+Values 使用 ATT 一般 expression parser。完整 `${...}` 保留 reference 原生型別（包括 null、number、list、map）；混合文字成為字串；`#{...}` 保留 typed result。Map/list 遞迴處理而 key 維持字面值。Vars dependency 不受宣告順序影響；missing bootstrap var 及直接／間接循環會報錯。每個 Load execution 都評估獨立複本，併發 user/workload 不共用 mutable values。第一次一般 `assign` 可取代初始值。
+
+可用 root 包括初始化完成的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.LOAD`、其他命名的 `EXEC.VARS`，以及穩定 META project/source/target/template metadata。Actions、action-local `output`、invocation-scoped META 和 external/stateful calls 不可用。只允許安全 pure built-in，並沿用相同 expression syntax/type rules。`--set vars.path=value` 會在 evaluation 前修改原始 definition。
+
 ### Load execution ID initialization
 
-Load 使用 att-load/v1.2。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。
+Load 使用 att-load/v1.3。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
 
 可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.PROJECT/SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
 

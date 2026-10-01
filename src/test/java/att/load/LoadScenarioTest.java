@@ -44,9 +44,9 @@ class LoadScenarioTest {
                 + "load: {users: 1, duration: 1s}\n").getBytes(StandardCharsets.UTF_8));
         DiagnosticException unsupported = assertThrows(DiagnosticException.class,
                 () -> new LoadScenarioLoader(project).load(legacy));
-        assertTrue(unsupported.getMessage().contains("att-load/v1.2"), unsupported.getMessage());
+        assertTrue(unsupported.getMessage().contains("att-load/v1.3"), unsupported.getMessage());
 
-        Path current = write(project, "full-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
+        Path current = write(project, "full-v12.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "  - id: default\n"
                 + "    target: {type: template, id: LOAD_TEMPLATE}\n"
                 + "    load: {users: 1, duration: 1s}\n"
@@ -54,6 +54,103 @@ class LoadScenarioTest {
         LoadScenario scenario = new LoadScenarioLoader(project).load(current);
         assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(scenario).success());
         assertEquals(LoadEvidencePolicy.Failure.FULL, LoadEvidencePolicy.from(scenario).failure());
+
+        Path prior = write(project, "prior-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
+                + "  - id: default\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
+        DiagnosticException oldCurrent = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(prior));
+        assertTrue(oldCurrent.getMessage().contains("att-load/v1.3"), oldCurrent.getMessage());
+    }
+
+    @Test void currentWorkloadVarsRemainDefinitionsAndCliOverridesAreAppliedBeforeEvaluation() throws Exception {
+        Path project = project();
+        Path file = write(project, "bootstrap.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: payments\n    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    inputs: {amount: 7}\n    vars: {base: 2, derived: '${EXEC.VARS.base}', nested: {value: old}}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", file.toString(),
+                "--set", "vars.base=${EXEC.INPUT.amount}", "--set", "vars.nested.value=updated"});
+        LoadScenario scenario = new LoadScenarioLoader(project).load(file, LoadOverrides.from(options));
+
+        assertEquals("${EXEC.INPUT.amount}", scenario.vars().get("base"));
+        assertEquals("${EXEC.VARS.base}", scenario.vars().get("derived"));
+        assertEquals("updated", ((Map<?, ?>) scenario.vars().get("nested")).get("value"));
+        assertFalse(scenario.toSummaryMap().toString().contains("derived"), "summary projection must not expose vars");
+
+        Path toolVars = write(project, "tool-vars.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: tool\n    target: {type: tool, id: sample.echo}\n"
+                + "    vars: {notArguments: value}\n    load: {users: 1, duration: 1s}\n");
+        DiagnosticException toolError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(toolVars));
+        assertTrue(toolError.getMessage().contains("Tool arguments remain a separate contract"), toolError.getMessage());
+    }
+
+    @Test void unifiedSetOverridesInputAndToolArgumentWithTypedValues() throws Exception {
+        Path project = project();
+        Path templateFile = write(project, "input-set.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: template\n    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    inputs: {customer: {ids: [1, 2]}}\n    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions inputOptions = ExecutionOptions.parse(new String[]{"load", templateFile.toString(),
+                "--set", "input.customer.ids[1]=false", "--set", "input.customer.active=true"});
+        LoadScenario template = new LoadScenarioLoader(project).load(templateFile, LoadOverrides.from(inputOptions));
+        Map<?, ?> customer = (Map<?, ?>) template.inputs().get("customer");
+        assertEquals(java.util.Arrays.asList(1, false), customer.get("ids"));
+        assertEquals(Boolean.TRUE, customer.get("active"));
+
+        Path toolFile = write(project, "tool-set.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: tool\n    target: {type: tool, id: sample.echo, arguments: {amount: 2}}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions toolOptions = ExecutionOptions.parse(new String[]{"load", toolFile.toString(),
+                "--set", "arg.amount=19"});
+        LoadScenario tool = new LoadScenarioLoader(project).load(toolFile, LoadOverrides.from(toolOptions));
+        assertEquals(19, tool.targetArguments().get("amount"));
+
+        Path multi = write(project, "multi-set.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n"
+                + "  - id: second\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions multiOptions = ExecutionOptions.parse(new String[]{"load", multi.toString(), "--set", "input.value=1"});
+        DiagnosticException ambiguous = assertThrows(DiagnosticException.class,
+                () -> new LoadScenarioLoader(project).load(multi, LoadOverrides.from(multiOptions)));
+        assertTrue(ambiguous.getMessage().contains("ambiguous for multi-workload"), ambiguous.getMessage());
+    }
+
+    @Test void quickLoadProfileProvidesDefaultsAndCliIntensityWins() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("load"));
+        Path profile = write(project, "load/load.yaml", "schemaVersion: att-load-profile/v1.0\n"
+                + "load: {users: 2, duration: 5s}\nexecution: {thinkTime: 1ms}\n"
+                + "thresholds: {p95: '< 20ms'}\nevidence: {mode: metrics}\nseed: 7\n");
+        Map<String, Object> policy = new LoadProfileLoader(project).loadDefault();
+        assertNotNull(policy);
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "LOAD_TEMPLATE",
+                "--users", "4", "--duration", "2s"});
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput(profile, "template", "LOAD_TEMPLATE",
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(), policy, options);
+        assertEquals(4, scenario.users());
+        assertEquals(2000L, scenario.duration().toMillis());
+        assertEquals(7L, scenario.seed());
+        assertEquals("< 20ms", scenario.thresholds().get("p95"));
+        assertEquals(LoadEvidencePolicy.Failure.NONE, LoadEvidencePolicy.from(scenario).failure());
+        assertEquals(1L, scenario.thinkTime().toMillis());
+
+        ExecutionOptions arrivalOptions = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "LOAD_TEMPLATE",
+                "--arrival-rate", "5/s", "--duration", "2s", "--max-concurrent", "2", "--overload-policy", "drop"});
+        LoadScenario arrivalScenario = new LoadScenarioLoader(project).fromDebugInput(profile, "template", "LOAD_TEMPLATE",
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(), policy, arrivalOptions);
+        assertEquals(LoadScenario.Model.ARRIVAL_RATE, arrivalScenario.model());
+        assertEquals(0L, arrivalScenario.thinkTime().toMillis());
+
+        Path invalid = write(project, "load/load.yaml", "schemaVersion: att-load-profile/v1.0\n"
+                + "load: {users: 1, duration: 1s}\ntarget: {type: template, id: BAD}\n");
+        assertThrows(DiagnosticException.class, () -> new LoadProfileLoader(project).loadDefault());
+        assertTrue(Files.exists(invalid));
+        assertNull(new LoadProfileLoader(temp.resolve("no-profile")).loadDefault());
+
+        ExecutionOptions incomplete = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "LOAD_TEMPLATE"});
+        DiagnosticException missingPolicy = assertThrows(DiagnosticException.class,
+                () -> new LoadScenarioLoader(project).fromDebugInput(profile, "template", "LOAD_TEMPLATE",
+                        Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), incomplete));
+        assertTrue(missingPolicy.getMessage().contains("Quick Load needs a policy"), missingPolicy.getMessage());
     }
 
     @Test void validatesBothWorkloadModelsAndExplicitOverridesWin() throws Exception {
@@ -262,7 +359,7 @@ class LoadScenarioTest {
         write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
                 + "  write: {type: tool, call: \"" + call + "\"}\n");
-        Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.2\n"
+        Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n  - id: files\n    target: {type: template, id: FILE_TEMPLATE}\n"
                 + "    load: {users: 1, duration: 1s}\n");
         Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
@@ -531,7 +628,7 @@ class LoadScenarioTest {
         write(project, "templates/SLOW_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.3\n"
                 + "name: SLOW_TEMPLATE\ndescription: cancellable load action\nactions:\n"
                 + "  run: {type: tool, call: \"#{slow()}\"}\n");
-        Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.2\n"
+        Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n  - id: slow\n    target: {type: template, id: SLOW_TEMPLATE}\n"
                 + "    load: {users: 1, duration: 10s}\n");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
@@ -709,7 +806,7 @@ class LoadScenarioTest {
         assertEquals("load", options.command());
         assertEquals(Paths.get("scenario.yaml"), options.loadScenario());
         assertEquals("100/s", options.loadArrivalRate());
-        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"load"}));
+        assertNull(ExecutionOptions.parse(new String[]{"load"}).loadScenario(), "no scenario selects discovery");
     }
 
     private Path project() throws Exception {
@@ -730,7 +827,9 @@ class LoadScenarioTest {
     }
 
     private Path write(Path project, String name, String content) throws Exception {
-        Path file = project.resolve(name); return LoadTestSupport.writeScenario(file, content);
+        Path file = project.resolve(name);
+        Files.createDirectories(file.getParent());
+        return LoadTestSupport.writeScenario(file, content);
     }
 
     private IterationResult deferredResult(Path outputRoot, IterationRequest request, ResultStatus status) {

@@ -93,6 +93,7 @@ public final class LoadScenario {
     public String targetId() { return workload().targetId(); }
     public Map<String, Object> targetArguments() { return workload().targetArguments(); }
     public Map<String, Object> inputs() { return workload().inputs(); }
+    public Map<String, Object> vars() { return workload().vars(); }
     public Model model() { return workload().model(); }
     public int users() { return workload().users(); }
     public double arrivalRatePerSecond() { return workload().arrivalRatePerSecond(); }

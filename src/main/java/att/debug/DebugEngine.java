@@ -51,6 +51,57 @@ public final class DebugEngine {
         this.config = config;
     }
 
+    /** Reads and validates a Debug sidecar for in-memory Load promotion without executing the target. */
+    public Map<String, Object> loadBootstrapInputForLoad(ExecutionOptions options) throws Exception {
+        DebugInput input = loadInput(options, options.debugTargetType(), options.debugTargetId(),
+                att.core.ExecutionBootstrapVariables.Scope.LOAD);
+        Map<String, Object> promoted = new LinkedHashMap<String, Object>();
+        promoted.put("source", input.path);
+        promoted.put("inputs", input.inputs);
+        promoted.put("vars", input.vars);
+        promoted.put("arguments", input.arguments);
+        return promoted;
+    }
+
+    /** Validates one discovery candidate without creating output or executing a resource call. */
+    public Path validateDiscoverableTarget(String type, String id) throws Exception {
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"debug", type, id});
+        Path sidecar = autoInput(type, id);
+        DebugInput input;
+        if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) input = loadInput(options, type, id);
+        else {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("schemaVersion", Version.DEBUG_SCHEMA);
+            input = new DebugInput(sidecar, empty, type, id, config);
+        }
+        ResolvedTarget resolved = resolveTarget(type, id, input);
+        StageCaseData stage = input.stage(resolved.template.name());
+        TestCase testCase = syntheticCase(type, id, input, stage);
+        if ("template".equals(type) || "flow".equals(type)) {
+            UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
+                    "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
+        }
+        new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
+                resolved.flows, input.path, "debug", input.inputs, input.vars);
+        return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
+    }
+
+    /** Validates a sidecar using the exact Load promotion path, not standalone Debug root availability. */
+    public Path validateDiscoverableTargetForLoad(String type, String id,
+                                                  Map<String, Object> quickLoadPolicy) throws Exception {
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", type, id});
+        Map<String, Object> promoted = loadBootstrapInputForLoad(options);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(projectRoot).fromDebugInput(
+                (Path) promoted.get("source"), type, id, DebugInput.map(promoted.get("inputs")),
+                DebugInput.map(promoted.get("vars")), DebugInput.map(promoted.get("arguments")),
+                quickLoadPolicy, options);
+        att.load.LoadTarget target = new att.load.LoadTargetResolver(projectRoot, config).resolve(scenario);
+        new att.load.LoadTargetValidator(projectRoot, config).validate(scenario, target);
+        return (Path) promoted.get("source");
+    }
+
     public Result run(ExecutionOptions options) throws Exception {
         java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
@@ -109,18 +160,26 @@ public final class DebugEngine {
             ResolvedTarget resolved = resolveTarget(targetType, targetId, input);
             StageCaseData stage = input.stage(resolved.template.name());
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
+            UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
+                    "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             if (options.verbose() && !options.quiet())
                 consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
                         + " case=" + testCase.caseId() + " resolved=" + input.path);
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                    resolved.flows, input.path, "debug", input.inputs);
+                    resolved.flows, input.path, "debug", input.inputs, input.vars);
 
             context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
             context.setProject(projectRoot);
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
+            context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
             context.setLegacyInputsView(input.inputs);
+            if ("template".equals(targetType) || "flow".equals(targetType))
+                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
+                        att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             context.put("CASE.environment", config.environment());
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
@@ -237,6 +296,11 @@ public final class DebugEngine {
     }
 
     private DebugInput loadInput(ExecutionOptions options, String type, String id) throws Exception {
+        return loadInput(options, type, id, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
+    }
+
+    private DebugInput loadInput(ExecutionOptions options, String type, String id,
+                                 att.core.ExecutionBootstrapVariables.Scope bootstrapScope) throws Exception {
         Path path = options.debugInput() == null ? autoInput(type, id) : resolveInput(options.debugInput());
         if (!Files.isRegularFile(path) || Files.isSymbolicLink(path))
             throw debugError("Debug input file does not exist: " + path, "Create the sidecar file or pass --input <path>.");
@@ -244,16 +308,53 @@ public final class DebugEngine {
             Object loaded = YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw debugError("Debug input must be a YAML map: " + path, "Use schemaVersion: " + Version.DEBUG_SCHEMA + ".");
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
-            Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-debug-v1.0.schema.json");
+            Object declaredVersion = map.get("schemaVersion");
+            String schemaVersion = declaredVersion == null ? "" : String.valueOf(declaredVersion);
+            String schemaName = Version.DEBUG_SCHEMA.equals(schemaVersion)
+                    ? "att-debug-v1.1.schema.json" : "att-debug-v1.0.schema.json";
+            Path schema = att.validation.SchemaFiles.resolve(projectRoot, schemaName);
             JsonSchemaVerifier.verify(schema, map);
+            if (Version.PREVIOUS_DEBUG_SCHEMA.equals(schemaVersion)) {
+                throw new DiagnosticException(DiagnosticCodes.SCHEMA_VERSION_OLD,
+                        "Debug input uses a historical schemaVersion",
+                        "declaredSchemaVersion=" + Version.PREVIOUS_DEBUG_SCHEMA
+                                + "\ncurrentSchemaVersion=" + Version.DEBUG_SCHEMA,
+                        path.toString(), "schemaVersion", null, null, null, null, null,
+                        "Upgrade schemaVersion to " + Version.DEBUG_SCHEMA + "; use top-level vars for initial EXEC.VARS values.", null);
+            }
             SchemaSupport.requireVersion(map, Version.DEBUG_SCHEMA, "debug input");
-            return new DebugInput(path, map, type, id, config);
+            List<String> overrides = options.setOverrides();
+            if (att.core.CliSetOverrides.hasNamespace(overrides, "arg") && !"tool".equals(type))
+                throw debugError("--set arg.* is valid only for a Tool target", "Use --set input.* for EXEC.INPUT or select a Tool target for arg.* overrides.");
+            if (att.core.CliSetOverrides.hasNamespace(overrides, "vars") && "tool".equals(type))
+                throw debugError("--set vars.* is not supported for Tool targets", "Tool Debug uses its explicit arguments contract.");
+            Map<String, Object> inputs = DebugInput.map(map.get("inputs"));
+            Object rawVars = map.get("vars");
+            UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            if (rawVars != null && !(rawVars instanceof Map))
+                validateDebugVariables(rawVars, type, path, inputs, bootstrapEngine, bootstrapScope);
+            Map<String, Object> vars = DebugInput.map(rawVars);
+            inputs = att.core.CliSetOverrides.apply(inputs, overrides, "input");
+            vars = att.core.CliSetOverrides.apply(vars, overrides, "vars");
+            vars = validateDebugVariables(vars, type, path, inputs, bootstrapEngine, bootstrapScope);
+            if (map.containsKey("inputs") || att.core.CliSetOverrides.hasNamespace(overrides, "input")) map.put("inputs", inputs);
+            if (map.containsKey("vars") || att.core.CliSetOverrides.hasNamespace(overrides, "vars")) map.put("vars", vars);
+            Map<String, Object> effectiveToolArguments = null;
+            if ("tool".equals(type)) {
+                // Preserve the existing root-versus-group resolution, then carry its result
+                // forward explicitly so later construction cannot re-read stale sidecar values.
+                effectiveToolArguments = new LinkedHashMap<String, Object>(
+                        new DebugInput(path, map, type, id, config).arguments);
+                effectiveToolArguments = att.core.CliSetOverrides.apply(effectiveToolArguments, overrides, "arg");
+            }
+            return new DebugInput(path, map, type, id, config, effectiveToolArguments);
         } catch (DiagnosticException e) {
             throw e;
         } catch (Exception e) {
             throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID, "Invalid debug input", e.getMessage(), path.toString(),
                     "debug", null, null, null, id, null,
-                    "Correct the debug YAML and validate it against schemas/att-debug-v1.0.schema.json.", e);
+                    "Correct the debug YAML and validate it against schemas/att-debug-v1.1.schema.json.", e);
         }
     }
 
@@ -312,6 +413,33 @@ public final class DebugEngine {
     private DiagnosticException debugError(String message, String suggestion) {
         return new DiagnosticException(DiagnosticCodes.DEBUG_INVALID, message, null, null, "debug", null, null, null,
                 null, null, suggestion, null);
+    }
+
+    private Map<String, Object> validateDebugVariables(Object raw, String targetType, Path path,
+                                                        Map<String, Object> inputs,
+                                                        UnifiedTemplateEngine bootstrapEngine,
+                                                        att.core.ExecutionBootstrapVariables.Scope bootstrapScope) {
+        if (raw != null && !(raw instanceof Map)) {
+            DiagnosticException error = new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                    "Invalid debug.vars", "vars must be a YAML object/map", path.toString(), "vars",
+                    null, null, null, null, null,
+                    "Use vars: {name: value} only for standalone Template or Flow Debug.", null);
+            throw YamlSupport.locate(error, path, "vars");
+        }
+        Map<String, Object> vars = DebugInput.map(raw);
+        if ("tool".equals(targetType)) {
+            if (!vars.isEmpty()) {
+                DiagnosticException error = new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                        "Debug vars are not supported for Tool targets",
+                        "debug.vars is supported only for standalone Template and Flow targets",
+                        path.toString(), "vars", null, null, null, null, null,
+                        "Use the Tool arguments contract for standalone Tool Debug.", null);
+                throw YamlSupport.locate(error, path, "vars");
+            }
+            return vars;
+        }
+        return att.core.ExecutionBootstrapVariables.validate(vars, bootstrapEngine, inputs, path,
+                "vars", DiagnosticCodes.DEBUG_INVALID, bootstrapScope);
     }
 
     private void appendError(CaseExecutionLog log, DiagnosticException error) {
@@ -395,17 +523,22 @@ public final class DebugEngine {
     }
 
     private static final class DebugInput {
-        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey;
+        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey;
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config) {
+            this(path, root, type, id, config, null);
+        }
+        private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config,
+                           Map<String, Object> effectiveToolArguments) {
             this.path = path;
             this.caseValues = map(root.get("case"));
             this.inputs = map(root.get("inputs"));
+            this.vars = map(root.get("vars"));
             this.stageValues = map(map(root.get("stage")).get("values"));
             Object key = map(root.get("stage")).get("key");
             this.stageKey = key == null ? "DEBUG" : String.valueOf(key);
             Map<String, Object> rootArguments = map(root.get("arguments"));
-            Map<String, Object> selectedArguments = rootArguments;
-            if ("tool".equals(type)) {
+            Map<String, Object> selectedArguments = effectiveToolArguments == null ? rootArguments : effectiveToolArguments;
+            if ("tool".equals(type) && effectiveToolArguments == null) {
                 Map<String, Object> tools = map(root.get("tools"));
                 ToolConfig tool = findTool(config, id);
                 String local = tool == null ? id : tool.localKey();

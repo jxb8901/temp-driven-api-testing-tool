@@ -4,6 +4,7 @@ import att.config.FrameworkConfig;
 import att.validation.PackageValidator;
 
 import java.nio.file.Path;
+import java.util.Set;
 
 /** Performs selected Template/Flow/Tool dependency validation before scheduling. */
 public final class LoadTargetValidator {
@@ -16,8 +17,22 @@ public final class LoadTargetValidator {
         att.core.TestCase testCase = adapter.testCase("iteration-validation", scenario.inputs());
         att.core.StageCaseData stage = adapter.stage();
         try {
+            att.template.UnifiedTemplateEngine bootstrapEngine = new att.template.UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            LoadWorkload workload = scenario.workload();
+            String varsField = workload.sourceIndex() < 0 ? "vars"
+                    : "workloads[" + workload.sourceIndex() + "].vars";
+            Set<String> availableLoadFields = att.core.CaseRuntimeContext.availableLoadContextFields(
+                    scenario.model() == LoadScenario.Model.CLOSED, !scenario.legacyV10());
+            try {
+                att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine, scenario.inputs(),
+                        scenario.source(), varsField, att.validation.DiagnosticCodes.LOAD_INVALID,
+                        att.core.ExecutionBootstrapVariables.Scope.LOAD, availableLoadFields);
+            } catch (att.validation.DiagnosticException error) {
+                throw error.withDetail("workloadId: " + workload.id());
+            }
             new PackageValidator(projectRoot, config).validateDebugTarget(target.template(), testCase, stage, target.flows(),
-                    scenario.source(), "load", scenario.inputs());
+                    scenario.source(), "load", scenario.inputs(), scenario.vars());
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed != null) throw typed;

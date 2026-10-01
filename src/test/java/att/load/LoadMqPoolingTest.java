@@ -149,7 +149,7 @@ class LoadMqPoolingTest {
                 + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}\"\n").getBytes("UTF-8"));
         FrameworkConfig config = config(2, 0, 1000L);
         Path metricsScenarioFile = project.resolve("mq-metrics.yaml");
-        LoadTestSupport.writeScenario(metricsScenarioFile, "schemaVersion: att-load/v1.2\n"
+        LoadTestSupport.writeScenario(metricsScenarioFile, "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n  - id: mq\n    target: {type: flow, id: load.mq.request.v1}\n"
                 + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 10ms}\n"
                 + "evidence: {mode: metrics}\n");
@@ -175,7 +175,7 @@ class LoadMqPoolingTest {
         }
 
         Path failureScenarioFile = project.resolve("mq-failures.yaml");
-        LoadTestSupport.writeScenario(failureScenarioFile, "schemaVersion: att-load/v1.2\n"
+        LoadTestSupport.writeScenario(failureScenarioFile, "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n  - id: mq\n    target: {type: flow, id: load.mq.request.v1}\n"
                 + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 10ms}\n"
                 + "evidence: {mode: failures, maxSamples: 1}\n");

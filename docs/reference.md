@@ -31,8 +31,8 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 | Mode | Primary input | Reuses |
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ |
-| Debug | `att-debug/v1.0` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.2` scenario | one Template, Flow or Tool target repeatedly |
+| Debug | `att-debug/v1.1` sidecar or `--input` | one Template, Flow or Tool target |
+| Load | `att-load/v1.3` scenario | one Template, Flow or Tool target repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
@@ -199,6 +199,8 @@ See [Actions and Typed Values](reference/14_actions.md) for the complete field l
 
 Run, Debug and Load share one canonical EXEC/META expression model. EXEC changes through framework lifecycle and explicit input/variable/action publication. META is curated, immutable and secret-safe.
 
+Standalone Debug bootstrap values are mapped into these canonical roots: `inputs` populates `EXEC.INPUT`, while Template/Flow `vars` seeds `EXEC.VARS` before the target starts. See [Standalone Debug](reference/04_execution_modes/debug.md) for the v1.1 schema, typed literal rules and protected framework roots.
+
 ### Identity roots
 
 | Path | Meaning and type | Availability |
@@ -277,9 +279,17 @@ EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs 
 
 Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
 
+### Execution bootstrap variables
+
+Debug sidecars and current Load workloads can seed a canonical initial `EXEC.VARS` tree for Template/Flow execution. The order is: resolve and validate the target and definitions; initialize `EXEC.RUN_ID`, `EXEC.INPUT`, `EXEC.LOAD`, stable META and execution timestamps; generate and publish `EXEC.ID`; establish `EXEC.OUTPUT_DIR`; evaluate vars; then start the Template/Flow. Debug follows the same rule with its initialized identity and output paths.
+
+Values use the ordinary ATT expression parser. An exact `${...}` retains the referenced type (including null, numbers, lists and maps); interpolation into surrounding text produces a string; `#{...}` preserves its typed result. Maps and lists recurse while keys remain literal. Vars dependencies are resolved independent of declaration order; missing bootstrap vars and direct/indirect cycles are errors. Each Load execution evaluates an isolated copy, so concurrent users/workloads do not share mutable values. The first regular `assign` may replace an initial value.
+
+The available roots are initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other named `EXEC.VARS` entries, and stable META project/source/target/template metadata. Actions, action-local `output`, invocation-scoped META, and external or stateful calls are unavailable. Only safe pure built-ins are allowed; normal expression syntax and type rules are reused. `--set vars.path=value` changes the raw definition before evaluation.
+
 ### Load execution ID initialization
 
-Load uses schema att-load/v1.2. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect.
+Load uses schema att-load/v1.3. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
 Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
 
@@ -357,9 +367,44 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
 ```
 
-Debug input uses `schemaVersion: att-debug/v1.0`. Supported top-level data is `case`, optional `stage`, `inputs`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input.
+Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
 
-Without `--input`, ATT looks for `debug.yaml` beside a selected Template or Flow and for `config/tools/<group>.debug.yaml` for a grouped Tool. When no default sidecar exists, supply `--input`. `--env` uses the same environment resolver as Run/Validate/Load before target validation.
+Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Historical `att-debug/v1.0` remains archived and must be migrated to v1.1.
+
+#### Standalone Debug bootstrap data
+
+The three input contracts are intentionally separate:
+
+| Debug field | Runtime destination | Use |
+|---|---|---|
+| `inputs` | `EXEC.INPUT` | Business input consumed directly by a Flow/Template |
+| `vars` | initial `EXEC.VARS` | Caller-prepared values expected by a reusable Flow/Template |
+| `arguments` / `tools.<localKey>.arguments` | Tool argument contract | Explicit arguments for standalone Tool Debug |
+
+A Flow that only consumes `EXEC.INPUT` needs no `vars`. A Flow that normally runs after a parent Flow publishes `EXEC.VARS.refNo` can be debugged directly with a scalar or typed structure:
+
+```yaml
+schemaVersion: att-debug/v1.1
+inputs:
+  amount: 100
+vars:
+  refNo: REF001
+  txnSeq: 23
+  tags: [SIT, PAYMENT]
+  order:
+    id: ORD001
+    amount: 100
+```
+
+```sh
+./att.sh debug flow common.payment --input common.payment.debug.yaml
+```
+
+`vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
+
+Bootstrap values may use initialized execution identity, `EXEC.INPUT`, `EXEC.LOAD` when present, other `EXEC.VARS.<name>` entries, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, and invocation-scoped metadata are not available. Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are blocked; safe pure built-ins use the normal ATT parser. Repeatable `--set` namespaces are `input.path=value`, `vars.path=value`, and Tool-only `arg.name=value`. Values are parsed as safe YAML; nested maps and numeric list indexes are supported where the destination accepts them. For example, `--set 'vars.refNo=${EXEC.INPUT.refNo}'` changes the raw definition before evaluation.
+
+Without `--input`, ATT looks for `debug.yaml` beside a selected Template or Flow and for `config/tools/<group>.debug.yaml` for a grouped Tool (`config/tools/<localKey>.debug.yaml` for an ungrouped Tool). When no default sidecar exists, supply `--input`; an explicit `--input` replaces auto-discovery. `--env` uses the same environment resolver as Run/Validate/Load before target validation.
 
 Debug performs target-scoped validation: it validates the selected Template/Flow dependency closure or Tool contract, rather than requiring unrelated workbooks. Template and Flow debug use the same Action/Flow scope rules as Run. Tool debug constructs the same configured Tool invocation contract.
 
@@ -389,6 +434,7 @@ Use the output directory to separate diagnosis stages:
 | Symptom | Check |
 |---|---|
 | `Debug input file does not exist` | Add the sidecar beside the selected target or pass `--input` explicitly. |
+| `Debug input uses a historical schemaVersion` | Upgrade `att-debug/v1.0` to `att-debug/v1.1`; add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
 | `target` or dependency validation fails | Confirm the target type/id and inspect the reported dependency field; unrelated workbook files are not required. |
 | MQ reports a missing/unsafe payload | Verify the absolute package path or the relative Case-output path; remove traversal and symlinks. |
 | The action runs but output is unexpected | Read `case.log`, `result.yaml` and the action artifacts under `output/debug/<debugId>/`; compare rendered inputs with the selected environment. |
@@ -397,16 +443,22 @@ Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does 
 
 ### 4.3 Load Mode
 
-ATT 3.6.0 accepts att-load/v1.2 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target and its pacing policy. ATT validates the scenario and all targets before a scheduler starts.
+ATT accepts att-load/v1.3 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target, its inputs, bootstrap vars and pacing policy. ATT validates the scenario and all targets before a scheduler starts.
+
+Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
 #### Scenario shape
 
 ~~~yaml
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.3
 workloads:
   - id: payment
     target: {type: template, id: PAYMENT_INVOKE}
-    inputs: {region: HK}
+    inputs: {region: HK, amount: 100}
+    vars:
+      baseAmount: "${EXEC.INPUT.amount}"
+      total: "#{${EXEC.INPUT.amount} * 2}"
+      reference: "REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
     load:
       users: 20
       warmup: 10s
@@ -428,7 +480,19 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
-A target accepts template, flow or tool; Tool targets may provide named arguments. Workload inputs become EXEC.INPUT for each iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
+A target accepts template, flow or tool; Tool targets may provide named arguments but cannot declare bootstrap vars. Workload inputs become EXEC.INPUT for each iteration; Template/Flow workload vars become a fresh initial EXEC.VARS tree for every started iteration. Workloads must share one model (closed users or arrivalRate) and one warmup/rampUp/duration/rampDown envelope. They are independently paced fixed targets, not a transaction mix.
+
+| Workload field | Runtime destination | Contract |
+|---|---|---|
+| `inputs` | `EXEC.INPUT` | Business input values; not bootstrap variables |
+| `vars` | initial `EXEC.VARS` | Typed expression tree for Template/Flow; independently evaluated per execution |
+| `target.arguments` | Tool arguments | Tool-only call arguments; separate from `EXEC.INPUT` and `EXEC.VARS` |
+
+#### Per-execution bootstrap vars
+
+After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable.
+
+Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 
 #### Workload models
 
@@ -440,7 +504,7 @@ duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends
 
 #### Load identity and output layout
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Runtime and Context Model](reference/03_runtime_context.md) for field availability and function restrictions.
+Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Runtime and Context Model](reference/03_runtime_context.md) for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -476,14 +540,32 @@ Top-level thresholds apply to the aggregate run; workload thresholds apply to on
 
 For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
+Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
+
+`load/load.yaml` is an optional `att-load-profile/v1.0` policy file with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence` and `seed`. Explicit CLI pacing values override the profile. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no profile, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+
+Example policy profile (copy to `load/load.yaml`):
+
+~~~yaml
+schemaVersion: att-load-profile/v1.0
+load: {users: 2, duration: 10s}
+execution: {thinkTime: 250ms}
+evidence: {mode: failures}
+~~~
+
 ~~~sh
 ./att.sh load examples/load/closed-smoke.yaml
 ./att.sh load examples/load/arrival-smoke.yaml --format json
 ./att.sh load examples/load/multi-closed.yaml
 ./att.sh load examples/load/multi-arrival.yaml
+./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh debug
+./att.sh load
+./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
 ~~~
 
-Copyable examples and field descriptions are maintained in [examples/load/README.md](../examples/load/README.md). Historical v1.0/v1.1 schemas are archived and are not accepted as active versions. Migrate to v1.2 workloads syntax; see [Migrations](reference/appendices/migrations.md).
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../examples/load/README.md). The previous v1.2 schema is retained for migration diagnostics; upgrade its schemaVersion to v1.3 to use workload vars. Historical v1.0/v1.1 schemas are also not accepted as active versions. See [Migrations](reference/appendices/migrations.md).
 
 ## 05 Resources and Integrations
 
@@ -1365,7 +1447,7 @@ ATT 3.6.0 uses the active resource/configuration schemas below. The current JSON
 | Workbook sidecar | att-sidecar/v2.2 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Load scenario | att-load/v1.2 |
+| Load scenario | att-load/v1.3 |
 
 The schema catalog at schemas/catalog.yaml is authoritative. Package validation verifies catalog registrations; it does not make archived schema versions executable. Unsupported active schema versions fail with migration guidance.
 
@@ -1583,6 +1665,7 @@ Generated envelopes reject additional top-level fields according to their schema
 | `snapshot` | Generate same-basename canonical testcase XML | No |
 | `run` | Validate and execute selected cases | Yes, except dry-run |
 | `debug` | Execute one Template, Flow, or Tool with a debug sidecar | Yes |
+| `load` | Execute a declared scenario or promote a Debug sidecar into a Quick Load | Yes |
 | `docs` | Generate searchable package documentation | No |
 | `report` | Regenerate reports for a completed run | No |
 | `build` | Archive the latest completed run | No |
@@ -1622,15 +1705,24 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 | `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
+| `./att.sh debug` | Discover runnable Tools, Templates, and Flows; show only existing default sidecars |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | Execute one Tool; auto-discover `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | Override the target's auto-discovered debug input |
+| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | Override a typed `EXEC.INPUT` value; repeatable |
+| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | Override one Tool argument; repeatable |
+| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | Override Template/Flow bootstrap `EXEC.VARS` before expression evaluation |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+| `./att.sh load` | Discover valid `att-load/*` scenarios under `load/`; report invalid declared scenarios |
 | `./att.sh load <scenario.yaml> --quiet` | Suppress periodic live progress; keep the final summary and errors |
 | `./att.sh load <scenario.yaml> --verbose` | Accepted for compatibility; bounded live progress is already the default |
+| `./att.sh load --debug <type> <id>` | Promote a Debug sidecar into a normal single-workload Load run using `load/load.yaml` policy |
+| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | Override one-workload `EXEC.INPUT`; repeatable, not valid for multi-workload scenarios |
+| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | Override a Tool argument in a one-workload Tool scenario |
+| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | Override one-workload Template/Flow bootstrap vars |
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
@@ -1638,22 +1730,45 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
 
+No-target `debug` and `load` are read-only discovery commands. Debug validates target contracts without invoking Tools or creating output. Load scans only declared `att-load/*` YAML, validates every target before listing the scenario, reports invalid declared descriptors, and ignores unrelated YAML. Both accept `--config`, `--env`, `--format`, `--quiet`, and `--verbose` in discovery mode.
+
+### Typed overrides and Quick Load
+
+`--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
+
+`load/load.yaml` is an optional, policy-only `att-load-profile/v1.0` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. Explicit CLI pacing fields override the profile. Without a profile, provide a complete policy on the command line; for example:
+
+```yaml
+schemaVersion: att-load-profile/v1.0
+load: {users: 2, duration: 10s}
+execution: {thinkTime: 250ms}
+evidence: {mode: failures}
+```
+
+```sh
+./att.sh debug
+./att.sh load
+./att.sh load --debug template PAYMENT_INVOKE
+./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
+./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
+```
+
 `run`, `debug`, and `load` default to interactive verbose behavior. Lifecycle, Case, Stage, Action, resource-attempt, retry, assertion, and error records are written as they occur and flushed promptly. The live Case-log mirror uses the same redacted append path as `case.log`; `case.log`, `case.yaml`/`result.yaml`, reports, and evidence remain the persistent source of truth. Concurrent Case-log chunks carry a Case ID prefix. `--quiet` suppresses detailed live progress but retains a final summary and errors. With `--format json`, machine-readable output remains on stdout and live progress is sent to stderr. Load progress prints bounded periodic counters/rates and throttled errors, never one console block per successful iteration.
 
 ### Standalone debug inputs and outputs
 
-Debug input files use `att-debug/v1.0`. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, and `inputs` is adapted directly into canonical `EXEC.INPUT.*`. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`. An explicit `--input` always wins over auto-discovery.
+Debug input files use the current `att-debug/v1.1` schema. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, `inputs` is adapted directly into canonical `EXEC.INPUT.*`, and Template/Flow `vars` is evaluated as a typed initial `EXEC.VARS.*` tree. Exact `${...}` references retain their type; interpolated strings and `#{...}` use the shared ATT expression engine. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`; Tool Debug does not support `vars`. An explicit `--input` always wins over auto-discovery. Historical `att-debug/v1.0` inputs must be migrated.
 
 Before execution ATT validates only the selected Template or Flow dependency closure, or the selected Tool definition. It does not require unrelated workbook snapshots or unrelated malformed Template descriptors to pass. The selected target still uses the normal Template/Flow/Tool runner, including Context resolution, Flow nesting, Tool retry/timeout, evidence, Action result persistence, DB finalization, and Case-log behavior.
 
 #### Configuration examples
 
-The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.0` document.
+The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.1` document.
 
 Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseName: PAYMENT debug
   amount: 100
@@ -1670,7 +1785,7 @@ Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions shoul
 Flow sidecar (`templates/flows/common/compose/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   caseName: Compose debug
   traceId: TRACE-001
@@ -1688,7 +1803,7 @@ Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available a
 Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 case:
   RefNo: REF001
 tools:
@@ -1705,7 +1820,7 @@ Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the grou
 Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.0
+schemaVersion: att-debug/v1.1
 arguments:
   requestFile: /tmp/payment-request.xml
   environment: SIT
@@ -1758,7 +1873,14 @@ Load uses the scenario as the base and explicit workload options override the co
   --max-concurrent 4 --overload-policy drop --format json
 ```
 
-The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
+Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed overrides before expression evaluation. The same option works for `debug`, single-workload Load scenarios, and `load --debug template|flow|tool <id>`. Quick Load uses `load/load.yaml` when present; otherwise provide a complete policy on the command line. For example:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
+```
+
+The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
 
 ## 11 Results, Reports, and Evidence
 
@@ -2190,8 +2312,8 @@ ATT 3.6.0 active schemas:
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.3 |
 | Flow | att-flow/v3.3 |
-| Debug input | att-debug/v1.0 |
-| Load scenario | att-load/v1.2 |
+| Debug input | att-debug/v1.1 |
+| Load scenario | att-load/v1.3 |
 | Load summary | att-load-summary/v1.0 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -2241,7 +2363,7 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-For Load, migrate old single-target or v1.1 scenarios to att-load/v1.2 workloads form. Put pacing under each workload and set the optional top-level execution.execIdFormat when a custom EXEC.ID is required. That field uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it. Do not use seq.next() or external/stateful functions in the format.
+For Load, migrate old single-target or v1.1 scenarios to att-load/v1.2 workloads form, then change the schemaVersion to att-load/v1.3 to enable workload-level vars. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. The optional top-level execution.execIdFormat still uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it.
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](reference/14_actions.md), [Runtime and Context Model](reference/03_runtime_context.md), [Load Mode](reference/04_execution_modes/load.md) and [Schema Matrix](reference/appendices/schema_matrix.md).
 
