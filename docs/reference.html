@@ -5601,6 +5601,10 @@ validation. The optional top-level execution.execIdFormat still uses the
 ordinary expression engine once during initialization; closed workloads
 may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have
 it.</p>
+<p>The historical <code>att-load-profile/v1.0</code> policy file is
+migration-only: rewrite it as the current policy-only
+<code>att-load/v1.4</code> descriptor before use. It is not a current
+<code>load/load.yaml</code> example.</p>
 <p>Unsupported schema versions fail before execution and include
 migration guidance. ATT does not auto-upgrade package files or invoke
 external resources to build the diagnostic. See <a

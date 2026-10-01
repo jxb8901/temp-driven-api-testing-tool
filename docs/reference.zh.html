@@ -5006,6 +5006,9 @@ type，dependency 不受宣告順序影響；循環及 external/stateful calls
 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般
 expression engine 求值一次；closed workload 可用
 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。</p>
+<p>歷史的 <code>att-load-profile/v1.0</code> policy file 僅供 migration
+使用：使用前請改寫為現行 policy-only <code>att-load/v1.4</code>
+descriptor；它不是現行 <code>load/load.yaml</code> 範例。</p>
 <p>Unsupported schema version 會在 execution 前失敗並提供 migration
 guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部
 resource。詳見<a href="reference.zh/14_actions.md">Action
