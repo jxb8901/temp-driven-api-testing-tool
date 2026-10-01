@@ -4345,7 +4345,14 @@ the executor. For thrown Tool exceptions, the public projection omits
 raw input, payload, argv, and output fields, redacts input values from
 retained text, and limits each retained text field to 1024 characters.
 <code>inputOmitted</code> and truncation flags identify omitted or
-bounded evidence.</p>
+bounded evidence. Free-form messages, stderr, per-instance errors, and
+cleanup warnings redact string, DocumentValue text, and array inputs;
+byte arrays are covered as UTF-8, Base64, hexadecimal, and Java decimal
+array renderings. Structured status, category, and resource identity are
+only length-bounded. SSH fan-out retains bounded metadata, errors, and
+stderr for up to 64 instances, prioritizing failures;
+<code>instanceCount</code> and <code>instancesTruncated</code> identify
+the total and omitted instances.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
 Earlier failed collector records remain available after a later

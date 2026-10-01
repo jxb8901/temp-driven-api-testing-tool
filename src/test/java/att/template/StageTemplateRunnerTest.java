@@ -1036,6 +1036,79 @@ class StageTemplateRunnerTest {
             return arguments.get("value");
         }
     }
+    @Test void typedCollectorSecretsAreRedactedWithoutChangingTimeoutMetadata() throws Exception {
+        String document = "<password>document-secret-931</password>";
+        String arraySecret = "array-secret-742";
+        byte[] binary = "binary-secret-628".getBytes("UTF-8");
+        String binary64 = java.util.Base64.getEncoder().encodeToString(binary);
+        String details = document + " " + arraySecret + " " + new String(binary, "UTF-8") + " " + binary64;
+        final Map<String, Object> privateInput = map("document", new DocumentValue("xml", document),
+                "array", new Object[] {new String[] {arraySecret}, binary, new char[] {'c', 'h', 'a', 'r'}},
+                "collision", Arrays.asList("TIMEOUT", "app", "one"));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null) {
+            @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,
+                    CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs,
+                    boolean overwrite, boolean bypassCache) throws Exception {
+                if (!call.startsWith("#{fail(")) return super.executeToolAttempt(call, context, log,
+                        invocationId, timeoutMs, saveAs, overwrite, bypassCache);
+                throw new ToolExecutionException("TIMEOUT", details,
+                        map("input", privateInput, "status", "TIMEOUT", "sshHelper", "app",
+                                "instance", "one", "stderr", details), null, null);
+            }
+        };
+        for (String mode : Arrays.asList("continue", "stop")) {
+            Path caseDir = tempDir.resolve("typed-collector-" + mode);
+            Files.createDirectories(caseDir);
+            TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                    Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+            CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+            context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "evidence", map("typed", map("call", "#{fail()}", "onFailure", mode))));
+            try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                List<ValidationResult> results = new StageTemplateRunner(engine).execute("invoke",
+                        new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+            }
+            String path = "ACTIONS.call.output.evidence.collectors.typed";
+            assertEquals("TIMEOUT", context.resolve(path + ".status"));
+            assertEquals("TIMEOUT", context.resolve(path + ".error.category"));
+            String invocation = path + ".evidence.tool.invocations[0]";
+            assertEquals("TIMEOUT", context.resolve(invocation + ".status"));
+            assertEquals("app", context.resolve(invocation + ".sshHelper"));
+            assertEquals("one", context.resolve(invocation + ".instance"));
+            String published = att.validation.JsonSupport.write(context.resolve(path));
+            String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+            for (String secret : Arrays.asList(document, arraySecret, new String(binary, "UTF-8"), binary64)) {
+                assertFalse(published.contains(secret), secret);
+                assertFalse(caseLog.contains(secret), secret);
+            }
+            assertTrue(published.contains("[REDACTED_SECRET]"));
+        }
+    }
+
+    @Test void collectorInstanceProjectionIsBoundedAndPrioritizesFailures() {
+        Map<String, Object> instances = new LinkedHashMap<String, Object>();
+        for (int index = 0; index < 80; index++) instances.put("peer" + index,
+                map("instance", "peer" + index, "status", "PASS", "output", "private payload"));
+        instances.put("failed", map("status", "TIMEOUT", "error", "secret" + String.join("", Collections.nCopies(5000, "x")),
+                "stderr", "secret", "rawOutput", "private payload"));
+        ToolExecutionException projected = CollectorExceptionEvidence.project(new ToolExecutionException("TIMEOUT",
+                "fanout failed", map("input", map("token", "secret"), "instances", instances), null, null));
+        Map<?, ?> peers = (Map<?, ?>) projected.evidence().get("instances");
+        assertEquals(CollectorExceptionEvidence.INSTANCE_LIMIT, peers.size());
+        assertTrue(peers.containsKey("failed"));
+        assertEquals(81, projected.evidence().get("instanceCount"));
+        assertEquals(Boolean.TRUE, projected.evidence().get("instancesTruncated"));
+        Map<?, ?> failed = (Map<?, ?>) peers.get("failed");
+        assertEquals("TIMEOUT", failed.get("status"));
+        assertEquals(Boolean.TRUE, failed.get("errorTruncated"));
+        assertTrue(String.valueOf(failed.get("error")).length() <= CollectorExceptionEvidence.TEXT_LIMIT);
+        assertFalse(att.validation.JsonSupport.write(peers).contains("secret"));
+        assertFalse(att.validation.JsonSupport.write(peers).contains("private payload"));
+        assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
+    }
+
     private final class PrivateCollectorEngine extends UnifiedTemplateEngine {
         private PrivateCollectorEngine() { super(null, new PrivateCollectorBuiltIns()); }
         @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,
