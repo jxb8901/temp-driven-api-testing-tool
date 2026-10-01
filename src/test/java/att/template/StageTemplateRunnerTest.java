@@ -1041,9 +1041,14 @@ class StageTemplateRunnerTest {
         String arraySecret = "array-secret-742";
         byte[] binary = "binary-secret-628".getBytes("UTF-8");
         String binary64 = java.util.Base64.getEncoder().encodeToString(binary);
-        String details = document + " " + arraySecret + " " + new String(binary, "UTF-8") + " " + binary64;
+        String binaryHex = "62696e6172792d7365637265742d363238";
+        String binaryDecimal = Arrays.toString(binary);
+        String primitiveArray = Arrays.toString(new int[] {918, 627});
+        String details = document + " " + arraySecret + " " + new String(binary, "UTF-8") + " " + binary64
+                + " " + binaryHex + " " + binaryHex.toUpperCase(Locale.ROOT) + " " + binaryDecimal
+                + " " + primitiveArray + " char-array-secret";
         final Map<String, Object> privateInput = map("document", new DocumentValue("xml", document),
-                "array", new Object[] {new String[] {arraySecret}, binary, new char[] {'c', 'h', 'a', 'r'}},
+                "array", new Object[] {new String[] {arraySecret}, binary, "char-array-secret".toCharArray(), new int[] {918, 627}},
                 "collision", Arrays.asList("TIMEOUT", "app", "one"));
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null) {
             @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,
@@ -1079,7 +1084,8 @@ class StageTemplateRunnerTest {
             assertEquals("one", context.resolve(invocation + ".instance"));
             String published = att.validation.JsonSupport.write(context.resolve(path));
             String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
-            for (String secret : Arrays.asList(document, arraySecret, new String(binary, "UTF-8"), binary64)) {
+            for (String secret : Arrays.asList(document, arraySecret, new String(binary, "UTF-8"), binary64,
+                    binaryHex, binaryHex.toUpperCase(Locale.ROOT), binaryDecimal, primitiveArray, "char-array-secret")) {
                 assertFalse(published.contains(secret), secret);
                 assertFalse(caseLog.contains(secret), secret);
             }

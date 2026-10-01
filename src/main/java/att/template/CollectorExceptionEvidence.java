@@ -120,6 +120,11 @@ final class CollectorExceptionEvidence {
         } else if (value instanceof Iterable && visited.add(value)) {
             for (Object nested : (Iterable<?>) value) collectInputValues(nested, values, visited);
         } else if (value != null && value.getClass().isArray() && visited.add(value)) {
+            if (value.getClass().getComponentType().isPrimitive()) {
+                List<Object> elements = new ArrayList<Object>();
+                for (int index = 0; index < Array.getLength(value); index++) elements.add(Array.get(value, index));
+                collectInputValues(elements.toString(), values, visited);
+            }
             for (int index = 0; index < Array.getLength(value); index++) {
                 collectInputValues(Array.get(value, index), values, visited);
             }
