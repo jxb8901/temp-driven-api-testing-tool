@@ -292,7 +292,8 @@ public class CaseExecutionLog implements AutoCloseable {
         }
         Object exception = output.get("exception");
         if (exception instanceof Map) compact.put("exception", compactException((Map<String, Object>) exception));
-        else copyIfPresent(output, compact, "diagnostic");
+        else if (output.get("diagnostic") instanceof Map)
+            compact.put("diagnostic", compactException((Map<String, Object>) output.get("diagnostic")));
         result.put("output", compact);
         return result;
     }

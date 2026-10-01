@@ -1950,12 +1950,12 @@ public final class PackageValidator {
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();
         if ("send".equals(operation)) {
-            allowed.add("queue"); allowed.add("file"); allowed.add("instance"); required.add("file");
+            allowed.add("queue"); allowed.add("file"); allowed.add("payload"); allowed.add("requestFormat"); allowed.add("instance");
         } else if ("receive".equals(operation)) {
-            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance");
+            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance"); allowed.add("responseFormat");
         } else if ("request".equals(operation)) {
-            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs"); allowed.add("instance");
-            required.add("file");
+            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("payload");
+            allowed.add("requestFormat"); allowed.add("responseFormat"); allowed.add("waitMs"); allowed.add("instance");
         } else {
             throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
         }
@@ -1966,7 +1966,7 @@ public final class PackageValidator {
             if (!allowed.contains(argument.key())) throw new IllegalArgumentException("Unknown MQ argument '" + argument.key() + "' for " + parsed.name());
             if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate MQ argument '" + argument.key() + "'");
             String value = argument.expression().trim();
-            boolean dynamic = value.contains("${") || value.contains("#{");
+            boolean dynamic = value.contains("${") || value.contains("#{") || value.contains("&{");
             if (dynamic) continue;
             Object literal = callParser.literal(value);
             if ("waitMs".equals(argument.key())) {
@@ -1975,6 +1975,12 @@ public final class PackageValidator {
                 if (number.doubleValue() != number.longValue() || number.longValue() < 0 || number.longValue() > 3600000) {
                     throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
                 }
+            } else if ("payload".equals(argument.key())) {
+                if (!(literal instanceof String || literal instanceof Map || literal instanceof List))
+                    throw new IllegalArgumentException("MQ payload must be a String, Map, or List");
+            } else if ("requestFormat".equals(argument.key()) || "responseFormat".equals(argument.key())) {
+                if (!(literal instanceof String) || !Arrays.asList("text", "json", "yaml", "xml").contains(literal))
+                    throw new IllegalArgumentException("MQ " + argument.key() + " must be text, json, yaml, or xml");
             } else {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty()) {
                     throw new IllegalArgumentException(parsed.name() + "." + argument.key() + " must be a non-blank string");
@@ -1989,6 +1995,11 @@ public final class PackageValidator {
                 }
             }
         }
+        if (("send".equals(operation) || "request".equals(operation))
+                && supplied.contains("file") == supplied.contains("payload"))
+            throw new IllegalArgumentException("MQ send/request requires exactly one file or payload");
+        if (supplied.contains("file") && supplied.contains("requestFormat"))
+            throw new IllegalArgumentException("MQ requestFormat is only valid with a structured payload");
         if ("send".equals(operation) && !supplied.contains("queue")) {
             boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
             if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");
