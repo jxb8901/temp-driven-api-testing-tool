@@ -14,9 +14,9 @@ REQUIRED = {
     "04_execution_modes/load.md": ["att-load/v1.4", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
     "05_resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
     "05_resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
-    "05_resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "DocumentValue", "evidence"],
-    "05_resources/operation_result.md": ["output.result", "evidence", "diagnostic", "attempts", "DocumentValue", "responseFormat"],
-    "14_actions.md": ["output.result", "DocumentValue", "stdoutFormat", "responseFormat", "evidence.output"],
+    "05_resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "String", "evidence"],
+    "05_resources/operation_result.md": ["output.result", "evidence", "diagnostic", "attempts", "String", "responseFormat"],
+    "14_actions.md": ["output.result", "String", "stdoutFormat", "responseFormat", "evidence.output"],
     "09_configuration.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "logical", "run", "validate", "debug", "load"],
     "08_reliability_execution_control.md": ["assert", "runWhen", "onFailure", "timeout", "retry", "attempts", "PASS", "FAIL", "ERROR", "INVALID", "SKIPPED"],
 }
