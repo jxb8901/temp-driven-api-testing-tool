@@ -22,7 +22,7 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-**Testcase** 是一個標準化 workbook row；**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper 或 MQHelper。
+**Testcase** 是一個標準化 workbook row；**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
 
 ### 三種執行模式是同級概念
 
@@ -36,14 +36,16 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 
 可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
-### 三種 Resource 是同級概念
+### 五種 Resource 是同級概念
 
-Tool、DBHelper、MQHelper 是獨立 Resource 類型。它們的配置與 lifecycle 不同，但 operation data 最終都收斂到同一 Action envelope。公開 expression 應讀取 Action result/evidence，而不是 resource 內部 connection/process state。
+Tool、DBHelper、MQHelper、HTTPHelper 和 SSHHelper 是獨立 Resource 類型。它們的配置與 lifecycle 不同，但 Action 會透過 `output.result` 發布原生 typed result，並將可選的 presentation evidence 分開保存。公開 expression 應讀取 Action result/evidence，而不是 resource 內部 connection/process state。
 
 ```text
-Tool ----\
-DBHelper --+--> operation result/evidence --> Action output
-MQHelper -/
+Tool ------\
+DBHelper ---+
+MQHelper ---+--> typed operation result --> Action output
+HTTPHelper -+
+SSHHelper --/
 ```
 
 ### Package 邊界

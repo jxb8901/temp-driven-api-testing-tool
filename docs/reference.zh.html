@@ -246,8 +246,8 @@ id="toc-01-概覽與-product-model">01 概覽與 Product Model</a>
 <li><a href="#產品模型" id="toc-產品模型">產品模型</a></li>
 <li><a href="#三種執行模式是同級概念"
 id="toc-三種執行模式是同級概念">三種執行模式是同級概念</a></li>
-<li><a href="#三種-resource-是同級概念"
-id="toc-三種-resource-是同級概念">三種 Resource 是同級概念</a></li>
+<li><a href="#五種-resource-是同級概念"
+id="toc-五種-resource-是同級概念">五種 Resource 是同級概念</a></li>
 <li><a href="#package-邊界" id="toc-package-邊界">Package 邊界</a></li>
 <li><a href="#如何使用本手冊"
 id="toc-如何使用本手冊">如何使用本手冊</a></li>
@@ -521,7 +521,8 @@ data；<strong>Template</strong> 是可執行 scenario
 邊界；<strong>Flow</strong> 是具有獨立 Action scope 的可重用 Template
 邏輯；<strong>Action</strong>
 是一個有序工作單元；<strong>Resource</strong> 是 Action 或允許的
-expression call 所使用的 Tool、DBHelper 或 MQHelper。</p>
+expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或
+SSHHelper。</p>
 <h3 id="三種執行模式是同級概念">三種執行模式是同級概念</h3>
 <p>Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context
 和同一批 reusable components：</p>
@@ -555,14 +556,17 @@ expression call 所使用的 Tool、DBHelper 或 MQHelper。</p>
 <code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>、<code>META</code>
 和 Action-local <code>output</code>。執行模式與 scheduler identity
 只保留在 framework evidence，不會成為 expression data。</p>
-<h3 id="三種-resource-是同級概念">三種 Resource 是同級概念</h3>
-<p>Tool、DBHelper、MQHelper 是獨立 Resource 類型。它們的配置與 lifecycle
-不同，但 operation data 最終都收斂到同一 Action envelope。公開
-expression 應讀取 Action result/evidence，而不是 resource 內部
-connection/process state。</p>
-<pre class="text"><code>Tool ----\
-DBHelper --+--&gt; operation result/evidence --&gt; Action output
-MQHelper -/</code></pre>
+<h3 id="五種-resource-是同級概念">五種 Resource 是同級概念</h3>
+<p>Tool、DBHelper、MQHelper、HTTPHelper 和 SSHHelper 是獨立 Resource
+類型。它們的配置與 lifecycle 不同，但 Action 會透過
+<code>output.result</code> 發布原生 typed result，並將可選的
+presentation evidence 分開保存。公開 expression 應讀取 Action
+result/evidence，而不是 resource 內部 connection/process state。</p>
+<pre class="text"><code>Tool ------\
+DBHelper ---+
+MQHelper ---+--&gt; typed operation result --&gt; Action output
+HTTPHelper -+
+SSHHelper --/</code></pre>
 <h3 id="package-邊界">Package 邊界</h3>
 <p>一般 package 包含
 <code>config/</code>、<code>testcase/</code>、<code>templates/</code>、<code>tools/</code>、<code>schemas/</code>
