@@ -16,6 +16,10 @@ public final class ExpressionBlockEvaluator {
         Object context(String path) throws Exception;
         Object call(String name, Map<String, Object> arguments) throws Exception;
         String interpolate(String value) throws Exception;
+        /** Resolves one statically addressed project-file value. */
+        default String file(String path) throws Exception {
+            throw new IllegalArgumentException("Project-file expressions are unavailable in this scope: &{" + path + "}");
+        }
         default boolean hasContext(String path) { return false; }
         default Object contextOptional(String path) throws Exception { return context(path); }
         default Object context(String path, boolean optional) throws Exception {
@@ -24,23 +28,26 @@ public final class ExpressionBlockEvaluator {
     }
 
     public Object evaluate(String expression, Resolver resolver) throws Exception {
-        return parse(expression).root.evaluate(resolver);
+        return compile(expression).evaluate(resolver);
     }
 
     public void validateSyntax(String expression) { parse(expression); }
 
+    /** Compiles an expression once so callers can reuse its immutable AST. */
+    public CompiledExpression compile(String expression) {
+        return new CompiledExpression(parse(expression).root);
+    }
+
+    public List<String> filePaths(String expression) {
+        return compile(expression).filePaths();
+    }
+
     public List<ToolCallParser.ParsedCall> calls(String expression) {
-        Parsed parsed = parse(expression);
-        List<ToolCallParser.ParsedCall> calls = new ArrayList<ToolCallParser.ParsedCall>();
-        parsed.root.collectCalls(calls);
-        return calls;
+        return compile(expression).calls();
     }
 
     public List<String> contextPaths(String expression) {
-        Parsed parsed = parse(expression);
-        List<String> paths = new ArrayList<String>();
-        parsed.root.collectContextPaths(paths);
-        return paths;
+        return compile(expression).contextPaths();
     }
 
     private Parsed parse(String expression) {
@@ -83,10 +90,37 @@ public final class ExpressionBlockEvaluator {
 
     private static final class Parsed { private final Node root; private Parsed(Node root) { this.root = root; } }
 
+    /** Immutable compiled expression used by cached project-file plans. */
+    public static final class CompiledExpression {
+        private final Node root;
+        private CompiledExpression(Node root) { this.root = root; }
+
+        public Object evaluate(Resolver resolver) throws Exception { return root.evaluate(resolver); }
+
+        public List<ToolCallParser.ParsedCall> calls() {
+            List<ToolCallParser.ParsedCall> result = new ArrayList<ToolCallParser.ParsedCall>();
+            root.collectCalls(result);
+            return result;
+        }
+
+        public List<String> contextPaths() {
+            List<String> result = new ArrayList<String>();
+            root.collectContextPaths(result);
+            return result;
+        }
+
+        public List<String> filePaths() {
+            List<String> result = new ArrayList<String>();
+            root.collectFilePaths(result);
+            return result;
+        }
+    }
+
     private interface Node {
         Object evaluate(Resolver resolver) throws Exception;
         void collectCalls(List<ToolCallParser.ParsedCall> calls);
         void collectContextPaths(List<String> paths);
+        default void collectFilePaths(List<String> paths) { }
         String source();
     }
 
@@ -113,6 +147,13 @@ public final class ExpressionBlockEvaluator {
         @Override public void collectContextPaths(List<String> paths) { paths.add(optional ? path + "?" : path); }
     }
 
+    private static final class FileNode extends BaseNode {
+        private final String path;
+        FileNode(String source, String path) { super(source); this.path = path; }
+        @Override public Object evaluate(Resolver resolver) throws Exception { return resolver.file(path); }
+        @Override public void collectFilePaths(List<String> paths) { paths.add(path); }
+    }
+
     private static final class IdentifierNode extends BaseNode {
         private final String value;
         IdentifierNode(String source, String value) { super(source); this.value = value; }
@@ -134,6 +175,7 @@ public final class ExpressionBlockEvaluator {
         }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { for (Node value : values) value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { for (Node value : values) value.collectContextPaths(paths); }
+        @Override public void collectFilePaths(List<String> paths) { for (Node value : values) value.collectFilePaths(paths); }
     }
 
     private static final class MapNode extends BaseNode {
@@ -150,6 +192,9 @@ public final class ExpressionBlockEvaluator {
         @Override public void collectContextPaths(List<String> paths) {
             for (Node value : values.values()) value.collectContextPaths(paths);
         }
+        @Override public void collectFilePaths(List<String> paths) {
+            for (Node value : values.values()) value.collectFilePaths(paths);
+        }
     }
 
     private static final class UnaryNode extends BaseNode {
@@ -163,6 +208,7 @@ public final class ExpressionBlockEvaluator {
         }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { value.collectContextPaths(paths); }
+        @Override public void collectFilePaths(List<String> paths) { value.collectFilePaths(paths); }
     }
 
     private static final class BinaryNode extends BaseNode {
@@ -196,6 +242,7 @@ public final class ExpressionBlockEvaluator {
         }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { left.collectCalls(calls); right.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { left.collectContextPaths(paths); right.collectContextPaths(paths); }
+        @Override public void collectFilePaths(List<String> paths) { left.collectFilePaths(paths); right.collectFilePaths(paths); }
     }
 
     private static final class IsNullNode extends BaseNode {
@@ -204,6 +251,7 @@ public final class ExpressionBlockEvaluator {
         @Override public Object evaluate(Resolver resolver) throws Exception { return Boolean.valueOf(negate ? value.evaluate(resolver) != null : value.evaluate(resolver) == null); }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { value.collectContextPaths(paths); }
+        @Override public void collectFilePaths(List<String> paths) { value.collectFilePaths(paths); }
     }
 
     private static final class CallNode extends BaseNode {
@@ -230,6 +278,7 @@ public final class ExpressionBlockEvaluator {
             for (CallArgument argument : arguments) argument.value.collectCalls(calls);
         }
         @Override public void collectContextPaths(List<String> paths) { for (CallArgument argument : arguments) argument.value.collectContextPaths(paths); }
+        @Override public void collectFilePaths(List<String> paths) { for (CallArgument argument : arguments) argument.value.collectFilePaths(paths); }
     }
 
     private static final class CallArgument { private final String name; private final Node value; private CallArgument(String name, Node value) { this.name = name; this.value = value; } }
@@ -286,7 +335,7 @@ public final class ExpressionBlockEvaluator {
     private static String text(Object value) { return value == null ? "" : String.valueOf(value); }
     private static String type(Object value) { return value == null ? "null" : value.getClass().getSimpleName(); }
 
-    private enum TokenType { NUMBER, STRING, CONTEXT, IDENTIFIER, EMBEDDED, LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE, COLON, COMMA, EQUALS, OPERATOR, END }
+    private enum TokenType { NUMBER, STRING, CONTEXT, FILE, IDENTIFIER, EMBEDDED, LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE, COLON, COMMA, EQUALS, OPERATOR, END }
     private static final class Token {
         private final TokenType type; private final String text; private final int start, end;
         private Token(TokenType type, String text, int start, int end) { this.type = type; this.text = text; this.start = start; this.end = end; }
@@ -305,6 +354,7 @@ public final class ExpressionBlockEvaluator {
             if (index >= source.length()) return new Token(TokenType.END, "", index, index);
             char value = source.charAt(index);
             if (value == '$' && index + 1 < source.length() && source.charAt(index + 1) == '{') return context(start);
+            if (value == '&' && index + 1 < source.length() && source.charAt(index + 1) == '{') return file(start);
             if (value == '#' && index + 1 < source.length() && source.charAt(index + 1) == '{') return embedded(start);
             if (value == '\'' || value == '"' || value == '\u2018' || value == '\u2019'
                     || value == '\u201c' || value == '\u201d') return string(start, value);
@@ -336,6 +386,17 @@ public final class ExpressionBlockEvaluator {
                 index++;
             }
             throw new ExpressionSyntaxException(start, index, "'}' to close Context expression", "end of expression");
+        }
+        private Token file(int start) {
+            index += 2;
+            int body = index;
+            while (index < source.length() && source.charAt(index) != '}') index++;
+            if (index >= source.length()) throw new ExpressionSyntaxException(start, index, "'}' to close project-file expression", "end of expression");
+            String path = source.substring(body, index);
+            index++;
+            if (path.trim().isEmpty() || !path.equals(path.trim()))
+                throw new ExpressionSyntaxException(start, index, "a non-blank project-file path", "invalid project-file path");
+            return new Token(TokenType.FILE, path, start, index);
         }
         private Token embedded(int start) {
             int end = matchingBlockEnd(source, index + 2);
@@ -408,6 +469,7 @@ public final class ExpressionBlockEvaluator {
                 }
                 return new ContextNode(raw(token), path, optional);
             }
+            if (token.type == TokenType.FILE) return new FileNode(raw(token), token.text);
             if (token.type == TokenType.EMBEDDED) {
                 try {
                     Parser nested = new Parser(token.text);
@@ -497,5 +559,6 @@ public final class ExpressionBlockEvaluator {
         @Override public Object evaluate(Resolver resolver) throws Exception { return value.evaluate(resolver); }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { value.collectContextPaths(paths); }
+        @Override public void collectFilePaths(List<String> paths) { value.collectFilePaths(paths); }
     }
 }

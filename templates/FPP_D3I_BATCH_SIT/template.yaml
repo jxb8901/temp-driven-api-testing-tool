@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.4
+schemaVersion: att-template/v3.5
 name: FPP_D3I_BATCH_SIT
 description: SIT D3I batch end-to-end flow covering D3I, RLT012, DVO, DRR, and DSR processing.
 

@@ -74,20 +74,21 @@ The UAT descriptors keep the same IDs and replace only physical endpoint setting
 
 ## Typed Action flow
 
-Actions use the same logical IDs in every profile. Render returns an exact `String`; HTTP/MQ accepts it directly without a `requestFormat` or temporary result file:
+Actions use the same logical IDs in every profile. A project-file expression returns an exact UTF-8 `String`; HTTP/MQ accepts it directly without a `requestFormat` or temporary result file:
 
 ```yaml
 actions:
-  renderRequest:
-    type: render
-    payload: payment/request.xml
+  prepareRequest:
+    type: assign
+    name: requestText
+    expression: "&{templates/payment/request.xml}"
   sendPayment:
     type: tool
     call: >-
       #{mq.payment.request(
         requestQueue='PAYMENT.REQUEST',
         replyQueue='PAYMENT.REPLY',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         responseFormat='xml'
       )}
 ```

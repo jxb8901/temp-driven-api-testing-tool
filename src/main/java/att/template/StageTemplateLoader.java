@@ -150,21 +150,23 @@ public final class StageTemplateLoader {
         Map<String, Object> map = yaml(descriptor);
         rejectLegacyResultFields(map, descriptor);
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
-        boolean typed = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
-        if (!typed) {
+        boolean current = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
+        boolean historical = Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4.equals(schemaVersion);
+        if (!current && !historical) {
             Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.4.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.5.schema.json");
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     schemaVersion, Version.TEMPLATE_SCHEMA);
             throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
                     + "'; ATT 3.6.2 supports only " + Version.TEMPLATE_SCHEMA
                     + ". Render now returns String, command Tool parsing uses stdoutFormat, and Log file/fields migrate to value. See docs/reference/appendices/migrations.md.");
         }
-        boolean current = true;
-        boolean previousVersion = false;
-        boolean modern = true;
-        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.4.schema.json");
-        att.validation.SchemaMigrationGuidance.verify(schema, schema, map, schemaVersion, Version.TEMPLATE_SCHEMA);
+        boolean previousVersion = historical;
+        boolean modern = historical;
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot,
+                current ? "att-template-v3.5.schema.json" : "att-template-v3.4.schema.json");
+        if (current) att.validation.SchemaMigrationGuidance.verify(schema, schema, map, schemaVersion, Version.TEMPLATE_SCHEMA);
+        else att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, schemaVersion, "template");
         SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
         SchemaSupport.string(map.get("description"), "template.description", true);
@@ -176,7 +178,7 @@ public final class StageTemplateLoader {
             String actionKey = String.valueOf(entry.getKey());
             if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
-            if (typed) rejectRemovedActionContract(actionMap, actionKey, descriptor);
+            if (current) rejectRemovedActionContract(actionMap, actionKey, descriptor);
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
                     current || previousVersion
                             ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "value", "format", "call", "assert", "expected", "actual", "message", "level", "timeoutMs", "db", "query", "update", "use", "runWhen"}

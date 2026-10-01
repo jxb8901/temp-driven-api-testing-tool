@@ -12,8 +12,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.4 |
-| Flow | att-flow/v3.4 |
+| Template | att-template/v3.5 |
+| Flow | att-flow/v3.5 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
@@ -23,4 +23,3 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | JUnit XML | att-junit/v2.1 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
-

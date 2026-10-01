@@ -25,10 +25,12 @@ schemas:
   sidecar: att-sidecar-v2.2.schema.json
   legacySidecar: history/att-sidecar-v2.1.schema.json
   testcaseSnapshot: att-testcases-v2.4.xsd
-  template: att-template-v3.4.schema.json
+  template: att-template-v3.5.schema.json
+  historicalTemplateV34: history/att-template-v3.4.schema.json
   historicalTemplateV33: history/att-template-v3.3.schema.json
   previousTemplateV31: history/att-template-v3.1.schema.json
-  flow: att-flow-v3.4.schema.json
+  flow: att-flow-v3.5.schema.json
+  historicalFlowV34: history/att-flow-v3.4.schema.json
   historicalFlowV33: history/att-flow-v3.3.schema.json
   previousFlowV31: history/att-flow-v3.1.schema.json
   mqhelper: att-mqhelper-v1.2.schema.json

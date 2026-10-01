@@ -16,7 +16,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- render / assert / log / assign
+              |     |-- project-file expression / assert / log / assign
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -207,15 +207,15 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](referen
 
 ### 2.3 Template
 
-只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.4。每個 Template 都需要非空且有序的 actions map，以及 description。
+只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.5。每個 Template 都需要非空且有序的 actions map，以及 description。
 
-每個 Action 依類型使用不同契約。Render 回傳原樣 String，不寫入檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
+每個 Action 依類型使用不同契約。`&{templates/payment/request.xml}` 這類 project-file expression 會將 exact UTF-8 檔案內容作為 String 回傳，不會建立檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
 完整欄位、範例、typed result/evidence model、HTTP/MQ/SSH boundary 與 migration guidance，請參閱[Action 與型別化值](reference.zh/14_actions.md)。[Expressions and Built-ins](reference.zh/07_expressions.md) 定義共用 expression language；[Load](reference.zh/04_execution_modes/load.md) 定義 ID initialization scope。
 
 ### 2.4 Flow
 
-Flow 是可重用的 Template logic，使用 `att-flow/v3.4`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](reference.zh/14_actions.md) 定義 Flow result 與 Assign behavior；[Context](reference.zh/03_runtime_context.md) 定義 lifetime。
+Flow 是可重用的 Template logic，使用 `att-flow/v3.5`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](reference.zh/14_actions.md) 定義 Flow result 與 Assign behavior；[Context](reference.zh/03_runtime_context.md) 定義 lifetime。
 
 ### 2.5 Authoring lifecycle
 
@@ -227,13 +227,12 @@ Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的 business inp
 
 ## 03 Actions 與 Typed Values
 
-本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.4。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。
+本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.5。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。
 
 ### Action 類型
 
 | 類型 | 必填欄位 | 結果與行為 |
 |---|---|---|
-| render | payload | 將範本檔渲染為原樣 String；多來源時回傳以相對路徑為 key 的 String map。不解析內容，也不寫入結果檔。 |
 | tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果。 |
 | db | db 與 query/update 其中一個區塊 | 回傳 DB operation 的型別化值與 evidence。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
@@ -251,41 +250,43 @@ ATT 將 operation 的邏輯結果與人類可讀或 wire representation 分開�
 |---|---|---|
 | Command Tool stdout | stdoutFormat | 將外部 stdout 解析為型別化結果。 |
 | HTTP/MQ response | responseFormat | 將外部 response bytes 解析為型別化結果。 |
-| Render 輸出 | `String` | 保留範本產生的原始字元。 |
+| Project-file expression | `String` | 讀取安全的 UTF-8 project file，並在 expression evaluation 後保留其字元。 |
 | 透過 HTTP/MQ 傳送抽象 Map/List | requestFormat | 在 outbound boundary 序列化該值。 |
 | Log 或 resource evidence | format / evidence.output.format | 產生人類可讀表示。 |
 
 DB result 本身已是型別化值。Tool、Action、Template、Flow 和 expression results 在 ATT 中傳遞時均保留型別。
 
-### Render 回傳 String
+### Project-file expression 回傳 String
 
-Render 回傳完全一致的 rendered String：
+歷史 Render Action 的現行替代方式是 typed project-file value expression `&{path}`。它一定回傳一個 `String`，不會推斷 document format、parse 副檔名、展開 glob 或建立輸出檔：
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+requestText:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 ~~~
 
-單一來源會令 output.result 成為 String。多來源則回傳以 template root 相對來源路徑為 key 的有序 String map。副檔名不會影響結果；Render 不會推斷或附加 format、parse、pretty-print、normalize 或改寫內容。
+`${...}` 仍然是 Context reference，`#{...}` 仍然是 expression/call，`&{...}` 是 static、one-file locator；v1 沒有 glob 或 dynamic locator。Locator 相對 canonical ATT project root。`./` 或 `../` descriptor-relative path 只有在 canonical target 仍在該 root 內才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白和 glob syntax 都會在 validation 失敗。
 
-String 本身就是權威表示。ATT 不會將它解析成可導航的 map/tree，也不會在傳輸前 pretty-print、normalize 或改寫。Render 不建立檔案，也不暴露 output.targetFiles。若要存取結構化資料，請使用原本的型別化 Context value，例如 EXEC.INPUT.amount 或前一 Action 的 output.result.amount。
+普通 UTF-8 file 會原樣回傳。如果 file 包含 `${...}` 或 `#{...}`，ATT 只 compile 一次這些 node，並在每次 execution 評估；compiled plan immutable，dynamic value 不會被當成第二份 template 重新 parse。Run 和 Debug 會重用 plan，直到 file fingerprint 改變。Load 會在 scheduling 前 validation 並 capture selected file identity、content 和 compiled dependency closure，因此 active iteration 看到穩定 snapshot。
 
-Render 結果直接傳送至 HTTP/MQ：
+若要由後續 Action 重用 String，使用 Assign：
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+requestText:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 
 sendRequest:
   type: tool
-  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
 ~~~
 
-HTTP/MQ 請將 Render String 直接傳給 body/payload。String 不可搭配 requestFormat。Resource 使用其配置的 charset/CCSID 編碼原文；Content-Type 與 MQ transport metadata 仍由 resource 管理。
+HTTP/MQ 請將 String 直接傳給 body/payload。Resource 使用其配置的 charset/CCSID 編碼原文；Content-Type 與 MQ transport metadata 仍由 resource 管理。`&{...}` 可用於 Tool/Helper call argument、Assign expression、Log value 和其他 typed value 位置。
 
-requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 Render 不會被靜默 parse/serialize。只有 resource 呼叫明確定義 file 參數時，raw file input 才仍可使用；Render 不會建立 handoff file。
+requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。只有 resource 呼叫明確定義 file 參數時，raw file input 才仍可使用。
 
 ### Tool、DB 與 Flow 結果
 
@@ -323,7 +324,7 @@ callPayment:
   type: tool
   call: >-
     #{mq.payment.request(
-      payload=${EXEC.ACTIONS.renderRequest.output.result},
+      payload=${EXEC.VARS.requestText},
       responseFormat='xml'
     )}
   evidence:
@@ -376,7 +377,7 @@ Tool retry 時，每個 primary attempt 都會在該 attempt assertion 前執行
 
 `call` 必填。`timeoutMs` 與 primary Tool timeout 獨立。應用程式 log 的一般診斷模式使用 `onFailure: continue`，避免收集 log 失敗掩蓋原本的 business 或 assertion failure；`stop` 則令 collector failure 成為 Action error。Collector 的 status 與 diagnostic 仍可觀察，且 collector failure 不會改變 primary logical result。若資料是後續 assertion 要使用的正常 business/test value，應使用普通 Tool/Log/Assign Action，而非 evidence collector。
 
-Collector result 遵守一般 typed-result 規則。放在 evidence 下不代表會轉成 String；Map、List 和 Render `String` 均保留型別。在 Load 中，明確要求的 collector execution 與 helper `evidence.output` serialization 是兩件事；resource-output 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除 author-requested collector。
+Collector result 遵守一般 typed-result 規則。放在 evidence 下不代表會轉成 String；Map、List 和 project-file `String` 均保留型別。在 Load 中，明確要求的 collector execution 與 helper `evidence.output` serialization 是兩件事；resource-output 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除 author-requested collector。
 
 ### Log：將型別化值轉成人類可讀日誌
 
@@ -393,7 +394,7 @@ logOrder:
 
 level 預設 INFO，可設 TRACE、DEBUG、INFO、WARN、ERROR。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
 
-同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。Render String 會原樣輸出；Log 不會推斷或附加 document format，也不會讀取檔案或使用 fields map。需要結構化日誌時，將 typed map/list 放到 value。
+同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。Project-file String 會原樣輸出；Log 不會推斷或附加 document format，也不會讀取檔案或使用 fields map。需要結構化日誌時，將 typed map/list 放到 value。
 
 ### Expressions 與變數 scope
 
@@ -528,7 +529,25 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-依各欄位支援的形式使用 expression。Render 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/14_actions.md)。
+依各欄位支援的形式使用 expression。Project-file 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/14_actions.md)。
+
+### Project-file String expression
+
+`&{path}` 是 typed project-file expression。它只解析一個 regular UTF-8 檔案，並且一定回傳 `String`；不會推斷 document format、解析副檔名、展開 glob 或建立 output file。Path 相對於 canonical ATT project root。Descriptor-relative 的 `./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。
+
+Standalone value 或嵌入較大 expression 時，請使用 YAML string：
+
+~~~yaml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
+~~~
+
+檔案內的 `${...}` 與 `#{...}` 會在 file value 使用時編譯及求值。Run 與 Debug 會 cache compiled plan，並在 file fingerprint 改變時失效；Load 會為 scenario freeze 已驗證的 file identity、content 及 compiled plan。File output 不會再被當作新的 expression source 解析。
 
 ### 操作符
 
@@ -555,6 +574,8 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 - 匹配本身是大小寫敏感的
 
 ### 內建函數
+
+只有作者直接撰寫的 file-expression node 才會求值。Context value、Tool result 和 file output 即使包含 `&{...}`，亦維持 literal String。檔案內的 Context path 和 call 依 enclosing Action 的一般 ordering、scope 和 resource validation 規則驗證。V1 在 Run、Debug、validation 和 Load snapshot discovery 都拒絕 project-file 內容中的巢狀 `&{...}`，包括 `#{...}` argument 內的 locator。
 
 內建函數通過 `#{...}` 調用。Canonical 名稱使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 與 `seq.*` package；舊 flat 名稱保留為兼容 alias。Tool group 同樣以 `group.tool` 組成 package-like 調用名；配置 Tool 不得佔用 built-in package root 或任何 canonical／legacy built-in 名稱。
 
@@ -939,7 +960,7 @@ Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact 或 
 
 evidence.mode 支援 metrics、failures、samples、all；預設 failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
 
-evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、Render String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
+evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、exact project-file String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
 
 #### Report、metrics 與 thresholds
 
@@ -1027,7 +1048,7 @@ Operation
 └── evidence     # 有界的 execution/transport metadata
 ~~~
 
-Action 在 output.result 發布最後的 operation value。Action status、assertion detail、diagnostic、attempts 描述執行，不會取代 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH response 或 stdout 使用各自的 responseFormat；DB operation 回傳 native typed value。Render 回傳原樣 String，詳見[Action 與型別化值](reference.zh/14_actions.md)。
+Action 在 output.result 發布最後的 operation value。Action status、assertion detail、diagnostic、attempts 描述執行，不會取代 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH response 或 stdout 使用各自的 responseFormat；DB operation 回傳 native typed value。Project-file expression 回傳原樣 file text String，詳見[Action 與型別化值](reference.zh/14_actions.md)。
 
 Resource evidence 可包含低成本 metadata。Helper 也可選擇配置人類可讀 snapshot：
 
@@ -1040,7 +1061,7 @@ evidence:
 
 Evidence output 支援 json、yaml、xml、text、sqlplus。這只用於 presentation，不會修改或取代 output.result。含 secrets 的值會過濾或省略。
 
-Load scenario 可將 evidence.resources.output 設為 inherit（預設）或 none。none 略過可選的 resource-output formatting/materialization；inherit 會等 success sample 或 failure 取得 retention slot 後才格式化。Metrics-only iteration 不序列化 resource output，也不建立 evidence workspace。Transport parsing 與 Render representation 不變。
+Load scenario 可將 evidence.resources.output 設為 inherit（預設）或 none。none 略過可選的 resource-output formatting/materialization；inherit 會等 success sample 或 failure 取得 retention slot 後才格式化。Metrics-only iteration 不序列化 resource output，也不建立 evidence workspace。Transport parsing 與 project-file String representation 不變。
 
 ### 7.2 Tool
 
@@ -1097,7 +1118,7 @@ Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `argu
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke a rendered payment request
+    description: Invoke a project-file payment request
     command:
       - ./tools/invoke_payment_api.sh
       - "${input.requestText}"
@@ -1105,8 +1126,8 @@ tools:
     stdoutFormat: json
     arguments:
       requestText:
-        name: Request File
-        description: Rendered XML request path
+        name: Request Body
+        description: Request body String
         required: true
       environment:
         name: Environment
@@ -1114,7 +1135,7 @@ tools:
         required: true
 ```
 
-每個 YAML command list item 在 render 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
+每個 YAML command list item 在 interpolation 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
 
 #### 引號、Context value 與 atomic argv
 
@@ -1297,22 +1318,23 @@ evidence:
 
 Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
 
-#### 傳送 Render String 或抽象值
+#### 傳送 project-file String 或抽象值
 
-Render output 是 String，可直接傳入 payload：
+Project-file expression output 是 String，可直接傳入 payload：
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{mq.payment.request(payload=${EXEC.VARS.requestText})}"
 ~~~
 
-ATT 使用配置的 MQ charset/CCSID 編碼完全相同的渲染文字，不會 parse/serialize。String 不應提供 requestFormat。Render 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
+ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。Project-file expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
 
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；Render 不建立檔案或 targetFiles。
+Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；project-file expression 不建立檔案或 targetFiles。
 
 #### Evidence、response parsing 與 Load
 
@@ -1362,24 +1384,25 @@ evidence:
 
 以 type: tool Action 的 primary call 呼叫 http.<id>.get/post/request。Response bytes 由此 boundary 解析：使用 call responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援 auto、text、json、yaml、xml。解析後的 native value 發布於 output.result。可選 evidence.output 是有長度上限的人類可讀 snapshot，不會改變該值。
 
-#### Request body 與 Render String
+#### Request body 與 project-file String
 
-Render Action 回傳原樣 String，可直接傳入 body：
+Project-file expression 回傳 exact UTF-8 file content String，可先 Assign，再直接傳入 body：
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 sendRequest:
   type: tool
-  call: "#{http.payment.post(path='/v1/payments', body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(path='/v1/payments', body=${EXEC.VARS.requestText})}"
 ~~~
 
 HTTP 在 charset encoding boundary 傳送完全相同的 String，不會 parse/serialize。String 不可搭配 requestFormat。
 
-Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。body 和 file 互斥；file 是 HTTP call 明確支援的 raw file input。Render 不建立結果檔，也沒有 targetFiles。
+Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。body 和 file 互斥；file 是 HTTP call 明確支援的 raw file input。Project-file expression 不建立結果檔，也沒有 targetFiles。
 
-Render String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定 media type 時請配置 contentType/header。Request charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting 分開。
+Project-file String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定 media type 時請配置 contentType/header。Request charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting 分開。
 
 #### Failure 與 evidence
 
@@ -1408,7 +1431,7 @@ actions:
     call: >-
       #{ssh.application.upload(
         remotePath='/srv/app/request.json',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         overwrite=true
       )}
   downloadResponse:
@@ -1653,9 +1676,10 @@ SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physica
 
 ```yaml
 actions:
-  renderRequest:
-    type: render
-    payload: payment/request.json
+  prepareRequest:
+    type: assign
+    name: requestText
+    expression: "&{templates/payment/request.json}"
 
   queryOrder:
     type: db
@@ -1671,7 +1695,7 @@ actions:
       #{mq.payment.request(
         requestQueue='PAYMENT.REQUEST',
         replyQueue='PAYMENT.REPLY',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         responseFormat='xml',
         waitMs=5000
       )}
@@ -1801,7 +1825,7 @@ Run ID 和完整 Case ID 會直接用作目錄名，ATT 不會對合法標識做
 
 Run ID 必須非空、最多 128 個 Unicode 碼點，不能是 `.` 或 `..`，不得含前導/尾隨空白或尾隨 `.`，且不能包含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|`、NUL、控制字符。Windows 設備名（如 `CON`、`NUL`、`COM1`、`LPT1`）會按大小寫不敏感方式拒絕。
 
-`workbookId`、`groupId`、`rowCaseId` 同樣遵循相同字符規則。`workbookId` 與 `groupId` 不能含點號，因為點號用於分隔三個組件；`rowCaseId` 可含點號。Template 路徑相對 `templates.root`；render glob 匹配必須保持在 Template 下。明確聲明的 resource file input 和 evidence output 路徑必須保持在各自配置根目錄內；ATT 會規範化並檢查包含性。
+`workbookId`、`groupId`、`rowCaseId` 同樣遵循相同字符規則。`workbookId` 與 `groupId` 不能含點號，因為點號用於分隔三個組件；`rowCaseId` 可含點號。Template 路徑相對 `templates.root`；project-file expression 只可讀取 project root 內一個 canonical、regular、UTF-8 file，並拒絕 absolute path、glob、dynamic locator 及 symlink escape。明確聲明的 resource file input 和 evidence output 路徑必須保持在各自配置根目錄內；ATT 會規範化並檢查包含性。
 
 ### Topology 與 secrets
 
@@ -2103,7 +2127,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Appendix A](reference.zh/appendices/schema_matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，移除舊 Render `result.path`，並依[Action 與型別化值](reference.zh/14_actions.md)將 typed `output.result` 傳至下一個 Action。Unsupported version 會在執行前失敗。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Appendix A](reference.zh/appendices/schema_matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render action 改為使用 `&{path}` 的 Assign，再依[Action 與型別化值](reference.zh/14_actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
 
 現行 schema 位於 [`schemas/`](../schemas)，較舊定義位於 [`schemas/history/`](../schemas/history)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 
@@ -2246,8 +2270,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.4 |
-| Flow | att-flow/v3.4 |
+| Template | att-template/v3.5 |
+| Flow | att-flow/v3.5 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
@@ -2266,30 +2290,36 @@ Deterministic legacy alias 在可一對一映射時可以保留並產生 migrati
 
 ## Appendix C — Migration Notes
 
-ATT 3.6.2 將型別化 operation result、外部 parsing、渲染 String、outbound transport 和人類可讀 evidence 分開。
+ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String、outbound transport 和人類可讀 evidence 分開。
 
 | 舊欄位／模型 | 3.6.2 遷移方式 |
 |---|---|
+| `att-template/v3.4` 或 `att-flow/v3.4` 的 `type: render` | 將 descriptor 改為 active v3.5 schema，並以使用 project-file expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor 只可經由 historical schema path 載入。 |
+| `type: render` / `payload: path` | 使用 `type: assign`、variable `name` 及 `expression: "&{project-relative-file}"`；將 `${EXEC.VARS.<name>}` 傳給 consumer。 |
 | Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
 | 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
-| Render result.format/path 或 renderAs/saveAs | 移除舊欄位。Render 回傳原樣 String，不建立結果檔或 targetFiles。 |
-| 透過 targetFiles 傳遞 Render 檔案 | 直接將 Render String 傳入 HTTP body 或 MQ payload。 |
-| 在 Render output 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
+| Render result.format/path 或 renderAs/saveAs | 移除舊欄位。Project-file expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
+| 透過 targetFiles 傳遞 Render 檔案 | 直接將 project-file String 傳入 HTTP body 或 MQ payload。 |
+| 在 project-file String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
+| Dynamic 或不安全 file locator | 改為一個 static project-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
 | Log file | 直接將 value 傳入 Log.value。 |
 | Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
 | HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
 | 舊 active resource/config schema | 使用 [Appendix A](reference.zh/appendices/schema_matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
 
-Render 直接傳到 HTTP 的例子：
+Project-file String 傳入 HTTP 的例子：
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
 ~~~
+
+File 以 strict UTF-8 text 讀取。File 內的 `${...}` 與 `#{...}` 仍是 runtime expressions；validation 編譯時不會呼叫外部 resource。Run/Debug 會 cache compiled plan，並在 file fingerprint 改變時失效；Load 會為 scenario freeze 已驗證的 file identity、content 及 plan。File output 不會再被當作新的 expression source 解析。
 
 抽象 typed value 必須明確使用 requestFormat：
 
@@ -2307,17 +2337,20 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 
 ### Historical schema migration
 
-ATT 3.6.2 使用 `att-template/v3.4` 與 `att-flow/v3.4` 作為現行 Render contract。已發布的 `att-template/v3.3` 與 `att-flow/v3.3` 定義保留於 `schemas/history/`，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.4，再套用以下欄位變更。
+ATT 3.6.2 使用 `att-template/v3.5` 與 `att-flow/v3.5` 作為 active schemas。已發布的 `att-template/v3.4` 與 `att-flow/v3.4` 定義保留於 `schemas/history/`；其中 historical Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.5，再套用以下欄位變更。
 
 | Historical configuration | 3.6.2 形式 |
 |---|---|
-| `att-template/v3.3` 或 `att-flow/v3.3` | 改為相應 v3.4 schema，再遷移已移除的 Render 欄位。 |
+| `att-template/v3.3` 或 `att-flow/v3.3` | 先按 historical release migration 遷移至 v3.4，再改為 v3.5 並遷移 Render Action。 |
+| Historical `type: render` | 改為使用 `"&{project-relative-file}"` expression 的 Assign；後續 Action 使用 `${EXEC.VARS.<name>}`。 |
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Render 將原樣 String 放入 output.result，不會隱式建立結果檔。 |
+| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Project-file expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
 | Log file | 將 typed value 直接傳入 Log.value |
 | Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ | 將 Render String 直接作為 HTTP body 或 MQ payload |
+| Render targetFiles handoff 至 HTTP/MQ | 將 project-file String 直接作為 HTTP body 或 MQ payload |
 | 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List |
+
+Project-file path 相對於 canonical project root。`./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。v1 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8 file。
 
 Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。
 

@@ -53,7 +53,7 @@ For example:
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke a rendered payment request
+    description: Invoke a project-file payment request
     command:
       - ./tools/invoke_payment_api.sh
       - "${input.requestText}"
@@ -61,8 +61,8 @@ tools:
     stdoutFormat: json
     arguments:
       requestText:
-        name: Request File
-        description: Rendered XML request path
+        name: Request Body
+        description: Request body String
         required: true
       environment:
         name: Environment
@@ -75,7 +75,7 @@ The action call is the boundary between the general Runtime Context and this res
 ```yaml
 callApi:
   type: tool
-  call: "#{invokePaymentApi(requestText=${EXEC.ACTIONS.renderRequest.output.result}, environment=${EXEC.INPUT.environment})}"
+  call: "#{invokePaymentApi(requestText=${EXEC.VARS.requestText}, environment=${EXEC.INPUT.environment})}"
 ```
 
 The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
@@ -195,8 +195,8 @@ If an argument declares a non-empty `argName`, its placeholder must appear exact
 command: [./tools/invoke_payment_api.sh, "${input.requestText}"]
 arguments:
   requestText:
-    name: Request File
-    description: Rendered XML request path
+    name: Request Body
+    description: Project-file request body String
     required: true
     argName: --request
 ```

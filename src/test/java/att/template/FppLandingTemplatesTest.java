@@ -41,14 +41,16 @@ class FppLandingTemplatesTest {
         StageTemplate template = loader().load("FPP_CTO_RTI_USMF");
         Map<String, TemplateAction> actions = index(template);
 
-        for (String id : new String[]{"buildTxnSeq", "renderPrecheckRequest", "log1",
+        for (String id : new String[]{"buildTxnSeq", "preparePrecheckRequest", "log1",
                 "invokePrecheck", "assertPrecheck"}) {
             assertNotNull(actions.get(id), "missing active CTO/RTI precheck action " + id);
         }
         assertEquals(5, actions.size());
         assertNull(actions.get("searchPrecheckLog"), "top-level x-staged extension must not become an action");
         assertEquals("TxnSeq", actions.get("buildTxnSeq").name());
+        assertEquals("precheckRequest", actions.get("preparePrecheckRequest").name());
         assertTrue(actions.get("invokePrecheck").call().contains("${CASE.VARS.TxnSeq}"));
+        assertTrue(actions.get("invokePrecheck").call().contains("${EXEC.VARS.precheckRequest}"));
     }
 
     private StageTemplateLoader loader() throws Exception {

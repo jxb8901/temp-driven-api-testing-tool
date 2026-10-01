@@ -1,29 +1,35 @@
 ## Appendix C — Migration Notes
 
-ATT 3.6.2 separates typed operation results, external parsing, rendered strings, outbound transport and human-readable evidence.
+ATT 3.6.2 separates typed operation results, external parsing, project-file Strings, outbound transport and human-readable evidence.
 
 | Previous field/model | 3.6.2 migration |
 |---|---|
+| `att-template/v3.4` or `att-flow/v3.4` with `type: render` | Change the descriptor to the active v3.5 schema and replace each Render Action with an Assign that uses a project-file expression. Historical v3.4 descriptors remain loadable only through the historical schema path. |
+| `type: render` / `payload: path` | Use `type: assign`, a variable `name`, and `expression: "&{project-relative-file}"`; pass `${EXEC.VARS.<name>}` to the consumer. |
 | Command Tool result.format | Move the parsing choice to the Tool descriptor's stdoutFormat. |
 | Common Action result.format/path/overwrite | Remove it. output.result is the native logical typed value; no implicit file replacement exists. |
-| Render result.format/path or renderAs/saveAs | Remove the old format/persistence fields. Render returns the exact String and creates no result file or targetFiles. |
-| Render file handoff through targetFiles | Pass the Render String directly as HTTP body or MQ payload, or use an explicit resource file argument. |
-| requestFormat on rendered output | Remove it. requestFormat is only for abstract Map/List values; String + requestFormat fails. |
+| Render result.format/path or renderAs/saveAs | Remove the old format/persistence fields. The project-file expression returns the exact UTF-8 String and creates no result file or targetFiles. |
+| Render file handoff through targetFiles | Pass the project-file String directly as HTTP body or MQ payload, or use an explicit resource file argument. |
+| requestFormat on a project-file String | Remove it. requestFormat is only for abstract Map/List values; String + requestFormat fails. |
+| Dynamic or unsafe file locator | Replace it with one static project-relative file. Absolute paths, globs, dynamic locators, missing files, directories, non-UTF-8 bytes and symlink escapes are rejected. |
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
 | Older active resource/config schema versions | Use the active schema from [Appendix A](schema_matrix.md) and migrate the fields above. Historical schemas are not active contracts. |
 
-A Render-to-HTTP example:
+A project-file String passed to HTTP:
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
 ~~~
+
+The file is read as strict UTF-8 text. `${...}` and `#{...}` inside the file remain runtime expressions and are compiled without invoking external resources during validation. Run/Debug cache the compiled plan and invalidate it when the file fingerprint changes; Load freezes the validated file identity, content and plan for the scenario. File output is not reparsed as a new expression source.
 
 For an abstract value, use requestFormat explicitly:
 
@@ -41,17 +47,20 @@ Unsupported schema versions fail before execution and include migration guidance
 
 ### Historical schema migration
 
-ATT 3.6.2 uses `att-template/v3.4` and `att-flow/v3.4` as the current Render contract. The published `att-template/v3.3` and `att-flow/v3.3` definitions remain under `schemas/history/` and are not active contracts. When migrating those descriptors, change their schema versions to v3.4 and apply the field changes below.
+ATT 3.6.2 uses `att-template/v3.5` and `att-flow/v3.5` as the active schemas. The published `att-template/v3.4` and `att-flow/v3.4` definitions remain under `schemas/history/`; their historical Render Action is compatibility-only and is not part of the active contract. When migrating those descriptors, change their schema versions to v3.5 and apply the field changes below.
 
 | Historical configuration | 3.6.2 form |
 |---|---|
-| `att-template/v3.3` or `att-flow/v3.3` | Change to the corresponding v3.4 schema, then migrate removed Render fields. |
+| `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.5 and migrate the Render Action. |
+| Historical `type: render` | Replace it with an Assign whose expression is `"&{project-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. Render returns the exact String in output.result and creates no implicit result file. |
+| Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. The project-file expression returns the exact UTF-8 String and creates no implicit result file. |
 | Log file | Pass a typed value to Log.value |
 | Log fields | Put a typed map/list in Log.value and select Log.format |
-| Render targetFiles handoff to HTTP/MQ | Pass the Render String directly as HTTP body or MQ payload |
+| Render targetFiles handoff to HTTP/MQ | Pass the project-file String directly as HTTP body or MQ payload |
 | requestFormat on rendered output | Remove it; reserve requestFormat for abstract Map/List values |
+
+Project-file paths are relative to the canonical project root. `./` and `../` are allowed only when the canonical target remains inside that root. The v1 contract has no globs or dynamic locators; the target must be a regular strict-UTF-8 file.
 
 Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.
 

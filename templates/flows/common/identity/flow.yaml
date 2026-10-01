@@ -1,4 +1,4 @@
-schemaVersion: att-flow/v3.4
+schemaVersion: att-flow/v3.5
 id: common.identity.v1
 name: Identity
 description: V3.4.2 Flow reading canonical source metadata in its own Action scope.

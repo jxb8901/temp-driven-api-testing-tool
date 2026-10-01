@@ -175,28 +175,32 @@ public final class FlowRegistry {
         rejectLegacyResultFields(map, descriptor);
         Object configuredVersion = map.get("schemaVersion");
         String flowVersion = configuredVersion == null ? "" : String.valueOf(configuredVersion);
-        boolean typed = Version.FLOW_SCHEMA.equals(flowVersion);
-        if (typed) rejectRemovedActionContract(map, descriptor);
-        if (!typed) {
+        boolean current = Version.FLOW_SCHEMA.equals(flowVersion);
+        boolean historical = Version.HISTORICAL_FLOW_SCHEMA_V3_4.equals(flowVersion);
+        if (current) {
+            rejectRemovedActionContract(map, descriptor);
+        }
+        if (!current && !historical) {
             Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, flowVersion);
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.4.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.5.schema.json");
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     flowVersion, Version.FLOW_SCHEMA);
             throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
                     + "'; ATT 3.6.2 supports only " + Version.FLOW_SCHEMA
                     + ". Migrate nested Actions to the 3.6.2 typed-result contract and see docs/reference/appendices/migrations.md.");
         }
-        boolean currentVersion = true;
-        boolean previousVersion = false;
-        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.4.schema.json");
-        att.validation.SchemaMigrationGuidance.verify(schema, schema, map, flowVersion, Version.FLOW_SCHEMA);
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot,
+                current ? "att-flow-v3.5.schema.json" : "att-flow-v3.4.schema.json");
+        if (current) att.validation.SchemaMigrationGuidance.verify(schema, schema, map, flowVersion, Version.FLOW_SCHEMA);
+        else att.validation.JsonSchemaVerifier.verify(schema, map);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
-        String templateVersion = Version.TEMPLATE_SCHEMA;
+        String templateVersion = current ? Version.TEMPLATE_SCHEMA : Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4;
         actionContract.put("schemaVersion", templateVersion);
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
-        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.4.schema.json");
+        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot,
+                current ? "att-template-v3.5.schema.json" : "att-template-v3.4.schema.json");
         att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
         SchemaSupport.requireVersion(map, flowVersion, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");
@@ -205,7 +209,7 @@ public final class FlowRegistry {
         SchemaSupport.string(map.get("name"), "flow.name", true);
         SchemaSupport.string(map.get("description"), "flow.description", true);
         return new FlowDefinition(id, text(map.get("name")), text(map.get("description")), descriptor.getParent(),
-                actions(map.get("actions"), id, templateVersion));
+                flowVersion, actions(map.get("actions"), id, templateVersion, historical));
     }
 
     private void rejectRemovedActionContract(Map<String, Object> flow, Path descriptor) {
@@ -255,22 +259,22 @@ public final class FlowRegistry {
                 descriptor.toString(), fullField, null, null, null, null, action, suggestion, null);
     }
 
-    private List<TemplateAction> actions(Object configured, String id, String templateSchema) {
+    private List<TemplateAction> actions(Object configured, String id, String templateSchema, boolean historical) {
         if (!(configured instanceof Map) || ((Map<?, ?>) configured).isEmpty()) throw new IllegalArgumentException("Flow actions must be a non-empty ordered map: " + id);
         List<TemplateAction> result = new ArrayList<TemplateAction>();
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
             String key = String.valueOf(entry.getKey());
             if (key.trim().isEmpty() || key.contains(".") || !(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Invalid Flow action: " + id + "." + key);
             TemplateAction action = new TemplateAction(key, objectMap((Map<?, ?>) entry.getValue()), templateSchema);
-            validateActionShape(action, id);
+            validateActionShape(action, id, historical);
             result.add(action);
         }
         return result;
     }
 
-    private void validateActionShape(TemplateAction action, String flowId) {
+    private void validateActionShape(TemplateAction action, String flowId, boolean historical) {
         String type = action.type().toLowerCase(java.util.Locale.ROOT);
-        if (!java.util.Arrays.asList("render", "tool", "db", "assert", "log", "assign", "flow").contains(type)) throw new IllegalArgumentException("Unsupported Flow action type: " + type);
+        if (!java.util.Arrays.asList(historical ? "render" : "", "tool", "db", "assert", "log", "assign", "flow").contains(type)) throw new IllegalArgumentException("Unsupported Flow action type: " + type);
         if (action.raw().containsKey("with")) throw new IllegalArgumentException("Flow action with is not supported: " + flowId + "." + action.id());
         if ("flow".equals(type) && action.use().trim().isEmpty()) throw new IllegalArgumentException("Flow action use is required: " + flowId + "." + action.id());
         if (!"flow".equals(type) && action.raw().containsKey("use")) throw new IllegalArgumentException("use is valid only for Flow actions: " + flowId + "." + action.id());
