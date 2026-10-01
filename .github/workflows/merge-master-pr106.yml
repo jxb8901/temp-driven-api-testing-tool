@@ -34,7 +34,9 @@ jobs:
           set -e
           if [ "$rc" -ne 0 ]; then
             echo "Resolving remaining conflicts in favor of current master structure"
-            git diff --name-only --diff-filter=U | while IFS= read -r path; do
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            rm -f .git/index.lock
+            for path in "${conflicts[@]}"; do
               if git cat-file -e "origin/master:$path" 2>/dev/null; then
                 git checkout --theirs -- "$path"
                 git add -- "$path"
