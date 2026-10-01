@@ -138,7 +138,7 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](08_reli
 
 ### 2.3 Template
 
-只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.5。每個 Template 都需要非空且有序的 actions map，以及 description。
+只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.6。每個 Template 都需要非空且有序的 actions map，以及 description。
 
 每個 Action 依類型使用不同契約。`&{templates/payment/request.xml}` 這類 project-file expression 會將 exact UTF-8 檔案內容作為 String 回傳，不會建立檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
@@ -146,7 +146,7 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](08_reli
 
 ### 2.4 Flow
 
-Flow 是可重用的 Template logic，使用 `att-flow/v3.5`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](14_actions.md) 定義 Flow result 與 Assign behavior；[Context](03_runtime_context.md) 定義 lifetime。
+Flow 是可重用的 Template logic，使用 `att-flow/v3.6`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](14_actions.md) 定義 Flow result 與 Assign behavior；[Context](03_runtime_context.md) 定義 lifetime。
 
 ### 2.5 Authoring lifecycle
 

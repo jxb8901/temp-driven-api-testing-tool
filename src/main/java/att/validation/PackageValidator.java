@@ -849,6 +849,9 @@ public final class PackageValidator {
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
             if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if ("db".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
+                throw new IllegalArgumentException("Action type 'db' is historical-only; use type: tool with a db.<helper>.query|scalar|update(...) call under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
+            }
             if ("render".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
                 throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{project-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
@@ -879,7 +882,7 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); validateSshRetryContract(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateDbRetryContract(action, config); validateToolCall(action.call(), config, true, att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())); validateSshRetryContract(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "result", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
@@ -1727,6 +1730,19 @@ public final class PackageValidator {
                     + " actions because replaying a transfer may duplicate a side effect; retry execute or handle the transfer explicitly: " + action.id());
         }
     }
+
+    private void validateDbRetryContract(TemplateAction action, FrameworkConfig config) {
+        if (action.retry().isEmpty()) return;
+        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        if (!parsed.name().startsWith("db.")) {
+            ToolConfig tool = config.tool(parsed.name());
+            if (tool == null || !tool.callBacked()) return;
+            parsed = callParser.parse(tool.call());
+        }
+        if (parsed.name().matches("db\\.[^.]+\\.update")) {
+            throw new IllegalArgumentException("DB update Tools do not support retry; use an idempotent query/scalar Tool or handle update recovery explicitly: " + action.id());
+        }
+    }
     private static int integer(Object value, int fallback) { if (value == null) return fallback; if (!(value instanceof Number)) throw new IllegalArgumentException("Expected integer retry value"); return ((Number) value).intValue(); }
 
     private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
@@ -1757,15 +1773,22 @@ public final class PackageValidator {
     }
 
     private void validateToolCall(String call, FrameworkConfig config) {
-        validateToolCall(call, config, true);
+        validateToolCall(call, config, true, false);
     }
 
     private void validateToolCall(String call, FrameworkConfig config, boolean allowMqPrimary) {
+        validateToolCall(call, config, allowMqPrimary, false);
+    }
+
+    private void validateToolCall(String call, FrameworkConfig config, boolean allowMqPrimary, boolean allowDbPrimary) {
         java.util.List<ToolCallParser.ParsedCall> calls = expressionEngine.parseCalls(call);
         if (calls.isEmpty()) throw new IllegalArgumentException("Tool call must be one exact #{...} expression");
         ToolCallParser.ParsedCall parsed = callParser.parse(call);
         if (parsed.name().startsWith("db.")) {
-            throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
+            if (!allowDbPrimary) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool in this historical schema; use an ordinary expression or migrate to the current typed-result contract");
+            validateDbToolCall(parsed, config);
+            for (int index = 1; index < calls.size(); index++) validateCall(calls.get(index), config, false);
+            return;
         }
         validateCall(parsed, config, allowMqPrimary);
         for (int index = 1; index < calls.size(); index++) validateCall(calls.get(index), config, false);
@@ -1781,7 +1804,8 @@ public final class PackageValidator {
         }
         String toolName = parsed.name();
         if (toolName.startsWith("db.")) {
-            validateDbExpressionCall(parsed, config);
+            if (allowWriteFacade) validateDbToolCall(parsed, config);
+            else validateDbExpressionCall(parsed, config);
             return;
         }
         if (toolName.startsWith("mq.")) {
@@ -2086,39 +2110,61 @@ public final class PackageValidator {
             return;
         }
         if (!target.name().startsWith("db.")) throw new IllegalArgumentException("Unknown framework-native call target for Tool " + tool.key() + ": " + target.name());
-        String[] parts = target.name().split("\\.", -1);
-        if (parts.length != 3 || config.dbHelper(parts[1]) == null
+        validateDbToolCall(target, config);
+    }
+
+    private void validateDbToolCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
-            throw new IllegalArgumentException("Invalid DB target for call-backed Tool " + tool.key() + ": " + target.name());
+            throw new IllegalArgumentException("DB Tool call must be db.<instance>.query|scalar|update(...): " + parsed.name());
         }
-        if ("update".equals(parts[2]) && config.dbHelper(parts[1]).readOnly()) {
-            throw new IllegalArgumentException("Dbhelper '" + parts[1] + "' is readOnly and cannot back update Tool " + tool.key());
+        att.config.DbHelperConfig helper = config.dbHelper(parts[1]);
+        if (helper == null) throw new IllegalArgumentException("Unknown dbhelper instance '" + parts[1] + "'");
+        if ("update".equals(parts[2]) && helper.readOnly()) {
+            throw new IllegalArgumentException("Dbhelper '" + parts[1] + "' is readOnly and cannot back update Tool " + parsed.name());
         }
         Set<String> supplied = new LinkedHashSet<String>();
-        Map<String, ToolCallParser.Argument> byName = new LinkedHashMap<String, ToolCallParser.Argument>();
-        for (ToolCallParser.Argument argument : target.arguments()) {
-            if (argument.positional()) throw new IllegalArgumentException(target.name() + " requires named arguments");
-            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key()) || "params".equals(argument.key()))) {
-                throw new IllegalArgumentException("Unknown DB call argument in Tool " + tool.key() + ": " + argument.key());
+        Map<String, ToolCallParser.Argument> arguments = new LinkedHashMap<String, ToolCallParser.Argument>();
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(parsed.name() + " requires named arguments");
+            if (!("sql".equals(argument.key()) || "params".equals(argument.key()) || "parameters".equals(argument.key()))) {
+                throw new IllegalArgumentException("Unknown DB Tool argument: " + argument.key());
             }
-            if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate DB call argument in Tool " + tool.key() + ": " + argument.key());
-            byName.put(argument.key(), argument);
+            if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate DB Tool argument: " + argument.key());
+            arguments.put(argument.key(), argument);
         }
-        if (supplied.contains("sql") == supplied.contains("sqlFile")) {
-            throw new IllegalArgumentException(target.name() + " requires exactly one of sql or sqlFile");
+        if (!supplied.contains("sql")) throw new IllegalArgumentException(parsed.name() + " requires sql");
+        if (supplied.contains("params") && supplied.contains("parameters")) {
+            throw new IllegalArgumentException(parsed.name() + " cannot use both params and parameters");
         }
-        if (byName.containsKey("sqlFile")) {
-            String expression = byName.get("sqlFile").expression().trim();
-            boolean dynamic = expression.contains("${") || expression.contains("#{")
-                    || expression.startsWith("input.") || expression.startsWith("TOOL.input.");
-            if (dynamic) throw new IllegalArgumentException(target.name() + ".sqlFile must be a static package-relative path");
-            try {
-                String configured = String.valueOf(callParser.literal(expression));
-                Path file = new att.exec.DbHelperExecutor(projectRoot, config).resolveSqlFile(configured);
-                validateDbSql(new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8), expressionEngine, config);
-            } catch (RuntimeException error) { throw error; }
-            catch (Exception error) { throw new IllegalArgumentException(error.getMessage(), error); }
+        String sqlExpression = arguments.get("sql").expression().trim();
+        if (sqlExpression.startsWith("&{") || sqlExpression.contains("&{")) {
+            validateFileExpressions(sqlExpression, validationSourceDirectories.get());
+        } else if (!sqlExpression.contains("${") && !sqlExpression.contains("#{")) {
+            validateDbSql(String.valueOf(callParser.literal(sqlExpression)), expressionEngine, config);
+        } else {
+            validateInlineExpressions(sqlExpression, expressionEngine, config);
         }
+        if (arguments.containsKey("params")) validateDbToolArgumentValue(arguments.get("params"), parsed.name(), true, config);
+        if (arguments.containsKey("parameters")) validateDbToolArgumentValue(arguments.get("parameters"), parsed.name(), false, config);
+    }
+
+    private void validateDbToolArgumentValue(ToolCallParser.Argument argument, String callName, boolean list, FrameworkConfig config) {
+        String expression = argument.expression().trim();
+        if (list && expression.startsWith("[") && expression.endsWith("]")) {
+            for (String item : callParser.listItems(expression)) validateInlineExpressions(item, expressionEngine, config);
+            return;
+        }
+        if (expression.startsWith("${") || expression.contains("${") || expression.contains("#{")) {
+            validateInlineExpressions(expression, expressionEngine, config);
+            return;
+        }
+        if (list) throw new IllegalArgumentException(callName + ".params must be an inline list or exact Context List expression");
+        if (!expression.startsWith("{") || !expression.endsWith("}")) {
+            throw new IllegalArgumentException(callName + ".parameters must be a map or exact Context Map expression");
+        }
+        validateInlineExpressions(expression, expressionEngine, config);
     }
 
     private void validateDbExpressionCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
@@ -2132,7 +2178,8 @@ public final class PackageValidator {
         Map<String, ToolCallParser.Argument> arguments = new LinkedHashMap<String, ToolCallParser.Argument>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
             if (argument.positional()) throw new IllegalArgumentException(parsed.name() + " requires named arguments");
-            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key()) || "params".equals(argument.key()))) {
+            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key())
+                    || "params".equals(argument.key()) || "parameters".equals(argument.key()))) {
                 throw new IllegalArgumentException("Unknown DB expression argument: " + argument.key());
             }
             if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate DB expression argument: " + argument.key());
@@ -2140,6 +2187,9 @@ public final class PackageValidator {
         }
         if (supplied.contains("sql") == supplied.contains("sqlFile")) {
             throw new IllegalArgumentException(parsed.name() + " requires exactly one of sql or sqlFile");
+        }
+        if (supplied.contains("params") && supplied.contains("parameters")) {
+            throw new IllegalArgumentException(parsed.name() + " cannot use both params and parameters");
         }
         if (arguments.containsKey("sqlFile")) {
             String expression = arguments.get("sqlFile").expression().trim();
@@ -2164,6 +2214,13 @@ public final class PackageValidator {
             else if (!expression.startsWith("${")) {
                 throw new IllegalArgumentException(parsed.name() + ".params must be an inline list or exact Context List expression");
             }
+        }
+        if (arguments.containsKey("parameters")) {
+            String expression = arguments.get("parameters").expression().trim();
+            if (!expression.startsWith("${") && !(expression.startsWith("{") && expression.endsWith("}"))) {
+                throw new IllegalArgumentException(parsed.name() + ".parameters must be a map or exact Context Map expression");
+            }
+            validateInlineExpressions(expression, expressionEngine, config);
         }
     }
 

@@ -12,8 +12,8 @@
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.5 |
-| Flow | att-flow/v3.5 |
+| Template | att-template/v3.6 |
+| Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
@@ -23,3 +23,5 @@
 | JUnit XML | att-junit/v2.1 |
 
 本次調整的 resource/config schema 舊版本已移至 schemas/history，僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。schemas/catalog.yaml 是 repository authoritative catalog。Package validation 會驗證已註冊的 schema resource 本身；封存不代表舊版本仍有 runtime compatibility。
+
+歷史 `att-template/v3.5` 與 `att-flow/v3.5` 定義保留於 `schemas/history/`，只供 compatibility loader 使用。

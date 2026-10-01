@@ -176,13 +176,15 @@ public final class FlowRegistry {
         Object configuredVersion = map.get("schemaVersion");
         String flowVersion = configuredVersion == null ? "" : String.valueOf(configuredVersion);
         boolean current = Version.FLOW_SCHEMA.equals(flowVersion);
-        boolean historical = Version.HISTORICAL_FLOW_SCHEMA_V3_4.equals(flowVersion);
+        boolean historicalV35 = Version.HISTORICAL_FLOW_SCHEMA_V3_5.equals(flowVersion);
+        boolean historicalV34 = Version.HISTORICAL_FLOW_SCHEMA_V3_4.equals(flowVersion);
+        boolean historical = historicalV35 || historicalV34;
         if (current) {
             rejectRemovedActionContract(map, descriptor);
         }
         if (!current && !historical) {
             Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, flowVersion);
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.5.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.6.schema.json");
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     flowVersion, Version.FLOW_SCHEMA);
             throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
@@ -190,17 +192,18 @@ public final class FlowRegistry {
                     + ". Migrate nested Actions to the 3.6.2 typed-result contract and see docs/reference/appendices/migrations.md.");
         }
         Path schema = att.validation.SchemaFiles.resolve(projectRoot,
-                current ? "att-flow-v3.5.schema.json" : "att-flow-v3.4.schema.json");
+                current ? "att-flow-v3.6.schema.json" : historicalV35 ? "att-flow-v3.5.schema.json" : "att-flow-v3.4.schema.json");
         if (current) att.validation.SchemaMigrationGuidance.verify(schema, schema, map, flowVersion, Version.FLOW_SCHEMA);
         else att.validation.JsonSchemaVerifier.verify(schema, map);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
-        String templateVersion = current ? Version.TEMPLATE_SCHEMA : Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4;
+        String templateVersion = current ? Version.TEMPLATE_SCHEMA
+                : historicalV35 ? Version.HISTORICAL_TEMPLATE_SCHEMA_V3_5 : Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4;
         actionContract.put("schemaVersion", templateVersion);
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
         Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot,
-                current ? "att-template-v3.5.schema.json" : "att-template-v3.4.schema.json");
+                current ? "att-template-v3.6.schema.json" : historicalV35 ? "att-template-v3.5.schema.json" : "att-template-v3.4.schema.json");
         att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
         SchemaSupport.requireVersion(map, flowVersion, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");

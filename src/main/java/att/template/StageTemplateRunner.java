@@ -402,8 +402,11 @@ public class StageTemplateRunner {
                 if (action.timeoutMs() != null) {
                     // Explicit Action timeout overrides the helper's statement timeout.
                     // Positional execution is also valid for SQL normalized from named parameters.
-                    result = executor.execute(action.db(), query ? "query" : "update", sql, source,
-                            params, invocationId, action.timeoutMs());
+                    result = parameterNames.isEmpty()
+                            ? executor.execute(action.db(), query ? "query" : "update", sql, source,
+                            params, invocationId, action.timeoutMs())
+                            : executor.execute(action.db(), query ? "query" : "update", sql, source,
+                            params, parameterNames, invocationId, action.timeoutMs(), log);
                 } else {
                     result = parameterNames.isEmpty()
                             ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)
@@ -527,6 +530,7 @@ public class StageTemplateRunner {
                 if (!operation.executionSuccess()) {
                     if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
                             || ("http".equals(kind) && httpTimeout(operation.outputMetadata()))
+                            || ("db".equals(kind) && "TIMEOUT".equals(dbFailureType(operation.result())))
                             || sshTimeout(result.invocation()))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");

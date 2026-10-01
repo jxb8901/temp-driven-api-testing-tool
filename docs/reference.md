@@ -207,7 +207,7 @@ Stage `required`, `runWhen` and `onFailure` behavior is defined in [Reliability]
 
 ### 2.3 Template
 
-A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.5. Each Template has a non-empty ordered actions map and a required description.
+A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.6. Each Template has a non-empty ordered actions map and a required description.
 
 Each Action has a type-specific contract. A project-file expression such as `&{templates/payment/request.xml}` returns the exact UTF-8 file content as a String without creating a file. Tool/DB/HTTP/MQ/SSH actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
@@ -215,7 +215,7 @@ See [Actions and Typed Values](reference/14_actions.md) for the complete field l
 
 ### 2.4 Flow
 
-A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.5`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/14_actions.md) owns Flow results and Assign behavior; [Context](reference/03_runtime_context.md) owns scope lifetime.
+A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.6`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/14_actions.md) owns Flow results and Assign behavior; [Context](reference/03_runtime_context.md) owns scope lifetime.
 
 ### 2.5 Authoring lifecycle
 
@@ -227,14 +227,13 @@ Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs 
 
 ## 03 Actions and Typed Values
 
-This chapter defines the active ATT action contract. Templates use att-template/v3.5. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
+This chapter defines the active ATT action contract. Templates use att-template/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
 
 ### Action types
 
 | Type | Required fields | Result and behavior |
 |---|---|---|
-| tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. |
-| db | db and exactly one query/update block | Returns the DB operation's typed value and evidence. |
+| tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. DB query/scalar/update calls are ordinary Tool calls. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
 | log | message or value | Formats a typed value for the Case log. Its fields are level, message, value and format. |
 | assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
@@ -255,6 +254,8 @@ ATT keeps the logical operation result separate from human or wire representatio
 | Log or resource evidence | format / evidence.output.format | Produces a human-readable representation. |
 
 DB results are already typed values. Tool, Action, Template, Flow and expression results remain typed while they move through ATT.
+
+DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{project-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
 
 ### Project-file expressions return String
 
@@ -1290,7 +1291,7 @@ connection:
 
 Credentials may be resolved from environment variables and must not be published into `META`, reports or diagnostics. JDBC driver jars are supplied in `lib/`; ATT does not bundle a database driver.
 
-A `type: db` Action selects one helper ID and exactly one `query` or `update` block. Read operations are also available through supported `#{db.<id>.query(...)}` / `scalar(...)` expression calls. Positional JDBC `?` bindings and direct-Action named `:name` parameters are supported by the documented contracts.
+In the current `att-template/v3.6` contract, DB operations run under ordinary `type: tool` Actions using `#{db.<id>.query(...)}`, `scalar(...)`, or `update(...)` calls. The call has exactly one String `sql` argument. Use a project-file expression such as `sql=&{sql/find-order.sql}` when the SQL is stored in the package; `sqlFile` is historical-only. Positional `params` and named `parameters` are mutually exclusive and use the same JDBC binding rules.
 
 Queries return typed rows/scalars; updates return the documented update result. Operation and SQL/parameter evidence enters the common Action envelope. Secret credentials are never evidence. Parameter evidence follows descriptor/Action masking/type policy.
 
@@ -1299,19 +1300,30 @@ Queries return typed rows/scalars; updates return the documented update result. 
 ```yaml
 actions:
   waitForOrder:
-    type: db
-    db: orders
     timeoutMs: 1500
-    query:
-      sql: select status from orders where id = :id
-      parameters:
-        id: "${EXEC.INPUT.orderId}"
+    type: tool
+    call: >-
+      #{db.orders.query(
+        sql='select status from orders where id = :id',
+        parameters={id: ${EXEC.INPUT.orderId}}
+      )}
     assert: "#{${output.result.rowCount} == 1 and ${output.result.rows[0].STATUS} == 'DONE'}"
     retry:
       maxAttempts: 5
       intervalMs: 500
       retryOn: [ASSERTION, TIMEOUT]
 ```
+
+An explicit update is also a Tool Action. It must not use automatic retry:
+
+```yaml
+actions:
+  markOrder:
+    type: tool
+    call: "#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}"
+```
+
+The historical v3.5/v3.4 `type: db` Action and its `query`/`update` blocks remain available only through the archived schemas and compatibility loaders.
 
 
 
@@ -1731,12 +1743,12 @@ actions:
     expression: "&{templates/payment/request.json}"
 
   queryOrder:
-    type: db
-    db: orders
-    query:
-      sql: "select * from orders where order_id = ?"
-      params:
-        - "${EXEC.INPUT.orderId}"
+    type: tool
+    call: >-
+      #{db.orders.query(
+        sql='select * from orders where order_id = ?',
+        params=[${EXEC.INPUT.orderId}]
+      )}
 
   paymentRequest:
     type: tool
@@ -2360,8 +2372,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.5 |
-| Flow | att-flow/v3.5 |
+| Template | att-template/v3.6 |
+| Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
@@ -2371,6 +2383,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | JUnit XML | att-junit/v2.1 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
+
+Historical `att-template/v3.5` and `att-flow/v3.5` definitions are retained under `schemas/history/` for compatibility loading only.
 
 ## Appendix B — Compatibility and Deprecated Aliases
 
@@ -2427,11 +2441,13 @@ Unsupported schema versions fail before execution and include migration guidance
 
 ### Historical schema migration
 
-ATT 3.6.2 uses `att-template/v3.5` and `att-flow/v3.5` as the active schemas. The published `att-template/v3.4` and `att-flow/v3.4` definitions remain under `schemas/history/`; their historical Render Action is compatibility-only and is not part of the active contract. When migrating those descriptors, change their schema versions to v3.5 and apply the field changes below.
+ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the field changes below.
 
 | Historical configuration | 3.6.2 form |
 |---|---|
-| `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.5 and migrate the Render Action. |
+| `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.6 and migrate the Render/DB Actions. |
+| Historical `type: db` with `query` or `update` | Use an ordinary `type: tool` Action with `#{db.<id>.query(...)}`, `scalar(...)`, or `update(...)`; query/scalar may retry, update must not use automatic retry. |
+| Historical `sqlFile` | Use the single String argument `sql=&{project-relative-sql-file}`. `params` and `parameters` remain mutually exclusive. |
 | Historical `type: render` | Replace it with an Assign whose expression is `"&{project-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
 | Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. The project-file expression returns the exact UTF-8 String and creates no implicit result file. |

@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.5
+schemaVersion: att-template/v3.6
 name: PAYMENT_PREPARE
 description: Prepare payment request identifiers.
 

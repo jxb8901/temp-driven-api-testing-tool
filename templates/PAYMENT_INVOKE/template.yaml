@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.5
+schemaVersion: att-template/v3.6
 name: PAYMENT_INVOKE
 description: Read the payment request project file as a String and invoke the payment API.
 

@@ -54,7 +54,7 @@ Windows uses the same commands through `att.bat`.
 
 The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper/SSHHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
 
-Direct DB Actions support Action-level `timeoutMs`. Read-only `query` Actions may also use bounded retry for `ASSERTION` and `TIMEOUT`; mutating `update` Actions deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md).
+DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md).
 
 ## Core package layout
 
@@ -67,7 +67,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-ATT 3.6.2 uses `att-config/v2.10`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.5`, `att-flow/v3.5`, and `att-load/v1.4`. Current schemas live under `schemas/`; superseded definitions are historical references, not runtime contracts.
+ATT 3.6.2 uses `att-config/v2.10`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.4`. Current schemas live under `schemas/`; v3.5 and older definitions are historical references under `schemas/history/`, not current runtime contracts.
 
 ## Build and validation
 

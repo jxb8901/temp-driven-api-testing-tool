@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.5
+schemaVersion: att-template/v3.6
 name: PAYMENT_CLEANUP
 description: Always-run cleanup example which records completion without external mutation.
 actions:

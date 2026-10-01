@@ -47,11 +47,13 @@ Unsupported schema versions fail before execution and include migration guidance
 
 ### Historical schema migration
 
-ATT 3.6.2 uses `att-template/v3.5` and `att-flow/v3.5` as the active schemas. The published `att-template/v3.4` and `att-flow/v3.4` definitions remain under `schemas/history/`; their historical Render Action is compatibility-only and is not part of the active contract. When migrating those descriptors, change their schema versions to v3.5 and apply the field changes below.
+ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the field changes below.
 
 | Historical configuration | 3.6.2 form |
 |---|---|
-| `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.5 and migrate the Render Action. |
+| `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.6 and migrate the Render/DB Actions. |
+| Historical `type: db` with `query` or `update` | Use an ordinary `type: tool` Action with `#{db.<id>.query(...)}`, `scalar(...)`, or `update(...)`; query/scalar may retry, update must not use automatic retry. |
+| Historical `sqlFile` | Use the single String argument `sql=&{project-relative-sql-file}`. `params` and `parameters` remain mutually exclusive. |
 | Historical `type: render` | Replace it with an Assign whose expression is `"&{project-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
 | Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. The project-file expression returns the exact UTF-8 String and creates no implicit result file. |

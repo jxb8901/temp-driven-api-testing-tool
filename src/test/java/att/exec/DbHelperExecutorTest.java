@@ -385,6 +385,41 @@ class DbHelperExecutorTest {
         log.close();
     }
 
+    @Test void currentTemplateDbOperationsArePrimaryToolActions() throws Exception {
+        Map<String, DbHelperConfig> helpers = Collections.singletonMap("orders",
+                db("orders", "jdbc:att-test:native-tool", "case", "rollback", 17, 10));
+        FrameworkConfig config = frameworkConfig(Collections.<String, ToolConfig>emptyMap(), helpers);
+        DbHelperExecutor executor = new DbHelperExecutor(tempDir, config);
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(tempDir, config), executor);
+        CaseRuntimeContext context = contextWithData(Collections.<String, Object>singletonMap("customerId", 42));
+        context.beginStage(new StageCaseData("verify", "Native DB Tool", Collections.<String, Object>emptyMap()),
+                "Native DB Tool", tempDir);
+        CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("native-tool.log"));
+        executor.beginCase();
+
+        List<TemplateAction> actions = new ArrayList<TemplateAction>();
+        actions.add(new TemplateAction("query", map("type", "tool",
+                "call", "#{db.orders.query(sql='select ONE', params=[${CASE.customerId}])}"), "att-template/v3.6"));
+        actions.add(new TemplateAction("scalar", map("type", "tool",
+                "call", "#{db.orders.scalar(sql='select SCALAR where id = :id', parameters={id: ${CASE.customerId}})}"), "att-template/v3.6"));
+        actions.add(new TemplateAction("update", map("type", "tool",
+                "call", "#{db.orders.update(sql='update orders set status = ?', params=['DONE'])}"), "att-template/v3.6"));
+
+        List<ValidationResult> results = new StageTemplateRunner(engine).execute("verify",
+                new StageTemplate("Native DB Tool", tempDir, actions, "att-template/v3.6"), context, log);
+        assertEquals(3, results.size(), results.size() > 1 ? results.get(1).status() + " " + results.get(1).message() : "no second result");
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
+        assertEquals(ResultStatus.PASS, results.get(2).status(), results.get(2).message());
+        assertEquals(1, ((Number) ((Map<?, ?>) context.resolve("ACTIONS.query.output.result")).get("rowCount")).intValue());
+        assertEquals("A100", context.resolve("ACTIONS.scalar.output.result"));
+        assertEquals(2, ((Number) ((Map<?, ?>) context.resolve("ACTIONS.update.output.result")).get("affectedRows")).intValue());
+        assertTrue(context.resolve("ACTIONS.update.output.evidence.db") instanceof Map);
+        assertTrue(executor.finishCase(context, log).isEmpty());
+        executor.close();
+        log.close();
+    }
+
     @Test void dbScopedToolCacheSurvivesUpdatesTransactionsAndReconnects() throws Exception {
         Map<String, DbHelperConfig> helpers = Collections.singletonMap("reference",
                 db("reference", "jdbc:att-test:db-cache-rollback-fail", "case", "commit", 19, 10));

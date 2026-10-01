@@ -233,13 +233,13 @@ class FrameworkEngineTest {
         assertEquals(ResultStatus.ERROR, method.invoke(engine, mixed));
     }
 
-    @Test void inputManifestIncludesStaticSqlFilesUsedByCallBackedTools() throws Exception {
+    @Test void inputManifestIncludesProjectFilesUsedByCallBackedTools() throws Exception {
         Path sql = projectRoot.resolve("sql/reference.sql");
         writeText(sql, "select 1");
         Path workbook = projectRoot.resolve("testcase/dummy.xlsx");
         writeText(workbook, "not parsed by input manifest collection");
         ToolConfig lookup = new ToolConfig("reference.lookup", "lookup", "reference", "Lookup", "Lookup",
-                Collections.<String>emptyList(), "#{db.reference.query(sqlFile='sql/reference.sql', params=[])}", "db",
+                Collections.<String>emptyList(), "#{db.reference.query(sql=&{sql/reference.sql}, params=[])}", "db",
                 Collections.<String>emptyList(), "", Collections.<String,ToolArgumentConfig>emptyMap(), null, null);
         DbHelperConfig helper = new DbHelperConfig("reference", "Reference", "Reference DB", "jdbc:never-connect",
                 "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 5,
