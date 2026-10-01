@@ -159,7 +159,7 @@ The high-level status model is:
 | `INVALID` | validation prevented execution |
 | `SKIPPED` | execution was intentionally skipped |
 
-You do not need the detailed aggregation rules yet; see [Validation and Diagnostics](reference/12_validation_diagnostics.md) when troubleshooting real suites.
+You do not need the detailed aggregation rules yet; see [Validation and Troubleshooting](reference/12_validation_diagnostics.md) when troubleshooting real suites.
 
 ## 8. Inspect the result
 
@@ -263,11 +263,11 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 | call scripts/programs or framework-native Tools | [Tool](reference/05_resources/tools.md) |
 | query/update a database, including query timeout/retry | [DBHelper](reference/05_resources/dbhelper.md) |
 | send/receive/request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
-| switch SIT/UAT resource bindings | [Environment and Test Data](reference/09_configuration.md) |
+| switch SIT/UAT resource bindings | [Configuration and Environments](reference/09_configuration.md) |
 | use `${...}` and `#{...}` correctly | [Expressions](reference/07_expressions.md) |
 | add assertion, timeout, retry, `runWhen`, `onFailure` | [Reliability and Execution Control](reference/08_reliability_execution_control.md) |
 | look up commands and options | [CLI Reference](reference/10_cli.md) |
-| troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Diagnostics](reference/12_validation_diagnostics.md) |
+| troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Troubleshooting](reference/12_validation_diagnostics.md) |
 | integrate ATT into CI or package it | [CI, Packaging, and Operations](reference/13_ci_packaging_operations.md) |
 
 For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/05_resources/dbhelper.md) for the full contract.

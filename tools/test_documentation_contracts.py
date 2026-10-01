@@ -1,7 +1,8 @@
 """Regression tests for the documentation gate, independent of checked-in text."""
 import unittest
 from documentation_contracts import (active_schemas, stale_claims, current_html,
-                                     manifest_errors, structure_errors)
+                                     manifest_errors, structure_errors, overview_resource_errors,
+                                     chapter_label_errors)
 
 VERSION = "3.6.1"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
@@ -45,6 +46,60 @@ class DocumentationContractsTest(unittest.TestCase):
         text = ("<h2>Appendix C — 遷移</h2><p>att-load/v1.2</p>"
                 "<h2>Appendix D — 限制</h2><p>att-load/v1.2</p>")
         self.assertEqual(1, len(stale_claims(current_html(text), self.active, VERSION)))
+
+
+    def test_html_historical_markers_outside_appendices_are_preserved(self):
+        # Compact HTML reproduces both stripping and boundary-loss failures.
+        text = ("<h2>05 Expressions</h2>"
+                "<!-- att-docs:historical --><p>att-load/v1.2; ATT 3.6.0</p>"
+                "<!-- /att-docs:historical --><p>att-load/v1.3</p>")
+        self.assertEqual([], stale_claims(current_html(text), self.active, VERSION))
+        # Identical stale text following the closing marker remains an error.
+        outside = text + "<p>att-load/v1.2</p>"
+        self.assertEqual(1, len(stale_claims(current_html(outside), self.active, VERSION)))
+
+    def test_html_historical_markers_must_be_balanced(self):
+        for text in ("<!-- att-docs:historical --><p>att-load/v1.2</p>",
+                     "<!-- /att-docs:historical --><p>att-load/v1.2</p>"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                stale_claims(current_html(text), self.active, VERSION)
+
+    def test_overview_requires_five_peers_in_definition_text_and_diagram(self):
+        names = "Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper"
+        good = ("A **Resource** is " + names + ".\n"
+                "### Resources are peers\n" + names + " are peers.\n"
+                "\x60\x60\x60text\nTool --\\\nDBHelper --+\nMQHelper --+\n"
+                "HTTPHelper --+\nSSHHelper --/\n\x60\x60\x60\n")
+        self.assertEqual([], overview_resource_errors(good))
+        zh = good.replace("A **Resource** is", "**Resource** 是")
+        zh = zh.replace("### Resources are peers", "### 五種 Resource 是同級概念")
+        self.assertEqual([], overview_resource_errors(zh))
+        variants = (
+            good.replace("A **Resource** is " + names,
+                         "A **Resource** is Tool, DBHelper or MQHelper"),
+            good.replace(names + " are peers.", "Tool, DBHelper and MQHelper are peers."),
+            good.replace("HTTPHelper --+\n", ""),
+            good.replace("SSHHelper --/\n", ""),
+            zh.replace("五種 Resource", "三種 Resource"),
+        )
+        for text in variants:
+            with self.subTest(text=text):
+                self.assertTrue(overview_resource_errors(text))
+
+    def test_secondary_link_labels_use_current_taxonomy(self):
+        for label, target in (
+                ("Environment and Test Data", "09_configuration.md"),
+                ("Validation and Diagnostics", "12_validation_diagnostics.md")):
+            for root in ("reference/", "reference.zh/"):
+                with self.subTest(label=label, root=root):
+                    self.assertTrue(chapter_label_errors("[%s](%s%s)" % (label, root, target)))
+        self.assertEqual([], chapter_label_errors(
+            "[Configuration and Environments](reference/09_configuration.md)\n"
+            "[Validation and Troubleshooting](reference.zh/12_validation_diagnostics.md)"))
+        self.assertEqual([], chapter_label_errors(
+            "<!-- att-docs:historical -->\n"
+            "[Environment and Test Data](old.md)\n"
+            "<!-- /att-docs:historical -->"))
 
     def test_manifest_rejects_duplicates_traversal_and_absolute_paths(self):
         for items in ([], ["a.md", "a.md"], ["../a.md"], ["/a.md"],

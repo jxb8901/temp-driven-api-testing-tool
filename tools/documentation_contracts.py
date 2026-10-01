@@ -71,10 +71,19 @@ def current_html(text):
     text = re.sub(r"<h2\b[^>]*>(.*?)</h2>", lambda m: "\n## " +
                   unescape(re.sub(r"<[^>]*>", "", m.group(1))) + "\n",
                   text, flags=re.S)
-    text = re.sub(r"<!--(?!/?\s*att-docs:historical)[\s\S]*?-->", "", text)
-    text = re.sub(r"<[^>]*>", " ", text)
-    return unescape(text)
-
+    # Keep actual historical comments out of both comment removal and generic
+    # tag stripping. Newlines preserve boundaries even in compact HTML.
+    markers = {
+        HISTORICAL_START: "\x00att-docs-historical-start\x00",
+        HISTORICAL_END: "\x00att-docs-historical-end\x00",
+    }
+    for marker, sentinel in markers.items():
+        text = text.replace(marker, "\n" + sentinel + "\n")
+    text = re.sub(r"<!--[\s\S]*?-->", "", text)
+    text = unescape(re.sub(r"<[^>]*>", " ", text))
+    for marker, sentinel in markers.items():
+        text = text.replace(sentinel, marker)
+    return text
 
 def stale_claims(text, active, version):
     errors = []
@@ -141,6 +150,49 @@ def structure_errors(text):
     return errors
 
 
+
+PEER_RESOURCES = ("Tool", "DBHelper", "MQHelper", "HTTPHelper", "SSHHelper")
+RETIRED_CHAPTER_LABELS = {
+    "environment and test data": "Configuration and Environments",
+    "validation and diagnostics": "Validation and Troubleshooting",
+}
+
+
+def overview_resource_errors(text):
+    """Check each place that teaches the inventory, not merely global presence."""
+    errors = []
+    definition = re.search(r"\*\*Resource\*\*([^\n]*)", text)
+    peers = re.search(r"^### [^\n]*Resource[^\n]*\n(.*?)(?=^### |\Z)",
+                      text, re.M | re.S)
+    sections = {
+        "Resource definition": definition.group(1) if definition else "",
+        "peer Resource explanation": without_code(peers.group(1)) if peers else "",
+    }
+    diagrams = re.findall(r"(?:\x60{3}|~{3})text\n(.*?)(?:\x60{3}|~{3})",
+                          peers.group(1), re.S) if peers else []
+    diagram = "\n".join(diagrams)
+    for location, content in sections.items():
+        for resource in PEER_RESOURCES:
+            if not re.search(r"\b" + resource + r"\b", content):
+                errors.append("%s omits peer resource %s" % (location, resource))
+    for resource in PEER_RESOURCES:
+        if not re.search(r"^\s*" + resource + r"\b", diagram, re.M):
+            errors.append("peer Resource diagram omits " + resource)
+    if re.search(r"^###\s+(?:三種|3\s+)[^\n]*Resource", text, re.M):
+        errors.append("obsolete three-resource heading")
+    return errors
+
+
+def chapter_label_errors(text):
+    errors = []
+    for line in current_blocks(text):
+        for label in re.findall(r"(?<!!)\[([^\]]+)\]\([^)]+\)", line):
+            expected = RETIRED_CHAPTER_LABELS.get(label.strip().casefold())
+            if expected:
+                errors.append("retired chapter link label %r; use %r" % (label, expected))
+    return errors
+
+
 def current_files(root):
     files = {root / "README.md"}
     for directory, suffixes in (("docs", (".md", ".html")),
@@ -172,6 +224,8 @@ def validate(root=ROOT):
             chunks.append(path.read_text(encoding="utf-8"))
         text = "\n".join(chunks)
         assembled[lang] = text
+        overview = (module_root / "01_overview.md").read_text(encoding="utf-8")
+        errors += [lang + "/01_overview.md: " + e for e in overview_resource_errors(overview)]
         errors += [lang + ": " + e for e in structure_errors(text)]
         matrix = (module_root / "appendices/schema_matrix.md").read_text(encoding="utf-8")
         found = {(m.group(1).lower(), m.group(2)) for m in SCHEMA_TOKEN.finditer(matrix)}
@@ -186,6 +240,10 @@ def validate(root=ROOT):
         if re.search(r"/appendices/(?:migrations|compatibility)\.md$", rel):
             continue
         text = path.read_text(encoding="utf-8")
+        if path.suffix == ".md" and (
+                rel in ("README.md", "docs/README.md", "docs/quick-start.md", "docs/quick-start.zh.md")
+                or rel.startswith("examples/")):
+            errors += [rel + ": " + e for e in chapter_label_errors(text)]
         if path.suffix == ".html":
             text = current_html(text)
         try:
