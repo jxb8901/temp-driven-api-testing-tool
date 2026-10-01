@@ -472,6 +472,48 @@ class SshResourceHelperTest {
         assertEquals(255, evidence.get("exitCode"));
     }
 
+    @Test void javaExecuteKnownHostsInitializationFailureHasConnectionCategory() throws Exception {
+        Path knownHosts = root.resolve("execute_known_hosts");
+        Files.write(knownHosts, new byte[0]);
+        // Inject the library setup failure after ATT's file checks, before any network I/O.
+        JschSshClient client = new JschSshClient(knownHosts, () -> new com.jcraft.jsch.JSch() {
+            @Override public void setKnownHosts(String filename) throws com.jcraft.jsch.JSchException {
+                throw new com.jcraft.jsch.JSchException("Unable to load host verification database");
+            }
+        });
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false, client, System.err);
+        ToolInvocationResult result = executor(new CommandResult(0, "unused", "", false), null,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
+                1, 1000, runner).execute("application", "execute", map("command", "health"),
+                context(), 5000L, "ssh-host-init", new CaseExecutionLog(root.resolve("host-init.log")));
+
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_CONNECTION_ERROR", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+        assertEquals("SSH_CONNECTION_ERROR", ((Map<?, ?>) evidence.get("error")).get("category"));
+        assertEquals("execute", evidence.get("operation"));
+        assertEquals("mwiede/jsch", evidence.get("transport"));
+    }
+
+    @Test void javaExecuteIdentityInitializationFailureStillHasAuthenticationCategory() throws Exception {
+        Path knownHosts = root.resolve("execute_identity_known_hosts");
+        Files.write(knownHosts, new byte[0]);
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false,
+                new JschSshClient(knownHosts), System.err);
+        ToolInvocationResult result = executor(new CommandResult(0, "unused", "", false), null,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22,
+                        root.resolve("missing-execute-private-key").toString())),
+                1, 1000, runner).execute("application", "execute", map("command", "health"),
+                context(), 5000L, "ssh-identity-init", new CaseExecutionLog(root.resolve("execute-identity-init.log")));
+
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_AUTH_ERROR", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+        assertEquals("SSH_AUTH_ERROR", ((Map<?, ?>) evidence.get("error")).get("category"));
+        assertEquals("execute", evidence.get("operation"));
+        assertEquals("mwiede/jsch", evidence.get("transport"));
+    }
+
     private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer) {
         return executor(commandResult, transfer, "single",
                 Collections.singletonMap("one", new SshConfig("example.test", "deploy", 22, "")));

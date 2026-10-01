@@ -18,13 +18,19 @@ import java.util.concurrent.TimeUnit;
 /** Minimal mwiede/jsch exec-channel fallback used when local OpenSSH is unavailable. */
 final class JschSshClient implements SshCommandRunner.JavaClient {
     private final Path knownHosts;
+    private final java.util.function.Supplier<JSch> jschFactory;
 
     JschSshClient() {
         this(Paths.get(System.getProperty("user.home", ""), ".ssh", "known_hosts"));
     }
 
     JschSshClient(Path knownHosts) {
+        this(knownHosts, JSch::new);
+    }
+
+    JschSshClient(Path knownHosts, java.util.function.Supplier<JSch> jschFactory) {
         this.knownHosts = knownHosts;
+        this.jschFactory = jschFactory;
     }
 
     @Override
@@ -51,13 +57,20 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
         if (!Files.isRegularFile(knownHosts) || Files.isSymbolicLink(knownHosts) || !Files.isReadable(knownHosts)) {
             throw new IOException("Java SSH fallback requires a readable non-symlink known_hosts file: " + knownHosts);
         }
-        JSch jsch = new JSch();
+        JSch jsch = jschFactory.get();
         try {
             jsch.setKnownHosts(knownHosts.toString());
-            if (!ssh.identityFile().isEmpty()) jsch.addIdentity(identityFile(ssh, projectRoot).toString());
         } catch (JSchException e) {
-            throw new SshResourceExecutor.SshOperationException("SSH_AUTH_ERROR",
-                    "Unable to initialize Java SSH authentication: " + e.getMessage(), e);
+            throw new SshResourceExecutor.SshOperationException("SSH_CONNECTION_ERROR",
+                    "Unable to initialize Java SSH host verification: " + e.getMessage(), e);
+        }
+        if (!ssh.identityFile().isEmpty()) {
+            try {
+                jsch.addIdentity(identityFile(ssh, projectRoot).toString());
+            } catch (JSchException e) {
+                throw new SshResourceExecutor.SshOperationException("SSH_AUTH_ERROR",
+                        "Unable to initialize Java SSH authentication: " + e.getMessage(), e);
+            }
         }
 
         Session session = null;
