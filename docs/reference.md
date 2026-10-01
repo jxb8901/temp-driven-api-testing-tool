@@ -432,6 +432,26 @@ This adds a bounded human-readable snapshot beside operation metadata; it does n
 
 Strings, numbers, booleans, null, maps and lists remain typed across Action/Template/Flow boundaries.
 
+### Common retry and Boolean conditions
+
+Tool Actions and retry-capable direct DB queries share the `retry` contract. `maxAttempts` (2–10), `intervalMs` (0–3600000) and a non-empty `retryOn` list (ASSERTION/TIMEOUT) remain required. `when` is an optional non-empty Boolean expression String. Existing restrictions on mutating DB updates and SSH transfers still apply.
+
+~~~yaml
+retry:
+  maxAttempts: 3
+  intervalMs: 1000
+  retryOn: [TIMEOUT]
+  when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+Each attempt executes its operation, publishes current result/evidence/diagnostic, evaluates its assertion where applicable, and selects a retry category. Only after `retryOn` matches, and while attempts remain, does ATT evaluate `when`. Omitting it preserves ordinary retry behavior. True permits the interval wait and another attempt; false preserves the current TIMEOUT/FAIL and stops. Successful attempts, category mismatches and exhausted attempts do not evaluate the gate.
+
+The condition can inspect `output.status`, `output.result`, `output.evidence`, `output.diagnostic`, the one-based `output.attempt`, and EXEC/META paths valid in the current scope. Top-level output is cleared at the start of each attempt so it cannot expose stale result/evidence. History remains in `output.attempts[n]`. Each `retryDecision` records category, candidate, whenEvaluated, whenResult (if evaluated), allowed and a reason such as WHEN_FALSE or MAX_ATTEMPTS.
+
+Conditions use normal `${...}`/`#{...}` typing and must return Boolean; numbers and strings such as 'false' are not coerced. Use `when: "#{false}"` to stop retry. Strict missing paths and expression failures produce normal diagnostics at retry.when and terminate retry. Pure deterministic built-ins are allowed; Tool/DB/MQ/HTTP/SSH calls, file/project-file operations, sequences, randomness and current-time operations are forbidden. Deterministic syntax/type errors fail validation; runtime result types and unavailable paths are checked when the gate runs.
+
+TIMEOUT is the canonical Action outcome; suite/report aggregate operational failure remains ERROR. Authors must decide whether side-effecting operations such as MQ request or HTTP POST are safe to replay. Unconditional TIMEOUT retry can duplicate a business transaction; ATT does not silently suppress MQ retry. See the [MQHelper example](reference/05_resources/mqhelper.md).
+
 ## 04 Runtime and Context Model
 
 Run, Debug and Load share one canonical EXEC/META expression model. EXEC changes through framework lifecycle and explicit input/variable/action publication. META is curated, immutable and secret-safe.
@@ -654,6 +674,10 @@ assert: "(${EXEC.INPUT.channel} == 'MOBILE') and (${EXEC.INPUT.amount} <= 1000)"
 ### Expression scope and errors
 
 This chapter defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/05_resources/tools.md), [Load execIdFormat and vars](reference/04_execution_modes/load.md), [Debug vars](reference/04_execution_modes/debug.md), and [report filenames](reference/09_configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/12_validation_diagnostics.md).
+
+### Retry-condition lifecycle
+
+`retry.when` runs after the current attempt completes, only after retryOn matches and while another attempt is available. `output.*` binds current result/evidence/diagnostic and `output.attempt`. Normal Boolean typing and strict/optional Context paths apply. Only deterministic pure built-ins are permitted; external, file, sequence, random and current-time operations are rejected. See [Action retry](reference/14_actions.md).
 
 ## 06 Execution Modes
 
@@ -1412,11 +1436,29 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
 
-#### Request/reply no-message semantics
+#### Request/reply timeout and replay policy
 
-`mq.<id>.request(...)` is complete only when the correlated reply is received. A successful PUT followed by MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) therefore publishes `sent: true`, `replyReceived: false`, the native completion/reason metadata, and an `MQ_NO_REPLY` error with status `ERROR`. It is not a generic `TIMEOUT`, so `retryOn: TIMEOUT` does not PUT the business request again. Use `mq.<id>.send(...)` followed by `mq.<id>.receive(correlationId=...)` when repeated reply polling is required.
+A correlated reply completes `mq.<id>.request(...)` with PASS. A successful PUT followed by correlated GET MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) is a standard TIMEOUT with `MQ_TIMEOUT` diagnostic, even if the outer Action deadline has time remaining. Native evidence retains `sent: true`, `replyReceived: false`, `completionCode: 2`, `reasonCode: 2033`, the reason name and effective `waitMs`. Other transport failures retain the stable MQ ERROR taxonomy; outer deadline and pool borrow timeout also follow the normal TIMEOUT path.
 
-Standalone `mq.<id>.receive(...)` retains its polling contract: a 2033 no-message result may remain a completed PASS with `received: false`, subject to the configured receive semantics. An actual outer Action deadline remains `MQ_TIMEOUT` and follows the normal timeout/retry policy.
+The canonical Action outcome is `output.status: TIMEOUT`; suite/report aggregate operational failure remains ERROR, with TIMEOUT and MQRC 2033 in the report message and Case log. Native metadata is available at `output.evidence.mq.invocations[0]` during the attempt and at `EXEC.ACTIONS.<actionId>.output.evidence.mq.invocations[0]` afterwards.
+
+Without `retry.when`, `retryOn: [TIMEOUT]` can PUT the whole request again. For a side-effecting request, add a Boolean gate that excludes the already-sent/no-reply case:
+
+~~~yaml
+invokePayment:
+  type: tool
+  call: "#{mq.payment.request(payload=${EXEC.INPUT.requestText})}"
+  timeoutMs: 30000
+  retry:
+    maxAttempts: 3
+    intervalMs: 1000
+    retryOn: [TIMEOUT]
+    when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+The optional `?` path evaluates to null when another timeout has no MQ reason code. The condition permits ordinary timeout retry, but reasonCode 2033 suppresses a second PUT without changing the TIMEOUT outcome. ATT does not infer idempotency or deduplicate messages. Use `send` followed by correlated `receive` when repeated reply polling is required.
+
+Standalone `receive` explicitly retains its non-error polling contract: MQRC 2033 returns PASS with `received: false` when the outer deadline has not expired, including a bounded wait that finds no message. An expired outer deadline is TIMEOUT. This operation-aware contract supersedes the earlier issue #13 guidance that avoided request/2033 TIMEOUT to prevent replay. See [common retry semantics](reference/14_actions.md).
 
 ### 7.5 HTTPHelper
 
