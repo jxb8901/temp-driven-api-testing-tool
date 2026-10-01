@@ -1361,6 +1361,12 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
 
+#### Request/reply 無訊息語義
+
+`mq.<id>.request(...)` 只有在收到 correlated reply 時才算完成。PUT 成功後若 GET 收到 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`），會發布 `sent: true`、`replyReceived: false`、原生 completion/reason metadata，以及 status 為 `ERROR` 的 `MQ_NO_REPLY` error；它不是 generic `TIMEOUT`，因此 `retryOn: TIMEOUT` 不會再次 PUT business request。若要反覆輪詢 reply，請使用 `mq.<id>.send(...)` 後再以 `mq.<id>.receive(correlationId=...)` 讀取。
+
+獨立 `mq.<id>.receive(...)` 保留 polling 契約：2033 無訊息結果可依既有 receive 語義以 `received: false` 完成並維持 PASS。真正的 outer Action deadline 仍是 `MQ_TIMEOUT`，並依正常 timeout/retry policy 處理。
+
 ### 7.5 HTTPHelper
 
 HTTPHelper 是依環境綁定的 HTTP resource。選定的 config profile 將穩定 logical helper ID 綁定至 base URL。Descriptor 使用 att-httphelper/v1.1。

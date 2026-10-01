@@ -3380,6 +3380,23 @@ validation.</p>
 <p>The machine-readable field constraints remain in <a
 href="../schemas/att-mqhelper-v1.2.schema.json">the active MQ
 schema</a>.</p>
+<h4 id="requestreply-no-message-semantics">Request/reply no-message
+semantics</h4>
+<p><code>mq.&lt;id&gt;.request(...)</code> is complete only when the
+correlated reply is received. A successful PUT followed by MQRC 2033
+(<code>MQRC_NO_MSG_AVAILABLE</code>) therefore publishes
+<code>sent: true</code>, <code>replyReceived: false</code>, the native
+completion/reason metadata, and an <code>MQ_NO_REPLY</code> error with
+status <code>ERROR</code>. It is not a generic <code>TIMEOUT</code>, so
+<code>retryOn: TIMEOUT</code> does not PUT the business request again.
+Use <code>mq.&lt;id&gt;.send(...)</code> followed by
+<code>mq.&lt;id&gt;.receive(correlationId=...)</code> when repeated
+reply polling is required.</p>
+<p>Standalone <code>mq.&lt;id&gt;.receive(...)</code> retains its
+polling contract: a 2033 no-message result may remain a completed PASS
+with <code>received: false</code>, subject to the configured receive
+semantics. An actual outer Action deadline remains
+<code>MQ_TIMEOUT</code> and follows the normal timeout/retry policy.</p>
 <h3 id="75-httphelper">7.5 HTTPHelper</h3>
 <p>HTTPHelper is an environment-bound HTTP resource. The selected config
 profile binds a stable logical helper ID to its base URL. Descriptors

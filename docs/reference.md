@@ -1412,6 +1412,12 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
 
+#### Request/reply no-message semantics
+
+`mq.<id>.request(...)` is complete only when the correlated reply is received. A successful PUT followed by MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) therefore publishes `sent: true`, `replyReceived: false`, the native completion/reason metadata, and an `MQ_NO_REPLY` error with status `ERROR`. It is not a generic `TIMEOUT`, so `retryOn: TIMEOUT` does not PUT the business request again. Use `mq.<id>.send(...)` followed by `mq.<id>.receive(correlationId=...)` when repeated reply polling is required.
+
+Standalone `mq.<id>.receive(...)` retains its polling contract: a 2033 no-message result may remain a completed PASS with `received: false`, subject to the configured receive semantics. An actual outer Action deadline remains `MQ_TIMEOUT` and follows the normal timeout/retry policy.
+
 ### 7.5 HTTPHelper
 
 HTTPHelper is an environment-bound HTTP resource. The selected config profile binds a stable logical helper ID to its base URL. Descriptors use att-httphelper/v1.1.
