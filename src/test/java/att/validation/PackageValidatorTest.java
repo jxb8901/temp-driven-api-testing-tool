@@ -117,6 +117,7 @@ class PackageValidatorTest {
     @Test void currentDbExpressionsRequireFileMigrationAndValidateNamedBindings() throws Exception {
         Files.createDirectories(tempDir.resolve("sql"));
         Files.write(tempDir.resolve("sql/find.sql"), "select 1".getBytes("UTF-8"));
+        Files.write(tempDir.resolve("sql/named.sql"), "select * from t where id=:id".getBytes("UTF-8"));
         DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB", "jdbc:never-connect",
                 "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 7,
                 "case", "rollback", 10, 1024, 4096, "full", "masked", null);
@@ -148,6 +149,19 @@ class PackageValidatorTest {
                 "call", "#{db.orders.query(sql='select * from t where left_id=:id or right_id=:id', parameters={id: 'A'})}"), "att-template/v3.6");
         assertDoesNotThrow(() -> contract.invoke(validator,
                 new StageTemplate("Named", tempDir, Collections.singletonList(validRepeated), "att-template/v3.6"), config));
+
+        TemplateAction validFileNamed = new TemplateAction("validFile", map("type", "tool",
+                "call", "#{db.orders.query(sql=&{sql/named.sql}, parameters={id: 'A'})}"), "att-template/v3.6");
+        assertDoesNotThrow(() -> contract.invoke(validator,
+                new StageTemplate("NamedFile", tempDir, Collections.singletonList(validFileNamed), "att-template/v3.6"), config));
+
+        TemplateAction invalidFileNamed = new TemplateAction("invalidFile", map("type", "tool",
+                "call", "#{db.orders.query(sql=&{sql/named.sql}, parameters={other: 'A'})}"), "att-template/v3.6");
+        java.lang.reflect.InvocationTargetException fileError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator,
+                        new StageTemplate("NamedFile", tempDir, Collections.singletonList(invalidFileNamed), "att-template/v3.6"), config));
+        String fileMessage = String.valueOf(fileError.getCause().getMessage());
+        assertTrue(fileMessage.contains("named SQL parameter") || fileMessage.contains("Unused named SQL parameters"), fileMessage);
 
         for (String parameters : Arrays.asList("{other: 'A'}", "{id: 'A', other: 'B'}")) {
             TemplateAction invalid = new TemplateAction("invalid", map("type", "tool",

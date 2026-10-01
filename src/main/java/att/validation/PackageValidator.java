@@ -2180,12 +2180,32 @@ public final class PackageValidator {
                                                      String callName, FrameworkConfig config) {
         if (!arguments.containsKey("parameters")) return;
         String sqlExpression = arguments.get("sql").expression().trim();
-        if (containsRuntimeExpression(sqlExpression)) return;
+        String sql = staticallyKnownDbSql(sqlExpression, callName);
+        if (sql == null) return;
         String parametersExpression = arguments.get("parameters").expression().trim();
         if (!(parametersExpression.startsWith("{") && parametersExpression.endsWith("}"))) return;
-        String sql = String.valueOf(callParser.literal(sqlExpression));
         Map<String, Object> shape = staticNamedParameterShape(parametersExpression, callName);
         att.template.NamedSqlParameters.bind(sql, shape);
+    }
+
+    private String staticallyKnownDbSql(String expression, String callName) {
+        String value = expression == null ? "" : expression.trim();
+        if (value.startsWith("&{") && value.endsWith("}") && value.indexOf('&', 2) < 0
+                && value.indexOf("${") < 0 && value.indexOf("#{") < 0) {
+            String authoredPath = value.substring(2, value.length() - 1);
+            try {
+                att.template.FileExpressionResolver.CompiledFilePlan plan = fileExpressions.compile(
+                        authoredPath, validationSourceDirectories.get());
+                return plan.isStatic() ? plan.evaluate(null) : null;
+            } catch (RuntimeException error) {
+                throw error;
+            } catch (Exception error) {
+                throw new IllegalArgumentException(callName + ".sql project-file expression could not be read: "
+                        + error.getMessage(), error);
+            }
+        }
+        if (containsRuntimeExpression(value)) return null;
+        return String.valueOf(callParser.literal(value));
     }
 
     private Map<String, Object> staticNamedParameterShape(String expression, String callName) {
