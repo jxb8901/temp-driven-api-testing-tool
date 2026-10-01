@@ -264,6 +264,78 @@ class SshResourceHelperTest {
         assertEquals("ready", String.valueOf(runtime.resolve("ACTIONS.ssh.output.result")).trim());
     }
 
+    @Test void callBackedSshTimeoutRetriesThroughTheStandardActionPath() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> calls.incrementAndGet() == 1
+                        ? new CommandResult(-1, "", "timed out", true)
+                        : new CommandResult(0, "ready", "", false), System.err);
+        SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false), null,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
+                1, 10000, runner);
+        att.config.ToolConfig tool = new att.config.ToolConfig("checkRemote", "checkRemote", "", "Check", "",
+                Collections.<String>emptyList(), "#{ssh.application.execute(command=${TOOL.input.command})}",
+                Collections.<String>emptyList(), "",
+                Collections.singletonMap("command", new att.config.ToolArgumentConfig("command", "", "", true, "")),
+                null, null);
+        FrameworkConfig toolConfig = new FrameworkConfig(root, root, root, "SIT", 5000, root,
+                Collections.singletonMap("checkRemote", tool), null, null);
+        CaseRuntimeContext runtime = context();
+        runtime.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", root);
+        TemplateAction action = new TemplateAction("ssh", map("type", "tool",
+                "call", "#{checkRemote(command='health')}",
+                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))));
+
+        List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                new ToolInvoker(root, toolConfig), null, null, null, executor, new DefaultBuiltInProvider()))
+                .execute("invoke", new StageTemplate("T", root, Collections.singletonList(action)), runtime,
+                        new CaseExecutionLog(root.resolve("ssh-retry.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals(2, calls.get());
+        List<?> attempts = (List<?>) runtime.resolve("ACTIONS.ssh.output.attempts");
+        assertEquals(2, attempts.size());
+        assertEquals("call", runtime.resolve("ACTIONS.ssh.output.attempts[0].implementation"));
+        assertEquals("SSH_TIMEOUT", runtime.resolve("ACTIONS.ssh.output.attempts[0].SSH.error.category"));
+        assertEquals("TIMEOUT", runtime.resolve("ACTIONS.ssh.output.attempts[0].retryReason"));
+        assertEquals("ready", String.valueOf(runtime.resolve("ACTIONS.ssh.output.result")).trim());
+    }
+
+    @Test void sftpConnectTimeoutBeforeActionDeadlineHasTypedTimeoutEvidence() throws Exception {
+        Path knownHosts = root.resolve("known_hosts");
+        Files.write(knownHosts, new byte[0]);
+        // A real TCP peer accepts the connection but never sends an SSH banner.
+        try (java.net.ServerSocket server = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getByName("127.0.0.1"))) {
+            FutureTask<java.net.Socket> accepted = new FutureTask<java.net.Socket>(() -> server.accept());
+            Thread peer = new Thread(accepted, "ssh-silent-peer");
+            peer.setDaemon(true);
+            peer.start();
+            SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false),
+                    new JschSshTransferClient(knownHosts), "single",
+                    Collections.singletonMap("one", new SshConfig("127.0.0.1", "deploy", server.getLocalPort(), "")),
+                    1, 100, null);
+            ToolInvocationResult result;
+            long started = System.nanoTime();
+            try {
+                result = executor.execute("application", "upload",
+                        map("remotePath", "/srv/value", "payload", "value"), context(), 5000L,
+                        "ssh-connect-timeout", new CaseExecutionLog(root.resolve("connect-timeout.log")));
+            } finally {
+                accepted.get(1, TimeUnit.SECONDS).close();
+            }
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertFalse(result.executionSuccess());
+            assertEquals("SSH_TIMEOUT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+            Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+            assertEquals("SSH_TIMEOUT", ((Map<?, ?>) evidence.get("error")).get("category"));
+            assertEquals("sftp", evidence.get("transport"));
+            assertEquals("connect", evidence.get("phase"));
+            assertTrue(((Number) evidence.get("connectTimeoutMs")).longValue() <= 100L);
+            assertTrue(elapsedMs < 2000L, "connect timeout must precede the 5s Action deadline");
+        }
+    }
+
     @Test void uploadsAndDownloadsOnlyThroughControlledCaseOutput() throws Exception {
         FakeTransfer transfer = new FakeTransfer();
         SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), transfer);

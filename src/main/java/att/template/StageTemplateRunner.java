@@ -521,7 +521,7 @@ public class StageTemplateRunner {
                 if (!operation.executionSuccess()) {
                     if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
                             || ("http".equals(kind) && httpTimeout(operation.outputMetadata()))
-                            || ("ssh".equals(kind) && sshTimeout(result.invocation())))
+                            || sshTimeout(result.invocation()))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");
                         appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
@@ -624,6 +624,8 @@ public class StageTemplateRunner {
     private boolean sshTimeout(Map<String, Object> invocation) {
         Object ssh = invocation == null ? null : invocation.get("SSH");
         if (!(ssh instanceof Map)) return false;
+        // Transfers must never be replayed automatically, including through call-backed Tools.
+        if (!"execute".equals(((Map<String, Object>) ssh).get("operation"))) return false;
         Object error = ((Map<String, Object>) ssh).get("error");
         if (!(error instanceof Map)) return false;
         Object category = ((Map<String, Object>) error).get("category");

@@ -749,11 +749,13 @@ final class JschSshTransferClient implements SshTransferClient {
             @Override public void run() { close(null, session); }
         };
         cancellation.register(sessionCloser);
+        long deadline = System.nanoTime() + timeout.toNanos();
+        long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeout.toNanos());
+        boolean connecting = true;
         try {
             if (cancellation.isCancelled()) throw new IOException("Java SSH transfer cancelled");
-            long deadline = System.nanoTime() + timeout.toNanos();
-            long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeout.toNanos());
             session.connect(remainingMillis(connectDeadline));
+            connecting = false;
             session.setTimeout(remainingMillis(deadline));
             ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
             channel.connect(remainingMillis(deadline));
@@ -772,8 +774,28 @@ final class JschSshTransferClient implements SshTransferClient {
         } catch (Exception error) {
             cancellation.unregister(sessionCloser);
             close(null, session);
+            if (!cancellation.isCancelled() && (System.nanoTime() >= (connecting ? connectDeadline : deadline)
+                    || isTimeout(error))) {
+                Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+                evidence.put("phase", connecting ? "connect" : "channel");
+                evidence.put("connectTimeoutMs", connectTimeout.toMillis());
+                evidence.put("timeoutMs", timeout.toMillis());
+                throw new SshResourceExecutor.SshOperationException("SSH_TIMEOUT",
+                        connecting ? "SSH transfer connection timed out" : "SSH transfer channel setup timed out",
+                        error, evidence);
+            }
             throw error;
         }
+    }
+
+    private static boolean isTimeout(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.SocketTimeoutException) return true;
+            String message = cause.getMessage();
+            if (message != null && (message.toLowerCase(Locale.ROOT).contains("timeout")
+                    || message.toLowerCase(Locale.ROOT).contains("timed out"))) return true;
+        }
+        return false;
     }
 
     private static int remainingMillis(long deadline) throws IOException {
