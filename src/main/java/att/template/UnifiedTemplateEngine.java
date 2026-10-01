@@ -414,6 +414,7 @@ public class UnifiedTemplateEngine {
             body = body.substring(2, body.length() - 1);
         }
         ToolCallParser.ParsedCall parsed = callParser.parse("#{" + body + "}");
+        DefaultBuiltInProvider.rejectRemoved(parsed.name());
         Map<String, Object> input = resolveArguments(parsed, context, log);
         return executeResolvedCall(parsed.name(), input, context, log, invocationId, attempt, actionId, timeoutMs,
                 saveAs, saveFormat, overwrite, bypassCache);
@@ -459,7 +460,7 @@ public class UnifiedTemplateEngine {
             if (!attempt) throw new IllegalArgumentException("An SSH operation must be the primary call of a type: tool Action");
             if (sshHelperExecutor == null) throw new IllegalStateException("SSH invocation is unavailable: " + name);
             String[] parts = name.split("\\.", -1);
-            if (parts.length != 3) throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + name);
+            if (parts.length != 3) throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download|stat|mkdirs|move|delete: " + name);
             String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
             return sshHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, log);
         }
@@ -735,7 +736,7 @@ public class UnifiedTemplateEngine {
         String invocationId = context.nextDbInvocationId(parts[1]);
         String operation = "update".equals(parts[2]) ? "update" : "query";
         DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs, log);
-        dbHelperExecutor.recordResourceOutput(parts[1], result, context);
+        dbHelperExecutor.recordResourceOutput(parts[1], result, context, log);
         if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         context.recordActionEvidence(result.operationResult().evidence());
@@ -1073,6 +1074,7 @@ public class UnifiedTemplateEngine {
 
     /** Validates a built-in call's name and argument shape without evaluating its values. */
     public void validateBuiltInCall(ToolCallParser.ParsedCall call) {
+        DefaultBuiltInProvider.rejectRemoved(call.name());
         if (!isBuiltIn(call.name())) throw new IllegalArgumentException("Configured Tool call is not available in this expression scope: " + call.name());
         Map<String, Object> arguments = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) putNested(arguments, argument.key(), "<expression>");

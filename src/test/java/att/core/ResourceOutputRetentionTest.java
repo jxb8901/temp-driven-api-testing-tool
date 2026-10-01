@@ -34,6 +34,27 @@ class ResourceOutputRetentionTest {
         assertTrue(evidence.contains("metadata:")); assertTrue(evidence.contains("truncated: true"));
         assertEquals("1234567890", value.get("paymentId"));
     }
+    @Test void credentialsAreRedactedBeforeTruncationInRetainedLoadEvidence() throws Exception {
+        CaseRuntimeContext context = context();
+        Map<String, Object> value = new LinkedHashMap<String, Object>(); value.put("token", "secret-value");
+        context.recordResourceOutput(policy(), value, new LinkedHashMap<String, Object>(), Collections.singletonList("secret-value"));
+        assertEquals("secret-value", value.get("token"));
+        context.materializeResourceOutputs(root);
+        String output = new String(Files.readAllBytes(root.resolve("resource-output.yaml")), "UTF-8");
+        assertFalse(output.contains("secret-value")); assertFalse(output.contains("secret-"));
+    }
+
+    @Test void presentationFailureDoesNotAlterTypedResultOrFailRetention() throws Exception {
+        CaseRuntimeContext context = context();
+        Object value = new Object() { @Override public String toString() { throw new IllegalStateException("private failure"); } };
+        ResourceOutputConfig invalid = ResourceOutputConfig.from(Collections.singletonMap("output",
+                Collections.singletonMap("format", "sqlplus")));
+        context.recordResourceOutput(invalid, value, new LinkedHashMap<String, Object>());
+        context.materializeResourceOutputs(root);
+        String output = new String(Files.readAllBytes(root.resolve("resource-output.yaml")), "UTF-8");
+        assertTrue(output.contains("outputError: Resource output formatting failed")); assertFalse(output.contains("private failure"));
+    }
+
     @Test void explicitNoneSuppressesFormattingEvenWhenEvidenceIsRetained() throws Exception {
         CountingMap value = new CountingMap(); value.put("payment", 1);
         CaseRuntimeContext context = context(); context.setResourceOutputEnabled(false);

@@ -58,7 +58,7 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("Global tools"));
         assertTrue(html.contains("Tool package: sample"));
         assertTrue(html.contains("str.lpad"));
-        assertTrue(html.contains("file.move"));
+        assertFalse(html.contains("file.move"));
         assertTrue(html.contains("misc.nvl"));
         assertTrue(html.contains("sample.date"));
         assertTrue(html.contains("orders.count"));
@@ -78,10 +78,10 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("str.substr(value, start[, length])"));
         assertTrue(html.contains("date.systimestamp([format])"));
         assertTrue(html.contains("date.add(value, amount, unit)"));
-        assertTrue(html.contains("file.exists(path)"));
-        assertTrue(html.contains("file.copy(source, target[, overwrite])"));
+        assertFalse(html.contains("file.exists(path)"));
+        assertFalse(html.contains("file.copy(source, target[, overwrite])"));
         assertTrue(html.contains("misc.randomChoice(first, ...)"));
-        assertTrue(html.contains("misc.dbText(value)"));
+        assertFalse(html.contains("misc.dbText(value)"));
         assertTrue(html.contains("<h2>str.indexOf</h2>"));
         assertNotEquals(HtmlSupport.id("中文一"), HtmlSupport.id("中文二"));
     }

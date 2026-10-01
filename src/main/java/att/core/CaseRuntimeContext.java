@@ -28,9 +28,15 @@ public final class CaseRuntimeContext {
     /** Formatting is deferred in Load until the scheduler has granted a retention slot. */
     public synchronized void recordResourceOutput(final att.config.ResourceOutputConfig policy,
             final Object value, final Map<String, Object> evidence) {
+        recordResourceOutput(policy, value, evidence, java.util.Collections.<String>emptyList());
+    }
+
+    public synchronized void recordResourceOutput(final att.config.ResourceOutputConfig policy,
+            final Object value, final Map<String, Object> evidence, final java.util.List<String> secrets) {
         if (!resourceOutputEnabled || policy == null) return;
+        final java.util.List<String> redactions = new java.util.ArrayList<String>(secrets);
         if (!"load".equals(mode)) {
-            try { evidence.put("output", policy.render(value)); }
+            try { evidence.put("output", policy.render(value, redactions)); }
             catch (RuntimeException error) { evidence.put("outputError", "Resource output formatting failed"); }
             return;
         }
@@ -38,7 +44,7 @@ public final class CaseRuntimeContext {
         deferredResourceOutputs.add(() -> {
             Map<String, Object> record = new LinkedHashMap<String, Object>();
             record.put("metadata", metadata);
-            try { record.put("output", policy.render(value)); }
+            try { record.put("output", policy.render(value, redactions)); }
             catch (RuntimeException error) { record.put("outputError", "Resource output formatting failed"); }
             return record;
         });

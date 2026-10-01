@@ -1,15 +1,8 @@
 /* Author: Jeffrey + ChatGPT */
 package att.template;
 
-import java.io.IOException;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
-import java.nio.file.CopyOption;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -25,8 +18,6 @@ import java.time.temporal.Temporal;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,11 +37,11 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
     private static final Set<String> EXECUTION_ID_FUNCTIONS = Collections.unmodifiableSet(new LinkedHashSet<String>(java.util.Arrays.asList(
             "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
             "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
-            "endswith", "replace", "padleft", "padright", "dateadd", "dbtext", "prettyprint", "format")));
+            "endswith", "replace", "padleft", "padright", "dateadd", "format")));
     private static final Set<String> BOOTSTRAP_SAFE_FUNCTIONS = Collections.unmodifiableSet(new LinkedHashSet<String>(java.util.Arrays.asList(
             "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
             "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
-            "endswith", "replace", "padleft", "padright", "dateadd", "formatdate", "dbtext", "prettyprint", "format")));
+            "endswith", "replace", "padleft", "padright", "dateadd", "formatdate", "format")));
 
     private final Clock clock;
     private final Random random;
@@ -104,16 +95,12 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             return systemTime(input, "systimestamp", SYSTEM_TIMESTAMP,
                     OffsetDateTime.ofInstant(clock.instant(), clock.getZone()));
         }
-        if ("dbtext".equals(function)) {
-            return new DbTextResultFormatter().format(singleValue(input, "dbText"));
-        }
         if ("format".equals(function)) {
             require(input, "format", 2, 2, "format", "obj");
             return new TypedValueFormatter().format(argument(input, "obj", "arg1"),
                     text(argument(input, "format", "arg0")));
         }
         if ("seq.next".equals(function)) return nextSequence(input);
-        if ("prettyprint".equals(function)) return prettyPrint(singleValue(input, "prettyPrint"));
         if (isSingleValueFunction(function)) return invokeSingleValue(function, singleValue(input, function));
         if ("concat".equals(function)) {
             rejectMixedArgumentStyles(input, "concat");
@@ -142,12 +129,6 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             int count = boundedSize(argument(input, "count", "arg0"), "nchar", "count");
             return repeat(text(argument(input, "value", "arg1")), count);
         }
-        if ("fileexists".equals(function)) return String.valueOf(Files.isRegularFile(singlePath(input, "fileExists"), LinkOption.NOFOLLOW_LINKS));
-        if ("directoryexists".equals(function)) return String.valueOf(Files.isDirectory(singlePath(input, "directoryExists"), LinkOption.NOFOLLOW_LINKS));
-        if ("filesize".equals(function)) return fileSize(input);
-        if ("makedirectories".equals(function)) return makeDirectories(input);
-        if ("copyfile".equals(function) || "movefile".equals(function)) return transferFile(input, function);
-        if ("deletefile".equals(function)) return deleteFile(input);
         if ("randomchoice".equals(function)) return randomChoice(input);
         if ("substr".equals(function)) return substr(input);
         if ("indexof".equals(function)) return indexOf(input);
@@ -177,8 +158,6 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("format".equals(function)) { require(input, "format", 2, 2, "format", "obj"); return; }
         if ("seq.next".equals(function)) { require(input, "seq.next", 0, 2, "name", "width"); return; }
         if ("sysdate".equals(function) || "systimestamp".equals(function)) { require(input, function, 0, 1, "format"); return; }
-        if ("dbtext".equals(function)) { singleValue(input, "dbText"); return; }
-        if ("prettyprint".equals(function)) { singleValue(input, "prettyPrint"); return; }
         if (isSingleValueFunction(function)) { singleValue(input, function); return; }
         if ("concat".equals(function) || "coalesce".equals(function)) { rejectMixedArgumentStyles(input, function); return; }
         if ("randomchoice".equals(function)) {
@@ -189,9 +168,6 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("nvl".equals(function)) { require(input, "nvl", 2, 2, "value", "defaultValue"); return; }
         if ("iif".equals(function)) { require(input, "iif", 3, 3, "condition", "trueValue", "falseValue"); return; }
         if ("nchar".equals(function)) { require(input, "nchar", 2, 2, "count", "value"); return; }
-        if ("fileexists".equals(function) || "directoryexists".equals(function) || "filesize".equals(function) || "makedirectories".equals(function)) { require(input, displayName(function), 1, 1, "path"); return; }
-        if ("copyfile".equals(function) || "movefile".equals(function)) { require(input, displayName(function), 2, 3, "source", "target", "overwrite"); return; }
-        if ("deletefile".equals(function)) { require(input, "deleteFile", 1, 2, "path", "missingOk"); return; }
         if ("substr".equals(function)) { require(input, "substr", 2, 3, "value", "start", "length"); return; }
         if ("indexof".equals(function)) { require(input, "indexOf", 2, 3, "value", "search", "fromIndex"); return; }
         if ("contains".equals(function)) { require(input, "contains", 2, 2, "value", "search"); return; }
@@ -206,8 +182,21 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
 
     private static String resolve(String name) {
         String function = name == null ? "" : ALIASES.get(name.toLowerCase(Locale.ROOT));
+        rejectRemoved(name);
         if (function == null) throw new IllegalArgumentException("Unknown built-in: " + name);
         return function;
+    }
+
+    /** Shared runtime/static migration diagnostic; removed names are not registered built-ins. */
+    public static void rejectRemoved(String name) {
+        String normalized = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (java.util.Arrays.asList("dbtext", "misc.dbtext", "prettyprint", "misc.prettyprint", "format.pretty").contains(normalized))
+            throw new IllegalArgumentException("Removed presentation built-in " + name
+                    + "; keep the value typed and use Log value + format: sqlplus, json or yaml, or resource evidence.output.");
+        if (normalized.startsWith("file.") || java.util.Arrays.asList("fileexists", "directoryexists", "filesize",
+                "makedirectories", "copyfile", "movefile", "deletefile").contains(normalized))
+            throw new IllegalArgumentException("Removed local file built-in " + name
+                    + "; use &{...} for project content or ssh.<helper>.stat/mkdirs/move/delete/upload/download for remote files; use execute for explicit remote copy.");
     }
 
     private static Map<String, String> aliases() {
@@ -215,8 +204,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         String[] legacy = {"upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
                 "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
                 "endswith", "replace", "padleft", "padright", "sysdate", "systimestamp", "formatdate",
-                "dateadd", "fileexists", "directoryexists", "filesize", "makedirectories", "copyfile",
-                "movefile", "deletefile", "randomchoice", "dbtext", "prettyprint"};
+                "dateadd", "randomchoice"};
         for (String name : legacy) result.put(name, name);
         alias(result, "format", "format");
         alias(result, "seq.next", "seq.next");
@@ -233,16 +221,11 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         alias(result, "date.sysdate", "sysdate"); alias(result, "date.systimestamp", "systimestamp");
         alias(result, "date.format", "formatdate"); alias(result, "date.add", "dateadd");
 
-        alias(result, "file.exists", "fileexists"); alias(result, "file.directoryexists", "directoryexists");
-        alias(result, "file.size", "filesize"); alias(result, "file.mkdirs", "makedirectories");
-        alias(result, "file.copy", "copyfile"); alias(result, "file.move", "movefile");
-        alias(result, "file.delete", "deletefile");
 
         alias(result, "misc.string", "string"); alias(result, "misc.number", "number");
         alias(result, "misc.boolean", "boolean"); alias(result, "misc.coalesce", "coalesce");
         alias(result, "misc.nvl", "nvl"); alias(result, "misc.iif", "iif");
-        alias(result, "misc.randomchoice", "randomchoice"); alias(result, "misc.dbtext", "dbtext");
-        alias(result, "misc.prettyprint", "prettyprint"); alias(result, "format.pretty", "prettyprint");
+        alias(result, "misc.randomchoice", "randomchoice");
         return Collections.unmodifiableMap(result);
     }
 
@@ -261,83 +244,6 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             width = boundedSize(second, "seq.next", "width");
         }
         return sequences.next(name, width);
-    }
-
-    private String prettyPrint(Object value) {
-        StringBuilder output = new StringBuilder();
-        appendPretty(value, output, 0, new IdentityHashMap<Object, Boolean>());
-        if (output.length() > MAX_TEXT_LENGTH) {
-            return output.substring(0, MAX_TEXT_LENGTH) + "\n... [truncated]";
-        }
-        return output.toString();
-    }
-
-    private void appendPretty(Object value, StringBuilder output, int depth,
-                              IdentityHashMap<Object, Boolean> active) {
-        if (output.length() > MAX_TEXT_LENGTH) return;
-        if (value == null) { output.append("null"); return; }
-        if (depth > 32) { output.append("<maximum depth exceeded>"); return; }
-        if (value instanceof Map) {
-            if (active.put(value, Boolean.TRUE) != null) { output.append("<cycle>"); return; }
-            try {
-                List<Map.Entry<?, ?>> entries = new ArrayList<Map.Entry<?, ?>>(((Map<?, ?>) value).entrySet());
-                if (!(value instanceof LinkedHashMap) && !(value instanceof java.util.SortedMap)) {
-                    Collections.sort(entries, new Comparator<Map.Entry<?, ?>>() {
-                        @Override public int compare(Map.Entry<?, ?> left, Map.Entry<?, ?> right) {
-                            return String.valueOf(left.getKey()).compareTo(String.valueOf(right.getKey()));
-                        }
-                    });
-                }
-                output.append('{');
-                for (int index = 0; index < entries.size(); index++) {
-                    Map.Entry<?, ?> entry = entries.get(index);
-                    output.append(index == 0 ? '\n' : ",\n");
-                    indent(output, depth + 1);
-                    appendQuoted(String.valueOf(entry.getKey()), output);
-                    output.append(": ");
-                    appendPretty(entry.getValue(), output, depth + 1, active);
-                }
-                if (!entries.isEmpty()) { output.append('\n'); indent(output, depth); }
-                output.append('}');
-            } finally { active.remove(value); }
-            return;
-        }
-        if (value instanceof Iterable || value.getClass().isArray()) {
-            if (active.put(value, Boolean.TRUE) != null) { output.append("<cycle>"); return; }
-            try {
-                List<Object> values = new ArrayList<Object>();
-                if (value instanceof Iterable) for (Object item : (Iterable<?>) value) values.add(item);
-                else for (int index = 0; index < Array.getLength(value); index++) values.add(Array.get(value, index));
-                output.append('[');
-                for (int index = 0; index < values.size(); index++) {
-                    output.append(index == 0 ? '\n' : ",\n");
-                    indent(output, depth + 1);
-                    appendPretty(values.get(index), output, depth + 1, active);
-                }
-                if (!values.isEmpty()) { output.append('\n'); indent(output, depth); }
-                output.append(']');
-            } finally { active.remove(value); }
-            return;
-        }
-        if (value instanceof CharSequence || value instanceof Character) appendQuoted(String.valueOf(value), output);
-        else output.append(String.valueOf(value));
-    }
-
-    private static void indent(StringBuilder output, int depth) {
-        for (int index = 0; index < depth * 2; index++) output.append(' ');
-    }
-
-    private static void appendQuoted(String value, StringBuilder output) {
-        output.append('"');
-        for (int index = 0; index < value.length(); index++) {
-            char item = value.charAt(index);
-            if (item == '\\' || item == '"') output.append('\\').append(item);
-            else if (item == '\n') output.append("\\n");
-            else if (item == '\r') output.append("\\r");
-            else if (item == '\t') output.append("\\t");
-            else output.append(item);
-        }
-        output.append('"');
     }
 
     private static void alias(Map<String, String> aliases, String name, String function) {
@@ -370,78 +276,11 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
                 function + "." + argument, null, null, null, null, null, suggestion, cause);
     }
 
-    private Object fileSize(Map<String, Object> input) {
-        Path path = singlePath(input, "fileSize");
-        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("fileSize() requires an existing regular file: " + path);
-        try { return String.valueOf(Files.size(path)); }
-        catch (IOException e) { throw fileFailure("fileSize", e); }
-    }
-
-    private Object makeDirectories(Map<String, Object> input) {
-        Path path = singlePath(input, "makeDirectories");
-        if (Files.isSymbolicLink(path)) throw new IllegalArgumentException("makeDirectories() refuses a symbolic-link target: " + path);
-        try {
-            Files.createDirectories(path);
-            return path.toString();
-        } catch (IOException e) { throw fileFailure("makeDirectories", e); }
-    }
-
-    private Object transferFile(Map<String, Object> input, String function) {
-        String display = displayName(function);
-        require(input, display, 2, 3, "source", "target", "overwrite");
-        Path source = normalizedPath(argument(input, "source", "arg0"), display, "source");
-        Path target = normalizedPath(argument(input, "target", "arg1"), display, "target");
-        boolean overwrite = input.containsKey("overwrite") || input.containsKey("arg2")
-                ? booleanValue(argument(input, "overwrite", "arg2"), display) : false;
-        if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException(display + "() requires an existing regular source file: " + source);
-        if (Files.isSymbolicLink(source) || Files.isSymbolicLink(target)) throw new IllegalArgumentException(display + "() refuses symbolic-link source or target paths");
-        if (source.equals(target)) throw new IllegalArgumentException(display + "() source and target must be different");
-        try {
-            Path parent = target.getParent();
-            if (parent != null) Files.createDirectories(parent);
-            CopyOption[] options = overwrite ? new CopyOption[]{StandardCopyOption.REPLACE_EXISTING} : new CopyOption[0];
-            if ("copyfile".equals(function)) Files.copy(source, target, options); else Files.move(source, target, options);
-            return target.toString();
-        } catch (IOException e) { throw fileFailure(display, e); }
-    }
-
-    private Object deleteFile(Map<String, Object> input) {
-        require(input, "deleteFile", 1, 2, "path", "missingOk");
-        Path path = normalizedPath(argument(input, "path", "arg0"), "deleteFile", "path");
-        boolean missingOk = input.containsKey("missingOk") || input.containsKey("arg1")
-                ? booleanValue(argument(input, "missingOk", "arg1"), "deleteFile") : false;
-        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("deleteFile() refuses directories: " + path);
-        try {
-            boolean deleted = Files.deleteIfExists(path);
-            if (!deleted && !missingOk) throw new IllegalArgumentException("deleteFile() file does not exist: " + path);
-            return String.valueOf(deleted);
-        } catch (IOException e) { throw fileFailure("deleteFile", e); }
-    }
-
     private Object randomChoice(Map<String, Object> input) {
         rejectMixedArgumentStyles(input, "randomChoice");
         if (input.isEmpty() || input.size() > MAX_RANDOM_CHOICES) throw new IllegalArgumentException("randomChoice() requires 1 to " + MAX_RANDOM_CHOICES + " arguments");
         List<Object> values = new ArrayList<Object>(input.values());
         return values.get(random.nextInt(values.size()));
-    }
-
-    private static Path singlePath(Map<String, Object> input, String function) {
-        if (input.size() != 1 || !(input.containsKey("path") || input.containsKey("arg0"))) {
-            throw new IllegalArgumentException(function + "() requires exactly one path argument");
-        }
-        return normalizedPath(argument(input, "path", "arg0"), function, "path");
-    }
-
-    private static Path normalizedPath(Object value, String function, String argument) {
-        String text = text(value).trim();
-        if (text.isEmpty()) throw new IllegalArgumentException(function + "() " + argument + " must not be blank");
-        try { return Paths.get(text).toAbsolutePath().normalize(); }
-        catch (RuntimeException e) { throw new IllegalArgumentException(function + "() has an invalid " + argument + " path: " + text, e); }
-    }
-
-    private static IllegalArgumentException fileFailure(String function, IOException exception) {
-        String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-        return new IllegalArgumentException(function + "() file operation failed: " + message, exception);
     }
 
     private Object invokeSingleValue(String function, Object raw) {
@@ -667,16 +506,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if ("padright".equals(function)) return "padRight";
         if ("formatdate".equals(function)) return "formatDate";
         if ("dateadd".equals(function)) return "dateAdd";
-        if ("fileexists".equals(function)) return "fileExists";
-        if ("directoryexists".equals(function)) return "directoryExists";
-        if ("filesize".equals(function)) return "fileSize";
-        if ("makedirectories".equals(function)) return "makeDirectories";
-        if ("copyfile".equals(function)) return "copyFile";
-        if ("movefile".equals(function)) return "moveFile";
-        if ("deletefile".equals(function)) return "deleteFile";
         if ("randomchoice".equals(function)) return "randomChoice";
-        if ("dbtext".equals(function)) return "dbText";
-        if ("prettyprint".equals(function)) return "prettyPrint";
         return function;
     }
 

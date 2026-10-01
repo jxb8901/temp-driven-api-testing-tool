@@ -19,6 +19,16 @@ import java.util.stream.Stream;
 
 /** Recursively indexes V2 template directories by full path and symbolic name. */
 public final class StageTemplateLoader {
+    private static void rejectLogLevel(Map<String, Object> document) {
+        Object configured = document.get("actions");
+        if (!(configured instanceof Map)) return;
+        for (Object action : ((Map<?, ?>) configured).values()) {
+            if (action instanceof Map && "log".equals(((Map<?, ?>) action).get("type"))
+                    && ((Map<?, ?>) action).containsKey("level"))
+                throw new IllegalArgumentException("Log.level was removed; delete level and use message or value + format. Log entries have no severity semantics.");
+        }
+    }
+
     private static final Map<DescriptorKey, Map<String, Object>> DESCRIPTORS = new LinkedHashMap<DescriptorKey, Map<String, Object>>();
     private static final Map<DescriptorKey, StageTemplate> TEMPLATES = new LinkedHashMap<DescriptorKey, StageTemplate>();
     private static final AtomicLong LOADS = new AtomicLong();
@@ -148,6 +158,7 @@ public final class StageTemplateLoader {
             if (cached != null) { HITS.incrementAndGet(); return cached; }
         }
         Map<String, Object> map = yaml(descriptor);
+        rejectLogLevel(map);
         rejectLegacyResultFields(map, descriptor);
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
         boolean current = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
@@ -181,9 +192,9 @@ public final class StageTemplateLoader {
             if (current) rejectRemovedActionContract(actionMap, actionKey, descriptor);
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
                     current || previousVersion
-                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "value", "format", "call", "assert", "expected", "actual", "message", "level", "timeoutMs", "db", "query", "update", "use", "runWhen"}
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "value", "format", "call", "assert", "expected", "actual", "message", "timeoutMs", "db", "query", "update", "use", "runWhen"}
                             : modern
-                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
                             : new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs"});
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);

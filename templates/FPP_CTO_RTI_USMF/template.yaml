@@ -25,7 +25,6 @@ actions:
 
   log1:
     type: log
-    level: INFO
     message: "====================== Starting testcase ${CASE.caseId} ======================"
     value:
       precheckResult: "${ACTIONS.buildTxnSeq.output}"
@@ -151,7 +150,6 @@ x-staged:
 
   logCtoRtiSummary:
     type: log
-    level: INFO
     message: "CTO plus RTI success flow completed for ${CASE.caseId}"
     value:
       precheckResult: "${ACTIONS.invokePrecheck.output.result.ResultCode}"

@@ -4,7 +4,6 @@ description: Always-run cleanup example which records completion without externa
 actions:
   cleanupSummary:
     type: log
-    level: INFO
     message: "Cleanup completed for ${CASE.caseId}"
     value:
       finalApiStatus: "${EXEC.VARS.lastApiStatus?}"

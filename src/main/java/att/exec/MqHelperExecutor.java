@@ -84,6 +84,7 @@ public final class MqHelperExecutor {
         }
         String effectiveResponseFormat = "send".equals(operation) ? null
                 : args.containsKey("responseFormat") ? String.valueOf(args.get("responseFormat")) : helper.responseFormat();
+        if (log != null) log.registerSecretRedactions(secrets(helper));
         Instant started = Instant.now();
         final long deadlineNanos = timeoutMs == null ? Long.MAX_VALUE
                 : System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs.longValue());
@@ -265,7 +266,7 @@ public final class MqHelperExecutor {
         if (savePath != null && !savePath.trim().isEmpty()) evidence.put("resultPath", savePath);
         evidence.put("resultFormat", representation);
         evidence.put("status", success ? "PASS" : "ERROR");
-        if (context != null) context.recordResourceOutput(logical.evidenceOutput(), result.get("result"), evidence);
+        if (context != null) context.recordResourceOutput(logical.evidenceOutput(), result.get("result"), evidence, secrets(helper));
         return new MqInvocationResult(result, evidence, success);
     }
 

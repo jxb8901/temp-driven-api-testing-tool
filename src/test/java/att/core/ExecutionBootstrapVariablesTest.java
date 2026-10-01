@@ -129,8 +129,8 @@ class ExecutionBootstrapVariablesTest {
         assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.string"));
         assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.number"));
         assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.boolean"));
-        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.prettyprint"));
-        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("format.pretty"));
+        assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("misc.prettyprint"));
+        assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("format.pretty"));
         assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("date.sysdate"));
         assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("file.delete"));
         assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("seq.next"));

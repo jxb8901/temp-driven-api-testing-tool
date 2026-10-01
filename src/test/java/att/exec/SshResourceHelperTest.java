@@ -472,6 +472,60 @@ class SshResourceHelperTest {
         assertEquals(255, evidence.get("exitCode"));
     }
 
+    @Test void filesystemOperationsShareTypedExecutionAndRejectArgumentsBeforeConnecting() throws Exception {
+        SftpFilesystemOperationsTest.MemorySftp remote = new SftpFilesystemOperationsTest.MemorySftp();
+        remote.nodes.put("/file", SftpFilesystemOperationsTest.attr(false, 12));
+        FakeTransfer transfer = new FakeTransfer() {
+            @Override public Map<String, Object> filesystem(SshConfig target, String operation, Map<String, Object> arguments,
+                    Duration connectTimeout, Duration timeout, Path project, SshTransferCancellation cancellation) throws Exception {
+                assertEquals("example.test", target.host());
+                assertTrue(timeout.toMillis() <= 5000); assertTrue(connectTimeout.toMillis() <= timeout.toMillis() + 1);
+                return SftpFilesystemOperations.execute(remote, operation, arguments);
+            }
+        };
+        SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false), transfer);
+        for (String operation : new String[]{"stat", "mkdirs", "move", "delete"}) {
+            Map<String, Object> arguments = "move".equals(operation)
+                    ? map("sourcePath", "/file", "targetPath", "/moved")
+                    : map("remotePath", "stat".equals(operation) ? "/absent" : "/created");
+            ToolInvocationResult result = executor.execute("application", operation, arguments, context(), 5000L, "fs-" + operation, null);
+            assertTrue(result.executionSuccess(), String.valueOf(result.invocation()));
+            assertTrue(result.output() instanceof Map);
+            Map<?, ?> evidence = (Map<?, ?>) result.invocation().get("SSH");
+            assertEquals("sftp", evidence.get("transport")); assertEquals(operation, evidence.get("operation"));
+            assertEquals("example.test", evidence.get("host"));
+            if ("stat".equals(operation)) assertEquals(false, ((Map<?, ?>) result.output()).get("exists"));
+        }
+        int before = remote.calls;
+        for (Map<String, Object> arguments : java.util.Arrays.asList(
+                map(), map("remotePath", ""), map("remotePath", "/x", "recursive", true),
+                map("remotePath", "/*"), map("remotePath", "/x", "missingOk", "true"),
+                map("remotePath", "/x", "timeoutMs", 0))) {
+            ToolInvocationResult failed = executor.execute("application", "delete", arguments, context(), 5000L, "invalid", null);
+            assertFalse(failed.executionSuccess()); assertEquals("SSH_ARGUMENT", ((Map<?, ?>) failed.invocation().get("error")).get("category"));
+        }
+        assertEquals(before, remote.calls, "Invalid calls must not connect or inspect the server");
+        ToolInvocationResult denied = executor.execute("application", "stat", map("remotePath", "/denied"), context(), 5000L, "denied", null);
+        assertEquals("SSH_STAT_ERROR", ((Map<?, ?>) denied.invocation().get("error")).get("category"));
+    }
+
+    @Test void filesystemDeadlineCancelsTheSameSftpTransport() throws Exception {
+        AtomicBoolean closed = new AtomicBoolean();
+        FakeTransfer transfer = new FakeTransfer() {
+            @Override public Map<String, Object> filesystem(SshConfig target, String operation, Map<String, Object> arguments,
+                    Duration connectTimeout, Duration timeout, Path project, SshTransferCancellation cancellation) throws Exception {
+                cancellation.register(() -> closed.set(true));
+                Thread.sleep(10000);
+                return map("exists", true);
+            }
+        };
+        ToolInvocationResult result = executor(new CommandResult(0, "", "", false), transfer)
+                .execute("application", "stat", map("remotePath", "/x"), context(), 1000L, "timeout", null);
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_TIMEOUT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        assertTrue(closed.get());
+    }
+
     private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer) {
         return executor(commandResult, transfer, "single",
                 Collections.singletonMap("one", new SshConfig("example.test", "deploy", 22, "")));

@@ -23,7 +23,14 @@ public final class ResourceOutputConfig {
         return new ResourceOutputConfig(format, max);
     }
     public Map<String, Object> render(Object value) {
+        return render(value, java.util.Collections.<String>emptyList());
+    }
+    public Map<String, Object> render(Object value, java.util.List<String> secrets) {
         String text = new att.template.TypedValueFormatter().format(value, format);
+        java.util.List<String> ordered = new java.util.ArrayList<String>(secrets);
+        ordered.removeIf(item -> item == null || item.isEmpty());
+        ordered.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        for (String secret : ordered) if (secret != null && !secret.isEmpty()) text = text.replace(secret, "[REDACTED_SECRET]");
         Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
         output.put("format", format);
         output.put("truncated", text.length() > maxChars);

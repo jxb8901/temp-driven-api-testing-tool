@@ -17,7 +17,6 @@ actions:
 
   logIds:
     type: log
-    level: INFO
     message: "Prepared IDs for ${CASE.caseId}"
     value:
       acDate: "${ACTIONS.getAcDate.output.result}"

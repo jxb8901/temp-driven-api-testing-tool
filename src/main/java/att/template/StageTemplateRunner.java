@@ -288,8 +288,7 @@ public class StageTemplateRunner {
         Object value = action.valuePresent() ? templateEngine.evaluateTypedTree(action.value(), context, log) : null;
         String formatted = action.valuePresent() ? new TypedValueFormatter().format(value, action.format()) : "";
         output.put("result", message.isEmpty() ? formatted : formatted.isEmpty() ? message : message + "\n" + formatted);
-        output.put("level", action.level());
-        try { log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result"))); }
+        try { log.appendRaw("LOG " + action.id(), String.valueOf(output.get("result"))); }
         catch (Exception error) { recordEvidenceError(output, error); }
     }
 
@@ -414,7 +413,7 @@ public class StageTemplateRunner {
                         elapsedMillis(operationStarted), error.getClass().getSimpleName());
                 throw error;
             }
-            executor.recordResourceOutput(action.db(), result, context);
+            executor.recordResourceOutput(action.db(), result, context, log);
         try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
             catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
 

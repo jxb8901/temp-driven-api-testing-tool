@@ -98,6 +98,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
             HttpHelperConfig helper = config.httpHelper(logicalId);
             if (helper == null) throw new HttpFailure("HTTP_CONFIG", "Unknown HTTP helper: " + logicalId);
             helperForDiagnostics = helper;
+            if (log != null) log.registerSecretRedactions(diagnosticSecrets(helper, arguments));
             Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
             phase = "http.request";
             Request request = request(helper, operation, args, context);
@@ -169,7 +170,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     metadata.put("resolvedResponseFormat", resolvedResponseFormat);
                     evidence.put("resolvedResponseFormat", resolvedResponseFormat);
                     Object result = decode(bytes, contentType, resolvedResponseFormat);
-                    if (context != null) context.recordResourceOutput(helper.evidenceOutput(), result, evidence);
+                    if (context != null) context.recordResourceOutput(helper.evidenceOutput(), result, evidence, diagnosticSecrets(helper, arguments));
                     return result(name, invocationId, result, true, metadata, evidence, null);
                 } catch (org.apache.http.conn.ConnectionPoolTimeoutException exhausted) {
                     throw new HttpFailure("HTTP_POOL_TIMEOUT", "HTTP connection pool borrow timed out");
