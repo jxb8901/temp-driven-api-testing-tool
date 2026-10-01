@@ -132,7 +132,8 @@ def structure_errors(text):
     if shape != expected:
         errors.append("chapter/appendix order must be %s; found %s" % (expected, shape))
     headings = re.findall(r"^##\s+(.+)$", without_code(text), re.M)
-    folded = [s.casefold() for s in headings]
+    folded = [re.sub(r"^(?:[0-9]+|Appendix\s+[A-D])(?:\s+[—–-])?\s*", "", s).casefold()
+              for s in headings]
     if len(folded) != len(set(folded)):
         errors.append("duplicate top-level chapter title")
     if len(headings) != len(expected):
@@ -192,7 +193,7 @@ def validate(root=ROOT):
         except ValueError as exc:
             errors.append(rel + ": " + str(exc))
         if rel.startswith(("docs/reference/", "docs/reference.zh/")) and path.name != "README.md":
-            if re.search(r"\b(?:issue\s*)?#(?:38|39|41|42)\b", text, re.I):
+            if re.search(r"(?:\bissue\s+#\d+\b|(?<![&\w])#\d+\b)", text, re.I):
                 errors.append(rel + ": maintainer/future issue reference in normative narrative")
         if rel.startswith(("docs/reference.zh/", "docs/quick-start.zh.md")):
             prose = re.sub(r"\x60[^\x60]*\x60", "", without_code(text))

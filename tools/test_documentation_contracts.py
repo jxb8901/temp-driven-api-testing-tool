@@ -54,10 +54,11 @@ class DocumentationContractsTest(unittest.TestCase):
 
     def test_duplicate_number_missing_appendix_and_order_drift_fail(self):
         good = "\n".join(["## %02d Chapter %s" % (n, n) for n in range(1, 14)] +
-                         ["## Appendix " + c + " — Lookup" for c in "ABCD"])
+                         ["## Appendix " + c + " — Lookup " + c for c in "ABCD"])
         self.assertEqual([], structure_errors(good))
         self.assertTrue(structure_errors(good.replace("## 03", "## 02")))
-        self.assertTrue(structure_errors(good.replace("## Appendix D — Lookup", "")))
+        self.assertTrue(structure_errors(good.replace("Chapter 3", "Chapter 2")))
+        self.assertTrue(structure_errors(good.replace("## Appendix D — Lookup D", "")))
         self.assertTrue(structure_errors(good.replace("## 03", "## 04")
                                              .replace("## 05", "## 03")))
 
