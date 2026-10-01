@@ -82,7 +82,7 @@ class DebugEngineTest {
         assertTrue(new String(Files.readAllBytes(tool.logPath()), StandardCharsets.UTF_8).contains("typed"));
     }
 
-    @Test void groupedToolSidecarArgumentsAreOverriddenBeforeDebugInvocation() throws Exception {
+    @Test void groupedToolSidecarKeepsExistingPrecedenceAndCliArgOverridesWinLast() throws Exception {
         Path project = fixtureWithoutSidecars();
         java.util.Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
                 new ToolArgumentConfig("value", "Value", "Value", true, ""));
@@ -92,15 +92,22 @@ class DebugEngineTest {
                 Paths.get("templates"), Collections.singletonMap("group.echo", grouped), null, null);
         Files.createDirectories(project.resolve("config/tools"));
         Files.write(project.resolve("config/tools/group.debug.yaml"), (
-                "schemaVersion: att-debug/v1.1\ntools:\n  echo:\n    arguments: {value: from-sidecar}\n")
+                "schemaVersion: att-debug/v1.1\narguments: {value: from-root}\n"
+                        + "tools:\n  echo:\n    arguments: {value: from-group}\n")
                 .getBytes(StandardCharsets.UTF_8));
 
-        DebugEngine.Result result = run(project, config, "tool", "group.echo", "--set", "arg.value=debug-overridden");
+        DebugEngine.Result withoutOverride = run(project, config, "tool", "group.echo");
+        DebugEngine.Result withOverride = run(project, config, "tool", "group.echo",
+                "--output-dir", temp.resolve("group-tool-overridden").toString(), "--set", "arg.value=debug-overridden");
 
-        assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().format());
-        String log = new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8);
-        assertTrue(log.contains("debug-overridden"), log);
-        assertFalse(log.contains("from-sidecar"), log);
+        assertEquals(ResultStatus.PASS, withoutOverride.status(), withoutOverride.diagnostic() == null ? "" : withoutOverride.diagnostic().format());
+        String originalLog = new String(Files.readAllBytes(withoutOverride.logPath()), StandardCharsets.UTF_8);
+        assertTrue(originalLog.contains("from-group"), originalLog);
+        assertFalse(originalLog.contains("from-root"), originalLog);
+        assertEquals(ResultStatus.PASS, withOverride.status(), withOverride.diagnostic() == null ? "" : withOverride.diagnostic().format());
+        String overrideLog = new String(Files.readAllBytes(withOverride.logPath()), StandardCharsets.UTF_8);
+        assertTrue(overrideLog.contains("debug-overridden"), overrideLog);
+        assertFalse(overrideLog.contains("from-group"), overrideLog);
     }
 
     @Test void standaloneAndNestedFlowBootstrapPreservesExplicitNull() throws Exception {
@@ -258,6 +265,32 @@ class DebugEngineTest {
         assertEquals("vars.result", unavailableResult.diagnostic().field());
         assertNotNull(unavailableResult.diagnostic().source());
         assertTrue(unavailableResult.diagnostic().format().contains("^"), unavailableResult.diagnostic().format());
+    }
+
+    @Test void optionalMissingBootstrapInputsRemainValidWhileStrictReferencesFailEarly() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        Path sidecar = project.resolve("templates/SIMPLE/debug.yaml");
+        Files.write(sidecar, ("schemaVersion: att-debug/v1.1\ninputs: {value: present}\nvars:\n"
+                + "  optional: '${EXEC.INPUT.customerId?}'\n"
+                + "  optionalBlock: '#{${EXEC.INPUT.region?}}'\n").getBytes(StandardCharsets.UTF_8));
+
+        DebugEngine.Result optional = run(project, config, "template", "SIMPLE");
+
+        assertEquals(ResultStatus.PASS, optional.status(), optional.diagnostic() == null ? "" : optional.diagnostic().format());
+        String caseYaml = new String(Files.readAllBytes(optional.outputDirectory().resolve("artifacts/case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(caseYaml.contains("optional: null"), caseYaml);
+        assertTrue(caseYaml.contains("optionalBlock: null"), caseYaml);
+
+        Files.write(sidecar, ("schemaVersion: att-debug/v1.1\ninputs: {value: present}\nvars:\n"
+                + "  strict: '${EXEC.INPUT.customerId}'\n").getBytes(StandardCharsets.UTF_8));
+        DebugEngine.Result strict = run(project, config, "template", "SIMPLE",
+                "--output-dir", temp.resolve("strict-bootstrap-input").toString());
+        assertEquals(ResultStatus.INVALID, strict.status());
+        assertNotNull(strict.diagnostic());
+        assertEquals("vars.strict", strict.diagnostic().field());
+        assertTrue(strict.diagnostic().detail().contains("missing input"), strict.diagnostic().format());
     }
 
     @Test void missingSidecarIsDiagnosticAndDoesNotTouchNormalRunOutput() throws Exception {

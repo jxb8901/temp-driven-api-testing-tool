@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -126,8 +127,8 @@ class LoadCrossModeTest {
 
     @Test void groupedToolSidecarOverridesSurviveQuickLoadPromotion() throws Exception {
         Path project = fixture();
-        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.1\ntools:\n"
-                + "  echo:\n    arguments: {value: from-sidecar}\n");
+        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.1\narguments: {value: from-root}\n"
+                + "tools:\n  echo:\n    arguments: {value: from-sidecar}\n");
         Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("value",
                 new att.config.ToolArgumentConfig("value", "Value", "Value", true, ""));
         ToolConfig grouped = new ToolConfig("group.echo", "echo", "group", "Echo", "Grouped Echo",
@@ -177,6 +178,30 @@ class LoadCrossModeTest {
         assertEquals(10, diagnostic.source().line());
         assertTrue(diagnostic.format().contains("^"), diagnostic.format());
         assertTrue(diagnostic.detail().contains("workloadId: second"), diagnostic.detail());
+    }
+
+    @Test void optionalMissingInputsSurviveLoadBootstrapIncludingExpressionBlocks() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        write(project, "templates/OPTIONAL/template.yaml", "schemaVersion: att-template/v3.3\nname: OPTIONAL\n"
+                + "description: optional bootstrap references\nactions:\n"
+                + "  check: {type: log, message: 'optional=${EXEC.VARS.customerId}|block=${EXEC.VARS.region}'}\n");
+        Path source = write(project, "load/optional-bootstrap-input.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: optional\n    target: {type: template, id: OPTIONAL}\n    inputs: {}\n"
+                + "    vars:\n      customerId: '${EXEC.INPUT.customerId?}'\n"
+                + "      region: '#{${EXEC.INPUT.region?}}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("optional-bootstrap", "optional-bootstrap-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+
+        assertEquals(ResultStatus.PASS, result.status());
+        assertNull(result.context().require("EXEC.VARS.customerId"));
+        assertNull(result.context().require("EXEC.VARS.region"));
     }
 
     @SuppressWarnings("unchecked")

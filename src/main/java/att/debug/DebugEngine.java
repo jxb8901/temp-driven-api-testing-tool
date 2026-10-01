@@ -319,15 +319,15 @@ public final class DebugEngine {
             vars = validateDebugVariables(vars, type, path, inputs, bootstrapEngine);
             if (map.containsKey("inputs") || att.core.CliSetOverrides.hasNamespace(overrides, "input")) map.put("inputs", inputs);
             if (map.containsKey("vars") || att.core.CliSetOverrides.hasNamespace(overrides, "vars")) map.put("vars", vars);
+            Map<String, Object> effectiveToolArguments = null;
             if ("tool".equals(type)) {
-                // Resolve the sidecar's representation-specific arguments once, then retain only
-                // the effective root map so a later DebugInput cannot prefer stale nested values.
-                Map<String, Object> arguments = new LinkedHashMap<String, Object>(
+                // Preserve the existing root-versus-group resolution, then carry its result
+                // forward explicitly so later construction cannot re-read stale sidecar values.
+                effectiveToolArguments = new LinkedHashMap<String, Object>(
                         new DebugInput(path, map, type, id, config).arguments);
-                arguments = att.core.CliSetOverrides.apply(arguments, overrides, "arg");
-                map.put("arguments", arguments);
+                effectiveToolArguments = att.core.CliSetOverrides.apply(effectiveToolArguments, overrides, "arg");
             }
-            return new DebugInput(path, map, type, id, config);
+            return new DebugInput(path, map, type, id, config, effectiveToolArguments);
         } catch (DiagnosticException e) {
             throw e;
         } catch (Exception e) {
@@ -503,6 +503,10 @@ public final class DebugEngine {
     private static final class DebugInput {
         private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey;
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config) {
+            this(path, root, type, id, config, null);
+        }
+        private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config,
+                           Map<String, Object> effectiveToolArguments) {
             this.path = path;
             this.caseValues = map(root.get("case"));
             this.inputs = map(root.get("inputs"));
@@ -511,15 +515,15 @@ public final class DebugEngine {
             Object key = map(root.get("stage")).get("key");
             this.stageKey = key == null ? "DEBUG" : String.valueOf(key);
             Map<String, Object> rootArguments = map(root.get("arguments"));
-            Map<String, Object> selectedArguments = rootArguments;
-            if ("tool".equals(type) && !root.containsKey("arguments")) {
+            Map<String, Object> selectedArguments = effectiveToolArguments == null ? rootArguments : effectiveToolArguments;
+            if ("tool".equals(type) && effectiveToolArguments == null) {
                 Map<String, Object> tools = map(root.get("tools"));
                 ToolConfig tool = findTool(config, id);
                 String local = tool == null ? id : tool.localKey();
                 Map<String, Object> selected = map(tools.get(local));
                 if (selected.isEmpty()) selected = map(tools.get(id));
                 Map<String, Object> toolArguments = map(selected.get("arguments"));
-                selectedArguments = toolArguments;
+                if (!toolArguments.isEmpty()) selectedArguments = toolArguments;
             }
             this.arguments = selectedArguments;
         }

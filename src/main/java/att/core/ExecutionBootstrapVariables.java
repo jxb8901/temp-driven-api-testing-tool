@@ -160,7 +160,12 @@ public final class ExecutionBootstrapVariables {
     private static void validatePath(String path, String field, Validation validation) {
         if (path == null || path.trim().isEmpty())
             throw validation.invalid("Bootstrap expression contains an empty Context path", field);
-        String upper = path.toUpperCase(java.util.Locale.ROOT);
+        String requiredPath;
+        try { requiredPath = CaseRuntimeContext.requiredReferencePath(path); }
+        catch (RuntimeException error) {
+            throw validation.invalid("Invalid optional Context path '" + path + "': " + error.getMessage(), field);
+        }
+        String upper = requiredPath.toUpperCase(java.util.Locale.ROOT);
         if (upper.equals("EXEC.ACTIONS") || upper.startsWith("EXEC.ACTIONS.") || upper.startsWith("EXEC.ACTIONS[")
                 || upper.equals("ACTIONS") || upper.startsWith("ACTIONS.") || upper.startsWith("ACTIONS[")
                 || upper.equals("OUTPUT") || upper.startsWith("OUTPUT.") || upper.startsWith("OUTPUT[")
@@ -180,7 +185,8 @@ public final class ExecutionBootstrapVariables {
                 || upper.equals("META.TARGET") || upper.startsWith("META.TARGET.") || upper.startsWith("META.TARGET[")
                 || upper.equals("META.TEMPLATE") || upper.startsWith("META.TEMPLATE.") || upper.startsWith("META.TEMPLATE[");
         if (!allowed) throw validation.invalid("Context path '" + path + "' is not an initialized bootstrap root", field);
-        if (inputPath && validation.checkInputReferences
+        boolean optionalInputReference = CaseRuntimeContext.isOptionalReference(path);
+        if (inputPath && validation.checkInputReferences && !optionalInputReference
                 && !CaseRuntimeContext.containsInputPath(validation.inputs, path))
             throw validation.invalid("Bootstrap expression references missing input '" + path + "'", field);
     }
