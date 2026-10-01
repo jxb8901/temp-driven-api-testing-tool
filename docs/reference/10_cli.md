@@ -10,6 +10,7 @@
 | `snapshot` | Generate same-basename canonical testcase XML | No |
 | `run` | Validate and execute selected cases | Yes, except dry-run |
 | `debug` | Execute one Template, Flow, or Tool with a debug sidecar | Yes |
+| `load` | Execute a declared scenario or promote a Debug sidecar into a Quick Load | Yes |
 | `docs` | Generate searchable package documentation | No |
 | `report` | Regenerate reports for a completed run | No |
 | `build` | Archive the latest completed run | No |
@@ -49,15 +50,24 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 | `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
+| `./att.sh debug` | Discover runnable Tools, Templates, and Flows; show only existing default sidecars |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
 | `./att.sh debug tool <id>` | Execute one Tool; auto-discover `config/tools/<group>.debug.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | Override the target's auto-discovered debug input |
+| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | Override a typed `EXEC.INPUT` value; repeatable |
+| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | Override one Tool argument; repeatable |
+| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | Override Template/Flow bootstrap `EXEC.VARS` before expression evaluation |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+| `./att.sh load` | Discover valid `att-load/*` scenarios under `load/`; report invalid declared scenarios |
 | `./att.sh load <scenario.yaml> --quiet` | Suppress periodic live progress; keep the final summary and errors |
 | `./att.sh load <scenario.yaml> --verbose` | Accepted for compatibility; bounded live progress is already the default |
+| `./att.sh load --debug <type> <id>` | Promote a Debug sidecar into a normal single-workload Load run using `load/load.yaml` policy |
+| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | Override one-workload `EXEC.INPUT`; repeatable, not valid for multi-workload scenarios |
+| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | Override a Tool argument in a one-workload Tool scenario |
+| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | Override one-workload Template/Flow bootstrap vars |
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
@@ -65,103 +75,34 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
 
-`run`, `debug`, and `load` default to interactive verbose behavior. Lifecycle, Case, Stage, Action, resource-attempt, retry, assertion, and error records are written as they occur and flushed promptly. The live Case-log mirror uses the same redacted append path as `case.log`; `case.log`, `case.yaml`/`result.yaml`, reports, and evidence remain the persistent source of truth. Concurrent Case-log chunks carry a Case ID prefix. `--quiet` suppresses detailed live progress but retains a final summary and errors. With `--format json`, machine-readable output remains on stdout and live progress is sent to stderr. Load progress prints bounded periodic counters/rates and throttled errors, never one console block per successful iteration.
+No-target `debug` and `load` are read-only discovery commands. Debug validates target contracts without invoking Tools or creating output. Load scans only declared `att-load/*` YAML, validates every target before listing the scenario, reports invalid declared descriptors, and ignores unrelated YAML. Both accept `--config`, `--env`, `--format`, `--quiet`, and `--verbose` in discovery mode.
 
-### Standalone debug inputs and outputs
+### Typed overrides and Quick Load
 
-Debug input files use `att-debug/v1.0`. `case` values become synthetic `CASE` data, `stage.key` and `stage.values` declare the one debug stage, and `inputs` is adapted directly into canonical `EXEC.INPUT.*`. For compatibility, `${CASE.inputs.<field>}` remains a read-only view when no business field is literally named `inputs`; it is not duplicated below `EXEC.INPUT`. Tool arguments come from the root `arguments` map or `tools.<localKey>.arguments`. An explicit `--input` always wins over auto-discovery.
+`--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
 
-Before execution ATT validates only the selected Template or Flow dependency closure, or the selected Tool definition. It does not require unrelated workbook snapshots or unrelated malformed Template descriptors to pass. The selected target still uses the normal Template/Flow/Tool runner, including Context resolution, Flow nesting, Tool retry/timeout, evidence, Action result persistence, DB finalization, and Case-log behavior.
-
-#### Configuration examples
-
-The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.0` document.
-
-Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
+`load/load.yaml` is an optional, policy-only `att-load/v1.4` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
 
 ```yaml
-schemaVersion: att-debug/v1.0
-case:
-  caseName: PAYMENT debug
-  amount: 100
-  environment: SIT
-stage:
-  key: invoke
-  values:
-    channel: WEB
-    sourceRef: SRC-001
+schemaVersion: att-load/v1.4
+load: {users: 2, duration: 10s}
+execution: {thinkTime: 250ms}
+evidence: {mode: failures}
 ```
-
-Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
-
-Flow sidecar (`templates/flows/common/compose/debug.yaml`):
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  caseName: Compose debug
-  traceId: TRACE-001
-stage:
-  key: DEBUG
-  values:
-    mode: SIT
-inputs:
-  source: payment
-  suffix: -debug
-```
-
-Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available as `${EXEC.INPUT.source}` and, when there is no same-named Case value, as the compatibility alias `${EXEC.INPUT.source}`.
-
-Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
-
-```yaml
-schemaVersion: att-debug/v1.0
-case:
-  RefNo: REF001
-tools:
-  invokeApi:
-    arguments:
-      requestId: REF001
-      requestType: PAYMENT
-      requestFile: /tmp/payment-request.xml
-      apiLogPath: /tmp/payment-api.log
-```
-
-Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the group-local Tool key. Values must be scalar or list values accepted by the Tool descriptor; map literals are not supported by the standalone Tool adapter.
-
-Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
-
-```yaml
-schemaVersion: att-debug/v1.0
-arguments:
-  requestFile: /tmp/payment-request.xml
-  environment: SIT
-```
-
-Run it with `./att.sh debug tool invokePaymentApi`. For an ungrouped Tool, root `arguments` is passed directly; it is not wrapped under `tools`.
-
-An explicit file overrides sidecar discovery, which is useful for temporary values in CI or local diagnosis:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml \
-  --output-dir /tmp/att-debug --format json
+./att.sh debug
+./att.sh load
+./att.sh load --debug template PAYMENT_INVOKE
+./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
+./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
 ```
 
-The selected input is validated before execution. Missing files, invalid schema, unknown or missing Tool arguments, and other input/configuration errors return exit code `2`. Framework-owned values such as `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.OUTPUT_DIR`, `EXEC.VARS`, and `EXEC.ACTIONS`, together with the corresponding `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` aliases, remain authoritative even if they appear in the input `case` map. Mode/scheduler diagnostics are not expression-visible. `EXEC.STAGES` is not a canonical Context node; Stage history remains in the legacy `CASE.STAGES` evidence view.
+`run`, `debug`, and `load` default to interactive verbose behavior. Lifecycle, Case, Stage, Action, resource-attempt, retry, assertion, and error records are written as they occur and flushed promptly. The live Case-log mirror uses the same redacted append path as `case.log`; `case.log`, `case.yaml`/`result.yaml`, reports, and evidence remain the persistent source of truth. Concurrent Case-log chunks carry a Case ID prefix. `--quiet` suppresses detailed live progress but retains a final summary and errors. With `--format json`, machine-readable output remains on stdout and live progress is sent to stderr. Load progress prints bounded periodic counters/rates and throttled errors, never one console block per successful iteration.
 
-Each invocation writes:
+### Debug inputs and outputs
 
-```text
-output/debug/<debugId>/
-├── case.log
-├── result.yaml
-└── artifacts/
-    └── case.yaml
-```
-
-`result.yaml` contains the target, status, exit code, duration, input path, Case ID, action results, diagnostic (when present), and evidence locations. Synthetic framework-owned fields always win over same-named values in `case`; debug inputs cannot replace `CASE.caseId`, `CASE.workbookId`, `CASE.groupId`, `CASE.rowCaseId`, `CASE.outputDirectory`, the legacy `CASE.STAGES` evidence view, `CASE.DB`, `CASE.VARS`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, or `DB.*`. Debug output is independent of ordinary `output/latest-run.yaml` and report lifecycle.
-
-For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics go to stderr.
+This chapter defines target, `--input`, `--set` and `--env` syntax in the option matrix. [Debug](04_execution_modes/debug.md) owns input discovery, bootstrap variables, protected roots and output lifecycle.
 
 ### Exit codes
 
@@ -172,7 +113,7 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 | 2 | CLI/configuration/validation/INVALID failure |
 | 3 | One or more ERROR results or unrecoverable runtime failure |
 
-### Complete option matrix (3.6.0)
+### Complete option matrix
 
 `--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.10` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 
@@ -185,4 +126,11 @@ Load uses the scenario as the base and explicit workload options override the co
   --max-concurrent 4 --overload-policy drop --format json
 ```
 
-The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
+Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed overrides before expression evaluation. The same option works for `debug`, single-workload Load scenarios, and `load --debug template|flow|tool <id>`. Quick Load uses `load/load.yaml` when present; otherwise provide a complete policy on the command line. For example:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
+```
+
+The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.

@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,7 +41,8 @@ class LoadReportTest {
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         evidence.put("count", 1);
         evidence.put("items", Collections.<Map<String, Object>>singletonList(new LinkedHashMap<String, Object>() {{
-            put("iterationId", "steady-1"); put("status", "SAMPLE"); put("path", "samples/00001-deadbeef.json");
+            put("workloadId", "payments<&"); put("execId", "exec-1"); put("iterationId", "steady-1");
+            put("status", "SAMPLE"); put("path", "samples/00001-deadbeef.json"); put("caseLog", "executions/exec-1/case log<&.log");
         }}));
         Map<String, Object> resources = new LinkedHashMap<String, Object>();
         Map<String, Object> dbHelper = new LinkedHashMap<String, Object>();
@@ -51,8 +54,12 @@ class LoadReportTest {
         LoadRunResult result = new LoadRunResult("run-24", scenario, started, started.plusSeconds(5), snapshot,
                 thresholds, evidence, resources);
 
-        Path report = new LoadReportWriter().write(temp, result);
         Path runDirectory = temp.resolve("load/run-24");
+        Files.createDirectories(runDirectory.resolve("samples"));
+        Files.write(runDirectory.resolve("samples/00001-deadbeef.json"), Collections.singletonList("evidence"), StandardCharsets.UTF_8);
+        Files.createDirectories(runDirectory.resolve("executions/exec-1"));
+        Files.write(runDirectory.resolve("executions/exec-1/case log<&.log"), Collections.singletonList("case log"), StandardCharsets.UTF_8);
+        Path report = new LoadReportWriter().write(temp, result);
         assertEquals(runDirectory.resolve("report/index.html").toAbsolutePath().normalize(), report.toAbsolutePath().normalize());
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.json")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.yaml")));
@@ -92,7 +99,45 @@ class LoadReportTest {
         assertTrue(html.contains("broker"));
         assertTrue(html.contains("timeoutCount"));
         assertTrue(html.contains("../samples/00001-deadbeef.json"));
+        assertTrue(html.contains("../executions/exec-1/case%20log%3C%26.log"));
+        assertTrue(html.contains("payments&lt;&amp;"));
         assertTrue(html.contains("window.ATT_LOAD_SUMMARY"));
+    }
+
+    @Test void reportDoesNotCreateCaseLogLinksForMissingOrEscapingArtifacts() throws Exception {
+        Instant started = Instant.parse("2026-09-22T04:00:00Z");
+        LoadScenario scenario = new LoadScenario(Paths.get("evidence.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, null,
+                Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                0, "", Collections.emptyMap(), Collections.emptyMap());
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        items.add(new LinkedHashMap<String, Object>() {{
+            put("workloadId", "safe"); put("iterationId", "iteration-1"); put("status", "FAILURE");
+            put("caseLog", "../outside/case.log"); put("path", "samples/retained.json");
+        }});
+        Path runDirectory = temp.resolve("load/evidence-links");
+        Files.createDirectories(runDirectory.resolve("samples"));
+        Files.write(runDirectory.resolve("samples/retained.json"), Collections.singletonList("evidence"), StandardCharsets.UTF_8);
+        Path outside = temp.resolve("outside");
+        Files.createDirectories(outside);
+        Files.write(outside.resolve("secret.json"), Collections.singletonList("secret"), StandardCharsets.UTF_8);
+        Files.createSymbolicLink(runDirectory.resolve("samples/escaped.json"), outside.resolve("secret.json"));
+        items.add(new LinkedHashMap<String, Object>() {{
+            put("workloadId", "symlink"); put("iterationId", "iteration-2"); put("status", "FAILURE");
+            put("path", "samples/escaped.json");
+        }});
+        evidence.put("items", items);
+        LoadRunResult result = new LoadRunResult("evidence-links", scenario, started, started.plusSeconds(1),
+                new LoadMetricsSnapshot(Collections.<String, Object>emptyMap(), Collections.<String, Map<String, Object>>emptyMap()),
+                LoadThresholdSummary.empty(), evidence, Collections.<String, Object>emptyMap());
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(html.contains("Case Log"));
+        assertTrue(html.contains("Not retained"));
+        assertFalse(html.contains("href=\"../../outside/case.log\""));
+        assertTrue(html.contains("href=\"../samples/retained.json\""));
+        assertFalse(html.contains("href=\"../samples/escaped.json\""));
     }
 
     @Test void reportHandlesEmptyMetricsAndRuntimeErrorStatus() throws Exception {

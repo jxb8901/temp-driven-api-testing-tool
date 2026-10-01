@@ -30,12 +30,24 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
     @Override
     public CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot)
             throws IOException, InterruptedException {
-        return run(ssh, remoteCommand, timeout, projectRoot, null);
+        return run(ssh, remoteCommand, timeout, timeout, projectRoot, null);
     }
 
     @Override
     public CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot,
                              CommandRunner.CapturePolicy capture) throws IOException, InterruptedException {
+        return run(ssh, remoteCommand, timeout, timeout, projectRoot, capture);
+    }
+
+    @Override
+    public CommandResult run(SshConfig ssh, String remoteCommand, Duration connectTimeout, Duration timeout,
+                             Path projectRoot) throws IOException, InterruptedException {
+        return run(ssh, remoteCommand, connectTimeout, timeout, projectRoot, null);
+    }
+
+    @Override
+    public CommandResult run(SshConfig ssh, String remoteCommand, Duration connectTimeout, Duration timeout,
+                             Path projectRoot, CommandRunner.CapturePolicy capture) throws IOException, InterruptedException {
         if (!Files.isRegularFile(knownHosts) || Files.isSymbolicLink(knownHosts) || !Files.isReadable(knownHosts)) {
             throw new IOException("Java SSH fallback requires a readable non-symlink known_hosts file: " + knownHosts);
         }
@@ -44,7 +56,8 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
             jsch.setKnownHosts(knownHosts.toString());
             if (!ssh.identityFile().isEmpty()) jsch.addIdentity(identityFile(ssh, projectRoot).toString());
         } catch (JSchException e) {
-            throw new IOException("Unable to initialize Java SSH authentication: " + e.getMessage(), e);
+            throw new SshResourceExecutor.SshOperationException("SSH_AUTH_ERROR",
+                    "Unable to initialize Java SSH authentication: " + e.getMessage(), e);
         }
 
         Session session = null;
@@ -55,12 +68,14 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
                 capture == null ? null : capture.stdoutArtifact());
         BoundedStreamCapture stderr = new BoundedStreamCapture(memoryLimit, artifactLimit,
                 capture == null ? null : capture.stderrArtifact());
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout.toMillis());
+        long deadline = System.nanoTime() + timeout.toNanos();
+        long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeout.toNanos());
+        boolean connectionPhase = true;
         try {
             session = jsch.getSession(ssh.user(), ssh.host(), ssh.port());
             session.setConfig("StrictHostKeyChecking", "yes");
             session.setConfig("PreferredAuthentications", "publickey,gssapi-with-mic");
-            session.connect(remainingMillis(deadline));
+            session.connect(remainingMillis(connectDeadline));
 
             channel = (ChannelExec) session.openChannel("exec");
             channel.setPty(false);
@@ -69,6 +84,8 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
             channel.setErrStream(stderr);
             channel.setCommand(remoteCommand);
             channel.connect(remainingMillis(deadline));
+            session.setTimeout(remainingMillis(deadline));
+            connectionPhase = false;
             while (!channel.isClosed()) {
                 if (System.nanoTime() >= deadline) {
                     channel.disconnect();
@@ -78,7 +95,8 @@ final class JschSshClient implements SshCommandRunner.JavaClient {
             }
             return result(channel.getExitStatus(), stdout, stderr, false);
         } catch (JSchException e) {
-            if (System.nanoTime() >= deadline || (e.getMessage() != null && e.getMessage().toLowerCase(java.util.Locale.ROOT).contains("timeout")))
+            if (System.nanoTime() >= deadline || (connectionPhase && System.nanoTime() >= connectDeadline)
+                    || (e.getMessage() != null && e.getMessage().toLowerCase(java.util.Locale.ROOT).contains("timeout")))
                 return result(-1, stdout, stderr, true);
             throw new IOException("Java SSH execution failed for " + ssh.destination() + ": " + e.getMessage(), e);
         } catch (IOException e) {

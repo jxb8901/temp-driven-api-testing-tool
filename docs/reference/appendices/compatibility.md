@@ -1,4 +1,4 @@
-### 14.2 Compatibility and Deprecated Aliases
+## Appendix B — Compatibility and Deprecated Aliases
 
 Compatibility exists to read established packages without creating a second current model. New authoring uses canonical `EXEC`, `META`, Action-local `output`, current schema versions, `--env`, and current Tool/DB/MQ contracts.
 

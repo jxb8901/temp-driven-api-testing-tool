@@ -1,6 +1,6 @@
 # ATT Load Scenario Examples
 
-本目錄的範例均使用 ATT 3.6.0 現行 schema att-load/v1.2。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
+本目錄的範例均使用 ATT 現行 schema att-load/v1.4。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
 
 ## 範例索引
 
@@ -15,11 +15,12 @@
 | multi-closed.yaml | 多個獨立 closed VU workload。 |
 | multi-arrival.yaml | 多個獨立 arrival-rate workload。 |
 | tool.yaml | 呼叫包內 deterministic Tool 的短範例。 |
+| quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
 
 ## 最小 closed workload
 
 ~~~yaml
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.4
 workloads:
   - id: default
     target: {type: template, id: V3_FLOW_EXAMPLE}
@@ -29,6 +30,36 @@ workloads:
 ~~~
 
 每個 Virtual User 重複執行固定 target。Think time 可設一個 duration，也可設定 min/max range。
+
+## Quick Load policy profile
+
+`quick-profile.yaml` 使用現行 `att-load/v1.4` policy-only descriptor，不包含 target 或 business data。複製到專案的 `load/load.yaml` 後，執行 `./att.sh load --debug template <id>`、`flow <id>` 或 `tool <id>`，即可將 sidecar inputs/vars/arguments 與此 policy 合併，再進入正常 Load runtime。CLI intensity options 會覆蓋 policy；若沒有 policy，命令列需提供完整 pacing policy。
+
+~~~yaml
+schemaVersion: att-load/v1.4
+load: {users: 2, duration: 10s}
+execution: {thinkTime: 250ms}
+evidence: {mode: failures}
+~~~
+
+## 每次 execution 的 typed vars
+
+Template/Flow workload 可設定 bootstrap `vars`。完整 reference 保留原生型別；expression 在每次 Load execution 的 EXEC.ID/EXEC.OUTPUT_DIR 初始化後評估：
+
+~~~yaml
+schemaVersion: att-load/v1.4
+workloads:
+  - id: payments
+    target: {type: template, id: PAYMENT_INVOKE}
+    inputs: {amount: 100}
+    vars:
+      amount: "${EXEC.INPUT.amount}"
+      total: "#{${EXEC.INPUT.amount} * 2}"
+      requestId: "REQ-${EXEC.ID}"
+    load: {users: 2, duration: 10s}
+~~~
+
+各 execution 的 map/list 相互獨立。Vars 可以引用其他 vars（不受宣告順序影響）；循環、缺少變數或外部/stateful calls 會在 target action 執行前失敗。第一次一般 `assign` 可取代 bootstrap variable。CLI 的 `--set vars.path=value` 會先修改 definition，再評估 expression。
 
 ## 自訂 Load execution ID
 

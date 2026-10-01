@@ -110,7 +110,7 @@ class LoadExecutionIdPatternTest {
 
     @Test void loadsCurrentScenarioIdFormatAndRejectsHistoricalSchema() throws Exception {
         installConfig();
-        String yaml = "schemaVersion: att-load/v1.2\nexecution:\n  execIdFormat: '${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}'\n"
+        String yaml = "schemaVersion: att-load/v1.3\nexecution:\n  execIdFormat: '${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}'\n"
                 + "workloads:\n  - id: one\n    target: {type: template, id: T}\n    load: {users: 1, duration: 1s}\n"
                 + "evidence: {resources: {output: none}}\n";
         Path path = root.resolve("load.yaml");
@@ -120,7 +120,7 @@ class LoadExecutionIdPatternTest {
         assertFalse(scenario.resourceOutputEnabled());
         assertEquals(scenario.execIdFormat(), scenario.forWorkload(scenario.workload()).execIdFormat());
         assertFalse(scenario.forWorkload(scenario.workload()).resourceOutputEnabled());
-        Files.write(path, yaml.replace("v1.2", "v1.1").getBytes("UTF-8"));
+        Files.write(path, yaml.replace("v1.3", "v1.2").getBytes("UTF-8"));
         assertThrows(Exception.class, () -> new LoadScenarioLoader(root).load(path));
     }
 

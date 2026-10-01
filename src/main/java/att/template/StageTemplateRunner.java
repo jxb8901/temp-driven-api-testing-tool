@@ -17,6 +17,7 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,12 @@ public class StageTemplateRunner {
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this.templateEngine = templateEngine; this.flows = flows; }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
+        try (UnifiedTemplateEngine.SourceScope ignored = templateEngine.pushSourceDirectory(template.directory())) {
+            return executeScoped(stageName, template, context, log);
+        }
+    }
+
+    private List<ValidationResult> executeScoped(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         for (TemplateAction action : template.actions()) {
             Instant started = Instant.now();
@@ -75,7 +82,7 @@ public class StageTemplateRunner {
                 actionStart.put("status", "START");
                 appendProgress(log, "ACTION", actionStart);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
-                else if ("tool".equals(type)) toolStatus = executeTool(stageName, action, context, log, output, targets, node);
+                else if ("tool".equals(type)) toolStatus = executeTool(stageName, template, action, context, log, output, targets, node);
                 else if ("db".equals(type)) toolStatus = executeDb(stageName, action, context, log, output, targets);
                 else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
@@ -179,7 +186,7 @@ public class StageTemplateRunner {
         appendProgress(log, "FLOW", flowEvent);
         String flowStatus = "ERROR";
         try {
-            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
             internal.addAll(execute(stageName + "." + action.id(), body, context, log));
             ResultStatus status = aggregateFlow(internal);
             flowStatus = status.name();
@@ -230,9 +237,6 @@ public class StageTemplateRunner {
                                Map<String, Object> output, List<String> targets) throws Exception {
         Path templateRoot = template.directory().toRealPath();
         List<Path> matches = payloadResolver.resolve(template.directory(), action.payload());
-        String configuredFormat = action.templateFormat() == null ? "auto" : action.templateFormat().toLowerCase(java.util.Locale.ROOT);
-        if (!java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(configuredFormat))
-            throw new IllegalArgumentException("templateFormat must be auto, text, json, yaml, or xml");
         Map<String, Object> multiple = new LinkedHashMap<String, Object>();
         List<Map<String, Object>> sourceEvidence = new ArrayList<Map<String, Object>>();
         Object single = null;
@@ -248,27 +252,18 @@ public class StageTemplateRunner {
                         att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
                         "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
             }
-            String format = configuredFormat.equals("auto") ? inferredFormat(source) : configuredFormat;
-            Object value = new DocumentValue(format, rendered);
+            Object value = rendered;
             if (matches.size() == 1) single = value; else multiple.put(relative, value);
             Map<String, Object> item = new LinkedHashMap<String, Object>();
-            item.put("source", relative); item.put("templateFormat", format);
+            item.put("source", relative);
             item.put("sourceBytes", Long.valueOf(Files.size(source))); item.put("renderedChars", Integer.valueOf(rendered.length()));
             sourceEvidence.add(item);
         }
         output.put("result", matches.size() == 1 ? single : multiple);
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
-        evidence.put("resource", "render"); evidence.put("templateFormat", configuredFormat);
+        evidence.put("resource", "render");
         evidence.put("sources", sourceEvidence); evidence.put("durationMs", Long.valueOf((System.nanoTime() - started) / 1000000L));
         output.put("evidence", evidence);
-    }
-
-    private String inferredFormat(Path source) {
-        String name = source.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-        if (name.endsWith(".json")) return "json";
-        if (name.endsWith(".yaml") || name.endsWith(".yml")) return "yaml";
-        if (name.endsWith(".xml")) return "xml";
-        return "text";
     }
 
     private Path renderPayloadRoot(Path templateDirectory, String payload) throws Exception {
@@ -487,7 +482,7 @@ public class StageTemplateRunner {
         return type == null ? null : String.valueOf(type);
     }
 
-    private ResultStatus executeTool(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
+    private ResultStatus executeTool(String stageName, StageTemplate template, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
                              List<String> targets, Map<String, Object> node) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
@@ -528,9 +523,11 @@ public class StageTemplateRunner {
                 if (invocation.get("TOOL") != null) node.put("TOOL", invocation.get("TOOL"));
                 if (invocation.get("DB") != null) node.put("DB", invocation.get("DB"));
                 if (invocation.get("HTTP") != null) node.put("HTTP", invocation.get("HTTP"));
+                if (invocation.get("SSH") != null) node.put("SSH", invocation.get("SSH"));
                 if (!operation.executionSuccess()) {
                     if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
-                            || ("http".equals(kind) && httpTimeout(operation.outputMetadata())))
+                            || ("http".equals(kind) && httpTimeout(operation.outputMetadata()))
+                            || sshTimeout(result.invocation()))
                             && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                         invocation.put("retryReason", "TIMEOUT");
                         appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
@@ -542,8 +539,13 @@ public class StageTemplateRunner {
                     return ResultStatus.ERROR;
                 }
                 context.setActionOutput(output);
-                runEvidenceCollectors(action, number, context, log, output, invocation);
-                boolean passed = evaluateAssertion(action, output, context, log);
+                runEvidenceCollectors(template, action, number, context, log, output, invocation);
+                boolean passed;
+                try {
+                    passed = evaluateAssertion(action, output, context, log);
+                } catch (Exception error) {
+                    throw phaseDiagnostic(error, template, action, "actions." + action.id() + ".assert");
+                }
                 if (output.get("assertion") != null) invocation.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) output.get("assertion")));
                 if (passed) {
                     output.put("winningAttempt", number);
@@ -576,6 +578,7 @@ public class StageTemplateRunner {
                 replaceActionEvidence(output, failedEvidence);
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
+                if (evidence.get("SSH") != null) node.put("SSH", evidence.get("SSH"));
                 if ("TIMEOUT".equals(e.category()) && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
                     evidence.put("retryReason", "TIMEOUT");
                     appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
@@ -623,7 +626,19 @@ public class StageTemplateRunner {
         return "HTTP_TIMEOUT".equals(type) || "HTTP_POOL_TIMEOUT".equals(type);
     }
 
-    private void runEvidenceCollectors(TemplateAction action, int attempt, CaseRuntimeContext context,
+    @SuppressWarnings("unchecked")
+    private boolean sshTimeout(Map<String, Object> invocation) {
+        Object ssh = invocation == null ? null : invocation.get("SSH");
+        if (!(ssh instanceof Map)) return false;
+        // Transfers must never be replayed automatically, including through call-backed Tools.
+        if (!"execute".equals(((Map<String, Object>) ssh).get("operation"))) return false;
+        Object error = ((Map<String, Object>) ssh).get("error");
+        if (!(error instanceof Map)) return false;
+        Object category = ((Map<String, Object>) error).get("category");
+        return "SSH_TIMEOUT".equals(category) || "SSH_POOL_TIMEOUT".equals(category);
+    }
+
+    private void runEvidenceCollectors(StageTemplate template, TemplateAction action, int attempt, CaseRuntimeContext context,
                                        CaseExecutionLog log, Map<String, Object> output,
                                        Map<String, Object> invocation) throws Exception {
         if (action.evidence().isEmpty()) return;
@@ -642,14 +657,26 @@ public class StageTemplateRunner {
                     throw new IllegalArgumentException("MQ operations may only be the primary call of a type: tool Action");
                 }
                 String invocationId = context.qualifiedActionId(action.id()) + ".evidence." + collector.id() + "." + attempt;
-                att.exec.ToolInvocationResult result = templateEngine.executeToolAttempt(collector.call(), context, log,
-                        invocationId, collector.timeoutMs(), "", false, true);
+                // Satisfy the executor log contract without publishing unprojected process/resource output.
+                att.exec.ToolInvocationResult result;
+                try (CaseExecutionLog executorLog = CaseExecutionLog.discarding(log == null
+                        ? context.caseOutputDirectory().resolve("case.log") : log.path())) {
+                    result = templateEngine.executeToolAttempt(collector.call(), context, executorLog,
+                            invocationId, collector.timeoutMs(), "", false, true);
+                }
                 Object status = result.invocation().get("status");
                 boolean passed = result.executionSuccess() && "PASS".equalsIgnoreCase(String.valueOf(status));
+                if (!passed) result = CollectorExceptionEvidence.project(result);
                 record.put("status", passed ? "PASS" : (status == null ? "ERROR" : String.valueOf(status)));
                 record.put("success", Boolean.valueOf(passed));
                 record.put("invocationId", result.invocationId());
                 record.put("result", result.output());
+                if (!result.operationResult().evidence().isEmpty()) {
+                    record.put("evidence", result.operationResult().evidence());
+                }
+                if (result.operationResult().diagnostic() != null && !result.operationResult().diagnostic().isEmpty()) {
+                    record.put("diagnostic", result.operationResult().diagnostic());
+                }
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 evidence.put(collector.id(), record);
                 Map<String, Object> collectorEvidence = new LinkedHashMap<String, Object>();
@@ -657,8 +684,11 @@ public class StageTemplateRunner {
                 ActionExecutionResult.mergeEvidence(attemptEvidence, collectorEvidence);
                 ActionExecutionResult.mergeEvidence(outputEvidence(output), collectorEvidence);
                 if (!passed) {
-                    record.put("error", collectorError(result.invocation(), "Evidence collector did not complete successfully"));
-                    throw new EvidenceCollectorFailure(collector, record);
+                    record.put("error", collectorResultError(result, "Evidence collector did not complete successfully"));
+                    if (record.get("diagnostic") != null) record.put("operationDiagnostic", record.get("diagnostic"));
+                    att.validation.DiagnosticException diagnostic = collectorDiagnostic(template, action, collector, record, null);
+                    record.put("diagnostic", diagnostic.toDiagnostic().toMap());
+                    throw new EvidenceCollectorFailure(collector, record, diagnostic);
                 }
                 appendEvidenceLog(log, action, attempt, collector, record);
             } catch (EvidenceCollectorFailure failure) {
@@ -667,20 +697,64 @@ public class StageTemplateRunner {
                 appendEvidenceLog(log, action, attempt, collector, record);
                 if ("stop".equals(collector.onFailure())) throw failure;
             } catch (Exception error) {
+                if (error instanceof att.exec.ToolExecutionException) {
+                    error = CollectorExceptionEvidence.project((att.exec.ToolExecutionException) error);
+                }
                 record.put("status", error instanceof att.exec.ToolExecutionException
                         ? ((att.exec.ToolExecutionException) error).category() : "ERROR");
                 record.put("success", false);
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 record.put("error", collectorError(error));
+                Map<String, Object> failureEvidence = collectorFailureEvidence(error);
+                if (!failureEvidence.isEmpty()) record.put("evidence", failureEvidence);
+                att.validation.DiagnosticException diagnostic = collectorDiagnostic(template, action, collector, record, error);
+                record.put("diagnostic", diagnostic.toDiagnostic().toMap());
                 evidence.put(collector.id(), record);
                 Map<String, Object> collectorEvidence = new LinkedHashMap<String, Object>();
                 collectorEvidence.put("collectors", evidence);
                 ActionExecutionResult.mergeEvidence(attemptEvidence, collectorEvidence);
                 ActionExecutionResult.mergeEvidence(outputEvidence(output), collectorEvidence);
                 appendEvidenceLog(log, action, attempt, collector, record);
-                if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, error);
+                if ("stop".equals(collector.onFailure())) throw new EvidenceCollectorFailure(collector, record, diagnostic);
             }
         }
+    }
+
+    private att.validation.DiagnosticException collectorDiagnostic(StageTemplate template, TemplateAction action,
+                                                                    EvidenceCollector collector, Map<String, Object> record,
+                                                                    Throwable failure) {
+        String field = "actions." + action.id() + ".evidence." + collector.id() + ".call";
+        att.validation.DiagnosticException existing = failure == null ? null : att.validation.DiagnosticException.find(failure);
+        if (existing != null) return phaseDiagnostic(existing, template, action, field);
+        Object error = record.get("error");
+        String message = error instanceof Map && ((Map<?, ?>) error).get("message") != null
+                ? String.valueOf(((Map<?, ?>) error).get("message"))
+                : failure instanceof Exception ? safeMessage((Exception) failure) : "Evidence collector failed";
+        if (message == null || message.trim().isEmpty()) message = "Evidence collector failed";
+        att.validation.DiagnosticException generated = new att.validation.DiagnosticException(
+                att.validation.DiagnosticCodes.TOOL_EXECUTION,
+                "Evidence collector '" + collector.id() + "' failed",
+                message,
+                null, field, null, null, null, template.name(), action.id(),
+                "Inspect the collector call and its execution evidence for the underlying resource failure.", failure);
+        return phaseDiagnostic(generated, template, action, field);
+    }
+
+    private Map<String, Object> collectorResultError(att.exec.ToolInvocationResult result, String fallback) {
+        if (result == null) return collectorError((Object) null, fallback);
+        // Defer the fallback until the native operation diagnostic/result has been consulted.
+        Map<String, Object> error = collectorError(result.invocation(), "");
+        Map<String, Object> diagnostic = result.operationResult().diagnostic();
+        String message = firstMessage(diagnostic);
+        if (isBlank(String.valueOf(error.get("message"))) && !isBlank(message)) error.put("message", message);
+        if (error.get("category") == null && !result.executionSuccess()) error.put("category", "OPERATION_FAILED");
+        if (error.get("category") == null && "ERROR".equalsIgnoreCase(String.valueOf(result.invocation().get("status")))) {
+            error.put("category", "OPERATION_FAILED");
+        }
+        if (isBlank(String.valueOf(error.get("message"))) || fallback.equals(String.valueOf(error.get("message")))) {
+            error.put("message", operationFailureMessage(result, fallback));
+        }
+        return error;
     }
 
     private Map<String, Object> collectorError(Object source, String fallback) {
@@ -688,23 +762,92 @@ public class StageTemplateRunner {
         if (source instanceof Map) {
             Map<?, ?> invocation = (Map<?, ?>) source;
             Object category = invocation.get("category");
-            Object message = invocation.get("error");
+            if (category == null) category = nestedValue(invocation.get("error"), "type", "category");
+            Object message = firstMessage(invocation.get("message"), invocation.get("error"), invocation.get("diagnostic"));
             if (category != null) error.put("category", category);
-            if (message != null) error.put("message", message);
+            if (!isBlank(String.valueOf(message))) error.put("message", message);
             Object exitCode = invocation.get("exitCode");
+            if (exitCode == null) exitCode = nestedValue(invocation.get("error"), "exitCode", "reasonCode");
             if (exitCode != null) error.put("exitCode", exitCode);
+            if (invocation.get("error") instanceof Map) {
+                Map<?, ?> nativeError = (Map<?, ?>) invocation.get("error");
+                for (String field : new String[] {"type", "sqlState", "vendorCode", "cancellation", "completionCode", "reasonCode", "reason"}) {
+                    if (nativeError.containsKey(field)) error.put(field, nativeError.get(field));
+                }
+            }
+            if (error.get("category") == null && "ERROR".equalsIgnoreCase(String.valueOf(invocation.get("status")))) {
+                error.put("category", "OPERATION_FAILED");
+            }
         }
-        if (error.isEmpty()) error.put("message", fallback);
+        if (isBlank(String.valueOf(error.get("message")))) error.put("message", fallback);
         return error;
     }
 
     private Map<String, Object> collectorError(Exception error) {
         if (error instanceof att.exec.ToolExecutionException) {
             att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
-            return collectorError(tool.evidence(), tool.getMessage());
+            Map<String, Object> result = collectorError(tool.evidence(), tool.getMessage());
+            if (result.get("category") == null) result.put("category", tool.category());
+            if (result.get("exitCode") == null && tool.exitCode() != null) result.put("exitCode", tool.exitCode());
+            if (isBlank(String.valueOf(result.get("message")))) result.put("message", tool.getMessage());
+            return result;
         }
-        return collectorError(null, safeMessage(error));
+        return collectorError((Object) null, safeMessage(error));
     }
+
+    private Map<String, Object> collectorFailureEvidence(Exception error) {
+        if (error instanceof att.exec.ToolExecutionException) {
+            att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
+            return ActionExecutionResult.evidence("tool", CollectorExceptionEvidence.project(tool).evidence());
+        }
+        att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.find(error);
+        if (diagnostic == null) return Collections.emptyMap();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("diagnostic", diagnostic.toDiagnostic().toMap());
+        return result;
+    }
+
+    private String operationFailureMessage(att.exec.ToolInvocationResult result, String fallback) {
+        String status = String.valueOf(result.invocation().get("status"));
+        Object exitCode = result.invocation().get("exitCode");
+        if (!isBlank(status) && !"null".equalsIgnoreCase(status)) {
+            return exitCode == null
+                    ? "Evidence collector operation failed with status " + status
+                    : "Evidence collector operation failed with status " + status + " (exitCode=" + exitCode + ")";
+        }
+        return fallback;
+    }
+
+    private Object nestedValue(Object value, String... keys) {
+        if (!(value instanceof Map)) return null;
+        Map<?, ?> map = (Map<?, ?>) value;
+        for (String key : keys) if (map.get(key) != null) return map.get(key);
+        return null;
+    }
+
+    private String firstMessage(Object... values) {
+        for (Object value : values) {
+            String message = messageValue(value);
+            if (!isBlank(message)) return message;
+        }
+        return "";
+    }
+
+    private String messageValue(Object value) {
+        if (value == null) return "";
+        if (value instanceof Map) {
+            Map<?, ?> map = (Map<?, ?>) value;
+            for (String key : new String[]{"message", "error", "detail", "reason", "description", "summary"}) {
+                String nested = messageValue(map.get(key));
+                if (!isBlank(nested)) return nested;
+            }
+            return "";
+        }
+        String message = String.valueOf(value).trim();
+        return message.isEmpty() ? "" : message;
+    }
+
+    private boolean isBlank(String value) { return value == null || value.trim().isEmpty() || "null".equalsIgnoreCase(value.trim()); }
 
     private void appendEvidenceLog(CaseExecutionLog log, TemplateAction action, int attempt,
                                    EvidenceCollector collector, Map<String, Object> record) {
@@ -717,10 +860,18 @@ public class StageTemplateRunner {
 
     private static final class EvidenceCollectorFailure extends Exception {
         private EvidenceCollectorFailure(EvidenceCollector collector, Map<String, Object> record) {
-            super("Evidence collector '" + collector.id() + "' failed: " + String.valueOf(record.get("status")));
+            super("Evidence collector '" + collector.id() + "' failed: " + rootCause(record));
         }
         private EvidenceCollectorFailure(EvidenceCollector collector, Map<String, Object> record, Throwable cause) {
-            super("Evidence collector '" + collector.id() + "' failed: " + String.valueOf(record.get("status")), cause);
+            super("Evidence collector '" + collector.id() + "' failed: " + rootCause(record), cause);
+        }
+        private static String rootCause(Map<String, Object> record) {
+            Object error = record.get("error");
+            if (error instanceof Map) {
+                Object message = ((Map<?, ?>) error).get("message");
+                if (message != null && !String.valueOf(message).trim().isEmpty()) return String.valueOf(message);
+            }
+            return String.valueOf(record.get("status"));
         }
     }
 
@@ -891,6 +1042,24 @@ public class StageTemplateRunner {
         Object existing = node.get("evidenceError");
         String message = safeMessage(error);
         node.put("evidenceError", existing == null ? message : String.valueOf(existing) + "; " + message);
+    }
+    private att.validation.DiagnosticException phaseDiagnostic(Exception error, StageTemplate template,
+                                                               TemplateAction action, String field) {
+        att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
+        if (typed == null) {
+            typed = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_EXECUTION,
+                    "Action '" + action.id() + "' failed", safeMessage(error), null, field,
+                    null, null, null, template.name(), action.id(),
+                    "Inspect the action field and its execution evidence.", error);
+        }
+        return phaseDiagnostic(typed, template, action, field);
+    }
+    private att.validation.DiagnosticException phaseDiagnostic(att.validation.DiagnosticException typed,
+                                                               StageTemplate template, TemplateAction action,
+                                                               String field) {
+        if (typed.file() != null || template.sourceFile() == null) return typed;
+        return att.config.YamlSupport.locate(typed, template.sourceFile(), field)
+                .withLocation(null, null, null, null, null, template.name(), action.id());
     }
     private att.validation.DiagnosticException detailed(Exception error, StageTemplate template, TemplateAction action, String executionField) {
         att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);

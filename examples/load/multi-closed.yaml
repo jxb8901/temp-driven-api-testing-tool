@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.4
 seed: 12345
 workloads:
 - id: account-date

@@ -284,19 +284,19 @@ class DbHelperExecutorTest {
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.add(new TemplateAction("query", map("type", "db", "db", "orders",
                 "query", map("sqlFile", "sql/orders.sql", "params", Collections.<Object>singletonList("${CASE.customerId}"))),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         actions.add(new TemplateAction("queryText", map("type", "db", "db", "orders",
-                "query", map("sql", "select ONE", "params", Collections.emptyList())), "att-template/v3.3"));
+                "query", map("sql", "select ONE", "params", Collections.emptyList())), "att-template/v3.4"));
         actions.add(new TemplateAction("assign", map("type", "assign", "name", "orders",
                 "expression", "#{db.orders.query(sql='select ONE', params=[${CASE.customerId}, 'OPEN'])}"),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         actions.add(new TemplateAction("scalar", map("type", "assign", "name", "orderId",
-                "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"), "att-template/v3.3"));
+                "expression", "#{db.orders.scalar(sql='select SCALAR', params=[])}"), "att-template/v3.4"));
         actions.add(new TemplateAction("printRows", map("type", "log",
-                "value", "${ACTIONS.queryText.output.result}", "format", "sqlplus"), "att-template/v3.3"));
+                "value", "${ACTIONS.queryText.output.result}", "format", "sqlplus"), "att-template/v3.4"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, executor))
-                .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v3.3"), context, log);
+                .execute("verify", new StageTemplate("DB", tempDir, actions, "att-template/v3.4"), context, log);
         assertEquals(5, results.size());
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS),
                 Arrays.asList(results.get(0).status(), results.get(1).status(), results.get(2).status(),
@@ -367,11 +367,11 @@ class DbHelperExecutorTest {
 
         List<TemplateAction> actions = new ArrayList<TemplateAction>();
         actions.add(new TemplateAction("scalar", map("type", "tool", "call", "#{orders.id()}"),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         actions.add(new TemplateAction("close", map("type", "tool", "call", "#{orders.close(status='DONE')}"),
-                "att-template/v3.3"));
+                "att-template/v3.4"));
         List<ValidationResult> results = new StageTemplateRunner(engine).execute("verify",
-                new StageTemplate("DB facade", tempDir, actions, "att-template/v3.3"), context, log);
+                new StageTemplate("DB facade", tempDir, actions, "att-template/v3.4"), context, log);
         assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
         assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
         assertEquals("A100", context.resolve("ACTIONS.scalar.output.result"));
@@ -433,6 +433,66 @@ class DbHelperExecutorTest {
         assertEquals(Collections.<Object>singletonList("7"), driver.states.get("jdbc:att-test:db-cache-rollback-fail").boundValues);
         executor.close();
         secondLog.close();
+    }
+
+    @Test void callBackedDbCollectorRetainsSafeReturnedSqlFailureSummary() throws Exception {
+        String privateValue = "private-param-739";
+        for (String operation : Arrays.asList("query", "update")) {
+            for (String mode : Arrays.asList("continue", "stop")) {
+                DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB",
+                        "jdbc:att-test:collector-" + operation + "-" + mode, "user", "secret", "",
+                        Collections.<String, String>emptyMap(), false, "driverDefault", 5,
+                        "statement", "commit", 10, 1024, 8192, "full", "values", null);
+                Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("pin",
+                        new att.config.ToolArgumentConfig("pin", "PIN", "", true, ""));
+                ToolConfig tool = callTool("orders.fail", "fail", "orders",
+                        "#{db.orders." + operation + "(sql='select FAIL_PRIVATE where id=?', params=[${input.pin}])}",
+                        arguments);
+                FrameworkConfig config = frameworkConfig(Collections.singletonMap(tool.key(), tool),
+                        Collections.singletonMap("orders", helper));
+                DbHelperExecutor executor = new DbHelperExecutor(tempDir, config);
+                try {
+                    executor.beginCase();
+                    CaseRuntimeContext context = context();
+                    context.beginStage(new StageCaseData("invoke", "T", map("pin", privateValue)), "T", tempDir);
+                    TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                            "evidence", map("dbFailure", map("call", "#{orders.fail(pin=${EXEC.INPUT.pin})}",
+                                    "onFailure", mode))));
+                    Path caseLogPath = tempDir.resolve("collector-" + operation + "-" + mode + ".log");
+                    List<ValidationResult> results;
+                    try (CaseExecutionLog log = new CaseExecutionLog(caseLogPath)) {
+                        results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config), executor))
+                                .execute("invoke", new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+                    }
+                    assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+                    String path = "ACTIONS.call.output.evidence.collectors.dbFailure";
+                    assertEquals("ERROR", context.resolve(path + ".status"));
+                    assertNull(context.resolve(path + ".result"));
+                    assertEquals("SQL_ERROR", context.resolve(path + ".error.type"));
+                    assertEquals("SQL_ERROR", context.resolve(path + ".error.category"));
+                    assertEquals("rejected parameter [REDACTED_SECRET]", context.resolve(path + ".error.message"));
+                    assertEquals("42000", context.resolve(path + ".error.sqlState"));
+                    assertEquals(99, context.resolve(path + ".error.vendorCode"));
+                    String evidence = path + ".evidence.db.invocations[0]";
+                    assertEquals("orders", context.resolve(evidence + ".db"));
+                    assertEquals(operation, context.resolve(evidence + ".operation"));
+                    assertEquals("SQL_ERROR", context.resolve(evidence + ".error.type"));
+                    assertEquals("42000", context.resolve(evidence + ".error.sqlState"));
+                    assertEquals(99, context.resolve(evidence + ".error.vendorCode"));
+                    for (String field : Arrays.asList("result", "rows", "parameters", "sql")) {
+                        assertNull(context.resolve(evidence + "." + field), field);
+                    }
+                    String published = att.validation.JsonSupport.write(context.resolve(path));
+                    String caseLog = new String(Files.readAllBytes(caseLogPath), "UTF-8");
+                    assertFalse(published.contains(privateValue));
+                    assertFalse(caseLog.contains(privateValue));
+                    assertTrue(caseLog.contains("rejected parameter [REDACTED_SECRET]"));
+                    assertTrue(caseLog.contains("42000"));
+                    assertTrue(caseLog.contains("99"));
+                    if ("stop".equals(mode)) assertTrue(results.get(0).message().contains("rejected parameter [REDACTED_SECRET]"));
+                } finally { executor.close(); }
+            }
+        }
     }
 
     private DbHelperExecutor executor(Map<String, DbHelperConfig> helpers) {
@@ -554,11 +614,15 @@ class DbHelperExecutorTest {
                     if ("setMaxRows".equals(name) || "close".equals(name)) return null;
                     if ("executeQuery".equals(name)) {
                         state.executions++;
+                        if (sql.contains("FAIL_PRIVATE")) throw new SQLException("rejected parameter "
+                                + state.boundValues.get(state.boundValues.size() - 1), "42000", 99);
                         if (sql.contains("FAIL")) throw new SQLException("expected failure", "42000", 99);
                         return rows(sql);
                     }
                     if ("executeUpdate".equals(name)) {
                         state.executions++;
+                        if (sql.contains("FAIL_PRIVATE")) throw new SQLException("rejected parameter "
+                                + state.boundValues.get(state.boundValues.size() - 1), "42000", 99);
                         if (sql.contains("FAIL")) throw new SQLException("expected failure", "42000", 99);
                         return 2;
                     }

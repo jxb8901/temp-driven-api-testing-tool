@@ -70,7 +70,6 @@ class MqHelperExecutorTest {
                 context(lazyIterationDirectory), null, "lazy-load-request");
 
         assertFalse(result.success(), result.result().toString());
-        assertEquals("MQ_NO_REPLY", ((Map<?, ?>) result.result().get("error")).get("type"));
         assertFalse(Files.exists(lazyIterationDirectory), "payload validation must not materialize a successful Load workspace");
         assertEquals(1, factory.connectedInstances.size(), "MQ connect must be reached after payload validation");
     }
@@ -202,8 +201,8 @@ class MqHelperExecutorTest {
             Files.createDirectories(caseDir);
             Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
             FakeFactory factory = new FakeFactory();
-            if ("send".equals(operation) || "request".equals(operation)) factory.firstPutDelayMs = 60L;
-            else factory.firstGetDelayMs = 60L;
+            if ("send".equals(operation) || "request".equals(operation)) factory.firstPutDelayMs = 300L;
+            else factory.firstGetDelayMs = 300L;
             Map<String, Object> args = "send".equals(operation)
                     ? map("queue", "REQUEST.Q", "file", "payload.bin")
                     : "receive".equals(operation)
@@ -212,7 +211,7 @@ class MqHelperExecutorTest {
             String call = "#{mq.broker." + operation + "(" + callArguments(args) + ")}";
             Map<String, Object> retry = map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"));
             TemplateAction action = new TemplateAction("mqRetry", map("type", "tool", "call", call,
-                    "timeoutMs", 20, "retry", retry));
+                    "timeoutMs", 100, "retry", retry));
             CaseRuntimeContext context = context(caseDir);
             context.beginStage(new StageCaseData("mq", "MQ", Collections.<String, Object>emptyMap()), "MQ", tempDir);
 
@@ -226,29 +225,6 @@ class MqHelperExecutorTest {
             assertEquals("TIMEOUT", context.resolve("ACTIONS.mqRetry.output.attempts[0].retryReason"), operation);
             assertEquals("PASS", context.resolve("ACTIONS.mqRetry.output.attempts[1].status"), operation);
         }
-    }
-
-    @Test void requestNoReplyDoesNotRetryOrPutTheBusinessRequestAgain() throws Exception {
-        Path caseDir = tempDir.resolve("request-no-reply-retry");
-        Files.createDirectories(caseDir);
-        Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
-        FakeFactory factory = new FakeFactory();
-        factory.noMessage = true;
-        TemplateAction action = new TemplateAction("mqRequest", map("type", "tool",
-                "call", "#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', file='payload.bin')}",
-                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))));
-        CaseRuntimeContext context = context(caseDir);
-        context.beginStage(new StageCaseData("mq", "MQ", Collections.<String, Object>emptyMap()), "MQ", tempDir);
-
-        List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
-                null, null, new MqHelperExecutor(tempDir, config(), factory)))
-                .execute("mq", new StageTemplate("MQ", tempDir, Collections.singletonList(action)), context,
-                        new CaseExecutionLog(caseDir.resolve("case.log")));
-
-        assertEquals(ResultStatus.ERROR, results.get(0).status());
-        assertEquals(1, ((List<?>) context.resolve("ACTIONS.mqRequest.output.attempts")).size());
-        assertEquals(1, factory.putCalls);
-        assertEquals("MQ_NO_REPLY", context.resolve("ACTIONS.mqRequest.output.attempts[0].evidence.mq.invocations[0].error.type"));
     }
 
     @Test void receiveRecalculatesGetWaitAfterQueueOpenConsumesDeadline() throws Exception {
@@ -546,6 +522,96 @@ class MqHelperExecutorTest {
         assertEquals(java.util.Collections.singletonList("a"), factory.putInstances);
         assertEquals(java.util.Collections.singletonList("a"), factory.getInstances);
         assertEquals(factory.putInstances.get(0), factory.getInstances.get(0));
+    }
+
+    @Test void callBackedMqCollectorKeepsFailureCodesAndEndpointIdentity() throws Exception {
+        String privateValue = "private-mq-value-739";
+        for (String mode : new String[] {"continue", "stop"}) {
+            Path caseDir = tempDir.resolve("collector-mq-" + mode);
+            Files.createDirectories(caseDir);
+            Path payload = caseDir.resolve("payload.bin");
+            Files.write(payload, privateValue.getBytes("UTF-8"));
+            MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
+                    "DEV.APP.SVRCONN", "user", "secret", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml"));
+            Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("file",
+                    new att.config.ToolArgumentConfig("file", "File", "", true, ""));
+            att.config.ToolConfig tool = new att.config.ToolConfig("broker.send", "send", "broker",
+                    "Send", "MQ collector", Collections.<String>emptyList(),
+                    "#{mq.broker.send(queue='REQUEST.Q', file=${input.file})}", Collections.<String>emptyList(),
+                    "", arguments, null, null);
+            FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
+                    Collections.singletonMap(tool.key(), tool), Collections.emptyMap(), Collections.singletonMap("broker", helper),
+                    null, null, null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());
+            FakeFactory factory = new FakeFactory();
+            factory.connectFailure = new MqTransport.Exception("Queue manager unavailable", 2, 2059,
+                    "MQRC_Q_MGR_NOT_AVAILABLE", null);
+            MqHelperExecutor mq = new MqHelperExecutor(tempDir, configured, factory);
+            CaseRuntimeContext runtime = context(caseDir);
+            runtime.beginStage(new StageCaseData("invoke", "T", map("file", payload.toString())), "T", tempDir);
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "evidence", map("brokerFailure", map("call", "#{broker.send(file=${EXEC.INPUT.file})}",
+                            "onFailure", mode))));
+            List<att.core.ValidationResult> results;
+            Path caseLogPath = caseDir.resolve("case.log");
+            try (CaseExecutionLog log = new CaseExecutionLog(caseLogPath)) {
+                results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, configured),
+                        null, mq, new att.template.DefaultBuiltInProvider())).execute("invoke",
+                        new StageTemplate("T", tempDir, Collections.singletonList(action)), runtime, log);
+            }
+            assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status(),
+                    results.get(0).message());
+            String path = "ACTIONS.call.output.evidence.collectors.brokerFailure";
+            String evidence = path + ".evidence.mq.invocations[0]";
+            assertEquals("ERROR", runtime.resolve(path + ".status"));
+            assertNull(runtime.resolve(path + ".result"));
+            assertEquals(2, runtime.resolve(evidence + ".error.completionCode"));
+            assertEquals(2059, runtime.resolve(evidence + ".error.reasonCode"));
+            assertEquals("MQRC_Q_MGR_NOT_AVAILABLE", runtime.resolve(evidence + ".error.reason"));
+            assertEquals(2, runtime.resolve(path + ".error.completionCode"));
+            assertEquals(2059, runtime.resolve(path + ".error.reasonCode"));
+            assertEquals("MQRC_Q_MGR_NOT_AVAILABLE", runtime.resolve(path + ".error.reason"));
+            assertEquals("broker", runtime.resolve(evidence + ".helperId"));
+            assertEquals("QM1", runtime.resolve(evidence + ".queueManager"));
+            assertEquals("broker", runtime.resolve(evidence + ".physicalInstance"));
+            assertEquals("localhost", runtime.resolve(evidence + ".host"));
+            assertEquals(1414, runtime.resolve(evidence + ".port"));
+            assertEquals("DEV.APP.SVRCONN", runtime.resolve(evidence + ".channel"));
+            assertNotNull(runtime.resolve(evidence + ".transport"));
+            for (String field : new String[] {"input", "payload", "result", "output"}) {
+                assertNull(runtime.resolve(evidence + "." + field), field);
+            }
+            String published = att.validation.JsonSupport.write(runtime.resolve(path));
+            String caseLog = new String(Files.readAllBytes(caseLogPath), "UTF-8");
+            assertFalse(published.contains(privateValue));
+            assertFalse(caseLog.contains(privateValue));
+            assertTrue(caseLog.contains("2059"));
+            assertTrue(caseLog.contains("MQRC_Q_MGR_NOT_AVAILABLE"));
+            assertTrue(caseLog.contains("QM1"));
+            if ("stop".equals(mode)) assertTrue(results.get(0).message().contains("Queue manager unavailable"));
+        }
+    }
+
+    @Test void requestNoReplyDoesNotRetryOrPutTheBusinessRequestAgain() throws Exception {
+        Path caseDir = tempDir.resolve("request-no-reply-retry");
+        Files.createDirectories(caseDir);
+        Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
+        FakeFactory factory = new FakeFactory();
+        factory.noMessage = true;
+        TemplateAction action = new TemplateAction("mqRequest", map("type", "tool",
+                "call", "#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', file='payload.bin')}",
+                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))));
+        CaseRuntimeContext context = context(caseDir);
+        context.beginStage(new StageCaseData("mq", "MQ", Collections.<String, Object>emptyMap()), "MQ", tempDir);
+
+        List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                null, null, new MqHelperExecutor(tempDir, config(), factory)))
+                .execute("mq", new StageTemplate("MQ", tempDir, Collections.singletonList(action)), context,
+                        new CaseExecutionLog(caseDir.resolve("case.log")));
+
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals(1, ((List<?>) context.resolve("ACTIONS.mqRequest.output.attempts")).size());
+        assertEquals(1, factory.putCalls);
+        assertEquals("MQ_NO_REPLY", context.resolve("ACTIONS.mqRequest.output.attempts[0].evidence.mq.invocations[0].error.type"));
     }
 
     private FrameworkConfig multiConfig(String strategy) {

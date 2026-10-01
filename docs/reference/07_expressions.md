@@ -1,4 +1,4 @@
-## 07 Expressions and Built-ins
+## 05 Expressions and Built-ins
 
 ### Unified expression engine
 
@@ -7,253 +7,32 @@ ATT uses one expression engine for runtime Templates, Flows, Actions and Tool ca
 - ${path} reads a Context value and interpolates it into surrounding text.
 - #{expression} evaluates a typed expression. It supports Context operands, built-in calls, list literals, parentheses, unary operators, arithmetic, comparisons, like, in, null checks and boolean logic.
 
-A complete expression preserves its value type. For example, an exact #{...} may return a number, boolean, map, list or DocumentValue. Embedding an expression in surrounding text produces a String. Use canonical EXEC and META paths; optional lookup uses a trailing question mark.
+A complete expression preserves its value type. For example, an exact #{...} may return a number, boolean, map, list or String. Embedding an expression in surrounding text also produces a String. Use canonical EXEC and META paths; optional lookup uses a trailing question mark.
 
 ~~~yaml
 assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-Use the expression form supported by each field. Render content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](14_actions.md).
+Use the expression form supported by each field. Project-file content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](14_actions.md).
 
-### Load execution ID initialization
+### Project-file String expressions
 
-ATT does not define a separate non-runtime/configuration expression language. Load execution.execIdFormat uses the same ${...} / #{...} engine, evaluated once during iteration initialization. Its accessible values are limited by lifecycle: EXEC.RUN_ID, timestamps, EXEC.INPUT, stable EXEC.LOAD identity, and META branches already initialized.
+`&{path}` is a typed project-file expression. It resolves exactly one regular UTF-8 file and always returns a `String`; it never infers a document format, parses an extension, expands a glob or creates an output file. The path is relative to the canonical ATT project root. Descriptor-relative `./` and `../` paths are allowed only when their canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation.
 
-EXEC.ID/EXEC.OUTPUT_DIR are not yet available because the ID determines the workspace. EXEC.ACTIONS and invocation-scoped Flow/Tool/DB/MQ/HTTP metadata are absent. Arrival-rate has no EXEC.LOAD.USER_ID. Only deterministic side-effect-free built-ins are allowed; external calls, seq.next(), random/clock/filesystem functions are rejected.
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
-~~~
-
-For arrival-rate, omit USER_ID:
+Use a YAML string when authoring a standalone value or embedding the locator in a larger expression:
 
 ~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
+send:
+  type: tool
+  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
 ~~~
 
-See [Runtime and Context Model](03_runtime_context.md) for the full META inventory, lifecycle table and artifact-navigation layout. There is no general configuration-expression model in 3.6.0.
-
-### `config.report.fileNamePattern`
-
-#### Context and legal forms
-
-`report.fileNamePattern` uses the unified expression engine with a dedicated non-Case scope. It has a dedicated configuration-local root, separate from EXEC:
-
-| Placeholder | Value |
-|---|---|
-| `${suiteName}` | Source workbook basename with its final lowercase `.xlsx` suffix removed; for example, `testcase/payment_regression.xlsx` becomes `payment_regression` |
-
-The configured string must reference `${suiteName}` explicitly, whether used as text interpolation or as a built-in argument. No other general non-runtime/configuration expression roots are defined. Bare `suiteName` inside a call is rejected. Legal examples include:
-
-```yaml
-report:
-  fileNamePattern: "${suiteName}.result.xlsx"
-```
-
-```yaml
-fileNamePattern: "result-${suiteName}.xlsx"
-fileNamePattern: "ATT-${suiteName}-report.xlsx"
-fileNamePattern: "${suiteName}-${suiteName}.xlsx"
-fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
-```
-
-For `testcase/payment.xlsx`, the first example writes `output/<RunID>/workbooks/payment.result.xlsx`. `${suiteName}` is the physical workbook basename, not the sidecar `id`, Sheet/group ID, Case ID, or Run ID. Authors should keep the value a safe filename ending in `.xlsx`; avoid `/`, `\`, absolute paths, `..`, and platform-reserved names. Workbooks in different recursive directories that share the same basename resolve to the same default result filename, so package authors must avoid that collision.
-
-#### Illegal or unsupported forms
-
-These values fail configuration loading because they do not reference `${suiteName}`:
-
-```yaml
-fileNamePattern: "result.xlsx"
-fileNamePattern: "${RUN_ID}.result.xlsx"
-fileNamePattern: "${WORKBOOK_ID}.result.xlsx"
-```
-
-No other configuration root or Runtime Context path is supported. Configured Tool calls are also unavailable in this scope. These forms are invalid:
-
-```text
-${RUN_ID}
-${WORKBOOK_ID}
-${ENVIRONMENT}
-${EXEC.INPUT.caseId}
-${EXEC.ID}
-#{configuredTool()}
-#{upper(${RUN_ID})}
-```
-
-A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
-
-### Tool-definition `command` expressions
-
-#### Context and legal forms
-
-A configured Tool `command` also has its own restricted Context. It may reference only keys declared by that Tool's `arguments` map. The canonical placeholder is `${input.argument}`. `${TOOL.input.argument}` and the exact `${argument}` spelling remain compatible legacy forms and both produce `CONTEXT_TOOL_INPUT_SHORTHAND` when they uniquely match a declared key:
-
-| Form | Meaning |
-|---|---|
-| `${requestText}` | Legacy shorthand; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
-| `${input.requestText}` | Explicit Tool-input namespace |
-| `${TOOL.input.requestText}` | Legacy full alias; emits `CONTEXT_TOOL_INPUT_SHORTHAND` |
-
-For example:
-
-```yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: Invoke a rendered payment request
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestText}"
-      - "${input.environment}"
-    stdoutFormat: json
-    arguments:
-      requestText:
-        name: Request File
-        description: Rendered XML request path
-        required: true
-      environment:
-        name: Environment
-        description: Target environment
-        required: true
-```
-
-The action call is the boundary between the general Runtime Context and this restricted Tool-input Context:
-
-```yaml
-callApi:
-  type: tool
-  call: "#{invokePaymentApi(requestText=${EXEC.ACTIONS.renderRequest.output.result}, environment=${EXEC.INPUT.environment})}"
-```
-
-The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
-
-Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
-
-```yaml
-command:
-  - ./tools/invoke_payment_api.sh
-  - "--environment=#{upper(${input.environment})}"
-  - "--label=#{concat('ATT-', #{lower(${input.requestText})})}"
-```
-
-Inside a command-side built-in call, declared inputs must also use placeholders: `${input.requestText}` is canonical; `${TOOL.input.requestText}` and `${requestText}` are deprecated compatible forms and produce `CONTEXT_TOOL_INPUT_SHORTHAND`. Bare `requestText` or `input.requestText` is not inferred. Outside `#{...}`, command text continues to use the same Tool-local rule.
-
-A normal argument placeholder may occupy a complete argv token, which is preferred, or be embedded in fixed text:
-
-```yaml
-command:
-  - ./tools/invoke_payment_api.sh
-  - "--request=${input.requestText}"
-  - "--environment=${input.environment}"
-```
-
-Because this is a YAML argv list, each list item remains one atomic process argument even when its resolved value contains spaces or shell-like characters. ATT does not invoke a local shell.
-
-#### Quotes, Context values, and atomic argv
-
-Quotes inside a Tool call belong to the ATT expression grammar; they are not shell quotes. The outer `'...'` or `"..."` delimiters are removed before invocation, the opposite quote is literal, and a matching quote can be escaped with a backslash. A `${...}` reference embedded in a quoted value is interpolated, while an unquoted canonical Context path passes its typed value directly.
-
-The following configured Tool keeps each declared input as one argv value:
-
-```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${message}", "${sourceFile}"]
-    stdoutFormat: yaml
-    arguments:
-      message:
-        name: Message
-        description: Exact audit message
-        required: true
-      sourceFile:
-        name: Source file
-        description: File associated with the message
-        required: true
-```
-
-Use a YAML block scalar when a call contains several quote layers:
-
-```yaml
-singleQuote:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message="Customer O'Reilly",
-        sourceFile=${EXEC.INPUT.sourceFile}
-    )}
-
-doubleQuote:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message='status="READY"',
-        sourceFile=${EXEC.INPUT.sourceFile}
-    )}
-
-mixedQuotesAndContext:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message="O'Reilly said \"READY\" for ${EXEC.INPUT.caseId}",
-        sourceFile=${EXEC.INPUT.sourceFile}
-    )}
-```
-
-The child process receives the three messages exactly as `Customer O'Reilly`, `status="READY"`, and, for example, `O'Reilly said "READY" for payment.payment.TC001`. A Context value that itself contains either quote needs no caller-side shell escaping and still occupies one argv item.
-
-If a call is kept on one YAML line, YAML escaping is an additional and separate layer:
-
-```yaml
-call: "#{writeAudit(message='status=\"READY\"', sourceFile=${EXEC.INPUT.sourceFile})}"
-call: '#{writeAudit(message="O''Reilly", sourceFile=${EXEC.INPUT.sourceFile})}'
-```
-
-The first line escapes double quotes for the YAML double-quoted scalar. The second doubles the apostrophe for the YAML single-quoted scalar. The expression engine then evaluates the resulting `#{...}` text.
-
-Ordinary process-backed Tools never ask a shell to reinterpret resolved inputs. Text such as `$HOME`, `$(date)`, `a*.xml`, `|`, `>`, and quotes carried by a Context value is passed literally. Use an explicitly reviewed wrapper when shell-like behavior is required; the shipped `fpp.exehelper` and `fpp.loghelper` provide only the narrowly documented pathname expansion above.
-
-#### Illegal forms and token restrictions
-
-Tool commands cannot directly read the general Runtime Context, use unique-suffix navigation, or navigate argument fields with bracket syntax. These `${...}` forms are rejected during configuration or package validation:
-
-```text
-${EXEC.INPUT.environment}
-${EXEC.ID}
-${EXEC.ID}
-${STAGES.invoke.InstrAmt}
-${input['requestText']}
-${TOOL.input['requestText']}
-${requestText.path}
-```
-
-Configured Tool calls are not available inside `command`:
-
-```text
-#{anotherConfiguredTool(value=${requestText})}
-```
-
-This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a standalone global Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
-
-If an argument declares a non-empty `argName`, its placeholder must appear exactly once and occupy one complete command token:
-
-```yaml
-command: [./tools/invoke_payment_api.sh, "${input.requestText}"]
-arguments:
-  requestText:
-    name: Request File
-    description: Rendered XML request path
-    required: true
-    argName: --request
-```
-
-ATT expands that token to two argv values: `--request`, then the resolved path. An embedded form such as `--request=${input.requestText}` or a transformed form such as `#{str.upper(${input.requestText})}` is invalid when `argName` is non-empty. Likewise, every typed List must use a complete-token placeholder so ATT can safely expand it to zero or more argv values. For an optional argument, a blank complete-token placeholder emits neither its `argName` nor a value; an embedded scalar placeholder instead leaves its surrounding fixed token in argv.
+`${...}` and `#{...}` inside the file are compiled and evaluated when the file value is used. Run and Debug cache the compiled plan and invalidate it when the file fingerprint changes; Load freezes the validated file identity, content and compiled plan for the scenario. File output is not reparsed as a new expression source.
 
 ### Operators
 
@@ -270,6 +49,8 @@ The current implementation translates `%` to Java regular-expression `.*` and `_
 Comparison first recognizes boolean literals. If both operands are valid decimal numbers, ATT compares them as arbitrary-precision decimals, including ordinary Excel strings such as `"100"`; numeric equality also uses this coercion, so `1.0 == 1` is true. Otherwise ATT compares the rendered strings lexicographically and case-sensitively. A present blank value compares as an empty string; a missing Context path is `ATT-CTX-001`, not an implicit null/empty value. Use `is null` only for a path that exists with a null value, and use `#{number(...)}` when invalid numeric text should become an explicit evaluation error instead of a string comparison.
 
 ### Built-in functions
+
+Only authored file-expression nodes are executable. Context values, Tool results and file output remain literal Strings even when they contain `&{...}`. Embedded Context paths and calls follow the enclosing Action's normal ordering, scope and resource validation rules. Nested `&{...}` inside project-file content, including inside `#{...}` arguments, is rejected in v1 in Run, Debug, validation and Load snapshot discovery.
 
 Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, `misc.*`, and `seq.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
 
@@ -345,7 +126,7 @@ Filesystem built-ins resolve relative paths against the ATT JVM working director
 
 `prettyPrint` accepts exactly one positional argument or named `value`. It formats Maps, Lists, Iterables, arrays, scalars, and null with two-space indentation. Linked and sorted Maps retain their iteration order; other Map keys are sorted by text. Strings are quoted and escaped, cycles and excessive depth are marked, output is bounded, and the source object is not modified.
 
-Use built-ins for in-process transformations, time values, DB-result formatting, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins occupy reserved framework packages. V2.6 retains an internal provider boundary for a future release, but configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
+Use built-ins for in-process transformations, time values, DB-result formatting, and simple local file operations; use tools when filesystem work needs process evidence or for network, database, system integration, or complex reusable logic. Built-ins occupy reserved framework packages. Configuration cannot load custom Java classes. Invalid arguments produce action ERROR.
 
 Typical expressions:
 
@@ -355,3 +136,7 @@ assert: "${EXEC.ACTIONS.callApi.output.result.status} == ${EXEC.INPUT.expectedSt
 assert: "${EXEC.ACTIONS.callApi.output.result.message} like 'PAYMENT%SUCCESS'"
 assert: "(${EXEC.INPUT.channel} == 'MOBILE') and (${EXEC.INPUT.amount} <= 1000)"
 ```
+
+### Expression scope and errors
+
+This chapter defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](05_resources/tools.md), [Load execIdFormat and vars](04_execution_modes/load.md), [Debug vars](04_execution_modes/debug.md), and [report filenames](09_configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](12_validation_diagnostics.md).

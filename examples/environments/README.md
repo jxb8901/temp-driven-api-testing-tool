@@ -1,6 +1,6 @@
-# ATT 3.6.0 environment profile examples
+# ATT environment profile examples
 
-ATT 3.6.0 uses `att-config/v2.10` profiles to select resource descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper and Tool Group schemas are listed in [the configuration reference](../../docs/reference/09_configuration.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.10` profiles to select resource descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper and Tool Group schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema_matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 
@@ -74,26 +74,26 @@ The UAT descriptors keep the same IDs and replace only physical endpoint setting
 
 ## Typed Action flow
 
-Actions use the same logical IDs in every profile. Render returns a `DocumentValue`; HTTP/MQ accepts it directly without a `requestFormat` or temporary result file:
+Actions use the same logical IDs in every profile. A project-file expression returns an exact UTF-8 `String`; HTTP/MQ accepts it directly without a `requestFormat` or temporary result file:
 
 ```yaml
 actions:
-  renderRequest:
-    type: render
-    payload: payment/request.xml
-    templateFormat: xml
+  prepareRequest:
+    type: assign
+    name: requestText
+    expression: "&{templates/payment/request.xml}"
   sendPayment:
     type: tool
     call: >-
       #{mq.payment.request(
         requestQueue='PAYMENT.REQUEST',
         replyQueue='PAYMENT.REPLY',
-        payload=${EXEC.ACTIONS.renderRequest.output.result},
+        payload=${EXEC.VARS.requestText},
         responseFormat='xml'
       )}
 ```
 
-For an abstract Map/List request, supply `requestFormat` explicitly. Do not combine `requestFormat` with a `DocumentValue`. HTTP/MQ `responseFormat` parses received bytes; `evidence.output.format` controls only an optional human-readable snapshot. See [Actions and Typed Values](../../docs/reference/14_actions.md), [DBHelper](../../docs/reference/05_resources/dbhelper.md), [MQHelper](../../docs/reference/05_resources/mqhelper.md), and [HTTPHelper](../../docs/reference/05_resources/httphelper.md).
+For an abstract Map/List request, supply `requestFormat` explicitly. Do not combine `requestFormat` with a String. HTTP/MQ `responseFormat` parses received bytes; `evidence.output.format` controls only an optional human-readable snapshot. See [Actions and Typed Values](../../docs/reference/14_actions.md), [DBHelper](../../docs/reference/05_resources/dbhelper.md), [MQHelper](../../docs/reference/05_resources/mqhelper.md), and [HTTPHelper](../../docs/reference/05_resources/httphelper.md).
 
 ## Validate each profile
 

@@ -45,7 +45,7 @@ public final class DbHelperConfigLoader {
                 Map<?, ?> map = yaml(file);
                 if (!att.Version.DBHELPER_SCHEMA.equals(map.get("schemaVersion")))
                     throw new IllegalArgumentException("Unsupported dbhelper schemaVersion '" + map.get("schemaVersion")
-                            + "'; ATT 3.6.0 supports only " + att.Version.DBHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
+                            + "'; ATT supports only " + att.Version.DBHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
                 JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion"))), map);
                 helper = parse(map, file).withEvidenceOutput(map.get("evidence"));
             } catch (Exception error) {

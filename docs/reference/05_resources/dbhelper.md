@@ -1,14 +1,17 @@
-### 5.2 DBHelper
+### 7.3 DBHelper
 
 DBHelper is a first-class JDBC resource, configured independently from Tools. Each descriptor uses `schemaVersion: att-dbhelper/v2.6` and a stable logical `id`; global `dbhelpers` references descriptor files.
 
 ```yaml
 schemaVersion: att-dbhelper/v2.6
 id: orders
-driverClass: oracle.jdbc.OracleDriver
-url: ${ENV:ORDERS_DB_URL}
-username: ${ENV:ORDERS_DB_USERNAME}
-password: ${ENV:ORDERS_DB_PASSWORD}
+name: Orders database
+description: Orders JDBC resource
+connection:
+  driverClass: oracle.jdbc.OracleDriver
+  url: ${ENV:ORDERS_DB_URL}
+  username: ${ENV:ORDERS_DB_USERNAME}
+  password: ${ENV:ORDERS_DB_PASSWORD}
 ```
 
 Credentials may be resolved from environment variables and must not be published into `META`, reports or diagnostics. JDBC driver jars are supplied in `lib/`; ATT does not bundle a database driver.
@@ -17,9 +20,7 @@ A `type: db` Action selects one helper ID and exactly one `query` or `update` bl
 
 Queries return typed rows/scalars; updates return the documented update result. Operation and SQL/parameter evidence enters the common Action envelope. Secret credentials are never evidence. Parameter evidence follows descriptor/Action masking/type policy.
 
-Direct DB Actions may declare `timeoutMs` from 1 to 3,600,000 ms. When present, `Action.timeoutMs` overrides `DBHelper.statement.timeoutSeconds`; otherwise the helper timeout is used. Each retry attempt gets a fresh Action timeout, and the retry interval is outside that timeout.
-
-A direct `query` Action may also use the standard retry block with `maxAttempts` 2–10, `intervalMs` 0–3,600,000, and a non-empty unique `retryOn` list containing `ASSERTION` and/or `TIMEOUT`. An explicit Action `timeoutMs` overrides the helper's statement-timeout default; without it, the helper default applies. JDBC query timeout is rounded up to whole seconds while ATT retains millisecond deadline cancellation. `ASSERTION` requires an Action `assert`. Ordinary SQL errors are terminal. Retry-enabled query attempts are retained in `output.attempts[n]`; the top-level `output.result` / `output.evidence` represent the final or winning attempt, with `winningAttempt` or `finalAttempt` recording the terminal attempt number.
+[Reliability](../08_reliability_execution_control.md) owns Action timeout precedence, retry eligibility, attempt limits and replay cautions. DBHelper owns the descriptor's statement timeout and transaction lifecycle. Example of an eligible query:
 
 ```yaml
 actions:
@@ -38,6 +39,23 @@ actions:
       retryOn: [ASSERTION, TIMEOUT]
 ```
 
-Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A timeout or database/transport failure cannot generally prove whether a mutation reached or committed at the server, so generic automatic replay could duplicate business state. Application-specific idempotent retry must be modeled explicitly instead.
+
 
 DBHelper owns connection/statement limits, query timeout and transaction behavior defined by its descriptor. Transaction finalization is tied to the Case/iteration lifecycle; commit/rollback/reconnect are resource operations, not public Context roots. Action-level timeout/retry extends the shared Action lifecycle without changing the DBHelper identity or Context model.
+
+### Dbhelper configuration
+
+Each path in global `dbhelpers` resolves from the package root and contains one `att-dbhelper/v2.6` object:
+
+| Object | Required/default | Allowed properties and constraints |
+|---|---|---|
+| root | required | `schemaVersion`, `id`, `name`, `description`, `connection`; optional `statement`, `transaction`, `result`, `evidence`, `pool`, `x-*` |
+| `connection` | required | required `url`; optional `username`, `password`, `driverClass`, `properties`, `readOnly`, `isolation`, `x-*` |
+| `statement` | defaults | `timeoutSeconds` defaults to 30, integer 1–3600 |
+| `transaction` | defaults | `scope: case|statement`, `onEnd: commit|rollback`; defaults `case`/`rollback` |
+| `result` | defaults | `maxRows` 1000, `maxCellBytes` 1048576, `maxBytes` 10485760; positive bounded integers |
+| `evidence` | defaults | `sql: full|hash` defaults full; `parameters: values|types|masked` defaults values |
+| `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `connectionTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize`, timeout is at least 250ms |
+
+The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [DBHelper](dbhelper.md) for Action, expression, result, security, and lifecycle behaviour.
+

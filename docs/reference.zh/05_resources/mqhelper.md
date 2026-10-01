@@ -1,4 +1,4 @@
-### 5.3 MQHelper
+### 7.4 MQHelper
 
 MQHelper 是由多個 physical instances 組成的 IBM MQ logical resource。現行 descriptor 使用 att-mqhelper/v1.2。Connection settings、credentials、queue defaults 與 pool limits 屬於 resource，不會公開至 META。
 
@@ -32,34 +32,51 @@ evidence:
 
 Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
 
-#### 傳送已表示或抽象值
+#### 傳送 project-file String 或抽象值
 
-Render output 是 DocumentValue，可直接傳入 payload：
+Project-file expression output 是 String，可直接傳入 payload：
 
 ~~~yaml
-renderRequest:
-  type: render
-  payload: payload/request.xml
-  templateFormat: xml
+prepareRequest:
+  type: assign
+  name: requestText
+  expression: "&{templates/payment/payload/request.xml}"
 send:
   type: tool
-  call: "#{mq.payment.request(payload=${EXEC.ACTIONS.renderRequest.output.result})}"
+  call: "#{mq.payment.request(payload=${EXEC.VARS.requestText})}"
 ~~~
 
-ATT 使用配置的 MQ charset/CCSID 編碼完全相同的渲染文字，不會 parse/serialize。DocumentValue 不應提供 requestFormat。Document format 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
+ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。Project-file expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
 
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。DocumentValue + requestFormat 及 String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；Render 不建立檔案或 targetFiles。
+Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；project-file expression 不建立檔案或 targetFiles。
 
 #### Evidence、response parsing 與 Load
 
 MQ evidence 可包含有界 transport metadata，例如 helper/instance identity、operation、安全 queue names、message IDs、CCSID、byte counts、response format、duration 與 failure classification。Payload capture 由 evidence.payload 控制；人類可讀 snapshot 由 evidence.output 獨立控制。Load 可用 evidence.resources.output: none 關閉 resource snapshots；否則等 iteration 保留後才格式化。Typed result 與 response parsing 不變。
 
-Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。歷史 v1.0/v1.1 schema 已封存；validation 前請遷移至 v1.2。
+Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Appendix C](../appendices/migrations.md)。
+
+共用 typed-result 契約見[Action 與型別化值](../14_actions.md)。
+
+### Descriptor configuration
+
+| Object | Required/default | Contract |
+|---|---|---|
+| root | required | `schemaVersion`, `id`, `name`, `description`, non-empty `instances`; optional `defaults`, `selection`, `evidence`, `x-*` |
+| `defaults` / `instances[]` settings | inherited then overridden | `connection`, `message`, `requestReply`, `pool`; each instance has an `id` |
+| `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
+| `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
+| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing |
+| `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
+| `selection.strategy` | descriptor policy | `random` or `roundRobin` |
+| `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |
+
+Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
+
+The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.2.schema.json).
 
 #### Request/reply 無訊息語義
 
 `mq.<id>.request(...)` 只有在收到 correlated reply 時才算完成。PUT 成功後若 GET 收到 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`），會發布 `sent: true`、`replyReceived: false`、原生 completion/reason metadata，以及 status 為 `ERROR` 的 `MQ_NO_REPLY` error；它不是 generic `TIMEOUT`，因此 `retryOn: TIMEOUT` 不會再次 PUT business request。若要反覆輪詢 reply，請使用 `mq.<id>.send(...)` 後再以 `mq.<id>.receive(correlationId=...)` 讀取。
 
 獨立 `mq.<id>.receive(...)` 保留 polling 契約：2033 無訊息結果可依既有 receive 語義以 `received: false` 完成並維持 PASS。真正的 outer Action deadline 仍是 `MQ_TIMEOUT`，並依正常 timeout/retry policy 處理。
-
-共用 DocumentValue 與 typed-result 契約見[動作與型別化值](../14_actions.md)。

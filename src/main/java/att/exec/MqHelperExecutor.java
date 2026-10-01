@@ -17,7 +17,6 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import att.template.DocumentValue;
 import att.template.TypedValueFormatter;
 import java.time.Duration;
 import java.time.Instant;
@@ -171,13 +170,9 @@ public final class MqHelperExecutor {
                         if (!isNoMessage(noReply)) throw noReply;
                         result.put("replyReceived", false); evidence.put("replyReceived", false);
                         addReason(result, evidence, noReply);
-                        if (deadlineExceeded(deadlineNanos)) {
-                            success = false;
-                            addDeadlineError(result, evidence);
-                        } else {
-                            success = false;
-                            addNoReplyError(result, evidence);
-                        }
+                        success = false;
+                        if (deadlineExceeded(deadlineNanos)) addDeadlineError(result, evidence);
+                        else addNoReplyError(result, evidence);
                         received = null;
                     }
                     if (received != null) {
@@ -329,10 +324,8 @@ public final class MqHelperExecutor {
     private void validateRequestPayload(Object payload, Object format) {
         boolean structured = payload instanceof Map || payload instanceof Iterable
                 || payload != null && payload.getClass().isArray();
-        if (payload instanceof DocumentValue && format != null)
-            throw new IllegalArgumentException("requestFormat cannot be combined with a Render DocumentValue");
         if (structured && format == null) throw new IllegalArgumentException("A Map/List MQ payload requires requestFormat");
-        if (!structured && !(payload instanceof DocumentValue) && format != null)
+        if (!structured && format != null)
             throw new IllegalArgumentException("requestFormat is valid only for a Map/List MQ payload");
         if (format != null && !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(String.valueOf(format)))
             throw new IllegalArgumentException("requestFormat must be text, json, yaml, or xml");
@@ -340,7 +333,6 @@ public final class MqHelperExecutor {
 
     private byte[] payloadBytes(Object payload, Object format, MqHelperConfig helper) throws Exception {
         java.nio.charset.Charset charset = MqCcsid.charset(helper.charset());
-        if (payload instanceof DocumentValue) return ((DocumentValue) payload).text().getBytes(charset);
         if (payload instanceof byte[]) return ((byte[]) payload).clone();
         boolean structured = payload instanceof Map || payload instanceof Iterable
                 || payload != null && payload.getClass().isArray();
@@ -454,15 +446,15 @@ public final class MqHelperExecutor {
         return deadlineNanos != Long.MAX_VALUE && System.nanoTime() >= deadlineNanos;
     }
 
-    private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence) {
-        addDeadlineError(result, evidence, "Action timeout expired while waiting for an MQ message");
-    }
-
     private void addNoReplyError(Map<String, Object> result, Map<String, Object> evidence) {
         Map<String, Object> error = new LinkedHashMap<String, Object>();
         error.put("type", "MQ_NO_REPLY");
         error.put("message", "MQ request completed without a correlated reply");
         result.put("error", error); evidence.put("error", error);
+    }
+
+    private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence) {
+        addDeadlineError(result, evidence, "Action timeout expired while waiting for an MQ message");
     }
 
     private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence, String message) {

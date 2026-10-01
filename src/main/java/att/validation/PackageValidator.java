@@ -17,7 +17,9 @@ import att.template.ToolCallParser;
 import att.template.EvidenceCollector;
 
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -31,10 +33,12 @@ import java.util.stream.Stream;
 public final class PackageValidator {
     private final ToolCallParser callParser = new ToolCallParser();
     private final att.template.ExpressionEvaluator expressionEvaluator = new att.template.ExpressionEvaluator();
-    private final att.template.UnifiedTemplateEngine expressionEngine = new att.template.UnifiedTemplateEngine(null);
+    private final att.template.UnifiedTemplateEngine expressionEngine;
+    private final att.template.FileExpressionResolver fileExpressions;
     private final att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
+    private final ThreadLocal<Path> validationSourceDirectories = new ThreadLocal<Path>();
     private final FrameworkConfig global;
     private final boolean windows;
     private final Set<String> skippedWindowsShellExecutableChecks = new LinkedHashSet<String>();
@@ -46,6 +50,8 @@ public final class PackageValidator {
 
     PackageValidator(Path projectRoot, FrameworkConfig global, boolean windows) {
         this.projectRoot = projectRoot; this.global = global; this.windows = windows;
+        this.expressionEngine = att.template.UnifiedTemplateEngine.forProject(projectRoot);
+        this.fileExpressions = new att.template.FileExpressionResolver(projectRoot);
     }
 
     /** Validates only the selected debug target and its Flow dependency closure. */
@@ -58,10 +64,18 @@ public final class PackageValidator {
     public void validateDebugTarget(StageTemplate template, TestCase testCase, StageCaseData stage,
                                     att.flow.FlowRegistry selectedFlows, Path debugInput,
                                     String executionMode, Map<String, Object> legacyInputs) throws Exception {
+        validateDebugTarget(template, testCase, stage, selectedFlows, debugInput, executionMode, legacyInputs, null);
+    }
+
+    /** Validates a Debug target with its literal initial EXEC.VARS bootstrap. */
+    public void validateDebugTarget(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                    att.flow.FlowRegistry selectedFlows, Path debugInput,
+                                    String executionMode, Map<String, Object> legacyInputs,
+                                    Map<String, Object> debugVariables) throws Exception {
         this.flows = selectedFlows;
         validateTemplate(template, global);
         validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
-        validateTemplateValues(template, testCase, stage, global, debugInput, new LinkedHashSet<String>(), executionMode, legacyInputs);
+        validateTemplateValues(template, testCase, stage, global, debugInput, new LinkedHashSet<String>(), executionMode, legacyInputs, debugVariables);
     }
 
     private void validateReferencedToolsClosure(StageTemplate template, FrameworkConfig config, Set<String> visitedFlows) {
@@ -71,7 +85,7 @@ public final class PackageValidator {
             if (!visitedFlows.add(action.use())) continue;
             att.flow.FlowDefinition flow = flows.get(action.use());
             if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
-            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA,
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), flow.templateSchemaVersion(),
                     flow.directory().resolve("flow.yaml"));
             validateReferencedToolsClosure(body, config, visitedFlows);
         }
@@ -111,7 +125,7 @@ public final class PackageValidator {
             }
             catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, projectRoot.resolve(global.templatesRoot()).resolve(reference).resolve("template.yaml"))); }
             for (att.flow.FlowDefinition flow : flows.all()) try {
-                StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), att.Version.TEMPLATE_SCHEMA, flow.directory().resolve("flow.yaml"));
+                StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(), flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
                 addContextMigrationWarnings(diagnostics, body);
                 validateReferencedTools(body, global);
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
@@ -144,7 +158,7 @@ public final class PackageValidator {
                             StageTemplate template = loader.load(stage.templateName());
                             addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
                                     resolved, assignedCaseVariables);
-                            validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables, "testcase", null);
+                            validateTemplateValues(template, testCase, stage, config, resolved, assignedCaseVariables, "testcase", null, null);
                             if ("package".equals(options.validationScope())) continue;
                             if (!templates.add(template.name())) continue;
                             validateTemplate(template, config);
@@ -276,7 +290,7 @@ public final class PackageValidator {
                 att.flow.FlowDefinition target = flows.get(action.use());
                 if (target != null) {
                     StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(),
-                            att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                            target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                     validateReferencedTools(body, config, diagnostics, visitedFlows);
                 }
             }
@@ -289,6 +303,7 @@ public final class PackageValidator {
                                                FrameworkConfig config) {
         if (expression == null || expression.trim().isEmpty()) return;
         try {
+            validateFileExpressions(expression, template.directory(), config);
             for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
         } catch (Exception error) {
             throw locateReferencedError(error, template, action, field, sourceFile);
@@ -814,6 +829,18 @@ public final class PackageValidator {
     private void validateTemplateActions(StageTemplate template, FrameworkConfig config,
                                          Set<String> actionIds, Set<String> completedActions,
                                          Set<String> assignmentNames) {
+        Path previousSourceDirectory = validationSourceDirectories.get();
+        validationSourceDirectories.set(template.directory());
+        try {
+            validateTemplateActionsInScope(template, config, actionIds, completedActions, assignmentNames);
+        } finally {
+            validationSourceDirectories.set(previousSourceDirectory);
+        }
+    }
+
+    private void validateTemplateActionsInScope(StageTemplate template, FrameworkConfig config,
+                                                Set<String> actionIds, Set<String> completedActions,
+                                                Set<String> assignmentNames) {
         att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
         for (TemplateAction action : template.actions()) {
           try {
@@ -822,6 +849,9 @@ public final class PackageValidator {
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
             if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if ("render".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
+                throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{project-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
+            }
             if (!"tool".equals(type) && action.raw().containsKey("evidence")) {
                 throw new IllegalArgumentException("Field 'evidence' is only supported for tool actions: " + action.id());
             }
@@ -832,13 +862,13 @@ public final class PackageValidator {
             if (!action.runWhen().trim().isEmpty()) validateAssertionExpression(action.runWhen(), syntaxEngine, config);
             if ("render".equals(type)) {
                 require(action.payload(), "payload is required for render action " + action.id());
-                String templateFormat = action.templateFormat().trim().toLowerCase(java.util.Locale.ROOT);
-                if (!java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(templateFormat)) throw new IllegalArgumentException("templateFormat must be auto, text, json, yaml, or xml: " + action.id());
-                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "fields", "level", "retry", "timeoutMs", "result", "render", "format", "value");
+                if (action.raw().containsKey("templateFormat")) throw new IllegalArgumentException("Render.templateFormat is no longer supported; Render output is always a String: " + action.id());
+                forbid(action, "name", "call", "db", "query", "update", "expression", "expected", "actual", "message", "file", "fields", "level", "retry", "timeoutMs", "result", "render", "format", "value", "templateFormat");
                 List<Path> payloads = new att.template.RenderPayloadResolver().resolve(template.directory(), action.payload());
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
+                        validateFileExpressions(content, payload.getParent(), config);
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false, action.id());
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
                     } catch (Exception e) {
@@ -849,7 +879,7 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); validateSshRetryContract(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "result", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
@@ -876,6 +906,7 @@ public final class PackageValidator {
             }
             if ("flow".equals(type)) {
                 if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())
+                        && !att.Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4.equals(template.schemaVersion())
                         && !"att-template/v3.2".equals(template.schemaVersion())
                         && !att.Version.PREVIOUS_TEMPLATE_SCHEMA.equals(template.schemaVersion())) throw new IllegalArgumentException("Flow actions require " + att.Version.PREVIOUS_TEMPLATE_SCHEMA + " or " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
                 require(action.use(), "use is required for Flow action " + action.id());
@@ -919,13 +950,14 @@ public final class PackageValidator {
                 }
             }
             if ("log".equals(type)) {
+                validateStaticValueTree(action.value(), syntaxEngine, completedActions, action.id());
                 validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false, action.id());
                 validateStaticContextStructure(action.file(), syntaxEngine, completedActions, false, action.id());
                 for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false, action.id());
             }
             if ("flow".equals(type)) {
                 att.flow.FlowDefinition target = flows.get(action.use());
-                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                 // A Flow invocation owns a fresh Action namespace.  Its
                 // internal IDs are intentionally not compared with the parent
                 // Template or with another Flow invocation.
@@ -952,7 +984,7 @@ public final class PackageValidator {
             try {
                 if (("assert".equals(fields[index]) || "runWhen".equals(fields[index])) && !values[index].trim().isEmpty())
                     validateAssertionExpression(values[index], engine, config);
-                else { engine.validateValueSyntax(values[index]); engine.parseCalls(values[index]); }
+                else { engine.validateValueSyntax(values[index]); validateFileExpressions(values[index], template.directory(), config); engine.parseCalls(values[index]); }
             } catch (Exception error) {
                 throw att.config.YamlSupport.locate(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
                         "Invalid Action expression", error, null, null, "Correct the expression at the reported source location."),
@@ -1048,6 +1080,17 @@ public final class PackageValidator {
         }
     }
 
+    private void validateStaticValueTree(Object value, att.template.UnifiedTemplateEngine engine,
+                                         Set<String> availableActions, String actionId) {
+        if (value instanceof String) {
+            validateStaticContextStructure((String) value, engine, availableActions, false, actionId);
+        } else if (value instanceof Map) {
+            for (Object child : ((Map<?, ?>) value).values()) validateStaticValueTree(child, engine, availableActions, actionId);
+        } else if (value instanceof Iterable) {
+            for (Object child : (Iterable<?>) value) validateStaticValueTree(child, engine, availableActions, actionId);
+        }
+    }
+
     private void validateValueTreeSyntax(Object value, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         if (value instanceof String) { validateInlineExpressions((String) value, engine, config); return; }
         if (value instanceof Map) {
@@ -1121,6 +1164,15 @@ public final class PackageValidator {
     private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                                 Set<String> availableActions, boolean currentOutputAvailable,
                                                 String currentActionId) {
+        try {
+            for (String filePath : fileExpressions.extractReferences(text)) {
+                att.template.FileExpressionResolver.CompiledFilePlan plan =
+                        fileExpressions.compile(filePath, validationSourceDirectories.get());
+                validateStaticContextStructure(plan.source(), engine, availableActions,
+                        currentOutputAvailable, currentActionId);
+            }
+        } catch (DiagnosticException error) { throw error; }
+        catch (Exception error) { throw new IllegalArgumentException(error.getMessage(), error); }
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
             String root = firstPathSegment(referencePath);
@@ -1303,28 +1355,30 @@ public final class PackageValidator {
     }
 
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage, FrameworkConfig config) {
-        validateTemplateValues(template, testCase, stage, config, null, new LinkedHashSet<String>(), "testcase", null);
+        validateTemplateValues(template, testCase, stage, config, null, new LinkedHashSet<String>(), "testcase", null, null);
     }
 
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
                                         FrameworkConfig config, Path caseFile) {
-        validateTemplateValues(template, testCase, stage, config, caseFile, new LinkedHashSet<String>(), "testcase", null);
+        validateTemplateValues(template, testCase, stage, config, caseFile, new LinkedHashSet<String>(), "testcase", null, null);
     }
 
     /** Retained for package-validation reflection tests and internal callers. */
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
                                         FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables) {
-        validateTemplateValues(template, testCase, stage, config, caseFile, assignedCaseVariables, "testcase", null);
+        validateTemplateValues(template, testCase, stage, config, caseFile, assignedCaseVariables, "testcase", null, null);
     }
 
     private void validateTemplateValues(StageTemplate template, TestCase testCase, StageCaseData stage,
                                         FrameworkConfig config, Path caseFile, Set<String> assignedCaseVariables,
-                                        String executionMode, Map<String, Object> legacyInputs) {
+                                        String executionMode, Map<String, Object> legacyInputs,
+                                        Map<String, Object> debugVariables) {
         att.core.CaseRuntimeContext context = new att.core.CaseRuntimeContext(testCase, projectRoot, "VALIDATE", projectRoot,
                 projectRoot.resolve(".att-validation.log"), executionMode);
         context.setProject(projectRoot);
         context.put("CASE.environment", config.environment());
         context.setLegacyInputsView(legacyInputs);
+        context.seedDebugVariables(debugVariables);
         for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
@@ -1482,7 +1536,7 @@ public final class PackageValidator {
 
                 if ("flow".equalsIgnoreCase(action.type())) {
                     att.flow.FlowDefinition target = flows.get(action.use());
-                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), att.Version.TEMPLATE_SCHEMA, target.directory().resolve("flow.yaml"));
+                    StageTemplate body = new StageTemplate(target.name(), target.directory(), target.actions(), target.templateSchemaVersion(), target.directory().resolve("flow.yaml"));
                     context.beginFlow(action.use(), action.id());
                     try {
                         validateTemplateRuntimeActions(body, testCase, config, caseFile, assignedCaseVariables,
@@ -1668,11 +1722,50 @@ public final class PackageValidator {
         if (categories.isEmpty()) throw new IllegalArgumentException("retry.retryOn must not be empty: " + action.id());
         if (categories.contains("ASSERTION") && action.assertion().trim().isEmpty()) throw new IllegalArgumentException("retryOn ASSERTION requires action assert: " + action.id());
     }
+
+    private void validateSshRetryContract(TemplateAction action, FrameworkConfig config) {
+        Map<String, Object> retry = action.retry();
+        Object retryOn = retry.get("retryOn");
+        if (!(retryOn instanceof Iterable)) return;
+        boolean retriesTimeout = false;
+        for (Object category : (Iterable<?>) retryOn) {
+            if ("TIMEOUT".equals(String.valueOf(category))) {
+                retriesTimeout = true;
+                break;
+            }
+        }
+        if (!retriesTimeout) return;
+        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        if (!parsed.name().startsWith("ssh.")) {
+            ToolConfig tool = config.tool(parsed.name());
+            if (tool == null || !tool.callBacked()) return;
+            parsed = callParser.parse(tool.call());
+        }
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length == 3 && "ssh".equals(parts[0])
+                && ("upload".equals(parts[2]) || "download".equals(parts[2]))) {
+            throw new IllegalArgumentException("retryOn TIMEOUT is not supported for native SSH " + parts[2]
+                    + " actions because replaying a transfer may duplicate a side effect; retry execute or handle the transfer explicitly: " + action.id());
+        }
+    }
     private static int integer(Object value, int fallback) { if (value == null) return fallback; if (!(value instanceof Number)) throw new IllegalArgumentException("Expected integer retry value"); return ((Number) value).intValue(); }
 
     private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         engine.validateValueSyntax(text);
+        validateFileExpressions(text, validationSourceDirectories.get(), config);
         for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCall(call, config);
+    }
+
+    private void validateFileExpressions(String text, Path sourceDirectory, FrameworkConfig config) {
+        if (text == null || text.isEmpty()) return;
+        try {
+            for (String path : fileExpressions.extractReferences(text)) {
+                att.template.FileExpressionResolver.CompiledFilePlan plan = fileExpressions.compile(path, sourceDirectory);
+                for (ToolCallParser.ParsedCall call : expressionEngine.parseCalls(plan.source())) validateCall(call, config);
+            }
+        } catch (Exception error) {
+            throw new IllegalArgumentException(error.getMessage(), error);
+        }
     }
 
     private void validateAssertionExpression(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
@@ -1725,6 +1818,11 @@ public final class PackageValidator {
             validateHttpCall(parsed, config);
             return;
         }
+        if (toolName.startsWith("ssh.")) {
+            if (!allowWriteFacade) throw new IllegalArgumentException("SSH operations may only be the primary call of a type: tool Action");
+            validateSshCall(parsed, config);
+            return;
+        }
         if (BUILT_INS.contains(toolName.toLowerCase(java.util.Locale.ROOT))) {
             Map<String,Object> shape = new LinkedHashMap<String,Object>();
             boolean staticArguments = true;
@@ -1754,7 +1852,9 @@ public final class PackageValidator {
                     suggestion == null ? "Define the tool in config/tools or correct the qualified group.tool name." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
         }
         if (tool.callBacked() && isWriteFacade(tool) && !allowWriteFacade) {
-            throw new IllegalArgumentException("DB update Tool may only be the primary call of a type: tool Action: " + tool.key());
+            String target = callParser.parse(tool.call()).name();
+            throw new IllegalArgumentException((target.startsWith("db.") ? "DB update" : "MQ/HTTP/SSH resource")
+                    + " call-backed Tool may only be the primary call of a type: tool Action: " + tool.key());
         }
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
@@ -1897,6 +1997,81 @@ public final class PackageValidator {
         }
     }
 
+    private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
+            throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + parsed.name());
+        att.config.SshHelperConfig helper = config.sshHelper(parts[1]);
+        if (helper == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
+        if ("all".equals(helper.strategy()))
+            throw new IllegalArgumentException("Native SSH Resource Helper calls do not support selection.strategy=all; use random or roundRobin");
+        String operation = parts[2];
+        Set<String> allowed = new LinkedHashSet<String>();
+        Set<String> required = new LinkedHashSet<String>();
+        if ("execute".equals(operation)) {
+            allowed.add("command"); allowed.add("stdoutFormat"); allowed.add("timeoutMs"); required.add("command");
+        } else if ("upload".equals(operation)) {
+            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("payload");
+            allowed.add("overwrite"); allowed.add("timeoutMs"); required.add("remotePath");
+        } else if ("download".equals(operation)) {
+            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("overwrite");
+            allowed.add("timeoutMs"); required.add("remotePath"); required.add("localPath");
+        } else {
+            throw new IllegalArgumentException("Unknown SSH operation '" + operation + "'; use execute, upload, or download");
+        }
+        Set<String> supplied = new LinkedHashSet<String>();
+        for (ToolCallParser.Argument argument : parsed.arguments()) {
+            if (argument.positional()) throw new IllegalArgumentException(parsed.name() + " requires named arguments");
+            String key = argument.key();
+            if (!allowed.contains(key)) throw new IllegalArgumentException("Unknown SSH argument '" + key + "' for " + parsed.name());
+            if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate SSH argument '" + key + "'");
+            String expression = argument.expression().trim();
+            boolean dynamic = expression.contains("${") || expression.contains("#{")
+                    || expression.startsWith("input.") || expression.startsWith("TOOL.input.");
+            if (dynamic) continue;
+            Object literal = callParser.literal(expression);
+            if ("timeoutMs".equals(key)) {
+                if (!(literal instanceof Number) || ((Number) literal).doubleValue() != ((Number) literal).longValue()
+                        || ((Number) literal).longValue() < 1L || ((Number) literal).longValue() > 3600000L)
+                    throw new IllegalArgumentException("SSH timeoutMs must be an integer from 1 to 3600000");
+            } else if ("overwrite".equals(key)) {
+                if (!(literal instanceof Boolean)) throw new IllegalArgumentException("SSH overwrite must be boolean");
+            } else if ("stdoutFormat".equals(key)) {
+                if (!(literal instanceof String) || !String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)
+                        .matches("text|json|yaml|xml"))
+                    throw new IllegalArgumentException("SSH stdoutFormat must be text, json, yaml, or xml");
+            } else if ("command".equals(key) || "localPath".equals(key) || "remotePath".equals(key)) {
+                if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty())
+                    throw new IllegalArgumentException("SSH " + key + " must be a non-blank string");
+                if ("remotePath".equals(key)) {
+                    String value = String.valueOf(literal);
+                    for (int index = 0; index < value.length(); index++)
+                        if (Character.isISOControl(value.charAt(index))) throw new IllegalArgumentException("SSH remotePath must not contain control characters");
+                }
+                if ("localPath".equals(key)) validateSshStaticLocalPath(String.valueOf(literal), "download".equals(operation));
+            } else if ("payload".equals(key) && (literal instanceof Map || literal instanceof List)) {
+                throw new IllegalArgumentException("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation");
+            }
+        }
+        for (String key : required) if (!supplied.contains(key)) throw new IllegalArgumentException("Missing required SSH argument '" + key + "' for " + parsed.name());
+        if ("upload".equals(operation) && supplied.contains("localPath") == supplied.contains("payload"))
+            throw new IllegalArgumentException("SSH upload requires exactly one of localPath or payload");
+    }
+
+    private void validateSshStaticLocalPath(String value, boolean caseOutputOnly) {
+        try {
+            Path path = Paths.get(value).normalize();
+            if (caseOutputOnly && (path.isAbsolute() || path.startsWith("..")))
+                throw new IllegalArgumentException("SSH download localPath must be a case-output-relative path");
+            if (!caseOutputOnly && path.startsWith(".."))
+                throw new IllegalArgumentException("SSH upload localPath must stay under the ATT package or case output");
+            if (!caseOutputOnly && path.isAbsolute() && !path.startsWith(projectRoot.toAbsolutePath().normalize()))
+                throw new IllegalArgumentException("SSH localPath must stay under the ATT package or case output");
+        } catch (InvalidPathException invalid) {
+            throw new IllegalArgumentException("SSH localPath is not a valid path", invalid);
+        }
+    }
+
     private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {
         for (att.config.MqHelperConfig instance : helper.instances().values()) {
             if (request ? instance.requestQueue().isEmpty() : instance.replyQueue().isEmpty()) return false;
@@ -1907,7 +2082,7 @@ public final class PackageValidator {
     private boolean isWriteFacade(ToolConfig tool) {
         if (tool == null || !tool.callBacked()) return false;
         String target = callParser.parse(tool.call()).name();
-        return target.matches("db\\.[^.]+\\.update") || target.startsWith("mq.") || target.startsWith("http.");
+        return target.matches("db\\.[^.]+\\.update") || target.startsWith("mq.") || target.startsWith("http.") || target.startsWith("ssh.");
     }
 
     private void validateCallBackedDefinition(ToolConfig tool, FrameworkConfig config) {
@@ -1918,6 +2093,10 @@ public final class PackageValidator {
         }
         if (target.name().startsWith("http.")) {
             validateHttpCall(target, config);
+            return;
+        }
+        if (target.name().startsWith("ssh.")) {
+            validateSshCall(target, config);
             return;
         }
         if (BUILT_INS.contains(target.name().toLowerCase(java.util.Locale.ROOT))) {

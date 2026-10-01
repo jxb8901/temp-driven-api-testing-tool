@@ -32,9 +32,9 @@ Minimal offline workflow:
 | Route SSH Tools across SIT/UAT or clustered hosts | [SSHHelper](reference/05_resources/sshhelper.md) · [中文](reference.zh/05_resources/sshhelper.md) |
 | Debug one Template, Flow, or Tool | [Debug](reference/04_execution_modes/debug.md) |
 | Run a load test | [Load](reference/04_execution_modes/load.md) |
-| Switch SIT/UAT resources | [Environment and Test Data](reference/06_environment_testdata.md) |
+| Switch SIT/UAT resources | [Configuration and Environments](reference/09_configuration.md) |
 | Understand `${...}` and `#{...}` | [Expressions](reference/07_expressions.md) |
-| Diagnose FAIL, ERROR, or INVALID | [Validation and Diagnostics](reference/12_validation_diagnostics.md) |
+| Diagnose FAIL, ERROR, or INVALID | [Validation and Troubleshooting](reference/12_validation_diagnostics.md) |
 | Integrate ATT with CI or package a release | [CI, Packaging, and Operations](reference/13_ci_packaging_operations.md) |
 
 ## Documentation types and language

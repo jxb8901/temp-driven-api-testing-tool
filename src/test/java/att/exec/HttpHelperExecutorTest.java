@@ -122,10 +122,14 @@ class HttpHelperExecutorTest {
     }
 
     private FrameworkConfig configuration(String url, String pool, String responseFormat) throws Exception {
+        return configuration(url, pool, responseFormat, 1000);
+    }
+
+    private FrameworkConfig configuration(String url, String pool, String responseFormat, int readTimeoutMs) throws Exception {
         att.TestSchemas.install(root);
         Files.createDirectories(root.resolve("config/httphelpers"));
         Files.write(root.resolve("config/httphelpers/sit.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
-                + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: 1000\n"
+                + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: " + readTimeoutMs + "\n"
                 + (responseFormat == null ? "" : "  responseFormat: " + responseFormat + "\n")
                 + (pool == null ? "" : "pool:\n" + pool)).getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
@@ -180,17 +184,19 @@ class HttpHelperExecutorTest {
 
     @Test void responseFormatValidationAndParseFailuresAreSafeAndDistinct() throws Exception {
         String url = start();
-        FrameworkConfig config = configuration(url, null);
+        FrameworkConfig config = configuration(url, null, null, 5000);
         CaseRuntimeContext context = context();
         int before = hits.get();
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
             ToolInvocationResult invalidFormat = http.execute("paymentApi", "get",
-                    args("path", "/json", "responseFormat", "binary"), context, 1000L, "bad-response-format", "text");
+                    args("path", "/json", "responseFormat", "binary"), context, 5000L, "bad-response-format", "text");
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) invalidFormat.operationResult().outputMetadata().get("error")).get("type"));
             assertEquals(before, hits.get());
 
+            // This checks parsing, so allow scheduling headroom instead of testing a one-second deadline.
             ToolInvocationResult parseError = http.execute("paymentApi", "get",
-                    args("path", "/status", "responseFormat", "json"), context, 1000L, "bad-json", "text");
+                    args("path", "/status", "responseFormat", "json", "readTimeoutMs", 10000),
+                    context, 10000L, "bad-json", "text");
             assertEquals("HTTP_RESULT_PARSE_ERROR", ((Map<?, ?>) parseError.operationResult().outputMetadata().get("error")).get("type"));
             assertFalse(parseError.operationResult().outputMetadata().toString().contains("missing"));
             assertEquals(404, parseError.operationResult().outputMetadata().get("statusCode"));
@@ -309,6 +315,56 @@ class HttpHelperExecutorTest {
         }
     }
 
+    @Test void failedHttpCollectorOmitsLiteralAndEncodedPrivatePathWithoutPublicInputs() throws Exception {
+        String origin = start();
+        FrameworkConfig config = configuration(origin, null);
+        String secret = "private-token-739";
+        for (String path : Arrays.asList("/orders/" + secret, "/orders/private%2Dtoken%2D739")) {
+            for (String mode : Arrays.asList("continue", "stop")) {
+                Path caseDir = root.resolve("collector-private-path-" + path.hashCode() + "-" + mode);
+                Files.createDirectories(caseDir);
+                TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+                CaseRuntimeContext runtime = new CaseRuntimeContext(test, caseDir, "R", root, caseDir.resolve("case.log"));
+                runtime.beginStage(new StageCaseData("invoke", "T", args("privatePath", path)), "T", root);
+                TemplateAction action = new TemplateAction("call", args("type", "tool", "call", "#{upper('ok')}",
+                        "evidence", args("httpFailure", args("call",
+                                "#{http.paymentApi.get(path=${EXEC.INPUT.privatePath}, responseFormat='json', readTimeoutMs=10000)}",
+                                "timeoutMs", 10000, "onFailure", mode))));
+                java.util.List<ValidationResult> results;
+                try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
+                     CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                    UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config),
+                            null, null, http, new att.template.DefaultBuiltInProvider());
+                    results = new StageTemplateRunner(engine).execute("invoke",
+                            new StageTemplate("T", root, Collections.singletonList(action)), runtime, log);
+                }
+                assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status(),
+                        results.get(0).message());
+                String collector = "ACTIONS.call.output.evidence.collectors.httpFailure";
+                assertEquals("ERROR", runtime.resolve(collector + ".status"));
+                assertNull(runtime.resolve(collector + ".result"));
+                String node = collector + ".evidence.http.invocations[0]";
+                assertEquals("GET", runtime.resolve(node + ".method"));
+                assertEquals("paymentApi", runtime.resolve(node + ".httpHelper"));
+                assertEquals(origin, runtime.resolve(node + ".url"));
+                assertEquals(Boolean.TRUE, runtime.resolve(node + ".urlPathOmitted"));
+                assertNull(runtime.resolve(node + ".input"));
+                assertTrue(String.valueOf(runtime.resolve(collector + ".error.message")).contains("not valid json"));
+                String published = att.validation.JsonSupport.write(runtime.resolve(collector));
+                String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+                for (String privateRepresentation : Arrays.asList(secret, "private%2Dtoken%2D739", path)) {
+                    assertFalse(published.contains(privateRepresentation), privateRepresentation);
+                    assertFalse(caseLog.contains(privateRepresentation), privateRepresentation);
+                    assertFalse(results.get(0).message().contains(privateRepresentation), privateRepresentation);
+                }
+                assertTrue(caseLog.contains(origin));
+                assertTrue(caseLog.contains("GET"));
+            }
+        }
+        assertEquals(4, hits.get(), "All returned failures must exercise the real HTTP transport");
+    }
+
     @Test void poolAndActionDeadlinesAreBounded() throws Exception {
         String url = start();
         FrameworkConfig config = configuration(url,
@@ -337,13 +393,13 @@ class HttpHelperExecutorTest {
         CaseRuntimeContext context = context();
         context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", root);
         TemplateAction action = new TemplateAction("fetch", args("type", "tool", "call", "#{http.paymentApi.get(path='/json', query={status:'OPEN', limit:50})}",
-                "assert", "${output.statusCode} == 200"), "att-template/v3.3");
+                "assert", "${output.statusCode} == 200"), "att-template/v3.4");
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
              CaseExecutionLog log = new CaseExecutionLog(context.caseOutputDirectory().resolve("case.log"))) {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config), null, null, http,
                     new att.template.DefaultBuiltInProvider());
             ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
-                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.3"), context, log).get(0);
+                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.4"), context, log).get(0);
             assertEquals(ResultStatus.PASS, result.status(), result.message());
             assertEquals(Boolean.TRUE, context.resolve("ACTIONS.fetch.output.result.ok"));
             assertEquals(200, context.resolve("ACTIONS.fetch.output.statusCode"));
@@ -360,13 +416,13 @@ class HttpHelperExecutorTest {
         TemplateAction action = new TemplateAction("retryFetch", args("type", "tool",
                 "call", "#{http.paymentApi.get(path='/slow')}", "timeoutMs", 30,
                 "retry", args("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))),
-                "att-template/v3.3");
+                "att-template/v3.4");
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config);
              CaseExecutionLog log = new CaseExecutionLog(context.caseOutputDirectory().resolve("retry.log"))) {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, config), null, null, http,
                     new att.template.DefaultBuiltInProvider());
             ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
-                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.3"), context, log).get(0);
+                    new StageTemplate("T", root, Collections.singletonList(action), "att-template/v3.4"), context, log).get(0);
             assertEquals(ResultStatus.ERROR, result.status());
             assertEquals(2, hits.get(), "Each author-configured retry is a new HTTP request");
         }

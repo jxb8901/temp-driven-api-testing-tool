@@ -13,6 +13,7 @@ import att.exec.DbInvocationResult;
 import att.exec.MqHelperExecutor;
 import att.exec.MqInvocationResult;
 import att.exec.HttpHelperExecutor;
+import att.exec.SshResourceExecutor;
 import att.config.ToolConfig;
 
 import java.util.ArrayList;
@@ -31,9 +32,12 @@ public class UnifiedTemplateEngine {
     private final DbHelperExecutor dbHelperExecutor;
     private final MqHelperExecutor mqHelperExecutor;
     private final HttpHelperExecutor httpHelperExecutor;
+    private final SshResourceExecutor sshHelperExecutor;
     private final ToolCallParser callParser = new ToolCallParser();
     private final ExpressionBlockEvaluator expressionBlocks = new ExpressionBlockEvaluator();
     private final BuiltInProvider builtIns;
+    private final FileExpressionResolver fileExpressions;
+    private final ThreadLocal<java.nio.file.Path> sourceDirectories = new ThreadLocal<java.nio.file.Path>();
     private static final java.util.concurrent.ExecutorService BUILTIN_EXECUTOR = java.util.concurrent.Executors.newCachedThreadPool(new java.util.concurrent.ThreadFactory() {
         private final java.util.concurrent.atomic.AtomicInteger sequence = new java.util.concurrent.atomic.AtomicInteger();
         @Override public Thread newThread(Runnable task) {
@@ -72,12 +76,78 @@ public class UnifiedTemplateEngine {
     public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
                                  MqHelperExecutor mqHelperExecutor, HttpHelperExecutor httpHelperExecutor,
                                  BuiltInProvider builtIns) {
+        this(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor,
+                toolInvoker == null ? null : new SshResourceExecutor(toolInvoker.projectRoot(), toolInvoker.config()), builtIns);
+    }
+
+    public UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                 MqHelperExecutor mqHelperExecutor, HttpHelperExecutor httpHelperExecutor,
+                                 SshResourceExecutor sshHelperExecutor, BuiltInProvider builtIns) {
+        this(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor, sshHelperExecutor,
+                builtIns, resolver(toolInvoker, null));
+    }
+
+    private UnifiedTemplateEngine(ToolInvoker toolInvoker, DbHelperExecutor dbHelperExecutor,
+                                  MqHelperExecutor mqHelperExecutor, HttpHelperExecutor httpHelperExecutor,
+                                  SshResourceExecutor sshHelperExecutor, BuiltInProvider builtIns,
+                                  FileExpressionResolver fileExpressions) {
         this.toolInvoker = toolInvoker;
         this.dbHelperExecutor = dbHelperExecutor;
         this.mqHelperExecutor = mqHelperExecutor;
         this.httpHelperExecutor = httpHelperExecutor;
+        this.sshHelperExecutor = sshHelperExecutor;
         this.builtIns = builtIns;
+        this.fileExpressions = fileExpressions;
         if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
+    }
+
+    /** Creates an expression engine that can resolve project-contained &{...} values. */
+    public static UnifiedTemplateEngine forProject(java.nio.file.Path projectRoot) {
+        return forProject(projectRoot, new DefaultBuiltInProvider());
+    }
+
+    /** Creates a project-aware engine with a caller-supplied built-in provider. */
+    public static UnifiedTemplateEngine forProject(java.nio.file.Path projectRoot, BuiltInProvider builtIns) {
+        return new UnifiedTemplateEngine(null, null, null, null, null,
+                builtIns == null ? new DefaultBuiltInProvider() : builtIns,
+                new FileExpressionResolver(projectRoot));
+    }
+
+    /** Creates a project-aware execution engine bound to an immutable Load snapshot. */
+    public static UnifiedTemplateEngine withFileSnapshot(ToolInvoker toolInvoker,
+                                                         DbHelperExecutor dbHelperExecutor,
+                                                         MqHelperExecutor mqHelperExecutor,
+                                                         HttpHelperExecutor httpHelperExecutor,
+                                                         BuiltInProvider builtIns,
+                                                         FileExpressionResolver.FileExpressionSnapshot snapshot) {
+        if (toolInvoker == null) throw new IllegalArgumentException("ToolInvoker is required for a Load execution engine");
+        return new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor,
+                new SshResourceExecutor(toolInvoker.projectRoot(), toolInvoker.config()),
+                builtIns == null ? new DefaultBuiltInProvider() : builtIns,
+                new FileExpressionResolver(toolInvoker.projectRoot(), snapshot));
+    }
+
+    private static FileExpressionResolver resolver(ToolInvoker toolInvoker,
+                                                   FileExpressionResolver.FileExpressionSnapshot snapshot) {
+        return toolInvoker == null ? null : new FileExpressionResolver(toolInvoker.projectRoot(), snapshot);
+    }
+
+    /** Binds all file expressions in a nested Template/Flow execution to its source directory. */
+    public SourceScope pushSourceDirectory(java.nio.file.Path directory) {
+        java.nio.file.Path previous = sourceDirectories.get();
+        sourceDirectories.set(directory == null ? null : directory.toAbsolutePath().normalize());
+        return new SourceScope(sourceDirectories, previous);
+    }
+
+    public FileExpressionResolver.Stats fileExpressionStats() {
+        return fileExpressions == null ? new FileExpressionResolver.Stats(0, 0, 0, 0, 0, 0, 0) : fileExpressions.stats();
+    }
+
+    public static final class SourceScope implements AutoCloseable {
+        private final ThreadLocal<java.nio.file.Path> owner;
+        private final java.nio.file.Path previous;
+        private SourceScope(ThreadLocal<java.nio.file.Path> owner, java.nio.file.Path previous) { this.owner = owner; this.previous = previous; }
+        @Override public void close() { owner.set(previous); }
     }
 
     public String render(String text, CaseRuntimeContext context) throws Exception {
@@ -92,6 +162,7 @@ public class UnifiedTemplateEngine {
         if (parsed.name().startsWith("db.")) return "db";
         if (parsed.name().startsWith("mq.")) return "mq";
         if (parsed.name().startsWith("http.")) return "http";
+        if (parsed.name().startsWith("ssh.")) return "ssh";
         if (builtIns.names().contains(parsed.name().toLowerCase(java.util.Locale.ROOT))) return "builtin";
         ToolConfig tool = toolInvoker == null ? null : toolInvoker.tool(parsed.name());
         if (tool != null && !tool.sshHelper().isEmpty()) return "ssh";
@@ -109,8 +180,7 @@ public class UnifiedTemplateEngine {
     }
 
     public String render(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        String afterTools = renderTools(text, context, log);
-        return renderValues(afterTools, context);
+        return renderAuthoredText(text, context, log, true);
     }
 
     /** Renders a non-Case expression scope (for example report filenames or Tool command arguments). */
@@ -187,6 +257,7 @@ public class UnifiedTemplateEngine {
             String path = CaseRuntimeContext.requiredReferencePath(exact.group(1));
             return CaseRuntimeContext.isOptionalReference(exact.group(1)) ? context.requireOptional(exact.group(1)) : context.require(path);
         }
+        if (exactFileExpression(value)) return evaluateFile(value.substring(2, value.length() - 1), context, log);
         if (value.startsWith("#{") && findToolEnd(value, 2) == value.length() - 1) {
             return evaluateBlock(value, context, log);
         }
@@ -224,8 +295,9 @@ public class UnifiedTemplateEngine {
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
-            @Override public String interpolate(String value) { return renderValues(value, context); }
+            @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
             @Override public boolean hasContext(String path) { return context.contains(path); }
+            @Override public String file(String path) throws Exception { return evaluateFile(path, context, log); }
         });
     }
 
@@ -242,6 +314,7 @@ public class UnifiedTemplateEngine {
 
     public void validateValueSyntax(String text) {
         if (text == null || text.isEmpty()) return;
+        if (fileExpressions != null) fileExpressions.extractReferences(text);
         int position = 0;
         while (true) {
             int start = text.indexOf("${", position);
@@ -382,6 +455,14 @@ public class UnifiedTemplateEngine {
             String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
             return httpHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, saveFormat, log);
         }
+        if (name.startsWith("ssh.")) {
+            if (!attempt) throw new IllegalArgumentException("An SSH operation must be the primary call of a type: tool Action");
+            if (sshHelperExecutor == null) throw new IllegalStateException("SSH invocation is unavailable: " + name);
+            String[] parts = name.split("\\.", -1);
+            if (parts.length != 3) throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + name);
+            String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(name) : invocationId;
+            return sshHelperExecutor.execute(parts[1], parts[2], input, context, timeoutMs, id, log);
+        }
         if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) {
             long started = System.nanoTime();
             long effectiveTimeout = toolInvoker == null ? (timeoutMs == null ? 10000L : timeoutMs.longValue()) : toolInvoker.defaultTimeoutMs(timeoutMs);
@@ -410,6 +491,7 @@ public class UnifiedTemplateEngine {
         if (parts.length >= 2 && "db".equals(parts[0])) { key = "DBHELPER"; id = parts[1]; type = "dbhelper"; }
         else if (parts.length >= 2 && "mq".equals(parts[0])) { key = "MQHELPER"; id = parts[1]; type = "mqhelper"; }
         else if (parts.length >= 2 && "http".equals(parts[0])) { key = "HTTPHELPER"; id = parts[1]; type = "httphelper"; }
+        else if (parts.length >= 2 && "ssh".equals(parts[0])) { key = "SSHHELPER"; id = parts[1]; type = "sshhelper"; }
         else if (builtIns.names().contains(name.toLowerCase(java.util.Locale.ROOT))) type = "builtin";
         return helperScope(key, id, type, context);
     }
@@ -454,12 +536,12 @@ public class UnifiedTemplateEngine {
         Map<String, Object> input = toolInvoker.prepareInput(tool.key(), supplied);
         ToolCallParser.ParsedCall target = callParser.parse(tool.call());
         boolean write = target.name().startsWith("db.") && target.name().endsWith(".update");
-        boolean resourceCall = target.name().startsWith("mq.") || target.name().startsWith("http.");
+        boolean resourceCall = target.name().startsWith("mq.") || target.name().startsWith("http.") || target.name().startsWith("ssh.");
         if (write && !attempt) {
             throw new IllegalArgumentException("A call-backed DB update Tool may only be the primary call of a type: tool Action: " + tool.key());
         }
         if (resourceCall && !attempt) {
-            throw new IllegalArgumentException("MQ/HTTP call-backed Tools may only be the primary call of a type: tool Action: " + tool.key());
+            throw new IllegalArgumentException("MQ/HTTP/SSH call-backed Tools may only be the primary call of a type: tool Action: " + tool.key());
         }
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextInvocationId(tool.key()) : requestedId;
@@ -518,7 +600,7 @@ public class UnifiedTemplateEngine {
         if (!dbEvidence.isEmpty()) toolEvidence.put("DB", dbEvidence);
         if (nativeInvocation != null) {
             Map<String, Object> nativeRecord = nativeInvocation.invocation();
-            for (String key : new String[]{"MQ", "HTTP", "DB"}) if (nativeRecord.get(key) != null) toolEvidence.put(key, nativeRecord.get(key));
+            for (String key : new String[]{"MQ", "HTTP", "SSH", "DB"}) if (nativeRecord.get(key) != null) toolEvidence.put(key, nativeRecord.get(key));
         }
         if (cached) {
             Map<String, Object> cache = new LinkedHashMap<String, Object>();
@@ -549,7 +631,7 @@ public class UnifiedTemplateEngine {
         if (!dbEvidence.isEmpty()) invocation.put("DB", dbEvidence);
         if (nativeInvocation != null) {
             Map<String, Object> nativeRecord = nativeInvocation.invocation();
-            for (String key : new String[]{"MQ", "HTTP", "DB"}) if (nativeRecord.get(key) != null) invocation.put(key, nativeRecord.get(key));
+            for (String key : new String[]{"MQ", "HTTP", "SSH", "DB"}) if (nativeRecord.get(key) != null) invocation.put(key, nativeRecord.get(key));
         }
         Map<String, Object> commonToolEvidence = new LinkedHashMap<String, Object>(toolEvidence);
         commonToolEvidence.remove("DB");
@@ -913,6 +995,61 @@ public class UnifiedTemplateEngine {
         return output.toString();
     }
 
+    /** Evaluates authored spans once; values returned by nodes are never parsed again. */
+    private String renderAuthoredText(String text, CaseRuntimeContext context, CaseExecutionLog log,
+                                      boolean allowCalls) throws Exception {
+        if (text == null || text.isEmpty()) return text == null ? "" : text;
+        StringBuilder output = new StringBuilder();
+        int cursor = 0;
+        while (cursor < text.length()) {
+            int contextStart = text.indexOf("${", cursor);
+            int callStart = allowCalls ? text.indexOf("#{", cursor) : -1;
+            int fileStart = text.indexOf("&{", cursor);
+            int start = -1;
+            for (int candidate : new int[]{contextStart, callStart, fileStart})
+                if (candidate >= 0 && (start < 0 || candidate < start)) start = candidate;
+            if (start < 0) { output.append(text.substring(cursor)); break; }
+            output.append(text.substring(cursor, start));
+            int end = findToolEnd(text, start + 2);
+            if (end < 0) throw new ExpressionSyntaxException(start, text.length(),
+                    "'}' to close authored expression", "end of text");
+            String authored = text.substring(start, end + 1);
+            Object value;
+            if (start == contextStart) value = renderValues(authored, context);
+            else if (start == fileStart) value = evaluateFile(text.substring(start + 2, end), context, log);
+            else {
+                value = evaluateBlock(authored, context, log);
+                if (value instanceof Map)
+                    throw new IllegalArgumentException("A typed Map cannot be interpolated into text; use an exact typed expression");
+            }
+            output.append(value == null ? "" : String.valueOf(value));
+            cursor = end + 1;
+        }
+        return output.toString();
+    }
+
+    private boolean exactFileExpression(String value) {
+        return value != null && value.startsWith("&{") && value.endsWith("}")
+                && value.indexOf('&', 2) < 0 && value.indexOf("${") < 0 && value.indexOf("#{") < 0;
+    }
+
+    private String evaluateFile(final String authoredPath, final CaseRuntimeContext context,
+                                 final CaseExecutionLog log) throws Exception {
+        if (fileExpressions == null)
+            throw new IllegalArgumentException("Project-file expressions require an ATT project-aware execution scope");
+        return fileExpressions.evaluate(authoredPath, sourceDirectories.get(), new FileExpressionResolver.Runtime() {
+            @Override public Object context(String path, boolean optional) {
+                return optional ? context.requireOptional(path) : context.require(path);
+            }
+            @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
+            }
+            @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
+            @Override public boolean hasContext(String path) { return context.contains(path); }
+            @Override public String file(String nested) throws Exception { return evaluateFile(nested, context, log); }
+        });
+    }
+
     /** Parses every inline call exactly as runtime rendering would, without invoking it. */
     public java.util.List<ToolCallParser.ParsedCall> parseCalls(String text) {
         java.util.List<ToolCallParser.ParsedCall> calls = new java.util.ArrayList<ToolCallParser.ParsedCall>();
@@ -996,8 +1133,9 @@ public class UnifiedTemplateEngine {
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
-            @Override public String interpolate(String value) { return renderValues(value, context); }
+            @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
             @Override public boolean hasContext(String path) { return context.contains(path); }
+            @Override public String file(String path) throws Exception { return evaluateFile(path, context, log); }
         });
     }
 

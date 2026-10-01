@@ -47,7 +47,6 @@ import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.config.Registry;
 import org.apache.http.config.RegistryBuilder;
 import org.apache.http.util.EntityUtils;
-import att.template.DocumentValue;
 import att.template.TypedValueFormatter;
 
 /** Run-owned, thread-safe HTTPHelper transport with bounded reusable connections. */
@@ -308,8 +307,6 @@ public final class HttpHelperExecutor implements AutoCloseable {
             Object suppliedBody = args.get("body");
             boolean structured = suppliedBody instanceof Map || suppliedBody instanceof Iterable
                     || suppliedBody != null && suppliedBody.getClass().isArray();
-            if (suppliedBody instanceof DocumentValue && args.containsKey("requestFormat"))
-                throw new HttpFailure("HTTP_ARGUMENT", "requestFormat cannot be combined with a Render DocumentValue");
             String requestFormat = null;
             if (args.containsKey("requestFormat")) {
                 if (args.get("requestFormat") == null)
@@ -321,17 +318,13 @@ public final class HttpHelperExecutor implements AutoCloseable {
             }
             if (structured && requestFormat == null)
                 throw new HttpFailure("HTTP_ARGUMENT", "A Map/List HTTP body requires requestFormat");
-            if (!structured && !(suppliedBody instanceof DocumentValue) && requestFormat != null)
+            if (!structured && requestFormat != null)
                 throw new HttpFailure("HTTP_ARGUMENT", "requestFormat is valid only for a Map/List HTTP body");
             String contentType = header(headers, "Content-Type");
             java.nio.charset.Charset charset = contentType == null ? StandardCharsets.UTF_8 : contentCharset(contentType);
             if (structured) {
                 body = new TypedValueFormatter().format(suppliedBody, requestFormat).getBytes(charset);
                 if (contentType == null) putHeader(headers, "Content-Type", mediaType(requestFormat) + "; charset=" + charset.name());
-            } else if (suppliedBody instanceof DocumentValue) {
-                DocumentValue document = (DocumentValue) suppliedBody;
-                body = document.text().getBytes(charset);
-                if (contentType == null) putHeader(headers, "Content-Type", mediaType(document.format()) + "; charset=" + charset.name());
             } else {
                 body = suppliedBody instanceof byte[] ? ((byte[]) suppliedBody).clone()
                         : String.valueOf(suppliedBody == null ? "" : suppliedBody).getBytes(charset);

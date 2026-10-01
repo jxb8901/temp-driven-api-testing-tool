@@ -8,16 +8,16 @@ DOCS = ROOT / "docs"
 MANIFEST = DOCS / "reference-manifest.txt"
 
 REQUIRED = {
-    "03_runtime_context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "execIdFormat", "META.HTTPHELPER"],
+    "03_runtime_context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
     "04_execution_modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
-    "04_execution_modes/debug.md": ["att-debug/v1.0", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
-    "04_execution_modes/load.md": ["att-load/v1.2", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
+    "04_execution_modes/debug.md": ["att-debug/v1.1", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
+    "04_execution_modes/load.md": ["att-load/v1.4", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
     "05_resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
     "05_resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
-    "05_resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "DocumentValue", "evidence"],
-    "05_resources/operation_result.md": ["output.result", "evidence", "diagnostic", "attempts", "DocumentValue", "responseFormat"],
-    "14_actions.md": ["output.result", "DocumentValue", "stdoutFormat", "responseFormat", "evidence.output"],
-    "06_environment_testdata.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "stable logical", "run", "validate", "debug", "load"],
+    "05_resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "String", "evidence"],
+    "05_resources/operation_result.md": ["output.result", "evidence", "diagnostic", "attempts", "String", "responseFormat"],
+    "14_actions.md": ["output.result", "String", "stdoutFormat", "responseFormat", "evidence.output"],
+    "09_configuration.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "logical", "run", "validate", "debug", "load"],
     "08_reliability_execution_control.md": ["assert", "runWhen", "onFailure", "timeout", "retry", "attempts", "PASS", "FAIL", "ERROR", "INVALID", "SKIPPED"],
 }
 
@@ -129,8 +129,8 @@ def main():
             if re.search(r"(?m)^#{3,5}\s+3\.[12]\b", text):
                 fail(errors, "%s still uses legacy User Guide section numbering" %
                      authoring.relative_to(ROOT))
-            if not re.search(r"(?m)^###\s+2\.1\s+", text) or not re.search(r"(?m)^###\s+2\.2\s+", text):
-                fail(errors, "%s must expose current 2.1 Workbook and 2.2 Template peer sections" %
+            if any(not re.search(r"(?m)^###\s+2\.%s\s+" % n, text) for n in range(1, 6)):
+                fail(errors, "%s must expose Workbook, Stage, Template, Flow and authoring lifecycle peer sections" %
                      authoring.relative_to(ROOT))
 
     en_ops = DOCS / "reference" / "13_ci_packaging_operations.md"

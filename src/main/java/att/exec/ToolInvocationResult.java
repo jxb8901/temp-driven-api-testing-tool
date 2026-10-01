@@ -57,7 +57,9 @@ public class ToolInvocationResult {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> defaultEvidence(Map<String, Object> invocation) {
-        if (invocation != null && invocation.get("MQ") instanceof Map) {
+        if (invocation != null && invocation.get("SSH") instanceof Map) {
+            return ActionExecutionResult.evidence("ssh", (Map<String, Object>) invocation.get("SSH"));
+        } else if (invocation != null && invocation.get("MQ") instanceof Map) {
             return ActionExecutionResult.evidence("mq", (Map<String, Object>) invocation.get("MQ"));
         } else if (invocation != null && invocation.get("DB") instanceof Map) {
             return ActionExecutionResult.evidence("db", (Map<String, Object>) invocation.get("DB"));

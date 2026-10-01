@@ -62,10 +62,16 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> execNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> inputNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> varsNode = new LinkedHashMap<String, Object>();
+    private Map<String, Object> bootstrapVariableDefinitions = Collections.emptyMap();
+    /** Bootstrap names may be replaced by the first normal assign. */
+    private final java.util.Set<String> bootstrapSeededVariableNames = new java.util.LinkedHashSet<String>();
     /** ATT-owned diagnostics, deliberately excluded from the expression Context. */
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
     /** Public uppercase load identity published below EXEC.LOAD. */
     private final Map<String, Object> loadNode = new LinkedHashMap<String, Object>();
+    private static final java.util.Set<String> LOAD_CONTEXT_FIELD_NAMES =
+            java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList(
+                    "RUN_ID", "ITERATION_ID", "MODEL", "USER_ID", "ITERATION", "PHASE", "WORKLOAD_ID")));
     /** ATT-owned load diagnostics, kept separate from the expression Context. */
     private final Map<String, Object> loadDiagnosticsNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
@@ -103,6 +109,20 @@ public final class CaseRuntimeContext {
     private final java.util.Deque<FlowFrame> flowScopes = new java.util.ArrayDeque<FlowFrame>();
     private final java.util.Deque<TemplateMetadataFrame> priorTemplates = new java.util.ArrayDeque<TemplateMetadataFrame>();
     private boolean executionIdInitializing;
+
+    /** True for a canonical field name owned by the public EXEC.LOAD identity map. */
+    public static boolean isLoadContextField(String name) {
+        return LOAD_CONTEXT_FIELD_NAMES.contains(name);
+    }
+
+    /** Returns the fields guaranteed by the selected scheduler mode and workload form. */
+    public static java.util.Set<String> availableLoadContextFields(boolean userIdAvailable,
+                                                                    boolean workloadIdAvailable) {
+        java.util.Set<String> fields = new java.util.LinkedHashSet<String>(LOAD_CONTEXT_FIELD_NAMES);
+        if (!userIdAvailable) fields.remove("USER_ID");
+        if (!workloadIdAvailable) fields.remove("WORKLOAD_ID");
+        return java.util.Collections.unmodifiableSet(fields);
+    }
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this(testCase, caseOutputDir, runId, runDirectory, caseLog, "testcase");
@@ -392,6 +412,47 @@ public final class CaseRuntimeContext {
     public static void validateReferencePath(String path) {
         java.util.List<Segment> segments = parsePath(requiredReferencePath(path));
         if (segments.isEmpty()) throw new IllegalArgumentException("Context path must contain at least one segment");
+    }
+
+    /** Result of statically probing a path beneath EXEC.INPUT. */
+    enum InputPathStatus { FOUND, MISSING, NULL_INTERMEDIATE, INVALID_PATH }
+
+    /** Probes EXEC.INPUT with the same map/list traversal distinctions used by runtime Context lookup. */
+    static InputPathStatus probeInputPath(Map<?, ?> input, String path) {
+        final java.util.List<Segment> segments;
+        try { segments = parsePath(requiredReferencePath(path)); }
+        catch (RuntimeException invalidPath) { return InputPathStatus.INVALID_PATH; }
+        if (segments.size() < 2 || !"EXEC".equals(segments.get(0).key)
+                || !"INPUT".equals(segments.get(1).key)) return InputPathStatus.INVALID_PATH;
+        Object current = input == null ? java.util.Collections.emptyMap() : input;
+        for (int index = 2; index < segments.size(); index++) {
+            if (current == null) return InputPathStatus.NULL_INTERMEDIATE;
+            Segment segment = segments.get(index);
+            if (current instanceof Map && segment.index == null) {
+                Map<?, ?> map = (Map<?, ?>) current;
+                if (!map.containsKey(segment.key)) return InputPathStatus.MISSING;
+                current = map.get(segment.key);
+            } else if (current instanceof java.util.List && segment.index != null) {
+                java.util.List<?> list = (java.util.List<?>) current;
+                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return InputPathStatus.MISSING;
+                current = list.get(segment.index.intValue());
+            } else return InputPathStatus.INVALID_PATH;
+            if (current == null && index + 1 < segments.size()) return InputPathStatus.NULL_INTERMEDIATE;
+        }
+        return InputPathStatus.FOUND;
+    }
+
+    /** Compatibility predicate for callers that only need an existence check. */
+    public static boolean containsInputPath(Map<?, ?> input, String path) {
+        return probeInputPath(input, path) == InputPathStatus.FOUND;
+    }
+
+    /** Returns the top-level EXEC.VARS key selected by a parsed Context path, if any. */
+    static String executionVariableName(String path) {
+        java.util.List<Segment> segments = parsePath(requiredReferencePath(path));
+        if (segments.size() < 3 || !"EXEC".equals(segments.get(0).key)
+                || !"VARS".equals(segments.get(1).key) || segments.get(2).index != null) return null;
+        return segments.get(2).key;
     }
 
     private Resolution resolution(String path) {
@@ -833,16 +894,43 @@ public final class CaseRuntimeContext {
                 : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(inputs));
     }
 
+    /** Stores an immutable definition snapshot to be evaluated per execution after ID publication. */
+    public void setBootstrapVariables(Map<String, Object> variables) {
+        bootstrapVariableDefinitions = variables == null || variables.isEmpty()
+                ? Collections.<String, Object>emptyMap() : Collections.unmodifiableMap(debugCopyMap(variables));
+    }
+
+    public Map<String, Object> bootstrapVariables() { return bootstrapVariableDefinitions; }
+
+    /** Seeds evaluated entries in canonical EXEC.VARS for Debug or each Load execution. */
+    public void seedExecutionBootstrapVariable(String name, Object value) {
+        validateCaseVariableName(name);
+        if (varsNode.containsKey(name)) throw new IllegalArgumentException("Duplicate EXEC.VARS bootstrap name '" + name + "'");
+        varsNode.put(name, debugCopy(value));
+        bootstrapSeededVariableNames.add(name);
+    }
+
+    /** Compatibility wrapper for validation contexts that only need declared names and raw shapes. */
+    public void seedDebugVariables(Map<String, Object> variables) {
+        if (variables == null || variables.isEmpty()) return;
+        for (Map.Entry<String, Object> entry : variables.entrySet()) {
+            seedExecutionBootstrapVariable(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /** Rolls back a failed pre-action bootstrap transaction. */
+    public void clearExecutionBootstrapVariables(java.util.Set<String> names) {
+        if (names == null) return;
+        for (String name : names) {
+            if (bootstrapSeededVariableNames.remove(name)) varsNode.remove(name);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public void requireCaseVariableAvailable(String name) {
-        if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
-            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
-                    "Invalid EXEC.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
-                    null, "name", null, null, null, null, null,
-                    "Use a simple case-sensitive identifier such as txnSeq.", null);
-        }
+        validateCaseVariableName(name);
         Map<String, Object> variables = varsNode;
-        if (variables.containsKey(name)) {
+        if (variables.containsKey(name) && !bootstrapSeededVariableNames.contains(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
                     "Duplicate EXEC.VARS assignment '${EXEC.VARS." + name + "}'",
                     "The variable was already assigned earlier in this Test Case.", null, "name",
@@ -851,11 +939,43 @@ public final class CaseRuntimeContext {
         }
     }
 
+    private static void validateCaseVariableName(String name) {
+        if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                    "Invalid EXEC.VARS assignment name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
+                    null, "name", null, null, null, null, null,
+                    "Use a simple case-sensitive identifier such as txnSeq.", null);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public void assignCaseVariable(String name, Object value) {
         requireCaseVariableAvailable(name);
         Map<String, Object> variables = varsNode;
         variables.put(name, value);
+        bootstrapSeededVariableNames.remove(name);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object debugCopy(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                copy.put(String.valueOf(entry.getKey()), debugCopy(entry.getValue()));
+            return copy;
+        }
+        if (value instanceof java.util.List) {
+            java.util.List<Object> copy = new java.util.ArrayList<Object>();
+            for (Object item : (java.util.List<?>) value) copy.add(debugCopy(item));
+            return copy;
+        }
+        return value;
+    }
+
+    private static Map<String, Object> debugCopyMap(Map<String, Object> value) {
+        Map<String, Object> copy = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : value.entrySet()) copy.put(entry.getKey(), debugCopy(entry.getValue()));
+        return copy;
     }
 
     /** Expression-visible roots, including legacy aliases and current local bindings. */
@@ -882,14 +1002,6 @@ public final class CaseRuntimeContext {
 
     private Object evidenceValue(Object value, java.util.IdentityHashMap<Object, Object> copies,
                                  java.util.IdentityHashMap<Object, Boolean> active) {
-        if (value instanceof att.template.DocumentValue) {
-            att.template.DocumentValue document = (att.template.DocumentValue) value;
-            Map<String, Object> represented = new LinkedHashMap<String, Object>();
-            represented.put("type", "DocumentValue");
-            represented.put("format", document.format());
-            represented.put("text", document.text());
-            return represented;
-        }
         if (value instanceof Map) {
             if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to Case evidence");
             Object prior = copies.get(value);
@@ -1297,7 +1409,7 @@ public final class CaseRuntimeContext {
         return true;
     }
 
-    private static java.util.List<Segment> parsePath(String path) {
+    static java.util.List<Segment> parsePath(String path) {
         if (path == null) throw new IllegalArgumentException("Context path is null");
         java.util.List<Segment> result = new java.util.ArrayList<Segment>();
         int position = 0;
@@ -1369,8 +1481,8 @@ public final class CaseRuntimeContext {
         private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, null, new java.util.ArrayList<String>(candidates)); }
     }
 
-    private static final class Segment {
-        private final String key; private final Integer index;
+    static final class Segment {
+        final String key; final Integer index;
         private Segment(String key, Integer index) { this.key = key; this.index = index; }
         private static Segment key(String value) { return new Segment(value, null); }
         private static Segment index(int value) { return new Segment(null, Integer.valueOf(value)); }

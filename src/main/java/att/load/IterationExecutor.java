@@ -102,13 +102,15 @@ public final class IterationExecutor implements LoadIterationRunner {
             // mkdir and temporary-workspace cleanup I/O.
             context.setCommandWorkingDirectory(executionWorkspace);
             log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
+            att.core.ExecutionBootstrapVariables.evaluate(context.bootstrapVariables(), context, identityEngine,
+                    att.core.ExecutionBootstrapVariables.Scope.LOAD);
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();
             ToolInvoker tools = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = resources.mq();
-            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(tools, db, mq, resources.http(),
-                    new att.template.DefaultBuiltInProvider(resources.sequences()));
+            UnifiedTemplateEngine engine = UnifiedTemplateEngine.withFileSnapshot(tools, db, mq, resources.http(),
+                    new att.template.DefaultBuiltInProvider(resources.sequences()), target.fileSnapshot());
             results.addAll(new StageTemplateRunner(engine, flows).execute("LOAD", target.template(), context, log));
             if (Thread.currentThread().isInterrupted()) resources.db().abortCase();
             else results.addAll(db.finishCase(context, log));

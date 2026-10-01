@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.3
+schemaVersion: att-template/v3.5
 name: CTO/RTI流程模板
 description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
 
@@ -17,11 +17,11 @@ actions:
     name: TxnSeq
     expression: ATT000${CASE.caseId}#{sysdate('yyyyMMdd')}#{sample.getSeq(6)}
 
-  renderPrecheckRequest:
-    type: render
-    description: "0. Render CT001 Precheck request with testcase amount"
-    payload: CT001_Precheck.xml
-    templateFormat: auto
+  preparePrecheckRequest:
+    type: assign
+    name: precheckRequest
+    description: "0. Read the CT001 Precheck project file"
+    expression: "&{templates/FPP_CTO_RTI_USMF/CT001_Precheck.xml}"
 
   log1:
     type: log
@@ -34,7 +34,7 @@ actions:
   invokePrecheck:
     type: tool
     description: "1. Send CT001 Precheck"
-    call: "#{fpp.invokeApi(requestId=${CASE.VARS.TxnSeq}, requestType='fromchannel', requestText=${ACTIONS.renderPrecheckRequest.output.result}, apiLogPath='invokePrecheck.log')}"
+    call: "#{fpp.invokeApi(requestId=${CASE.VARS.TxnSeq}, requestType='fromchannel', requestText=${EXEC.VARS.precheckRequest}, apiLogPath='invokePrecheck.log')}"
 
   assertPrecheck:
     type: assert

@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 
+from documentation_contracts import active_schemas, current_files, current_blocks
+
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 SCHEMAS = ROOT / "schemas"
@@ -68,6 +70,9 @@ def numbered_heading_shape(path):
         match = re.match(r"^(#{1,6})\s+([0-9]+(?:\.[0-9]+)*)\b", line)
         if match:
             shape.append((len(match.group(1)), match.group(2)))
+        appendix = re.match(r"^(#{1,6})\s+Appendix\s+([A-D])\b", line)
+        if appendix:
+            shape.append((len(appendix.group(1)), "Appendix " + appendix.group(2)))
     return shape
 
 
@@ -256,8 +261,11 @@ def check_schema_references():
     schema_corpus = "\n".join(read(path) for path in SCHEMAS.rglob("*")
                                 if path.is_file() and path.suffix.lower() in
                                 (".json", ".xsd", ".yaml", ".yml"))
+    catalog_path = SCHEMAS / "catalog.yaml"
+    registered = active_schemas(read(catalog_path)) if catalog_path.is_file() else {}
+    registered_tokens = {name + "/v" + version for name, version in registered.items()}
     for token in sorted(tokens):
-        if token not in schema_corpus:
+        if token not in schema_corpus and token not in registered_tokens:
             fail("current documentation references schemaVersion with no matching schema contract: %s" % token)
 
     catalog = SCHEMAS / "catalog.yaml"
@@ -274,7 +282,7 @@ def check_cli_documentation():
     source = read(ROOT / "src/main/java/att/core/ExecutionOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
-                           "build", "clean", "version", "debug", "load"))
+                           "build", "clean", "version", "debug", "load", "help"))
 
     for rel in ("reference/10_cli.md", "reference.zh/10_cli.md"):
         path = DOCS / rel
@@ -310,6 +318,25 @@ def check_cli_documentation():
         for option in re.findall(r"--[a-z][a-z0-9-]*", line):
             if option not in supported_options:
                 fail("docs/quick-start.md uses unsupported ATT option: %s" % option)
+
+
+    # Secondary current docs/examples must use supported commands/options too.
+    for path in current_files(ROOT):
+        if path.suffix.lower() != ".md":
+            continue
+        if path.name in ("migrations.md", "compatibility.md") and "appendices" in path.parts:
+            continue
+        for line in current_blocks(read(path)):
+            match = re.search(r"(?:\./att\.sh|att\.bat)\s+([a-z][a-z0-9-]*)", line)
+            if not match:
+                continue
+            if match.group(1) not in public_commands:
+                fail("%s uses unsupported ATT command: %s" %
+                     (path.relative_to(ROOT), match.group(1)))
+            for option in re.findall(r"--[a-z][a-z0-9-]*", line):
+                if option not in supported_options:
+                    fail("%s uses unsupported ATT option: %s" %
+                         (path.relative_to(ROOT), option))
 
 
 def check_secret_placeholders():
@@ -398,7 +425,7 @@ def check_ownership_links():
             "quick-start.md", "quick-start.zh.md", "reference.html", "reference.zh.html",
             "reference/02_test_authoring.md", "reference/04_execution_modes/debug.md",
             "reference/04_execution_modes/load.md", "reference/05_resources/dbhelper.md",
-            "reference/05_resources/mqhelper.md", "reference/06_environment_testdata.md",
+            "reference/05_resources/mqhelper.md", "reference/09_configuration.md",
             "reference/07_expressions.md", "reference/12_validation_diagnostics.md",
             "reference/13_ci_packaging_operations.md", "system-design/runtime-execution.md",
             "history/README.md"):
@@ -442,6 +469,11 @@ def main():
 
     run_gate("generated Reference freshness",
              [sys.executable, "tools/build_reference_manual.py", "--check"])
+    run_gate("current documentation contracts",
+             [sys.executable, "tools/documentation_contracts.py"])
+    run_gate("documentation contract regression tests",
+             [sys.executable, "-m", "unittest", "discover", "-s", "tools",
+              "-p", "test_documentation_contracts.py"])
     run_gate("Reference semantic coverage",
              [sys.executable, "tools/validate_reference_content.py"])
 
@@ -466,6 +498,9 @@ def main():
         DOCS / "reference.zh.md",
     ]
     markdown_files += list((DOCS / "system-design").rglob("*.md"))
+    markdown_files += list((DOCS / "reference").rglob("*.md"))
+    markdown_files += list((DOCS / "reference.zh").rglob("*.md"))
+    markdown_files += list((ROOT / "examples").rglob("*.md"))
     for path in markdown_files:
         if path.is_file():
             check_markdown_links(path)

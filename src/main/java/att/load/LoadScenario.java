@@ -26,6 +26,9 @@ public final class LoadScenario {
     private final Map<String, Object> evidence;
     private final Long seed;
     private final boolean workloadView;
+    private final Map<String, Object> loadDefaults;
+    private final Map<String, Object> executionDefaults;
+    private final boolean policyOnly;
     private String execIdFormat = "";
     public String execIdFormat() { return execIdFormat; }
     LoadScenario withExecIdFormat(String value) { execIdFormat = value == null ? "" : value; return this; }
@@ -60,12 +63,27 @@ public final class LoadScenario {
 
     LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                  Map<String, Object> thresholds, Map<String, Object> evidence) {
-        this(source, schemaVersion, workloads, seed, thresholds, evidence, false);
+        this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), false);
+    }
+
+    LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
+                 Map<String, Object> thresholds, Map<String, Object> evidence,
+                 Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly) {
+        this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
+                loadDefaults, executionDefaults, policyOnly);
     }
 
     private LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                          Map<String, Object> thresholds, Map<String, Object> evidence, boolean workloadView) {
-        if (workloads == null || workloads.isEmpty()) throw new IllegalArgumentException("Load scenario requires at least one workload");
+        this(source, schemaVersion, workloads, seed, thresholds, evidence, workloadView,
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), false);
+    }
+
+    private LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
+                         Map<String, Object> thresholds, Map<String, Object> evidence, boolean workloadView,
+                         Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly) {
+        if (workloads == null || (workloads.isEmpty() && !policyOnly)) throw new IllegalArgumentException("Load scenario requires at least one workload unless it is policy-only");
         this.source = source;
         this.schemaVersion = schemaVersion == null ? Version.LOAD_SCHEMA : schemaVersion;
         this.workloads = Collections.unmodifiableList(new ArrayList<LoadWorkload>(workloads));
@@ -73,6 +91,9 @@ public final class LoadScenario {
         this.thresholds = immutable(thresholds);
         this.evidence = immutable(evidence);
         this.workloadView = workloadView;
+        this.loadDefaults = immutable(loadDefaults);
+        this.executionDefaults = immutable(executionDefaults);
+        this.policyOnly = policyOnly;
     }
 
     public Path source() { return source; }
@@ -80,8 +101,13 @@ public final class LoadScenario {
     public List<LoadWorkload> workloads() { return workloads; }
     public boolean multiWorkload() { return workloads.size() > 1; }
     public boolean legacyV10() { return Version.LOAD_SCHEMA_V1_0.equals(schemaVersion); }
-    boolean coordinatorRequired() { return !legacyV10() && !workloadView; }
-    public LoadWorkload workload() { return workloads.get(0); }
+    boolean coordinatorRequired() { return !legacyV10() && !workloadView && !policyOnly; }
+    public boolean policyOnly() { return policyOnly; }
+    public boolean hasWorkloads() { return !workloads.isEmpty(); }
+    public LoadWorkload workload() {
+        if (workloads.isEmpty()) throw new IllegalStateException("Load descriptor is policy-only and has no executable workload");
+        return workloads.get(0);
+    }
     public LoadWorkload workload(String id) {
         for (LoadWorkload workload : workloads) if (workload.id().equals(id)) return workload;
         return null;
@@ -93,6 +119,7 @@ public final class LoadScenario {
     public String targetId() { return workload().targetId(); }
     public Map<String, Object> targetArguments() { return workload().targetArguments(); }
     public Map<String, Object> inputs() { return workload().inputs(); }
+    public Map<String, Object> vars() { return workload().vars(); }
     public Model model() { return workload().model(); }
     public int users() { return workload().users(); }
     public double arrivalRatePerSecond() { return workload().arrivalRatePerSecond(); }
@@ -109,6 +136,8 @@ public final class LoadScenario {
     /** Run-level thresholds; a single workload can also declare workload-specific thresholds. */
     public Map<String, Object> thresholds() { return thresholds; }
     public Map<String, Object> evidence() { return evidence; }
+    public Map<String, Object> loadDefaults() { return loadDefaults; }
+    public Map<String, Object> executionDefaults() { return executionDefaults; }
 
     public int configuredUsers() {
         int result = 0;
@@ -146,11 +175,16 @@ public final class LoadScenario {
         if (legacyV10()) return legacyMap(includeExecutionData, summary);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", schemaVersion);
-        if (!execIdFormat.isEmpty()) result.put("execution", Collections.<String, Object>singletonMap("execIdFormat", execIdFormat));
+        Map<String, Object> execution = new LinkedHashMap<String, Object>(executionDefaults);
+        if (!execIdFormat.isEmpty()) execution.put("execIdFormat", execIdFormat);
+        if (!execution.isEmpty()) result.put("execution", execution);
         if (seed != null) result.put("seed", seed);
-        List<Map<String, Object>> workloadMaps = new ArrayList<Map<String, Object>>();
-        for (LoadWorkload workload : workloads) workloadMaps.add(workload.toMap(includeExecutionData, summary));
-        result.put("workloads", workloadMaps);
+        if (!loadDefaults.isEmpty()) result.put("load", loadDefaults);
+        if (!workloads.isEmpty()) {
+            List<Map<String, Object>> workloadMaps = new ArrayList<Map<String, Object>>();
+            for (LoadWorkload workload : workloads) workloadMaps.add(workload.toMap(includeExecutionData, summary));
+            result.put("workloads", workloadMaps);
+        }
         if (!thresholds.isEmpty()) result.put("thresholds", thresholds);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
         return result;

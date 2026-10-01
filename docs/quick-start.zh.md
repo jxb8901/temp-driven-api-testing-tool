@@ -1,4 +1,4 @@
-# ATT V3.6.0 快速入門
+# ATT V3.6.2 快速入門
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.html)
 
@@ -159,7 +159,7 @@ Validation 會檢查 schema、workbook/snapshot 一致性、Template reference�
 | `INVALID` | validation 失敗，因此沒有開始執行 |
 | `SKIPPED` | 被規則刻意跳過 |
 
-遇到真實案例問題時再看 [Validation and Diagnostics](reference.zh/12_validation_diagnostics.md)。
+遇到真實案例問題時再看 [Validation and Troubleshooting](reference.zh/12_validation_diagnostics.md)。
 
 ## 8. 查看結果
 
@@ -263,13 +263,13 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 | 調用 script/program 或 framework-native Tool | [Tool](reference.zh/05_resources/tools.md) |
 | 查詢／更新資料庫，包括 query timeout/retry | [DBHelper](reference.zh/05_resources/dbhelper.md) |
 | 發送／接收／request MQ message | [MQHelper](reference.zh/05_resources/mqhelper.md) |
-| 在 SIT/UAT 間切換 resource binding | [Environment and Test Data](reference.zh/06_environment_testdata.md) |
+| 在 SIT/UAT 間切換 resource binding | [Configuration and Environments](reference.zh/09_configuration.md) |
 | 正確使用 `${...}` / `#{...}` | [Expressions](reference.zh/07_expressions.md) |
 | 使用 assertion、timeout、retry、`runWhen`、`onFailure` | [Reliability and Execution Control](reference.zh/08_reliability_execution_control.md) |
 | 查 CLI command / option | [CLI Reference](reference.zh/10_cli.md) |
-| 排查 `FAIL`、`ERROR`、`INVALID` | [Validation and Diagnostics](reference.zh/12_validation_diagnostics.md) |
+| 排查 `FAIL`、`ERROR`、`INVALID` | [Validation and Troubleshooting](reference.zh/12_validation_diagnostics.md) |
 | 接入 CI 或打包部署 | [CI, Packaging, and Operations](reference.zh/13_ci_packaging_operations.md) |
 
 Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/05_resources/dbhelper.md)。
 
-需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.6.0 中文 Reference Manual](reference.zh.html)。
+需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.6.2 中文 Reference Manual](reference.zh.html)。
