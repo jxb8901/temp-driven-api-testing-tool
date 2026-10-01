@@ -46,6 +46,10 @@ public final class FrameworkRunner {
             }
             profile.end("configLoadMs", profilePhase);
             if ("debug".equals(options.command())) {
+                if (options.debugTargetType().isEmpty()) {
+                    CliDiscovery.printDebug(CliDiscovery.debug(root, config), options.format());
+                    return;
+                }
                 att.debug.DebugEngine.Result debug = new att.debug.DebugEngine(root, config).run(options);
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
@@ -66,8 +70,21 @@ public final class FrameworkRunner {
                 return;
             }
             if ("load".equals(options.command())) {
-                att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(root).load(options.loadScenario(),
-                        att.load.LoadOverrides.from(options));
+                if (options.loadScenario() == null && !options.loadDebug()) {
+                    CliDiscovery.printLoad(CliDiscovery.load(root, config), options.format());
+                    return;
+                }
+                att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(root);
+                att.load.LoadScenario scenario;
+                if (options.loadDebug()) {
+                    java.util.Map<String, Object> promoted = new att.debug.DebugEngine(root, config).loadBootstrapInputForLoad(options);
+                    java.util.Map<String, Object> quickPolicy = new att.load.LoadProfileLoader(root).loadDefault();
+                    scenario = loader.fromDebugInput((Path) promoted.get("source"), options.debugTargetType(),
+                            options.debugTargetId(), castMap(promoted.get("inputs")), castMap(promoted.get("vars")),
+                            castMap(promoted.get("arguments")), quickPolicy, options);
+                } else {
+                    scenario = loader.load(options.loadScenario(), att.load.LoadOverrides.from(options));
+                }
                 att.load.LoadTarget target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
                 new att.load.LoadTargetValidator(root, config).validate(scenario, target);
                 runLoad(root, config, options, scenario, target, profile);
@@ -175,6 +192,11 @@ public final class FrameworkRunner {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private static java.util.Map<String, Object> castMap(Object value) {
+        return value instanceof java.util.Map ? (java.util.Map<String, Object>) value : java.util.Collections.<String, Object>emptyMap();
+    }
+
     private static void runLoad(Path root, FrameworkConfig config, ExecutionOptions options,
                                 att.load.LoadScenario scenario, att.load.LoadTarget target,
                                 PerformanceProfile profile) throws Exception {
@@ -241,8 +263,11 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println("Debug: ./att.sh debug template|flow|tool <id> [--config <file>] [--env <name>] [--input <debug.yaml>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
-        System.out.println("Load: ./att.sh load <scenario.yaml> [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
+        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
+        System.out.println("Debug discovery: ./att.sh debug [--format human|json] lists runnable targets and existing sidecars; discovery does not execute targets.");
+        System.out.println("Load: ./att.sh load [<scenario.yaml> | --debug template|flow|tool <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
+        System.out.println("Load discovery: ./att.sh load [--format human|json] lists valid scenarios; load/load.yaml supplies the optional Quick Load policy.");
+        System.out.println("--set namespaces: input.* -> EXEC.INPUT; arg.* -> Tool arguments; vars.* -> Template/Flow EXEC.VARS. Values use safe YAML types.");
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");

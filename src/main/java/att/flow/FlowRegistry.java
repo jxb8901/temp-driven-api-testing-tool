@@ -75,6 +75,12 @@ public final class FlowRegistry {
     }
 
     public List<FlowDefinition> all() { return Collections.unmodifiableList(new ArrayList<FlowDefinition>(byId.values())); }
+    /** Canonical descriptor IDs available for target discovery; IDs are not loaded or executed here. */
+    public List<String> ids() {
+        List<String> result = new ArrayList<String>(descriptors.keySet());
+        Collections.sort(result);
+        return Collections.unmodifiableList(result);
+    }
     public int size() { return byId.size(); }
     public int parsedCount() { return parsedCount; }
 

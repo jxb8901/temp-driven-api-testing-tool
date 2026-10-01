@@ -61,7 +61,7 @@ class MultiWorkloadReviewRegressionTest {
 
     @Test void singleWorkloadV12UsesCoordinatorAndPropagatesWorkloadThresholdFailure() throws Exception {
         LoadScenario scenario = load("single-v12.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: only\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {users: 1, duration: 120ms}\n"
                 + "  thresholds: {minThroughput: \">= 999999/s\"}\n");
@@ -89,7 +89,7 @@ class MultiWorkloadReviewRegressionTest {
 
     @Test void coordinatedGateExcludesDelayedWorkerStartupFromRunEnvelope() throws Exception {
         LoadScenario scenario = load("barrier.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: first\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {arrivalRate: 20/s, duration: 150ms, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "- id: second\n  target: {type: tool, id: sample.getAcDate}\n"
@@ -134,7 +134,7 @@ class MultiWorkloadReviewRegressionTest {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Test void validatedScenarioDataRemainsDeeplyImmutableForV11AndLegacyV10() throws Exception {
         LoadScenario v11 = load("immutable-v11.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: immutable\n  target:\n    type: tool\n    id: sample.getSeq\n    arguments:\n      values: [a, b]\n"
                 + "  inputs:\n    payload:\n      flags: [A, B]\n"
                 + "  load: {users: 1, duration: 100ms}\n");
@@ -158,7 +158,7 @@ class MultiWorkloadReviewRegressionTest {
 
     @Test void retainedV11EvidenceIncludesWorkloadAndTargetIdentity() throws Exception {
         LoadScenario scenario = load("evidence-identity.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: account-date\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {users: 1, duration: 100ms}\n  execution: {thinkTime: 1ms}\n"
                 + "evidence: {success: sample, sampleRate: 1.0, maxSamples: 5}\n");

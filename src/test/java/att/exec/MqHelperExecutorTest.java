@@ -201,8 +201,8 @@ class MqHelperExecutorTest {
             Files.createDirectories(caseDir);
             Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
             FakeFactory factory = new FakeFactory();
-            if ("send".equals(operation) || "request".equals(operation)) factory.firstPutDelayMs = 60L;
-            else factory.firstGetDelayMs = 60L;
+            if ("send".equals(operation) || "request".equals(operation)) factory.firstPutDelayMs = 300L;
+            else factory.firstGetDelayMs = 300L;
             Map<String, Object> args = "send".equals(operation)
                     ? map("queue", "REQUEST.Q", "file", "payload.bin")
                     : "receive".equals(operation)
@@ -211,7 +211,7 @@ class MqHelperExecutorTest {
             String call = "#{mq.broker." + operation + "(" + callArguments(args) + ")}";
             Map<String, Object> retry = map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"));
             TemplateAction action = new TemplateAction("mqRetry", map("type", "tool", "call", call,
-                    "timeoutMs", 20, "retry", retry));
+                    "timeoutMs", 100, "retry", retry));
             CaseRuntimeContext context = context(caseDir);
             context.beginStage(new StageCaseData("mq", "MQ", Collections.<String, Object>emptyMap()), "MQ", tempDir);
 

@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,7 +21,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Loads and semantically validates active att-load/v1.2 YAML scenarios. */
+/** Loads and semantically validates active att-load/v1.3 YAML scenarios. */
 public final class LoadScenarioLoader {
     private static final Pattern DURATION = Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern RATE = Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
@@ -43,16 +44,18 @@ public final class LoadScenarioLoader {
             Path schema;
             if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.3.schema.json");
+            } else if (Version.LOAD_SCHEMA_V1_2.equals(version)) {
                 schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.2.schema.json");
             } else {
-                throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; ATT 3.6.0 supports only "
+                throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; current schema is "
                         + Version.LOAD_SCHEMA_CURRENT + ". Update to workloads-based syntax and use execution.execIdFormat; see docs/reference/appendices/migrations.md.");
             }
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.2.schema.json"), map,
+                    att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.3.schema.json"), map,
                     version, Version.LOAD_SCHEMA_CURRENT);
             SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_CURRENT, "load scenario");
-            return semanticCurrent(source, map);
+            return semanticCurrent(source, map, true);
         } catch (DiagnosticException e) {
             throw e;
         } catch (SemanticFailure e) {
@@ -82,7 +85,63 @@ public final class LoadScenarioLoader {
         }
     }
 
-    private LoadScenario semanticCurrent(Path source, Map<String, Object> root) {
+    /** Builds the transient one-workload Load scenario used by `load --debug`. */
+    public LoadScenario fromDebugInput(Path source, String targetType, String targetId,
+                                       Map<String, Object> inputs, Map<String, Object> vars,
+                                       att.core.ExecutionOptions options) {
+        return fromDebugInput(source, targetType, targetId, inputs, vars, Collections.<String, Object>emptyMap(), null, options);
+    }
+
+    public LoadScenario fromDebugInput(Path source, String targetType, String targetId,
+                                       Map<String, Object> inputs, Map<String, Object> vars,
+                                       Map<String, Object> arguments, Map<String, Object> profile,
+                                       att.core.ExecutionOptions options) {
+        if (!("template".equals(targetType) || "flow".equals(targetType) || "tool".equals(targetType)))
+            throw failure("target.type", "load --debug target must be Template, Flow, or Tool");
+        Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
+        if (profile != null) {
+            for (String field : new String[]{"seed", "thresholds", "evidence"}) if (profile.containsKey(field)) root.put(field, profile.get(field));
+        }
+        Map<String, Object> workload = new LinkedHashMap<String, Object>();
+        workload.put("id", "debug-" + targetId.replaceAll("[^A-Za-z0-9._-]", "-"));
+        Map<String, Object> target = mapOf("type", targetType, "id", targetId);
+        if ("tool".equals(targetType) && arguments != null && !arguments.isEmpty()) target.put("arguments", LoadIsolation.deepCopyMap(arguments));
+        workload.put("target", target);
+        if (inputs != null && !inputs.isEmpty()) workload.put("inputs", LoadIsolation.deepCopyMap(inputs));
+        if (vars != null && !vars.isEmpty()) workload.put("vars", LoadIsolation.deepCopyMap(vars));
+        Map<String, Object> load = profile == null ? new LinkedHashMap<String, Object>() : copyMap(profile.get("load"));
+        Map<String, Object> execution = profile == null ? new LinkedHashMap<String, Object>() : copyMap(profile.get("execution"));
+        LoadOverrides intensity = new LoadOverrides(options.loadUsers(), options.loadArrivalRate(), options.loadWarmup(),
+                options.loadRampUp(), options.loadDuration(), options.loadRampDown(), options.loadThinkTime(),
+                options.loadMaxConcurrent(), options.loadOverloadPolicy());
+        applyOverrideMaps(load, execution, intensity);
+        if (load.get("users") == null && load.get("arrivalRate") == null)
+            throw quickLoadFailure(source, "load", "Quick Load needs a policy: add load/load.yaml or provide --users/--arrival-rate with the required --duration (arrival rate also needs --max-concurrent and --overload-policy)");
+        if (load.get("duration") == null)
+            throw quickLoadFailure(source, "load.duration", "Quick Load needs duration from load/load.yaml or --duration");
+        workload.put("load", load);
+        if (!execution.isEmpty()) workload.put("execution", execution);
+        root.put("workloads", java.util.Collections.<Object>singletonList(workload));
+        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.3.schema.json"), root); }
+        catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
+        return semanticCurrent(source, root, false);
+    }
+
+    private DiagnosticException quickLoadFailure(Path source, String field, String detail) {
+        return new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Invalid Quick Load policy", detail,
+                source == null ? null : source.toString(), field, null, null, null, null, null,
+                "Add a valid load/load.yaml policy or provide compatible CLI pacing options, then retry.", null);
+    }
+
+    private static Map<String, Object> mapOf(String key1, Object value1, String key2, Object value2) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put(key1, value1); result.put(key2, value2); return result;
+    }
+    private static Map<String, Object> mapOf(String key, Object value) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put(key, value); return result;
+    }
+
+    private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario) {
         List<Object> raw = list(root.get("workloads"), "workloads");
         if (raw.isEmpty()) throw failure("workloads", "workloads must contain at least one workload");
         List<LoadWorkload> workloads = new ArrayList<LoadWorkload>();
@@ -96,9 +155,9 @@ public final class LoadScenarioLoader {
             if (!WORKLOAD_ID.matcher(id).matches()) throw failure(prefix + ".id", "workload id must match [A-Za-z0-9][A-Za-z0-9._-]*");
             if (!ids.add(id)) throw failure(prefix + ".id", "duplicate workload id '" + id + "'");
             Map<String, Object> thresholds = mapOptional(map.get("thresholds"), prefix + ".thresholds");
-            LoadWorkload workload = parseWorkload(id, map, prefix + ".", thresholds);
+            LoadWorkload workload = parseWorkload(id, map, prefix + ".", thresholds, sourceIsScenario ? i : -1);
             if (model == null) model = workload.model();
-            else if (model != workload.model()) throw failure(prefix + ".load", "mixed closed and arrivalRate workload models are not supported in att-load/v1.2");
+            else if (model != workload.model()) throw failure(prefix + ".load", "mixed closed and arrivalRate workload models are not supported in " + Version.LOAD_SCHEMA_CURRENT);
             if (warmup == null) {
                 warmup = workload.warmup(); rampUp = workload.rampUp(); duration = workload.duration(); rampDown = workload.rampDown();
             } else if (!warmup.equals(workload.warmup()) || !rampUp.equals(workload.rampUp())
@@ -119,16 +178,20 @@ public final class LoadScenarioLoader {
                 .withExecIdFormat(format);
     }
 
-    private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix, Map<String, Object> thresholds) {
+    private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
+                                       Map<String, Object> thresholds, int sourceIndex) {
         Map<String, Object> target = map(root.get("target"), prefix + "target");
         String type = string(target.get("type"), prefix + "target.type");
         String targetId = string(target.get("id"), prefix + "target.id");
         Map<String, Object> arguments = mapOptional(target.get("arguments"), prefix + "target.arguments");
         Map<String, Object> inputs = mapOptional(root.get("inputs"), prefix + "inputs");
+        Map<String, Object> vars = mapOptional(root.get("vars"), prefix + "vars");
         Map<String, Object> load = map(root.get("load"), prefix + "load");
         Map<String, Object> execution = mapOptional(root.get("execution"), prefix + "execution");
         if (("template".equals(type) || "flow".equals(type)) && !arguments.isEmpty())
             throw failure(prefix + "target.arguments", "target.arguments is supported only for Tool targets");
+        if ("tool".equals(type) && !vars.isEmpty())
+            throw failure(prefix + "vars", "workload.vars is supported only for Template and Flow targets; Tool arguments remain a separate contract");
 
         Object usersValue = load.get("users");
         Object rateValue = load.get("arrivalRate");
@@ -154,8 +217,8 @@ public final class LoadScenarioLoader {
         Duration rampDown = duration(load.get("rampDown"), prefix + "load.rampDown", false);
         ThinkTimePolicy thinkTime = thinkTime(execution.get("thinkTime"), prefix + "execution.thinkTime");
         validateThresholds(model, thresholds, prefix + "thresholds");
-        return new LoadWorkload(id, type, targetId, arguments, inputs, model, users, rate, rateText,
-                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds);
+        return new LoadWorkload(id, type, targetId, arguments, inputs, vars, model, users, rate, rateText,
+                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, sourceIndex);
     }
 
     private ThinkTimePolicy thinkTime(Object value, String field) {
@@ -181,17 +244,42 @@ public final class LoadScenarioLoader {
         Map<String, Object> workload = map(values.get(0), "workloads[0]");
         Map<String, Object> load = copyMap(workload.get("load"));
         Map<String, Object> execution = copyMap(workload.get("execution"));
+        Map<String, Object> inputs = copyMap(workload.get("inputs"));
+        Map<String, Object> vars = copyMap(workload.get("vars"));
+        Map<String, Object> target = copyMap(workload.get("target"));
+        String targetType = String.valueOf(target.get("type"));
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "arg") && !"tool".equals(targetType))
+            throw failure("target.arguments", "--set arg.* is valid only for a Tool workload");
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "vars") && "tool".equals(targetType))
+            throw failure("vars", "--set vars.* is not supported for Tool workloads; use --set arg.* for Tool arguments");
+        inputs = att.core.CliSetOverrides.apply(inputs, overrides.setOverrides(), "input");
+        vars = att.core.CliSetOverrides.apply(vars, overrides.setOverrides(), "vars");
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "input") || workload.containsKey("inputs")) workload.put("inputs", inputs);
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "vars") || workload.containsKey("vars")) workload.put("vars", vars);
+        if (att.core.CliSetOverrides.hasNamespace(overrides.setOverrides(), "arg")) {
+            Map<String, Object> arguments = copyMap(target.get("arguments"));
+            target.put("arguments", att.core.CliSetOverrides.apply(arguments, overrides.setOverrides(), "arg"));
+            workload.put("target", target);
+        }
         applyOverrideMaps(load, execution, overrides);
         workload.put("load", load); if (!execution.isEmpty()) workload.put("execution", execution);
         List<Object> replaced = new ArrayList<Object>(); replaced.add(workload); root.put("workloads", replaced);
     }
 
     private void applyOverrideMaps(Map<String, Object> load, Map<String, Object> execution, LoadOverrides overrides) {
-        putInteger(load, "users", overrides.users()); put(load, "arrivalRate", overrides.arrivalRate());
+        if (overrides.users() != null) {
+            load.remove("arrivalRate"); load.remove("maxConcurrent"); load.remove("overloadPolicy");
+            putInteger(load, "users", overrides.users());
+        }
+        if (overrides.arrivalRate() != null) {
+            load.remove("users");
+            put(load, "arrivalRate", overrides.arrivalRate());
+        }
         put(load, "warmup", overrides.warmup()); put(load, "rampUp", overrides.rampUp());
         put(load, "duration", overrides.duration()); put(load, "rampDown", overrides.rampDown());
         putInteger(load, "maxConcurrent", overrides.maxConcurrent()); put(load, "overloadPolicy", overrides.overloadPolicy());
-        put(execution, "thinkTime", overrides.thinkTime());
+        if (overrides.arrivalRate() != null && overrides.thinkTime() == null) execution.remove("thinkTime");
+        else put(execution, "thinkTime", overrides.thinkTime());
     }
 
     private static void put(Map<String, Object> map, String key, String value) { if (value != null) map.put(key, value); }

@@ -47,6 +47,10 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
             "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
             "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
             "endswith", "replace", "padleft", "padright", "dateadd", "dbtext", "prettyprint", "format")));
+    private static final Set<String> BOOTSTRAP_SAFE_FUNCTIONS = Collections.unmodifiableSet(new LinkedHashSet<String>(java.util.Arrays.asList(
+            "upper", "lower", "trim", "ltrim", "rtrim", "string", "number", "boolean", "length",
+            "concat", "coalesce", "nvl", "iif", "nchar", "substr", "indexof", "contains", "startswith",
+            "endswith", "replace", "padleft", "padright", "dateadd", "formatdate", "dbtext", "prettyprint", "format")));
 
     private final Clock clock;
     private final Random random;
@@ -81,6 +85,12 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
     public static boolean isSafeForExecutionIdentity(String name) {
         String function = name == null ? null : ALIASES.get(name.toLowerCase(Locale.ROOT));
         return function != null && EXECUTION_ID_FUNCTIONS.contains(function);
+    }
+
+    /** Pure deterministic built-ins allowed while bootstrap vars are evaluated. */
+    public static boolean isSafeForBootstrap(String name) {
+        String function = name == null ? null : ALIASES.get(name.toLowerCase(Locale.ROOT));
+        return function != null && BOOTSTRAP_SAFE_FUNCTIONS.contains(function);
     }
 
     @Override public Object invoke(String name, Map<String, Object> input) {

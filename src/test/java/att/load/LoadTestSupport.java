@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Migrates old load test fixtures in memory so behavior tests exercise the active v1.2 schema. */
+/** Migrates old load test fixtures in memory so behavior tests exercise the active v1.3 schema. */
 final class LoadTestSupport {
     private LoadTestSupport() { }
 
@@ -20,8 +20,8 @@ final class LoadTestSupport {
             if (!(parsed instanceof Map)) return yaml;
             Map<String, Object> root = (Map<String, Object>) parsed;
             Object version = root.get("schemaVersion");
-            if ("att-load/v1.2".equals(version)) return yaml;
-            if (!"att-load/v1.0".equals(version) && !"att-load/v1.2".equals(version)) return yaml;
+            if ("att-load/v1.3".equals(version)) return yaml;
+            if (!"att-load/v1.0".equals(version) && !"att-load/v1.3".equals(version)) return yaml;
             if ("att-load/v1.0".equals(version)) {
                 Map<String, Object> workload = new LinkedHashMap<String, Object>();
                 workload.put("id", "default");
@@ -46,7 +46,7 @@ final class LoadTestSupport {
                 workloads.add(workload);
                 root.put("workloads", workloads);
             }
-            root.put("schemaVersion", "att-load/v1.2");
+            root.put("schemaVersion", "att-load/v1.3");
             return new org.yaml.snakeyaml.Yaml().dump(root);
         } catch (Exception failure) {
             throw new IllegalArgumentException("Invalid Load test fixture", failure);

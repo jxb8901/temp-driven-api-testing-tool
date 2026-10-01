@@ -20,7 +20,7 @@ class MultiWorkloadReportTest {
         Path root = Paths.get("").toAbsolutePath().normalize();
         Path scenarioFile = temp.resolve("report-v11.yaml");
         Files.write(scenarioFile, (
-                "schemaVersion: att-load/v1.2\n"
+                "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n"
                 + "- id: primary\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {arrivalRate: 10/s, duration: 250ms, maxConcurrent: 2, overloadPolicy: drop}\n"

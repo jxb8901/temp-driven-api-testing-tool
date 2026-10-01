@@ -5,13 +5,14 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Immutable normalized workload used by active att-load/v1.2 scenarios. */
+/** Immutable normalized workload used by active workloads-based load scenarios. */
 public final class LoadWorkload {
     private final String id;
     private final String targetType;
     private final String targetId;
     private final Map<String, Object> targetArguments;
     private final Map<String, Object> inputs;
+    private final Map<String, Object> vars;
     private final LoadScenario.Model model;
     private final int users;
     private final double arrivalRatePerSecond;
@@ -24,17 +25,39 @@ public final class LoadWorkload {
     private final int maxConcurrent;
     private final String overloadPolicy;
     private final Map<String, Object> thresholds;
+    private final int sourceIndex;
 
     public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
                         Map<String, Object> inputs, LoadScenario.Model model, int users,
                         double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
                         Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
                         int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds) {
+        this(id, targetType, targetId, targetArguments, inputs, Collections.<String, Object>emptyMap(), model,
+                users, arrivalRatePerSecond, arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy,
+                maxConcurrent, overloadPolicy, thresholds, -1);
+    }
+
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds) {
+        this(id, targetType, targetId, targetArguments, inputs, vars, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy,
+                thresholds, -1);
+    }
+
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds, int sourceIndex) {
         this.id = id;
         this.targetType = targetType;
         this.targetId = targetId;
         this.targetArguments = immutable(targetArguments);
         this.inputs = immutable(inputs);
+        this.vars = immutable(vars);
         this.model = model;
         this.users = users;
         this.arrivalRatePerSecond = arrivalRatePerSecond;
@@ -47,6 +70,7 @@ public final class LoadWorkload {
         this.maxConcurrent = maxConcurrent;
         this.overloadPolicy = overloadPolicy;
         this.thresholds = immutable(thresholds);
+        this.sourceIndex = sourceIndex;
     }
 
     public String id() { return id; }
@@ -54,6 +78,7 @@ public final class LoadWorkload {
     public String targetId() { return targetId; }
     public Map<String, Object> targetArguments() { return targetArguments; }
     public Map<String, Object> inputs() { return inputs; }
+    public Map<String, Object> vars() { return vars; }
     public LoadScenario.Model model() { return model; }
     public int users() { return users; }
     public double arrivalRatePerSecond() { return arrivalRatePerSecond; }
@@ -66,6 +91,8 @@ public final class LoadWorkload {
     public int maxConcurrent() { return maxConcurrent; }
     public String overloadPolicy() { return overloadPolicy; }
     public Map<String, Object> thresholds() { return thresholds; }
+    /** Zero-based index in the source scenario, or -1 for in-memory promoted workloads. */
+    public int sourceIndex() { return sourceIndex; }
 
     Map<String, Object> toMap(boolean includeExecutionData, boolean summary) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -76,6 +103,7 @@ public final class LoadWorkload {
         if (includeExecutionData && !targetArguments.isEmpty()) target.put("arguments", targetArguments);
         result.put("target", target);
         if (includeExecutionData && !inputs.isEmpty()) result.put("inputs", inputs);
+        if (includeExecutionData && !vars.isEmpty()) result.put("vars", vars);
         Map<String, Object> load = new LinkedHashMap<String, Object>();
         if (model == LoadScenario.Model.CLOSED) load.put("users", users);
         else load.put("arrivalRate", arrivalRate);

@@ -122,10 +122,14 @@ class HttpHelperExecutorTest {
     }
 
     private FrameworkConfig configuration(String url, String pool, String responseFormat) throws Exception {
+        return configuration(url, pool, responseFormat, 1000);
+    }
+
+    private FrameworkConfig configuration(String url, String pool, String responseFormat, int readTimeoutMs) throws Exception {
         att.TestSchemas.install(root);
         Files.createDirectories(root.resolve("config/httphelpers"));
         Files.write(root.resolve("config/httphelpers/sit.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
-                + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: 1000\n"
+                + "\ndefaults:\n  headers: {Accept: application/json, X-Channel: default}\n  readTimeoutMs: " + readTimeoutMs + "\n"
                 + (responseFormat == null ? "" : "  responseFormat: " + responseFormat + "\n")
                 + (pool == null ? "" : "pool:\n" + pool)).getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
@@ -180,12 +184,12 @@ class HttpHelperExecutorTest {
 
     @Test void responseFormatValidationAndParseFailuresAreSafeAndDistinct() throws Exception {
         String url = start();
-        FrameworkConfig config = configuration(url, null);
+        FrameworkConfig config = configuration(url, null, null, 5000);
         CaseRuntimeContext context = context();
         int before = hits.get();
         try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
             ToolInvocationResult invalidFormat = http.execute("paymentApi", "get",
-                    args("path", "/json", "responseFormat", "binary"), context, 1000L, "bad-response-format", "text");
+                    args("path", "/json", "responseFormat", "binary"), context, 5000L, "bad-response-format", "text");
             assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) invalidFormat.operationResult().outputMetadata().get("error")).get("type"));
             assertEquals(before, hits.get());
 

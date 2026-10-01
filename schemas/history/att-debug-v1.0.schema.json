@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:att:schema:debug:v1.0",
-  "title": "ATT standalone debug input",
+  "title": "ATT historical standalone debug input",
   "type": "object",
   "required": ["schemaVersion"],
   "properties": {

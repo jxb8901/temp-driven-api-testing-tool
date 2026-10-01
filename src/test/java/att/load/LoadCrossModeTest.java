@@ -29,6 +29,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Regression proof that one canonical component is portable across execution modes. */
@@ -64,6 +69,234 @@ class LoadCrossModeTest {
         IterationResult load = new IterationExecutor(project, config, target).execute(
                 IterationRequest.closed("cross-mode", "cross-mode-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
         assertPortableResult(load.context(), load.validations());
+    }
+
+    @Test void loadDebugPromotionEvaluatesOverridesPerExecutionWithoutSharingValues() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.3\n"
+                + "name: SHARED\ndescription: bootstrap fixture\nactions:\n"
+                + "  check:\n    type: log\n    message: 'value=${EXEC.VARS.refNo}|id=${EXEC.VARS.executionId}'\n");
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {amount: 17}\n"
+                + "vars: {refNo: sidecar, executionId: '${EXEC.ID}', loadUser: '${EXEC.LOAD.USER_ID}'}\n");
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "SHARED",
+                "--input", "templates/SHARED/debug.yaml", "--users", "1", "--duration", "1s",
+                "--run-id", "bootstrap-load", "--output-dir", temp.resolve("load-output").toString(),
+                "--set", "vars.refNo=${EXEC.INPUT.amount}"});
+        Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
+                options.debugTargetType(), options.debugTargetId(), map(promoted.get("inputs")), map(promoted.get("vars")), options);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources, temp.resolve("load-output"));
+            IterationResult first = executor.execute(IterationRequest.closed("bootstrap-load", "i-1", 1,
+                    "STEADY", Instant.now(), "VU-1", scenario.inputs()).withWorkloadId(scenario.workloadId()));
+            IterationResult second = executor.execute(IterationRequest.closed("bootstrap-load", "i-2", 2,
+                    "STEADY", Instant.now(), "VU-1", scenario.inputs()).withWorkloadId(scenario.workloadId()));
+            assertEquals(ResultStatus.PASS, first.status());
+            assertEquals(ResultStatus.PASS, second.status());
+            assertEquals(17L, ((Number) first.context().require("EXEC.VARS.refNo")).longValue());
+            assertEquals(first.context().resolve("EXEC.ID"), first.context().resolve("EXEC.VARS.executionId"));
+            assertEquals(second.context().resolve("EXEC.ID"), second.context().resolve("EXEC.VARS.executionId"));
+            assertEquals("VU-1", first.context().resolve("EXEC.VARS.loadUser"));
+            assertEquals("VU-1", second.context().resolve("EXEC.VARS.loadUser"));
+            assertNotEquals(first.context().resolve("EXEC.VARS.executionId"), second.context().resolve("EXEC.VARS.executionId"));
+            assertTrue(String.valueOf(first.context().resolve("EXEC.ACTIONS.check.output.result")).contains("value=17|id="));
+        }
+    }
+
+    @Test void loadDebugPromotesTypedToolArgumentsIntoTheNormalLoadRuntime() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        write(project, "config/tools/echo.debug.yaml", "schemaVersion: att-debug/v1.1\narguments: {value: sidecar}\n");
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "echo",
+                "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
+        Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
+                options.debugTargetType(), options.debugTargetId(), map(promoted.get("inputs")), map(promoted.get("vars")),
+                map(promoted.get("arguments")), null, options);
+        assertEquals("typed-load", scenario.targetArguments().get("value"));
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("tool-debug-load", "tool-debug-load-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+        assertEquals(ResultStatus.PASS, result.status());
+        assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.loadTool.output.result")).contains("typed-load"));
+    }
+
+    @Test void groupedToolSidecarOverridesSurviveQuickLoadPromotion() throws Exception {
+        Path project = fixture();
+        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.1\narguments: {value: from-root}\n"
+                + "tools:\n  echo:\n    arguments: {value: from-sidecar}\n");
+        Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new att.config.ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig grouped = new ToolConfig("group.echo", "echo", "group", "Echo", "Grouped Echo",
+                java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("group.echo", grouped), null, null);
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "group.echo",
+                "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
+
+        Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
+
+        assertEquals("typed-load", map(promoted.get("arguments")).get("value"));
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
+                options.debugTargetType(), options.debugTargetId(), map(promoted.get("inputs")), map(promoted.get("vars")),
+                map(promoted.get("arguments")), null, options);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("group-tool-debug-load", "group-tool-debug-load-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+
+        assertEquals(ResultStatus.PASS, result.status());
+        String output = String.valueOf(result.context().resolve("EXEC.ACTIONS.loadTool.output.result"));
+        assertTrue(output.contains("typed-load"), output);
+        assertFalse(output.contains("from-sidecar"), output);
+    }
+
+    @Test void missingStaticBootstrapInputFailsBeforeLoadSchedulingWithWorkloadSourceLocation() throws Exception {
+        Path project = fixture();
+        Path source = write(project, "load/missing-bootstrap-input.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: first\n    target: {type: template, id: SHARED}\n    load: {users: 1, duration: 1s}\n"
+                + "  - id: second\n    target: {type: template, id: SHARED}\n"
+                + "    inputs: {customer: {id: C001}}\n"
+                + "    vars:\n      account: '${EXEC.INPUT.customer.account}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario parsed = new LoadScenarioLoader(project).load(source);
+        LoadScenario selected = parsed.forWorkload(parsed.workload("second"));
+        FrameworkConfig config = config();
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(selected);
+
+        att.validation.DiagnosticException diagnostic = assertThrows(att.validation.DiagnosticException.class,
+                () -> new LoadTargetValidator(project, config).validate(selected, target));
+
+        assertEquals("workloads[1].vars.account", diagnostic.field());
+        assertEquals(source.toString(), diagnostic.file());
+        assertNotNull(diagnostic.source());
+        assertEquals(10, diagnostic.source().line());
+        assertTrue(diagnostic.format().contains("^"), diagnostic.format());
+        assertTrue(diagnostic.detail().contains("workloadId: second"), diagnostic.detail());
+    }
+
+    @Test void optionalMissingInputsSurviveLoadBootstrapIncludingExpressionBlocks() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        write(project, "templates/OPTIONAL/template.yaml", "schemaVersion: att-template/v3.3\nname: OPTIONAL\n"
+                + "description: optional bootstrap references\nactions:\n"
+                + "  check: {type: log, message: 'optional=${EXEC.VARS.customerId}|block=${EXEC.VARS.region}'}\n");
+        Path source = write(project, "load/optional-bootstrap-input.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: optional\n    target: {type: template, id: OPTIONAL}\n    inputs: {}\n"
+                + "    vars:\n      customerId: '${EXEC.INPUT.customerId?}'\n"
+                + "      loadUser: '${EXEC.LOAD.USER_ID}'\n"
+                + "      iteration: '${EXEC.LOAD.ITERATION}'\n"
+                + "      region: '#{${EXEC.INPUT.region?}}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("optional-bootstrap", "optional-bootstrap-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+
+        assertEquals(ResultStatus.PASS, result.status());
+        assertNull(result.context().require("EXEC.VARS.customerId"));
+        assertNull(result.context().require("EXEC.VARS.region"));
+        assertEquals("VU-1", result.context().require("EXEC.VARS.loadUser"));
+        assertEquals(1L, ((Number) result.context().require("EXEC.VARS.iteration")).longValue());
+    }
+
+    @Test void loadBootstrapValidatesKnownFieldsAndPreservesOptionalArrivalUserId() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        Path source = write(project, "load/arrival-optional-user.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: arrival\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      userId: '${EXEC.LOAD.USER_ID?}'\n"
+                + "      iteration: '${EXEC.LOAD.ITERATION}'\n"
+                + "    load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources,
+                    temp.resolve("arrival-load-bootstrap"));
+            IterationResult result = executor.execute(IterationRequest.arrivalRate("arrival-user", "arrival-1", 1,
+                    "STEADY", Instant.now(), scenario.inputs()).withWorkloadId(scenario.workloadId()));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertNull(result.context().require("EXEC.VARS.userId"));
+            assertEquals(1L, ((Number) result.context().require("EXEC.VARS.iteration")).longValue());
+        }
+
+        Path typoSource = write(project, "load/arrival-typo-user.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: arrival\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      userId: '${EXEC.LOAD.USRE_ID}'\n"
+                + "    load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n");
+        LoadScenario typoScenario = new LoadScenarioLoader(project).load(typoSource);
+        LoadTarget typoTarget = new LoadTargetResolver(project, config).resolve(typoScenario);
+        Path output = temp.resolve("arrival-typo-output");
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor seed = new IterationExecutor(project, config, typoTarget, resources, output);
+            att.validation.DiagnosticException diagnostic = assertThrows(att.validation.DiagnosticException.class,
+                    () -> LoadRunCoordinator.runFrom(typoScenario, seed, "arrival-typo", null, output));
+            assertEquals("workloads[0].vars.userId", diagnostic.field());
+            assertTrue(diagnostic.detail().contains("missing Load field"), diagnostic.format());
+        }
+        assertFalse(Files.exists(output.resolve("load/arrival-typo")),
+                "a deterministic Load-field typo must fail before the scheduler creates run output");
+
+        Path nestedSource = write(project, "load/closed-nested-load-field.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: closed\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      nested: '${EXEC.LOAD.USER_ID.value}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario nestedScenario = new LoadScenarioLoader(project).load(nestedSource);
+        LoadTarget nestedTarget = new LoadTargetResolver(project, config).resolve(nestedScenario);
+        att.validation.DiagnosticException nested = assertThrows(att.validation.DiagnosticException.class,
+                () -> new LoadTargetValidator(project, config).validate(nestedScenario, nestedTarget));
+        assertEquals("workloads[0].vars.nested", nested.field());
+        assertTrue(nested.detail().contains("structurally invalid Load path"), nested.format());
+
+        Path unavailableSource = write(project, "load/arrival-required-user.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: arrival\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      userId: '${EXEC.LOAD.USER_ID}'\n"
+                + "    load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n");
+        LoadScenario unavailableScenario = new LoadScenarioLoader(project).load(unavailableSource);
+        LoadTarget unavailableTarget = new LoadTargetResolver(project, config).resolve(unavailableScenario);
+        att.validation.DiagnosticException unavailable = assertThrows(att.validation.DiagnosticException.class,
+                () -> new LoadTargetValidator(project, config).validate(unavailableScenario, unavailableTarget));
+        assertEquals("workloads[0].vars.userId", unavailable.field());
+        assertTrue(unavailable.detail().contains("unavailable Load field"), unavailable.format());
+    }
+
+    @Test void optionalStructurallyInvalidInputPathFailsBeforeLoadSchedulerStarts() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        Path source = write(project, "load/optional-invalid-input-path.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: invalidPath\n    target: {type: template, id: SHARED}\n"
+                + "    inputs: {value: ready, customer: C001}\n"
+                + "    vars:\n      customerId: '${EXEC.INPUT.customer.id?}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget seedTarget = new LoadTargetResolver(project, config).resolve(scenario);
+        Path output = temp.resolve("invalid-input-path-output");
+
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor seed = new IterationExecutor(project, config, seedTarget, resources, output);
+            att.validation.DiagnosticException diagnostic = assertThrows(att.validation.DiagnosticException.class,
+                    () -> LoadRunCoordinator.runFrom(scenario, seed, "invalid-input-path-run", null, output));
+            assertEquals("workloads[0].vars.customerId", diagnostic.field());
+            assertTrue(diagnostic.detail().contains("structurally invalid input path"), diagnostic.format());
+        }
+        assertFalse(Files.exists(output.resolve("load/invalid-input-path-run")),
+                "preflight failure must happen before a workload scheduler creates run output");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Collections.<String, Object>emptyMap();
     }
 
     private List<att.core.ValidationResult> execute(Path project, FrameworkConfig config, StageTemplate template,
@@ -122,7 +355,7 @@ class LoadCrossModeTest {
         write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.3\n"
                 + "id: shared.echo.v1\nname: Shared Echo\ndescription: cross-mode flow\nactions:\n"
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
-        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.0\ninputs:\n  value: shared-value\n");
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs:\n  value: shared-value\n");
         return project;
     }
 

@@ -16,7 +16,7 @@ class MultiWorkloadScenarioTest {
 
     @Test void parsesIndependentArrivalWorkloadsAndAggregatesConfiguredRate() throws Exception {
         LoadScenario scenario = load("arrival.yaml",
-                "schemaVersion: att-load/v1.2\n"
+                "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n"
                 + "  - id: payment\n"
                 + "    target: {type: tool, id: sample.getAcDate}\n"
@@ -37,7 +37,7 @@ class MultiWorkloadScenarioTest {
 
     @Test void parsesIndependentClosedVuPoolsAndSumsUsers() throws Exception {
         LoadScenario scenario = load("closed.yaml",
-                "schemaVersion: att-load/v1.2\n"
+                "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n"
                 + "  - id: payment\n"
                 + "    target: {type: tool, id: sample.getAcDate}\n"
@@ -58,17 +58,17 @@ class MultiWorkloadScenarioTest {
 
     @Test void rejectsDuplicateIdsMixedModelsAndDifferentTimingEnvelopes() throws Exception {
         assertInvalid("duplicate.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- {id: same, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n"
                 + "- {id: same, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n",
                 "duplicate workload id");
         assertInvalid("mixed.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- {id: closed, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n"
                 + "- {id: open, target: {type: tool, id: sample.getAcDate}, load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}}\n",
                 "mixed closed and arrivalRate");
         assertInvalid("timing.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- {id: a, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n"
                 + "- {id: b, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 2s}}\n",
                 "same warmup/rampUp/duration/rampDown");
@@ -76,7 +76,7 @@ class MultiWorkloadScenarioTest {
 
     @Test void rejectsAmbiguousCliOverridesForMultipleWorkloads() throws Exception {
         Path file = write("override.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- {id: a, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n"
                 + "- {id: b, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n");
         Exception error = assertThrows(Exception.class, () -> new LoadScenarioLoader(projectRoot()).load(file,
@@ -90,7 +90,7 @@ class MultiWorkloadScenarioTest {
                 + "target: {type: tool, id: sample.getAcDate}\n"
                 + "load: {users: 2, duration: 1s}\n").getBytes(StandardCharsets.UTF_8));
         Exception error = assertThrows(Exception.class, () -> new LoadScenarioLoader(projectRoot()).load(file));
-        assertTrue(message(error).contains("att-load/v1.2"), message(error));
+        assertTrue(message(error).contains("att-load/v1.3"), message(error));
     }
 
     private LoadScenario load(String name, String content) throws Exception {

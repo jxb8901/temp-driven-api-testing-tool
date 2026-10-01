@@ -20,7 +20,7 @@ class MultiWorkloadRuntimeTest {
 
     @Test void coordinatesIndependentArrivalWorkloadsWithAggregateAndPerWorkloadMetrics() throws Exception {
         LoadScenario scenario = load("multi-arrival.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: fast\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {arrivalRate: 20/s, duration: 250ms, maxConcurrent: 4, overloadPolicy: drop}\n"
                 + "- id: slow\n  target: {type: tool, id: sample.getSeq, arguments: {seqLen: 8}}\n"
@@ -38,7 +38,7 @@ class MultiWorkloadRuntimeTest {
 
     @Test void coordinatesClosedVuPoolsAndKeepsDuplicateVuNamesDistinctInAggregateMetrics() throws Exception {
         LoadScenario scenario = load("multi-closed.yaml",
-                "schemaVersion: att-load/v1.2\nseed: 7\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nseed: 7\nworkloads:\n"
                 + "- id: one\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {users: 1, duration: 250ms}\n  execution: {thinkTime: 20ms}\n"
                 + "- id: two\n  target: {type: tool, id: sample.getAcDate}\n"
@@ -56,7 +56,7 @@ class MultiWorkloadRuntimeTest {
         Path root = projectRoot();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
         LoadScenario scenario = load("context.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: payment\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {users: 1, duration: 100ms}\n");
         LoadScenario child = scenario.forWorkload(scenario.workloads().get(0));
@@ -91,7 +91,7 @@ class MultiWorkloadRuntimeTest {
         Path root = projectRoot();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
         LoadScenario scenario = load("invalid-target.yaml",
-                "schemaVersion: att-load/v1.2\nworkloads:\n"
+                "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: valid\n  target: {type: tool, id: sample.getAcDate}\n"
                 + "  load: {users: 1, duration: 100ms}\n"
                 + "- id: invalid\n  target: {type: tool, id: missing.tool}\n"

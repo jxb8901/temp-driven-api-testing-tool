@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.2
+schemaVersion: att-load/v1.3
 workloads:
 - target:
     type: flow
