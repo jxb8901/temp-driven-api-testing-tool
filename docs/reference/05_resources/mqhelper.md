@@ -75,8 +75,26 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 
 The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.2.schema.json).
 
-#### Request/reply no-message semantics
+#### Request/reply timeout and replay policy
 
-`mq.<id>.request(...)` is complete only when the correlated reply is received. A successful PUT followed by MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) therefore publishes `sent: true`, `replyReceived: false`, the native completion/reason metadata, and an `MQ_NO_REPLY` error with status `ERROR`. It is not a generic `TIMEOUT`, so `retryOn: TIMEOUT` does not PUT the business request again. Use `mq.<id>.send(...)` followed by `mq.<id>.receive(correlationId=...)` when repeated reply polling is required.
+A correlated reply completes `mq.<id>.request(...)` with PASS. A successful PUT followed by correlated GET MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) is a standard TIMEOUT with `MQ_TIMEOUT` diagnostic, even if the outer Action deadline has time remaining. Native evidence retains `sent: true`, `replyReceived: false`, `completionCode: 2`, `reasonCode: 2033`, the reason name and effective `waitMs`. Other transport failures retain the stable MQ ERROR taxonomy; outer deadline and pool borrow timeout also follow the normal TIMEOUT path.
 
-Standalone `mq.<id>.receive(...)` retains its polling contract: a 2033 no-message result may remain a completed PASS with `received: false`, subject to the configured receive semantics. An actual outer Action deadline remains `MQ_TIMEOUT` and follows the normal timeout/retry policy.
+The canonical Action outcome is `output.status: TIMEOUT`; suite/report aggregate operational failure remains ERROR, with TIMEOUT and MQRC 2033 in the report message and Case log. Native metadata is available at `output.evidence.mq.invocations[0]` during the attempt and at `EXEC.ACTIONS.<actionId>.output.evidence.mq.invocations[0]` afterwards.
+
+Without `retry.when`, `retryOn: [TIMEOUT]` can PUT the whole request again. For a side-effecting request, add a Boolean gate that excludes the already-sent/no-reply case:
+
+~~~yaml
+invokePayment:
+  type: tool
+  call: "#{mq.payment.request(payload=${EXEC.INPUT.requestText})}"
+  timeoutMs: 30000
+  retry:
+    maxAttempts: 3
+    intervalMs: 1000
+    retryOn: [TIMEOUT]
+    when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+The optional `?` path evaluates to null when another timeout has no MQ reason code. The condition permits ordinary timeout retry, but reasonCode 2033 suppresses a second PUT without changing the TIMEOUT outcome. ATT does not infer idempotency or deduplicate messages. Use `send` followed by correlated `receive` when repeated reply polling is required.
+
+Standalone `receive` explicitly retains its non-error polling contract: MQRC 2033 returns PASS with `received: false` when the outer deadline has not expired, including a bounded wait that finds no message. An expired outer deadline is TIMEOUT. This operation-aware contract supersedes the earlier issue #13 guidance that avoided request/2033 TIMEOUT to prevent replay. See [common retry semantics](../14_actions.md).

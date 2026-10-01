@@ -171,8 +171,7 @@ public final class MqHelperExecutor {
                         result.put("replyReceived", false); evidence.put("replyReceived", false);
                         addReason(result, evidence, noReply);
                         success = false;
-                        if (deadlineExceeded(deadlineNanos)) addDeadlineError(result, evidence);
-                        else addNoReplyError(result, evidence);
+                        addDeadlineError(result, evidence, "MQ request reply wait expired (MQRC 2033: MQRC_NO_MSG_AVAILABLE)");
                         received = null;
                     }
                     if (received != null) {
@@ -265,7 +264,10 @@ public final class MqHelperExecutor {
         if (result.get("outputFile") != null) evidence.put("outputFile", portable(Paths.get(String.valueOf(result.get("outputFile")))));
         if (savePath != null && !savePath.trim().isEmpty()) evidence.put("resultPath", savePath);
         evidence.put("resultFormat", representation);
-        evidence.put("status", success ? "PASS" : "ERROR");
+        @SuppressWarnings("unchecked") Map<String, Object> error = (Map<String, Object>) result.get("error");
+        String status = success ? "PASS" : error != null && ("MQ_TIMEOUT".equals(error.get("type"))
+                || "MQ_POOL_TIMEOUT".equals(error.get("type"))) ? "TIMEOUT" : "ERROR";
+        result.put("status", status); evidence.put("status", status);
         if (context != null) context.recordResourceOutput(logical.evidenceOutput(), result.get("result"), evidence);
         return new MqInvocationResult(result, evidence, success);
     }
@@ -444,13 +446,6 @@ public final class MqHelperExecutor {
 
     private boolean deadlineExceeded(long deadlineNanos) {
         return deadlineNanos != Long.MAX_VALUE && System.nanoTime() >= deadlineNanos;
-    }
-
-    private void addNoReplyError(Map<String, Object> result, Map<String, Object> evidence) {
-        Map<String, Object> error = new LinkedHashMap<String, Object>();
-        error.put("type", "MQ_NO_REPLY");
-        error.put("message", "MQ request completed without a correlated reply");
-        result.put("error", error); evidence.put("error", error);
     }
 
     private void addDeadlineError(Map<String, Object> result, Map<String, Object> evidence) {

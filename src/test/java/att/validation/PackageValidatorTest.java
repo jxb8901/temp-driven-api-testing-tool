@@ -15,6 +15,32 @@ class PackageValidatorTest {
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
+    @Test void retryConditionUsesCompletedAttemptScopeAndRejectsForbiddenCalls() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        String[] valid = {"#{false}", "#{${output.status} == 'TIMEOUT'}",
+                "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}", "#{length(${output.result}) > 0}"};
+        for (String expression : valid) {
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Arrays.asList("TIMEOUT"), "when", expression)),
+                    att.Version.TEMPLATE_SCHEMA);
+            StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(action), att.Version.TEMPLATE_SCHEMA);
+            assertDoesNotThrow(() -> contract.invoke(new PackageValidator(tempDir, config), template, config), expression);
+        }
+        String[] invalid = {"#{1}", "#{true &&}", "#{mq.payment.request(payload='x')}", "#{seq('x')}",
+                "&{payload.txt}", "#{${EXEC.ACTIONS.later.output.result} == true}"};
+        for (String expression : invalid) {
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Arrays.asList("TIMEOUT"), "when", expression)),
+                    att.Version.TEMPLATE_SCHEMA);
+            StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(action), att.Version.TEMPLATE_SCHEMA);
+            assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> contract.invoke(new PackageValidator(tempDir, config), template, config), expression);
+        }
+    }
+
     @Test void projectFileContextReferencesFollowActionOrderingAndScopeRules() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);

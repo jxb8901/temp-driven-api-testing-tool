@@ -2,6 +2,9 @@
 
 ## 3.6.2 - 2026-10-01
 
+- Classify MQ request PUT followed by correlated reply MQRC 2033 as canonical TIMEOUT, preserve native completion/reason/wait metadata, and retain standalone receive polling semantics (issue #92).
+- Add common optional Boolean `retry.when` for Tool and direct DB query Actions, evaluated against current-attempt output only after retryOn matches; validate pure expressions, preserve suppressed TIMEOUT/FAIL outcomes, and record retry decisions. Document the MQ 2033 replay-suppression example and the duplicate-request risk of unconditional TIMEOUT retry (issue #92).
+
 - Add native SSH Resource Helper `execute`, `upload`, and `download` operations with typed stdout, bounded concurrency, one Action deadline, stable error categories, redacted diagnostics, controlled transfer paths, and timeout retry for `execute` only (issue #89).
 - Unify current Load descriptors on `att-load/v1.4`, preserve historical v1.3 threshold semantics, and keep policy-only Quick Load descriptors non-executable (issue #102).
 - Link retained Load evidence and Case Logs safely in portable reports, including canonical path containment and symlink-escape checks (issue #100).

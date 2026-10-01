@@ -126,6 +126,11 @@
               "TIMEOUT"
             ]
           }
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pure Boolean expression evaluated against the completed attempt only after retryOn matches."
         }
       },
       "additionalProperties": false

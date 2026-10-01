@@ -140,3 +140,7 @@ assert: "(${EXEC.INPUT.channel} == 'MOBILE') and (${EXEC.INPUT.amount} <= 1000)"
 ### Expression scope and errors
 
 This chapter defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](05_resources/tools.md), [Load execIdFormat and vars](04_execution_modes/load.md), [Debug vars](04_execution_modes/debug.md), and [report filenames](09_configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](12_validation_diagnostics.md).
+
+### Retry-condition lifecycle
+
+`retry.when` runs after the current attempt completes, only after retryOn matches and while another attempt is available. `output.*` binds current result/evidence/diagnostic and `output.attempt`. Normal Boolean typing and strict/optional Context paths apply. Only deterministic pure built-ins are permitted; external, file, sequence, random and current-time operations are rejected. See [Action retry](14_actions.md).

@@ -925,6 +925,11 @@ public final class PackageValidator {
             boolean expectedOutputAvailable = "tool".equals(type);
             validateStaticContextStructure(action.expected(), syntaxEngine, expectedActions, expectedOutputAvailable, action.id());
             validateStaticContextStructure(action.runWhen(), syntaxEngine, completedActions, false, action.id());
+            if (!action.retry().isEmpty()) {
+                validateRetry(action);
+                if (action.retry().containsKey("when"))
+                    validateStaticContextStructure(String.valueOf(action.retry().get("when")), syntaxEngine, completedActions, true, action.id());
+            }
             if ("tool".equals(type)) {
                 validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false, action.id());
                 validateStaticContextStructure(action.resultConfig().path(), syntaxEngine, completedActions, false, action.id());
@@ -1410,6 +1415,13 @@ public final class PackageValidator {
                 engine.renderValidationValues(action.runWhen(), context);
                 validateCallArgumentsIn(action.runWhen(), context, engine);
 
+                if (action.retry().containsKey("when")) {
+                    sourceField = "actions." + action.id() + ".retry.when";
+                    att.template.RetryCondition.validate(action.retry().get("when"));
+                    validateContextStructure(String.valueOf(action.retry().get("when")),
+                            engine, context, testCase, completedActions, action.id());
+                }
+
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
                     context.requireCaseVariableAvailable(action.name());
@@ -1707,7 +1719,8 @@ public final class PackageValidator {
     }
     private static void validateRetry(TemplateAction action) {
         Map<String, Object> retry = action.retry(); if (retry.isEmpty()) return;
-        att.config.SchemaSupport.rejectUnknown(retry, "actions." + action.id() + ".retry", "maxAttempts", "intervalMs", "retryOn");
+        if (retry.containsKey("when")) att.template.RetryCondition.validate(retry.get("when"));
+        att.config.SchemaSupport.rejectUnknown(retry, "actions." + action.id() + ".retry", "maxAttempts", "intervalMs", "retryOn", "when");
         if (!retry.containsKey("maxAttempts") || !retry.containsKey("intervalMs") || !retry.containsKey("retryOn")) throw new IllegalArgumentException("retry requires maxAttempts, intervalMs, and retryOn: " + action.id());
         int attempts = integer(retry.get("maxAttempts"), 0); if (attempts < 2 || attempts > 10) throw new IllegalArgumentException("retry.maxAttempts must be 2..10: " + action.id());
         int interval = integer(retry.get("intervalMs"), -1); if (interval < 0 || interval > 3600000) throw new IllegalArgumentException("retry.intervalMs must be 0..3600000: " + action.id());
