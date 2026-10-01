@@ -539,7 +539,10 @@ public class UnifiedTemplateEngine {
         } else {
             Object sqlValue = input.get("sql");
             if (!(sqlValue instanceof String)) throw new IllegalArgumentException(callName + ".sql must be a String");
-            sql = renderDbSql((String) sqlValue, context);
+            // resolveArguments/resolveDefinitionDbArguments already evaluated
+            // Context, file, and authored interpolation nodes exactly once.
+            // Do not interpret the resulting SQL text as template source again.
+            sql = (String) sqlValue;
         }
         if (input.containsKey("params") && input.containsKey("parameters")) {
             throw new IllegalArgumentException(callName + " cannot use both params and parameters");
@@ -942,8 +945,12 @@ public class UnifiedTemplateEngine {
             java.nio.file.Path file = dbHelperExecutor.resolveSqlFile(configured);
             sql = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
             source = configured;
-        } else sql = String.valueOf(input.get("sql"));
-        sql = renderDbSql(sql, context);
+        } else {
+            Object sqlValue = input.get("sql");
+            if (!(sqlValue instanceof String)) throw new IllegalArgumentException(callName + ".sql must be a String");
+            sql = (String) sqlValue;
+        }
+        if (hasFile) sql = renderDbSql(sql, context);
         if (input.containsKey("params") && input.containsKey("parameters")) {
             throw new IllegalArgumentException(callName + " cannot use both params and parameters");
         }
@@ -1005,13 +1012,9 @@ public class UnifiedTemplateEngine {
     }
 
     private Object resolveDbValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        Matcher exact = VALUE.matcher(expression);
-        if (exact.matches()) return context.require(exact.group(1));
-        if (isExplicitContextPath(expression)) throw bareContextReference(expression);
-        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
-            return executeCall(expression, context, log, null);
-        }
-        return callParser.literal(expression);
+        // Use the normal typed expression resolver so quoted SQL, Context
+        // values, and project-file values are each evaluated once.
+        return resolveArgumentValue(expression, context, log);
     }
 
     private att.exec.ToolInvocationResult builtInAttempt(String name, String invocationId, Map<String, Object> input,

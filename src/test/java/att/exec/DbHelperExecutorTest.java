@@ -420,6 +420,41 @@ class DbHelperExecutorTest {
         log.close();
     }
 
+    @Test void nativeDbToolsDoNotRenderResolvedSqlTextAgain() throws Exception {
+        Map<String, DbHelperConfig> helpers = new LinkedHashMap<String, DbHelperConfig>();
+        helpers.put("contextDb", db("contextDb", "jdbc:att-test:native-context", "case", "rollback", 17, 10));
+        helpers.put("fileDb", db("fileDb", "jdbc:att-test:native-file", "case", "rollback", 17, 10));
+        FrameworkConfig config = frameworkConfig(Collections.<String, ToolConfig>emptyMap(), helpers);
+        DbHelperExecutor executor = new DbHelperExecutor(tempDir, config);
+        Files.createDirectories(tempDir.resolve("sql"));
+        Files.write(tempDir.resolve("sql/literal.sql"),
+                "select ONE ${EXEC.INPUT.fileMarker}".getBytes("UTF-8"));
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("contextSql", "select ONE ${EXEC.INPUT.literal}");
+        data.put("literal", "LEAKED");
+        data.put("fileMarker", "#{EXEC.INPUT.fileMarker}");
+        CaseRuntimeContext context = contextWithData(data);
+        context.beginStage(new StageCaseData("verify", "Resolved SQL", Collections.<String, Object>emptyMap()),
+                "Resolved SQL", tempDir);
+        CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("resolved-sql.log"));
+        executor.beginCase();
+
+        List<TemplateAction> actions = new ArrayList<TemplateAction>();
+        actions.add(new TemplateAction("context", map("type", "tool",
+                "call", "#{db.contextDb.query(sql=${CASE.contextSql}, params=[])}"), "att-template/v3.6"));
+        actions.add(new TemplateAction("file", map("type", "tool",
+                "call", "#{db.fileDb.query(sql=&{sql/literal.sql}, params=[])}"), "att-template/v3.6"));
+        List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config), executor))
+                .execute("verify", new StageTemplate("Resolved SQL", tempDir, actions, "att-template/v3.6"), context, log);
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals(ResultStatus.PASS, results.get(1).status(), results.get(1).message());
+        assertEquals("select ONE ${EXEC.INPUT.literal}", driver.states.get("jdbc:att-test:native-context").lastSql);
+        assertEquals("select ONE #{EXEC.INPUT.fileMarker}", driver.states.get("jdbc:att-test:native-file").lastSql);
+        assertTrue(executor.finishCase(context, log).isEmpty());
+        executor.close();
+        log.close();
+    }
+
     @Test void dbScopedToolCacheSurvivesUpdatesTransactionsAndReconnects() throws Exception {
         Map<String, DbHelperConfig> helpers = Collections.singletonMap("reference",
                 db("reference", "jdbc:att-test:db-cache-rollback-fail", "case", "commit", 19, 10));
@@ -593,6 +628,7 @@ class DbHelperExecutorTest {
 
     private static final class FakeState {
         int connections, commits, rollbacks, closes, lastQueryTimeout, rollbackFailuresRemaining, executions;
+        String lastSql;
         boolean autoCommit, closed, commitFails;
         final List<Object> boundValues = new ArrayList<Object>();
     }
@@ -641,6 +677,7 @@ class DbHelperExecutorTest {
         }
 
         private PreparedStatement statement(final FakeState state, final String sql) {
+            state.lastSql = sql;
             return proxy(PreparedStatement.class, new InvocationHandler() {
                 @Override public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     String name = method.getName();

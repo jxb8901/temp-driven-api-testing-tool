@@ -2292,8 +2292,6 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 本次調整的 resource/config schema 舊版本已移至 schemas/history，僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。schemas/catalog.yaml 是 repository authoritative catalog。Package validation 會驗證已註冊的 schema resource 本身；封存不代表舊版本仍有 runtime compatibility。
 
-歷史 `att-template/v3.5` 與 `att-flow/v3.5` 定義保留於 `schemas/history/`，只供 compatibility loader 使用。
-
 ## Appendix B — Compatibility 與 Deprecated Aliases
 
 Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套 current model。新 authoring 使用 canonical `EXEC`、`META`、Action-local `output`、current schema、`--env` 與目前 Tool/DB/MQ contract。

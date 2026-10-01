@@ -2384,8 +2384,6 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 
 For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
 
-Historical `att-template/v3.5` and `att-flow/v3.5` definitions are retained under `schemas/history/` for compatibility loading only.
-
 ## Appendix B — Compatibility and Deprecated Aliases
 
 Compatibility exists to read established packages without creating a second current model. New authoring uses canonical `EXEC`, `META`, Action-local `output`, current schema versions, `--env`, and current Tool/DB/MQ contracts.

@@ -39,6 +39,7 @@ public final class PackageValidator {
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
     private final ThreadLocal<Path> validationSourceDirectories = new ThreadLocal<Path>();
+    private final ThreadLocal<Boolean> legacyDbSqlFileAllowed = new ThreadLocal<Boolean>();
     private final FrameworkConfig global;
     private final boolean windows;
     private final Set<String> skippedWindowsShellExecutableChecks = new LinkedHashSet<String>();
@@ -216,8 +217,13 @@ public final class PackageValidator {
 
     private void validateReferencedTools(StageTemplate template, FrameworkConfig config,
                                          List<Diagnostic> diagnostics, Set<String> visitedFlows) {
-        att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
-        for (TemplateAction action : template.actions()) {
+        Path previousSourceDirectory = validationSourceDirectories.get();
+        Boolean previousLegacySqlFile = legacyDbSqlFileAllowed.get();
+        validationSourceDirectories.set(template.directory());
+        legacyDbSqlFileAllowed.set(Boolean.valueOf(!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())));
+        try {
+          att.template.UnifiedTemplateEngine syntaxEngine = new att.template.UnifiedTemplateEngine(null);
+          for (TemplateAction action : template.actions()) {
             String prefix = "actions." + action.id();
             if (diagnostics != null) {
                 for (String expression : actionExpressions(action))
@@ -225,7 +231,8 @@ public final class PackageValidator {
             }
             if ("tool".equalsIgnoreCase(action.type())) {
                 try {
-                    validateToolCall(action.call(), config);
+                    validateToolCall(action.call(), config, true,
+                            att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion()));
                     // validateToolCall checks the invocation shape and supplied arguments;
                     // every referenced definition still needs the same package-level
                     // checks as a tool used from an expression (including nested calls).
@@ -294,6 +301,10 @@ public final class PackageValidator {
                     validateReferencedTools(body, config, diagnostics, visitedFlows);
                 }
             }
+          }
+        } finally {
+            validationSourceDirectories.set(previousSourceDirectory);
+            legacyDbSqlFileAllowed.set(previousLegacySqlFile);
         }
     }
 
@@ -830,11 +841,14 @@ public final class PackageValidator {
                                          Set<String> actionIds, Set<String> completedActions,
                                          Set<String> assignmentNames) {
         Path previousSourceDirectory = validationSourceDirectories.get();
+        Boolean previousLegacySqlFile = legacyDbSqlFileAllowed.get();
         validationSourceDirectories.set(template.directory());
+        legacyDbSqlFileAllowed.set(Boolean.valueOf(!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())));
         try {
             validateTemplateActionsInScope(template, config, actionIds, completedActions, assignmentNames);
         } finally {
             validationSourceDirectories.set(previousSourceDirectory);
+            legacyDbSqlFileAllowed.set(previousLegacySqlFile);
         }
     }
 
@@ -2139,15 +2153,10 @@ public final class PackageValidator {
             throw new IllegalArgumentException(parsed.name() + " cannot use both params and parameters");
         }
         String sqlExpression = arguments.get("sql").expression().trim();
-        if (sqlExpression.startsWith("&{") || sqlExpression.contains("&{")) {
-            validateFileExpressions(sqlExpression, validationSourceDirectories.get());
-        } else if (!sqlExpression.contains("${") && !sqlExpression.contains("#{")) {
-            validateDbSql(String.valueOf(callParser.literal(sqlExpression)), expressionEngine, config);
-        } else {
-            validateInlineExpressions(sqlExpression, expressionEngine, config);
-        }
+        validateDbSqlArgument(sqlExpression, parsed.name(), config);
         if (arguments.containsKey("params")) validateDbToolArgumentValue(arguments.get("params"), parsed.name(), true, config);
         if (arguments.containsKey("parameters")) validateDbToolArgumentValue(arguments.get("parameters"), parsed.name(), false, config);
+        validateStaticDbToolNamedParameters(arguments, parsed.name(), config);
     }
 
     private void validateDbToolArgumentValue(ToolCallParser.Argument argument, String callName, boolean list, FrameworkConfig config) {
@@ -2165,6 +2174,76 @@ public final class PackageValidator {
             throw new IllegalArgumentException(callName + ".parameters must be a map or exact Context Map expression");
         }
         validateInlineExpressions(expression, expressionEngine, config);
+    }
+
+    private void validateStaticDbToolNamedParameters(Map<String, ToolCallParser.Argument> arguments,
+                                                     String callName, FrameworkConfig config) {
+        if (!arguments.containsKey("parameters")) return;
+        String sqlExpression = arguments.get("sql").expression().trim();
+        if (containsRuntimeExpression(sqlExpression)) return;
+        String parametersExpression = arguments.get("parameters").expression().trim();
+        if (!(parametersExpression.startsWith("{") && parametersExpression.endsWith("}"))) return;
+        String sql = String.valueOf(callParser.literal(sqlExpression));
+        Map<String, Object> shape = staticNamedParameterShape(parametersExpression, callName);
+        att.template.NamedSqlParameters.bind(sql, shape);
+    }
+
+    private Map<String, Object> staticNamedParameterShape(String expression, String callName) {
+        try {
+            Object value = new att.template.ExpressionBlockEvaluator().evaluate(expression,
+                    new att.template.ExpressionBlockEvaluator.Resolver() {
+                        @Override public Object context(String path) { return "<validation-value>"; }
+                        @Override public Object call(String name, Map<String, Object> arguments) { return "<validation-value>"; }
+                        @Override public String interpolate(String text) { return text; }
+                        @Override public String file(String path) { return "<validation-value>"; }
+                    });
+            if (!(value instanceof Map)) {
+                throw new IllegalArgumentException(callName + ".parameters must be an inline map or exact Context Map expression");
+            }
+            Map<String, Object> shape = new LinkedHashMap<String, Object>();
+            for (Object key : ((Map<?, ?>) value).keySet()) {
+                String name = String.valueOf(key);
+                if (!name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                    throw new IllegalArgumentException("Invalid named SQL parameter: " + name);
+                }
+                shape.put(name, null);
+            }
+            return shape;
+        } catch (RuntimeException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalArgumentException(callName + ".parameters must be an inline map or exact Context Map expression", error);
+        }
+    }
+
+    private boolean containsRuntimeExpression(String expression) {
+        return expression != null && (expression.contains("${") || expression.contains("#{") || expression.contains("&{"));
+    }
+
+    private void validateDbSqlArgument(String expression, String callName, FrameworkConfig config) {
+        if (expression == null || expression.trim().isEmpty()) {
+            throw new IllegalArgumentException(callName + ".sql must not be blank");
+        }
+        String value = expression.trim();
+        if (value.contains("&{")) {
+            validateFileExpressions(value, validationSourceDirectories.get());
+            if (value.startsWith("&{") && value.endsWith("}") && value.indexOf('&', 2) < 0
+                    && value.indexOf("${") < 0 && value.indexOf("#{") < 0) {
+                String authoredPath = value.substring(2, value.length() - 1);
+                try {
+                    Path file = fileExpressions.resolve(authoredPath, validationSourceDirectories.get());
+                    validateDbSql(new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8), expressionEngine, config);
+                } catch (RuntimeException error) {
+                    throw error;
+                } catch (Exception error) {
+                    throw new IllegalArgumentException(error.getMessage(), error);
+                }
+            }
+        } else if (containsRuntimeExpression(value)) {
+            validateInlineExpressions(value, expressionEngine, config);
+        } else {
+            validateDbSql(String.valueOf(callParser.literal(value)), expressionEngine, config);
+        }
     }
 
     private void validateDbExpressionCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
@@ -2192,6 +2271,9 @@ public final class PackageValidator {
             throw new IllegalArgumentException(parsed.name() + " cannot use both params and parameters");
         }
         if (arguments.containsKey("sqlFile")) {
+            if (!Boolean.TRUE.equals(legacyDbSqlFileAllowed.get())) {
+                throw new IllegalArgumentException(parsed.name() + ".sqlFile is historical-only; use sql=&{project-relative-sql-file}");
+            }
             String expression = arguments.get("sqlFile").expression().trim();
             if (expression.contains("${") || expression.contains("#{")) {
                 throw new IllegalArgumentException(parsed.name() + ".sqlFile must be a static package-relative path");
@@ -2204,9 +2286,7 @@ public final class PackageValidator {
             catch (Exception error) { throw new IllegalArgumentException(error.getMessage(), error); }
         } else {
             String expression = arguments.get("sql").expression().trim();
-            if (!expression.contains("${")) {
-                validateDbSql(String.valueOf(callParser.literal(expression)), expressionEngine, config);
-            }
+            validateDbSqlArgument(expression, parsed.name(), config);
         }
         if (arguments.containsKey("params")) {
             String expression = arguments.get("params").expression().trim();
