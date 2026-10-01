@@ -107,7 +107,7 @@ V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 S
 
 ATT 不會拼接父子標簽。表頭匹配會移除空格、制表符、換行符、NBSP 以及其他 Unicode 空白字符；匹配其余部分仍區分大小寫。例如，`案例 編號`、`案例\n編號`、`案例編號` 會被视為同一列。每個有效表頭在歸一化後必须唯一，因此僅因空白差異而不同的两個物理表頭會被認為是重復表頭錯誤。Testcase 加載和结果 Workbook 寫回使用相同的投影逻辑；结果列如果原本不存在，則會寫入最終表頭行。
 
-#### WorkbookSidecar
+#### Workbook / Sidecar
 
 | 對象 | 允許屬性 | 必填/約束 |
 |---|---|---|
@@ -120,7 +120,7 @@ ATT 不會拼接父子標簽。表頭匹配會移除空格、制表符、換行�
 
 ### 2.2 Stage
 
-每個 SidecarStage 都有一個不含点號的 `key`，以及一個命名物理 Excel 選擇器列的 `template` 字段。選擇器單元格可以包含符號 Template 名、完整相對 Template 路径，或 YAML 映射：
+每個 Sidecar Stage 都有一個不含点號的 `key`，以及一個命名物理 Excel 選擇器列的 `template` 字段。選擇器單元格可以包含符號 Template 名、完整相對 Template 路径，或 YAML 映射：
 
 | 單元格值 | 含義 |
 |---|---|
@@ -142,7 +142,7 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](08_reli
 
 每個 Action 依類型使用不同契約。Render 回傳 DocumentValue，不寫入檔案。Tool/DB/HTTP/MQ action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
-完整欄位、範例、typed result/evidence model、DocumentValue 行為、HTTP/MQ boundary 與 migration guidance，請參閱[Action 與型別化值](14_actions.md)。[Expressions and Built-ins](07_expressions.md) 說明共用 expression engine 與 Load ID initialization scope。
+完整欄位、範例、typed result/evidence model、DocumentValue 行為、HTTP/MQ boundary 與 migration guidance，請參閱[Action 與型別化值](14_actions.md)。[Expressions and Built-ins](07_expressions.md) 定義共用 expression language；[Load](04_execution_modes/load.md) 定義 ID initialization scope。
 
 ### 2.4 Flow
 

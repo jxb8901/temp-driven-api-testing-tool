@@ -21,13 +21,44 @@ jobs:
             --output "$RUNNER_TEMP/pandoc.deb"
           echo 'caa7e0410f9e2cb1da2eb8db13cc97b5548fe455985e2c944e3929d22f99bcdc  '"$RUNNER_TEMP/pandoc.deb" | sha256sum --check
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
+      - name: Normalize Traditional Chinese explanatory prose
+        run: |
+          python3 -m pip install --disable-pip-version-check opencc-python-reimplemented==0.1.7
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          from opencc import OpenCC
+          converter = OpenCC("s2t")
+          paths = list(Path("docs/reference.zh").rglob("*.md"))
+          paths += [Path("docs/quick-start.zh.md")]
+          paths += list(Path("docs/system-design").glob("*.zh.md"))
+          paths += [Path("examples/load/README.md")]
+          for path in paths:
+              fence = None
+              lines = []
+              for line in path.read_text(encoding="utf-8").splitlines():
+                  match = re.match(r"^\s*(\x60{3,}|~{3,})", line)
+                  if match:
+                      if fence is None:
+                          fence = match.group(1)[0]
+                      elif fence == match.group(1)[0]:
+                          fence = None
+                      lines.append(line)
+                      continue
+                  if fence is None:
+                      parts = re.split(r"(\x60+[^\x60]*\x60+)", line)
+                      line = "".join(part if i % 2 else converter.convert(part)
+                                     for i, part in enumerate(parts))
+                  lines.append(line)
+              path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
       - name: Generate deterministic manuals
         run: python3 tools/build_reference_manual.py
       - name: Commit generated outputs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/reference.md docs/reference.html docs/reference.zh.md docs/reference.zh.html
+          git add docs/reference.md docs/reference.html docs/reference.zh.md docs/reference.zh.html docs/reference.zh docs/quick-start.zh.md docs/system-design/*.zh.md examples/load/README.md
           if ! git diff --cached --quiet; then
             git commit -m "Regenerate EN/ZH Reference manuals"
             git push origin HEAD:docs/issue-103-reference-refactor
