@@ -1,6 +1,6 @@
 ## 06 Execution Modes
 
-Run、Debug、Load 是同級 adapter，共用相同的 Template/Flow/Tool/DB/MQ 執行語義。
+Run、Debug、Load 是同級 adapter，共用相同的 Template/Flow/Tool/DB/MQ/HTTP/SSH 執行語義。
 
 | 模式 | `EXEC.ID` | 執行單位 | 主要結果位置 |
 |---|---|---|---|

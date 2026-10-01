@@ -55,7 +55,7 @@ MQ evidence may contain bounded transport metadata such as helper/instance ident
 
 Call-level responseFormat may override requestReply.responseFormat for receive/request; send does not parse a reply. Instance selection and pool limits belong to the descriptor. See [Appendix C](../appendices/migrations.md) for schema migration.
 
-See [Actions and Typed Values](../14_actions.md) for the shared DocumentValue and typed-result contract.
+See [Actions and Typed Values](../14_actions.md) for the shared typed-result contract.
 
 ### Descriptor configuration
 

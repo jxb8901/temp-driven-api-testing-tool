@@ -5,8 +5,13 @@ import att.config.SshConfig;
 import att.config.SshHelperConfig;
 import att.core.CaseExecutionLog;
 import att.core.CaseRuntimeContext;
+import att.core.ResultStatus;
+import att.core.StageCaseData;
 import att.core.TestCase;
 import att.template.DefaultBuiltInProvider;
+import att.template.StageTemplate;
+import att.template.StageTemplateRunner;
+import att.template.TemplateAction;
 import att.template.UnifiedTemplateEngine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -25,6 +30,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +48,7 @@ class SshResourceHelperTest {
         assertEquals("SSH", String.valueOf(result.invocation().get("type")).toUpperCase());
         assertEquals("warning\n", ((Map<?, ?>) result.invocation().get("SSH")).get("stderr"));
         assertEquals("execute", ((Map<?, ?>) result.invocation().get("SSH")).get("operation"));
+        assertFalse(((Map<?, ?>) result.invocation().get("input")).containsKey("command"));
     }
 
     @Test void parsesYamlAndXmlStdoutAtTheSshIngressBoundary() throws Exception {
@@ -168,11 +175,12 @@ class SshResourceHelperTest {
         assertTrue(entered.await(1, TimeUnit.SECONDS));
         assertFalse(result.executionSuccess());
         assertEquals("SSH_TIMEOUT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        assertEquals("sftp", ((Map<?, ?>) result.invocation().get("SSH")).get("transport"));
         assertTrue(elapsedMs < 1000L, "transfer exceeded absolute deadline: " + elapsedMs + "ms");
         release.countDown();
     }
 
-    @Test void stubbornSftpTransferKeepsPermitUntilWorkerStops() throws Exception {
+    @Test void stubbornSftpTransferReturnsAtDeadlineButKeepsPermitUntilWorkerStops() throws Exception {
         final CountDownLatch entered = new CountDownLatch(1);
         final CountDownLatch interrupted = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
@@ -206,19 +214,54 @@ class SshResourceHelperTest {
 
         assertTrue(entered.await(1, TimeUnit.SECONDS));
         assertTrue(interrupted.await(1, TimeUnit.SECONDS));
-        assertFalse(first.isDone(), "timeout must wait for the transfer worker to stop");
+        ToolInvocationResult firstResult = first.get(1, TimeUnit.SECONDS);
+        assertFalse(firstResult.executionSuccess());
+        assertEquals("SSH_TIMEOUT", ((Map<?, ?>) firstResult.invocation().get("error")).get("category"));
+        assertFalse(postTimeoutSideEffect.get(), "transfer must not complete a side effect while timeout is pending");
         ToolInvocationResult second = executor.execute("application", "upload",
                 map("remotePath", "/srv/second", "payload", "second"), context(), 60L,
                 "ssh-stubborn-2", new CaseExecutionLog(root.resolve("stubborn-2.log")));
         assertFalse(second.executionSuccess());
         assertEquals("SSH_POOL_TIMEOUT", ((Map<?, ?>) second.invocation().get("error")).get("category"));
-        assertFalse(postTimeoutSideEffect.get(), "transfer must not complete a side effect while timeout is pending");
 
         release.countDown();
-        ToolInvocationResult firstResult = first.get(1, TimeUnit.SECONDS);
-        assertFalse(firstResult.executionSuccess());
-        assertEquals("SSH_TIMEOUT", ((Map<?, ?>) firstResult.invocation().get("error")).get("category"));
+        long waitStarted = System.nanoTime();
+        while (!postTimeoutSideEffect.get() && TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStarted) < 1000L)
+            Thread.yield();
         assertTrue(postTimeoutSideEffect.get());
+        ToolInvocationResult third = executor.execute("application", "upload",
+                map("remotePath", "/srv/third", "payload", "third"), context(), 1000L,
+                "ssh-stubborn-3", new CaseExecutionLog(root.resolve("stubborn-3.log")));
+        assertTrue(third.executionSuccess());
+    }
+
+    @Test void nativeSshTimeoutRetriesThroughTheStandardActionPath() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> calls.incrementAndGet() == 1
+                        ? new CommandResult(-1, "", "timed out", true)
+                        : new CommandResult(0, "ready", "", false), System.err);
+        SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false), null,
+                "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
+                1, 10000, runner);
+        CaseRuntimeContext runtime = context();
+        runtime.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", root);
+        TemplateAction action = new TemplateAction("ssh", map("type", "tool",
+                "call", "#{ssh.application.execute(command='health')}",
+                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))));
+
+        List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                null, null, null, null, executor, new DefaultBuiltInProvider()))
+                .execute("invoke", new StageTemplate("T", root, Collections.singletonList(action)), runtime,
+                        new CaseExecutionLog(root.resolve("ssh-retry.log")));
+
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals(2, calls.get());
+        List<?> attempts = (List<?>) runtime.resolve("ACTIONS.ssh.output.attempts");
+        assertEquals(2, attempts.size());
+        assertFalse(((Map<?, ?>) ((Map<?, ?>) attempts.get(0)).get("input")).containsKey("command"));
+        assertEquals("TIMEOUT", runtime.resolve("ACTIONS.ssh.output.attempts[0].retryReason"));
+        assertEquals("ready", String.valueOf(runtime.resolve("ACTIONS.ssh.output.result")).trim());
     }
 
     @Test void uploadsAndDownloadsOnlyThroughControlledCaseOutput() throws Exception {

@@ -23,7 +23,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 
 | Mode | Primary input | Reuses |
 |---|---|---|
-| Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ |
+| Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.1` sidecar or `--input` | one Template, Flow or Tool target |
 | Load | `att-load/v1.4` scenario | one or more Template, Flow or Tool workloads repeatedly |
 

@@ -18,7 +18,7 @@ stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses 
 
 #### Call-backed Tool
 
-A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP operation. Its native typed return value is output.result. Call-backed descriptors do not declare stdoutFormat.
+A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP/SSH operation. Its native typed return value is output.result. Call-backed descriptors do not declare stdoutFormat.
 
 ~~~yaml
 tools:

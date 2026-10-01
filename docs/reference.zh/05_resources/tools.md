@@ -18,7 +18,7 @@ stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再�
 
 #### Call-backed Tool
 
-Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
+Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP/SSH operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
 
 ~~~yaml
 tools:

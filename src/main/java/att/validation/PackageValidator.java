@@ -858,7 +858,7 @@ public final class PackageValidator {
                     }
                 }
             }
-            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
+            if ("tool".equals(type)) { require(action.call(), "call is required for tool action " + action.id()); forbid(action, "name", "payload", "db", "query", "update", "expression", "message", "file", "fields", "format", "value", "templateFormat", "result", "render"); if (action.timeoutMs() != null && (action.timeoutMs() < 1 || action.timeoutMs() > 3600000)) throw new IllegalArgumentException("timeoutMs must be 1..3600000: " + action.id()); validateRetry(action); validateToolCall(action.call(), config); validateSshRetryContract(action, config); validateEvidence(action, template, syntaxEngine, config, completedActions); }
             if ("db".equals(type)) validateDbAction(action, template, syntaxEngine, config, completedActions);
             if ("assert".equals(type)) { require(action.assertion(), "assert is required for assert action " + action.id()); forbid(action, "name", "payload", "result", "expression", "call", "db", "query", "update", "message", "file", "level", "fields", "retry", "timeoutMs"); }
             if ("log".equals(type)) {
@@ -1679,6 +1679,32 @@ public final class PackageValidator {
         if (categories.isEmpty()) throw new IllegalArgumentException("retry.retryOn must not be empty: " + action.id());
         if (categories.contains("ASSERTION") && action.assertion().trim().isEmpty()) throw new IllegalArgumentException("retryOn ASSERTION requires action assert: " + action.id());
     }
+
+    private void validateSshRetryContract(TemplateAction action, FrameworkConfig config) {
+        Map<String, Object> retry = action.retry();
+        Object retryOn = retry.get("retryOn");
+        if (!(retryOn instanceof Iterable)) return;
+        boolean retriesTimeout = false;
+        for (Object category : (Iterable<?>) retryOn) {
+            if ("TIMEOUT".equals(String.valueOf(category))) {
+                retriesTimeout = true;
+                break;
+            }
+        }
+        if (!retriesTimeout) return;
+        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        if (!parsed.name().startsWith("ssh.")) {
+            ToolConfig tool = config.tool(parsed.name());
+            if (tool == null || !tool.callBacked()) return;
+            parsed = callParser.parse(tool.call());
+        }
+        String[] parts = parsed.name().split("\\.", -1);
+        if (parts.length == 3 && "ssh".equals(parts[0])
+                && ("upload".equals(parts[2]) || "download".equals(parts[2]))) {
+            throw new IllegalArgumentException("retryOn TIMEOUT is not supported for native SSH " + parts[2]
+                    + " actions because replaying a transfer may duplicate a side effect; retry execute or handle the transfer explicitly: " + action.id());
+        }
+    }
     private static int integer(Object value, int fallback) { if (value == null) return fallback; if (!(value instanceof Number)) throw new IllegalArgumentException("Expected integer retry value"); return ((Number) value).intValue(); }
 
     private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
@@ -1981,6 +2007,8 @@ public final class PackageValidator {
             Path path = Paths.get(value).normalize();
             if (caseOutputOnly && (path.isAbsolute() || path.startsWith("..")))
                 throw new IllegalArgumentException("SSH download localPath must be a case-output-relative path");
+            if (!caseOutputOnly && path.startsWith(".."))
+                throw new IllegalArgumentException("SSH upload localPath must stay under the ATT package or case output");
             if (!caseOutputOnly && path.isAbsolute() && !path.startsWith(projectRoot.toAbsolutePath().normalize()))
                 throw new IllegalArgumentException("SSH localPath must stay under the ATT package or case output");
         } catch (InvalidPathException invalid) {

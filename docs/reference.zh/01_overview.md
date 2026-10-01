@@ -23,7 +23,7 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 
 | 模式 | 主要輸入 | 重用內容 |
 |---|---|---|
-| Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ |
+| Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.1` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
 | Load | `att-load/v1.4` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 

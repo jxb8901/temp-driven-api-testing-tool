@@ -12,7 +12,7 @@ Assertion 在文件規定的 assertion point、primary work 之後評估 boolean
 
 ### Timeout
 
-Timeout 依 backend 支援能力終止或放棄 operation，並記錄 diagnostic/evidence。Timeout 是 operational failure，不是 assertion false。Tool timeout 與 resource-specific DB/MQ limit 分別由其 resource contract 定義。
+Timeout 依 backend 支援能力終止或放棄 operation，並記錄 diagnostic/evidence。Timeout 是 operational failure，不是 assertion false。Tool timeout 與 resource-specific DB/MQ/HTTP/SSH limit 分別由其 resource contract 定義。
 
 ### Retry 與 attempts
 
@@ -26,7 +26,7 @@ Tool evidence collector 在 primary operation 發布 typed `output.result` 後�
 
 ### Transaction/resource lifecycle
 
-DB transaction finalization 與 DB/MQ resource cleanup 在相應 execution lifecycle boundary 進行。它們可能影響 operation success/diagnostic，但屬 internal resource state，不是 public Context namespace。
+DB transaction finalization 與 DB/MQ/HTTP/SSH resource cleanup 在相應 execution lifecycle boundary 進行。它們可能影響 operation success/diagnostic，但屬 internal resource state，不是 public Context namespace。
 
 ### Aggregation
 

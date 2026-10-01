@@ -23,6 +23,32 @@ class PackageValidatorTest {
         return result;
     }
 
+    @Test void rejectsEscapingNativeSshUploadPathsAndTimeoutRetriesForTransfers() throws Exception {
+        SshHelperConfig helper = new SshHelperConfig("application", "Application", "", "single", 1,
+                1000, 60000, Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), Collections.<String,DbHelperConfig>emptyMap(),
+                Collections.<String,MqHelperConfig>emptyMap(), Collections.singletonMap("application", helper),
+                Collections.<String,att.config.HttpHelperConfig>emptyMap(), null, null, null, "", "", null, null,
+                1, "ignore", "", false, ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+
+        TemplateAction escaping = new TemplateAction("upload", map("type", "tool",
+                "call", "#{ssh.application.upload(remotePath='/srv/value', localPath='../../outside.txt')}"),
+                "att-template/v3.4");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("SSH", tempDir, Collections.singletonList(escaping), "att-template/v3.4"), config));
+
+        TemplateAction retryingUpload = new TemplateAction("uploadRetry", map("type", "tool",
+                "call", "#{ssh.application.upload(remotePath='/srv/value', payload='value')}",
+                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))),
+                "att-template/v3.4");
+        assertThrows(java.lang.reflect.InvocationTargetException.class, () -> contract.invoke(validator,
+                new StageTemplate("SSH", tempDir, Collections.singletonList(retryingUpload), "att-template/v3.4"), config));
+    }
+
         @Test void validatesHttpPrimaryCallsBeforeNetworkExecution() throws Exception {
         att.config.HttpHelperConfig helper = new att.config.HttpHelperConfig("paymentApi",
                 new java.net.URI("https://sit.example.internal"), Collections.<String,String>emptyMap(),

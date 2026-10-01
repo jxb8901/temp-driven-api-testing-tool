@@ -572,7 +572,7 @@ execution-neutral Context and reusable components:</p>
 <tr class="odd">
 <td>Run</td>
 <td>workbook Testcases and Stage selectors</td>
-<td>Templates, Flows, Tools, DB/MQ</td>
+<td>Templates, Flows, Tools, DB/MQ/HTTP/SSH</td>
 </tr>
 <tr class="even">
 <td>Debug</td>
@@ -917,13 +917,13 @@ href="reference/08_reliability_execution_control.md">Reliability</a>.</p>
 template.yaml. ATT uses att-template/v3.4. Each Template has a non-empty
 ordered actions map and a required description.</p>
 <p>Each Action has a type-specific contract. Render returns the exact
-rendered String without writing a file. Tool/DB/HTTP/MQ actions publish
-the native typed operation result. Log formats typed values for human
-observation. Assign publishes values to EXEC.VARS, and Flow runs in a
-nested Action scope.</p>
+rendered String without writing a file. Tool/DB/HTTP/MQ/SSH actions
+publish the native typed operation result. Log formats typed values for
+human observation. Assign publishes values to EXEC.VARS, and Flow runs
+in a nested Action scope.</p>
 <p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
 for the complete field list, examples, typed result/evidence model,
-DocumentValue behavior, HTTP/MQ boundaries and migration guidance. <a
+HTTP/MQ/SSH boundaries and migration guidance. <a
 href="reference/07_expressions.md">Expressions and Built-ins</a> covers
 the shared expression language; <a
 href="reference/04_execution_modes/load.md">Load</a> owns ID
@@ -1103,8 +1103,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href=
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
 <span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
 <p>stdoutFormat parses external stdout once into output.result; it is
-not output serialization. Call-backed Tools and DB/HTTP/MQ operations
-keep their native return types.</p>
+not output serialization. Call-backed Tools and DB/HTTP/MQ/SSH
+operations keep their native return types.</p>
 <p>A DB action uses db and exactly one query or update block. SQL, bind
 parameters, transaction controls and DB evidence follow the DB action
 and DBHelper contracts.</p>
@@ -1308,8 +1308,8 @@ attempt.</td>
 </tr>
 </tbody>
 </table>
-<p>Strings, numbers, booleans, null, maps, lists and DocumentValue
-remain typed across Action/Template/Flow boundaries.</p>
+<p>Strings, numbers, booleans, null, maps and lists remain typed across
+Action/Template/Flow boundaries.</p>
 <h2 id="04-runtime-and-context-model">04 Runtime and Context Model</h2>
 <p>Run, Debug and Load share one canonical EXEC/META expression model.
 EXEC changes through framework lifecycle and explicit
@@ -2093,7 +2093,7 @@ structured diagnostics; see <a
 href="reference/12_validation_diagnostics.md">Validation</a>.</p>
 <h2 id="06-execution-modes">06 Execution Modes</h2>
 <p>Run, Debug and Load are peer adapters over the same reusable
-Template/Flow/Tool/DB/MQ execution semantics.</p>
+Template/Flow/Tool/DB/MQ/HTTP/SSH execution semantics.</p>
 <table>
 <thead>
 <tr class="header">
@@ -2794,9 +2794,9 @@ It does not control human-readable logging or file output. Exit code,
 bounded stdout/stderr preview and streamed process artifacts remain
 evidence.</p>
 <h4 id="call-backed-tool">Call-backed Tool</h4>
-<p>A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP
-operation. Its native typed return value is output.result. Call-backed
-descriptors do not declare stdoutFormat.</p>
+<p>A call-backed Tool invokes a built-in or supported native
+DB/MQ/HTTP/SSH operation. Its native typed return value is
+output.result. Call-backed descriptors do not declare stdoutFormat.</p>
 <div class="sourceCode" id="cb41"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
 <span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">queryOrder</span><span class="kw">:</span></span>
@@ -3257,7 +3257,7 @@ pool limits belong to the descriptor. See <a
 href="reference/appendices/migrations.md">Appendix C</a> for schema
 migration.</p>
 <p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
-for the shared DocumentValue and typed-result contract.</p>
+for the shared typed-result contract.</p>
 <h3 id="descriptor-configuration">Descriptor configuration</h3>
 <table>
 <thead>
@@ -3468,8 +3468,13 @@ cannot extend the enclosing Action deadline.
 <code>timeouts.connectTimeoutMs</code> caps connection establishment
 within the remaining deadline; it does not add time to the operation.
 The timeout applies to <code>execute</code>, <code>upload</code>, and
-<code>download</code>, and timed-out SFTP transport is closed before the
-concurrency lease is released.</p>
+<code>download</code>. Native <code>execute</code>
+<code>SSH_TIMEOUT</code> and <code>SSH_POOL_TIMEOUT</code> failures may
+use Action <code>retryOn: [TIMEOUT]</code>; native <code>upload</code>
+and <code>download</code> reject timeout retry because replaying a
+transfer can duplicate a side effect. A timed-out SFTP Action returns at
+its deadline while its concurrency lease remains held by the cleanup
+worker until the transfer worker and transport terminate.</p>
 <p>SSHHelper routes a command-backed Tool to a stable logical
 application-server ID instead of embedding a physical host in the Tool
 group. The <code>att-sshhelper/v1.0</code> YAML descriptor contains
@@ -3640,8 +3645,8 @@ failures.</p>
 <p>Timeout terminates or abandons the operation according to the
 supported backend and records diagnostic/evidence. Timeout is an
 operational failure; it is not an assertion false result. Tool timeout
-behavior and resource-specific DB/MQ limits are documented in their
-resource contracts.</p>
+behavior and resource-specific DB/MQ/HTTP/SSH limits are documented in
+their resource contracts.</p>
 <h3 id="retry-and-attempts">Retry and attempts</h3>
 <p>Where retry is supported, one logical Action owns multiple attempts.
 Retry policy determines which operation failures are retryable. The
@@ -3671,10 +3676,10 @@ Action when the collected value is business/test data rather than
 pre-assertion diagnostics.</p>
 <h3 id="transactionresource-lifecycle">Transaction/resource
 lifecycle</h3>
-<p>DB transaction finalization and DB/MQ resource cleanup occur at the
-appropriate execution lifecycle boundary. These mechanisms can affect
-operation success/diagnostics but are internal resource state, not
-public Context namespaces.</p>
+<p>DB transaction finalization and DB/MQ/HTTP/SSH resource cleanup occur
+at the appropriate execution lifecycle boundary. These mechanisms can
+affect operation success/diagnostics but are internal resource state,
+not public Context namespaces.</p>
 <h3 id="aggregation">Aggregation</h3>
 <p>When multiple child outcomes contribute to a parent, severity is
 preserved:</p>
@@ -5720,8 +5725,8 @@ output, resolved command text, and the failed record's
 safe fields; each retained text field is limited to 1024 characters.
 <code>inputOmitted</code> and truncation flags identify omitted or
 bounded evidence. Free-form messages, stderr, per-instance errors, and
-cleanup warnings redact string, DocumentValue text, and array inputs
-within a fixed budget: 256 input nodes, 8192 token characters, and 1024
+cleanup warnings redact string, typed text, and array inputs within a
+fixed budget: 256 input nodes, 8192 token characters, and 1024
 characters per token. Byte arrays are limited to 128 bytes (UTF-8,
 Base64, hexadecimal, and Java decimal renderings), other arrays to 64
 elements, and char arrays to 1024 characters. Exceeding any budget,

@@ -55,7 +55,7 @@ MQ evidence 可包含有界 transport metadata，例如 helper/instance identity
 
 Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Appendix C](../appendices/migrations.md)。
 
-共用 DocumentValue 與 typed-result 契約見[Action 與型別化值](../14_actions.md)。
+共用 typed-result 契約見[Action 與型別化值](../14_actions.md)。
 
 ### Descriptor configuration
 

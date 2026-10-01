@@ -44,4 +44,4 @@ Render String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特�
 
 Transport/protocol、response-parse failures 屬 operational error。已收到的 4xx/5xx 是 completed response，可對 statusCode 做 assertion。HTTP evidence 可包含 helper ID、method、安全 URL、response status、content type、byte counts、response format 與 duration。Credentials/payload 不會隱式保存。Load 可用 evidence.resources.output: none 略過可選 resource output formatting，或將其延至 iteration evidence 保留時。
 
-共用 DocumentValue 與 typed-result 契約見[Action 與型別化值](../14_actions.md)。
+共用 typed-result 契約見[Action 與型別化值](../14_actions.md)。

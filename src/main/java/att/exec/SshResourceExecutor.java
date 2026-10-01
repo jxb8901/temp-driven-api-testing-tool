@@ -73,7 +73,7 @@ public final class SshResourceExecutor {
         SshHelperConfig helper = config.sshHelper(helperId);
         SshConfig target = null;
         Semaphore permit = null;
-        boolean acquired = false;
+        PermitLease lease = null;
         try {
             if (helper == null) throw argument("Unknown SSH helper: " + helperId, "SSH_ARGUMENT");
             validateArguments(operation, supplied);
@@ -87,11 +87,11 @@ public final class SshResourceExecutor {
             long poolWaitNanos = remainingNanos(deadlineNanos);
             if (poolWaitNanos <= 0L || !permit.tryAcquire(poolWaitNanos, TimeUnit.NANOSECONDS))
                 throw argument("SSH helper concurrency limit timed out: " + helper.id(), "SSH_POOL_TIMEOUT");
-            acquired = true;
+            lease = new PermitLease(permit);
             Map<String, Object> result;
             if ("execute".equals(operation)) result = executeCommand(name, helper, target, supplied, timeoutMs, deadlineNanos, context, log);
-            else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, deadlineNanos, context);
-            else if ("download".equals(operation)) result = download(name, helper, target, supplied, timeoutMs, deadlineNanos, context);
+            else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, deadlineNanos, context, lease);
+            else if ("download".equals(operation)) result = download(name, helper, target, supplied, timeoutMs, deadlineNanos, context, lease);
             else throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, or download", "SSH_ARGUMENT");
             return success(name, id, result.get("result"), result, safeInput, started);
         } catch (InterruptedException interrupted) {
@@ -104,7 +104,7 @@ public final class SshResourceExecutor {
                 InternalExceptionLogger.logIfInternal(log, "ssh." + operation, error, identityRedactions(target));
             return failure(name, id, safeInput, started, helper, target, category, message, log, error);
         } finally {
-            if (acquired && permit != null) permit.release();
+            if (lease != null) lease.release();
         }
     }
 
@@ -191,7 +191,7 @@ public final class SshResourceExecutor {
 
     private Map<String, Object> upload(String name, SshHelperConfig helper, SshConfig target,
                                        Map<String, Object> input, long timeoutMs, long deadlineNanos,
-                                       CaseRuntimeContext context) throws Exception {
+                                       CaseRuntimeContext context, PermitLease lease) throws Exception {
         String remotePath = requiredRemotePath(input.get("remotePath"));
         boolean hasLocal = input.containsKey("localPath");
         boolean hasPayload = input.containsKey("payload");
@@ -207,7 +207,7 @@ public final class SshResourceExecutor {
                     return transferClient.upload(target, local, null, remotePath, overwrite,
                             connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
                 }
-            }, deadlineNanos).longValue();
+            }, deadlineNanos, lease).longValue();
             mode = "local-file";
         } else {
             Object payload = input.get("payload");
@@ -221,7 +221,7 @@ public final class SshResourceExecutor {
                     return transferClient.upload(target, null, represented, remotePath, overwrite,
                             connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
                 }
-            }, deadlineNanos).longValue();
+            }, deadlineNanos, lease).longValue();
             mode = "represented-payload";
         }
         Map<String, Object> evidence = commonEvidence(helper, target, "upload", "sftp", started);
@@ -243,7 +243,7 @@ public final class SshResourceExecutor {
 
     private Map<String, Object> download(String name, SshHelperConfig helper, SshConfig target,
                                          Map<String, Object> input, long timeoutMs, long deadlineNanos,
-                                         CaseRuntimeContext context) throws Exception {
+                                         CaseRuntimeContext context, PermitLease lease) throws Exception {
         String remotePath = requiredRemotePath(input.get("remotePath"));
         String localText = requiredString(input.get("localPath"), "localPath");
         boolean overwrite = bool(input.get("overwrite"), false, "overwrite");
@@ -254,7 +254,7 @@ public final class SshResourceExecutor {
                 return transferClient.download(target, remotePath, local, overwrite,
                         connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
             }
-        }, deadlineNanos).longValue();
+        }, deadlineNanos, lease).longValue();
         Map<String, Object> evidence = commonEvidence(helper, target, "download", "sftp", started);
         evidence.put("remotePath", remotePath);
         evidence.put("localPath", portable(local));
@@ -284,8 +284,10 @@ public final class SshResourceExecutor {
     private ToolInvocationResult failure(String name, String id, Map<String, Object> input, Instant started,
                                          SshHelperConfig helper, SshConfig target, String category, String message,
                                          CaseExecutionLog log, Throwable cause) {
-        Map<String, Object> evidence = commonEvidence(helper, target, operationName(name),
-                target == null ? "" : commandRunner.transportName(), started);
+        String operation = operationName(name);
+        String transport = ("upload".equals(operation) || "download".equals(operation))
+                ? "sftp" : (target == null ? "" : commandRunner.transportName());
+        Map<String, Object> evidence = commonEvidence(helper, target, operation, transport, started);
         if (cause instanceof SshOperationException && ((SshOperationException) cause).evidence != null)
             evidence.putAll(((SshOperationException) cause).evidence);
         evidence.put("durationMs", elapsed(started));
@@ -368,7 +370,7 @@ public final class SshResourceExecutor {
                 ? Duration.ofMillis(helper.connectTimeoutMs()) : remaining;
     }
 
-    private <T> T transferWithDeadline(TransferOperation<T> operation, long deadlineNanos) throws Exception {
+    private <T> T transferWithDeadline(TransferOperation<T> operation, long deadlineNanos, PermitLease lease) throws Exception {
         long remaining = remainingNanos(deadlineNanos);
         if (remaining <= 0L) throw operation("SSH transfer timed out", "SSH_TIMEOUT", null);
         TransferCancellation cancellation = new TransferCancellation();
@@ -379,9 +381,13 @@ public final class SshResourceExecutor {
         try {
             return task.get(remaining, TimeUnit.NANOSECONDS);
         } catch (TimeoutException timeout) {
-            cancellation.cancel();
-            task.cancel(true);
-            awaitTransferWorker(worker);
+            lease.handoff(new Runnable() {
+                @Override public void run() {
+                    cancellation.cancel();
+                    task.cancel(true);
+                    awaitTransferWorker(worker);
+                }
+            });
             throw operation("SSH transfer timed out", "SSH_TIMEOUT", null, timeout);
         } catch (ExecutionException failure) {
             Throwable cause = failure.getCause();
@@ -389,9 +395,13 @@ public final class SshResourceExecutor {
             if (cause instanceof Error) throw (Error) cause;
             throw new IOException(String.valueOf(cause), cause);
         } catch (InterruptedException interrupted) {
-            cancellation.cancel();
-            task.cancel(true);
-            awaitTransferWorker(worker);
+            lease.handoff(new Runnable() {
+                @Override public void run() {
+                    cancellation.cancel();
+                    task.cancel(true);
+                    awaitTransferWorker(worker);
+                }
+            });
             throw interrupted;
         }
     }
@@ -467,6 +477,7 @@ public final class SshResourceExecutor {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (Map.Entry<String, Object> entry : input.entrySet()) {
             if ("payload".equals(entry.getKey())) result.put("payload", "<represented payload>");
+            else if ("command".equals(entry.getKey())) continue;
             else result.put(entry.getKey(), entry.getValue());
         }
         return result;
@@ -494,6 +505,40 @@ public final class SshResourceExecutor {
     private String operationName(String name) { String[] parts = name.split("\\.", -1); return parts.length == 3 ? parts[2] : "unknown"; }
     private interface TransferOperation<T> {
         T call(SshTransferCancellation cancellation) throws Exception;
+    }
+
+    private static final class PermitLease {
+        private final Semaphore semaphore;
+        private boolean handedOff;
+        private boolean released;
+
+        private PermitLease(Semaphore semaphore) { this.semaphore = semaphore; }
+
+        private synchronized void release() {
+            if (handedOff || released) return;
+            released = true;
+            semaphore.release();
+        }
+
+        private synchronized void handoff(final Runnable cleanup) {
+            if (handedOff || released) return;
+            handedOff = true;
+            Thread cleanupThread = new Thread(new Runnable() {
+                @Override public void run() {
+                    try { cleanup.run(); }
+                    finally {
+                        synchronized (PermitLease.this) {
+                            if (!released) {
+                                released = true;
+                                semaphore.release();
+                            }
+                        }
+                    }
+                }
+            }, "att-ssh-transfer-cleanup");
+            cleanupThread.setDaemon(true);
+            cleanupThread.start();
+        }
     }
 
     private static final class TransferCancellation implements SshTransferCancellation {

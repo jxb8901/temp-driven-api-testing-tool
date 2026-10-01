@@ -142,7 +142,7 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](08_reli
 
 每個 Action 依類型使用不同契約。Render 回傳原樣 String，不寫入檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
-完整欄位、範例、typed result/evidence model、DocumentValue 行為、HTTP/MQ boundary 與 migration guidance，請參閱[Action 與型別化值](14_actions.md)。[Expressions and Built-ins](07_expressions.md) 定義共用 expression language；[Load](04_execution_modes/load.md) 定義 ID initialization scope。
+完整欄位、範例、typed result/evidence model、HTTP/MQ/SSH boundary 與 migration guidance，請參閱[Action 與型別化值](14_actions.md)。[Expressions and Built-ins](07_expressions.md) 定義共用 expression language；[Load](04_execution_modes/load.md) 定義 ID initialization scope。
 
 ### 2.4 Flow
 

@@ -140,9 +140,9 @@ Stage `required`, `runWhen` and `onFailure` behavior is defined in [Reliability]
 
 A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.4. Each Template has a non-empty ordered actions map and a required description.
 
-Each Action has a type-specific contract. Render returns the exact rendered String without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
+Each Action has a type-specific contract. Render returns the exact rendered String without writing a file. Tool/DB/HTTP/MQ/SSH actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
-See [Actions and Typed Values](14_actions.md) for the complete field list, examples, typed result/evidence model, DocumentValue behavior, HTTP/MQ boundaries and migration guidance. [Expressions and Built-ins](07_expressions.md) covers the shared expression language; [Load](04_execution_modes/load.md) owns ID initialization.
+See [Actions and Typed Values](14_actions.md) for the complete field list, examples, typed result/evidence model, HTTP/MQ/SSH boundaries and migration guidance. [Expressions and Built-ins](07_expressions.md) covers the shared expression language; [Load](04_execution_modes/load.md) owns ID initialization.
 
 ### 2.4 Flow
 
