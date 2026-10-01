@@ -87,8 +87,7 @@ public final class CliDiscovery {
             result.put("profile", profile);
             List<String> quickCommands = new ArrayList<String>();
             if (policy != null) {
-                for (Map<String, Object> target : debugTargets(canonicalRoot, config)) {
-                    if (!target.containsKey("sidecar")) continue;
+                for (Map<String, Object> target : quickLoadTargets(canonicalRoot, config, policy)) {
                     quickCommands.add("./att.sh load --debug " + target.get("type") + " "
                             + shellQuote(String.valueOf(target.get("id"))));
                 }
@@ -122,13 +121,41 @@ public final class CliDiscovery {
 
         FlowRegistry flows = new FlowRegistry(canonicalRoot, config.templatesRoot(), false);
         for (String id : flows.ids()) addDebugTarget(targets, engine, "flow", id);
+        sortTargets(targets);
+        return targets;
+    }
+
+    private static List<Map<String, Object>> quickLoadTargets(Path root, FrameworkConfig config,
+                                                               Map<String, Object> quickLoadPolicy) throws Exception {
+        Path canonicalRoot = root.toAbsolutePath().normalize();
+        DebugEngine engine = new DebugEngine(canonicalRoot, config);
+        List<Map<String, Object>> targets = new ArrayList<Map<String, Object>>();
+
+        List<String> toolIds = new ArrayList<String>(config.tools().keySet());
+        Collections.sort(toolIds);
+        for (String id : toolIds) addQuickLoadTarget(targets, engine, "tool", id, id, quickLoadPolicy);
+
+        StageTemplateLoader templates = new StageTemplateLoader(canonicalRoot, config.templatesRoot(), false);
+        for (String path : templates.paths()) {
+            try {
+                StageTemplate template = templates.load(path);
+                addQuickLoadTarget(targets, engine, "template", path, template.name(), quickLoadPolicy);
+            } catch (Exception ignored) { }
+        }
+
+        FlowRegistry flows = new FlowRegistry(canonicalRoot, config.templatesRoot(), false);
+        for (String id : flows.ids()) addQuickLoadTarget(targets, engine, "flow", id, id, quickLoadPolicy);
+        sortTargets(targets);
+        return targets;
+    }
+
+    private static void sortTargets(List<Map<String, Object>> targets) {
         Collections.sort(targets, new Comparator<Map<String, Object>>() {
             public int compare(Map<String, Object> left, Map<String, Object> right) {
                 int type = String.valueOf(left.get("type")).compareTo(String.valueOf(right.get("type")));
                 return type == 0 ? String.valueOf(left.get("id")).compareTo(String.valueOf(right.get("id"))) : type;
             }
         });
-        return targets;
     }
 
     public static void printDebug(Map<String, Object> result, String format) {
@@ -188,6 +215,18 @@ public final class CliDiscovery {
             Map<String, Object> entry = new LinkedHashMap<String, Object>();
             entry.put("type", type); entry.put("id", id); entry.put("name", displayName);
             entry.put("command", "./att.sh debug " + type + " " + shellQuote(id));
+            entry.put("sidecar", sidecar.toAbsolutePath().normalize().toString());
+            targets.add(entry);
+        } catch (Exception ignored) { }
+    }
+
+    private static void addQuickLoadTarget(List<Map<String, Object>> targets, DebugEngine engine, String type,
+                                           String id, String displayName, Map<String, Object> quickLoadPolicy) {
+        try {
+            Path sidecar = engine.validateDiscoverableTargetForLoad(type, id, quickLoadPolicy);
+            if (sidecar == null) return;
+            Map<String, Object> entry = new LinkedHashMap<String, Object>();
+            entry.put("type", type); entry.put("id", id); entry.put("name", displayName);
             entry.put("sidecar", sidecar.toAbsolutePath().normalize().toString());
             targets.add(entry);
         } catch (Exception ignored) { }

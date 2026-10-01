@@ -51,8 +51,10 @@ class CliDiscoveryTest {
         assertEquals(1, invalid.size());
         assertEquals("load/scenarios/invalid.yaml", invalid.get(0).get("path"));
         assertTrue(String.valueOf(invalid.get(0).get("diagnostic")).contains("Invalid load scenario"));
-        assertEquals(1, quick.size());
-        assertTrue(quick.get(0).contains("load --debug template 'TARGET'"), quick.toString());
+        assertEquals(2, quick.size());
+        assertTrue(quick.stream().anyMatch(command -> command.contains("load --debug template 'TARGET'")), quick.toString());
+        assertTrue(quick.stream().anyMatch(command -> command.contains("load --debug template 'LOAD_ONLY'")),
+                "Load discovery must include targets valid only through Load bootstrap scope: " + quick);
         assertFalse(Files.exists(root.resolve("output")), "discovery must not create load output or start a scheduler");
     }
 

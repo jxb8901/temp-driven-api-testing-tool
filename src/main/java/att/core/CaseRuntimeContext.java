@@ -69,6 +69,9 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
     /** Public uppercase load identity published below EXEC.LOAD. */
     private final Map<String, Object> loadNode = new LinkedHashMap<String, Object>();
+    private static final java.util.Set<String> LOAD_CONTEXT_FIELD_NAMES =
+            java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList(
+                    "RUN_ID", "ITERATION_ID", "MODEL", "USER_ID", "ITERATION", "PHASE", "WORKLOAD_ID")));
     /** ATT-owned load diagnostics, kept separate from the expression Context. */
     private final Map<String, Object> loadDiagnosticsNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
@@ -106,6 +109,20 @@ public final class CaseRuntimeContext {
     private final java.util.Deque<FlowFrame> flowScopes = new java.util.ArrayDeque<FlowFrame>();
     private final java.util.Deque<TemplateMetadataFrame> priorTemplates = new java.util.ArrayDeque<TemplateMetadataFrame>();
     private boolean executionIdInitializing;
+
+    /** True for a canonical field name owned by the public EXEC.LOAD identity map. */
+    public static boolean isLoadContextField(String name) {
+        return LOAD_CONTEXT_FIELD_NAMES.contains(name);
+    }
+
+    /** Returns the fields guaranteed by the selected scheduler mode and workload form. */
+    public static java.util.Set<String> availableLoadContextFields(boolean userIdAvailable,
+                                                                    boolean workloadIdAvailable) {
+        java.util.Set<String> fields = new java.util.LinkedHashSet<String>(LOAD_CONTEXT_FIELD_NAMES);
+        if (!userIdAvailable) fields.remove("USER_ID");
+        if (!workloadIdAvailable) fields.remove("WORKLOAD_ID");
+        return java.util.Collections.unmodifiableSet(fields);
+    }
 
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String runId, Path runDirectory, Path caseLog) {
         this(testCase, caseOutputDir, runId, runDirectory, caseLog, "testcase");

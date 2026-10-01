@@ -192,6 +192,7 @@ class LoadCrossModeTest {
                 + "  - id: optional\n    target: {type: template, id: OPTIONAL}\n    inputs: {}\n"
                 + "    vars:\n      customerId: '${EXEC.INPUT.customerId?}'\n"
                 + "      loadUser: '${EXEC.LOAD.USER_ID}'\n"
+                + "      iteration: '${EXEC.LOAD.ITERATION}'\n"
                 + "      region: '#{${EXEC.INPUT.region?}}'\n"
                 + "    load: {users: 1, duration: 1s}\n");
         LoadScenario scenario = new LoadScenarioLoader(project).load(source);
@@ -206,6 +207,68 @@ class LoadCrossModeTest {
         assertNull(result.context().require("EXEC.VARS.customerId"));
         assertNull(result.context().require("EXEC.VARS.region"));
         assertEquals("VU-1", result.context().require("EXEC.VARS.loadUser"));
+        assertEquals(1L, ((Number) result.context().require("EXEC.VARS.iteration")).longValue());
+    }
+
+    @Test void loadBootstrapValidatesKnownFieldsAndPreservesOptionalArrivalUserId() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        Path source = write(project, "load/arrival-optional-user.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: arrival\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      userId: '${EXEC.LOAD.USER_ID?}'\n"
+                + "      iteration: '${EXEC.LOAD.ITERATION}'\n"
+                + "    load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources,
+                    temp.resolve("arrival-load-bootstrap"));
+            IterationResult result = executor.execute(IterationRequest.arrivalRate("arrival-user", "arrival-1", 1,
+                    "STEADY", Instant.now(), scenario.inputs()).withWorkloadId(scenario.workloadId()));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertNull(result.context().require("EXEC.VARS.userId"));
+            assertEquals(1L, ((Number) result.context().require("EXEC.VARS.iteration")).longValue());
+        }
+
+        Path typoSource = write(project, "load/arrival-typo-user.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: arrival\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      userId: '${EXEC.LOAD.USRE_ID}'\n"
+                + "    load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n");
+        LoadScenario typoScenario = new LoadScenarioLoader(project).load(typoSource);
+        LoadTarget typoTarget = new LoadTargetResolver(project, config).resolve(typoScenario);
+        Path output = temp.resolve("arrival-typo-output");
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor seed = new IterationExecutor(project, config, typoTarget, resources, output);
+            att.validation.DiagnosticException diagnostic = assertThrows(att.validation.DiagnosticException.class,
+                    () -> LoadRunCoordinator.runFrom(typoScenario, seed, "arrival-typo", null, output));
+            assertEquals("workloads[0].vars.userId", diagnostic.field());
+            assertTrue(diagnostic.detail().contains("missing Load field"), diagnostic.format());
+        }
+        assertFalse(Files.exists(output.resolve("load/arrival-typo")),
+                "a deterministic Load-field typo must fail before the scheduler creates run output");
+
+        Path nestedSource = write(project, "load/closed-nested-load-field.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: closed\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      nested: '${EXEC.LOAD.USER_ID.value}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario nestedScenario = new LoadScenarioLoader(project).load(nestedSource);
+        LoadTarget nestedTarget = new LoadTargetResolver(project, config).resolve(nestedScenario);
+        att.validation.DiagnosticException nested = assertThrows(att.validation.DiagnosticException.class,
+                () -> new LoadTargetValidator(project, config).validate(nestedScenario, nestedTarget));
+        assertEquals("workloads[0].vars.nested", nested.field());
+        assertTrue(nested.detail().contains("structurally invalid Load path"), nested.format());
+
+        Path unavailableSource = write(project, "load/arrival-required-user.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: arrival\n    target: {type: template, id: SHARED}\n    inputs: {value: ready}\n"
+                + "    vars:\n      userId: '${EXEC.LOAD.USER_ID}'\n"
+                + "    load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n");
+        LoadScenario unavailableScenario = new LoadScenarioLoader(project).load(unavailableSource);
+        LoadTarget unavailableTarget = new LoadTargetResolver(project, config).resolve(unavailableScenario);
+        att.validation.DiagnosticException unavailable = assertThrows(att.validation.DiagnosticException.class,
+                () -> new LoadTargetValidator(project, config).validate(unavailableScenario, unavailableTarget));
+        assertEquals("workloads[0].vars.userId", unavailable.field());
+        assertTrue(unavailable.detail().contains("unavailable Load field"), unavailable.format());
     }
 
     @Test void optionalStructurallyInvalidInputPathFailsBeforeLoadSchedulerStarts() throws Exception {

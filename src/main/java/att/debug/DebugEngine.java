@@ -88,6 +88,20 @@ public final class DebugEngine {
         return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
     }
 
+    /** Validates a sidecar using the exact Load promotion path, not standalone Debug root availability. */
+    public Path validateDiscoverableTargetForLoad(String type, String id,
+                                                  Map<String, Object> quickLoadPolicy) throws Exception {
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", type, id});
+        Map<String, Object> promoted = loadBootstrapInputForLoad(options);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(projectRoot).fromDebugInput(
+                (Path) promoted.get("source"), type, id, DebugInput.map(promoted.get("inputs")),
+                DebugInput.map(promoted.get("vars")), DebugInput.map(promoted.get("arguments")),
+                quickLoadPolicy, options);
+        att.load.LoadTarget target = new att.load.LoadTargetResolver(projectRoot, config).resolve(scenario);
+        new att.load.LoadTargetValidator(projectRoot, config).validate(scenario, target);
+        return (Path) promoted.get("source");
+    }
+
     public Result run(ExecutionOptions options) throws Exception {
         java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());

@@ -4,6 +4,7 @@ import att.config.FrameworkConfig;
 import att.validation.PackageValidator;
 
 import java.nio.file.Path;
+import java.util.Set;
 
 /** Performs selected Template/Flow/Tool dependency validation before scheduling. */
 public final class LoadTargetValidator {
@@ -21,10 +22,12 @@ public final class LoadTargetValidator {
             LoadWorkload workload = scenario.workload();
             String varsField = workload.sourceIndex() < 0 ? "vars"
                     : "workloads[" + workload.sourceIndex() + "].vars";
+            Set<String> availableLoadFields = att.core.CaseRuntimeContext.availableLoadContextFields(
+                    scenario.model() == LoadScenario.Model.CLOSED, !scenario.legacyV10());
             try {
                 att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine, scenario.inputs(),
                         scenario.source(), varsField, att.validation.DiagnosticCodes.LOAD_INVALID,
-                        att.core.ExecutionBootstrapVariables.Scope.LOAD);
+                        att.core.ExecutionBootstrapVariables.Scope.LOAD, availableLoadFields);
             } catch (att.validation.DiagnosticException error) {
                 throw error.withDetail("workloadId: " + workload.id());
             }

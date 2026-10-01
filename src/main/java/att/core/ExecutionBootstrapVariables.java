@@ -37,9 +37,16 @@ public final class ExecutionBootstrapVariables {
     public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine,
                                                Map<String, Object> inputs, Path source, String fieldPrefix,
                                                String diagnosticCode, Scope scope) {
+        return validate(definitions, engine, inputs, source, fieldPrefix, diagnosticCode, scope, null);
+    }
+
+    /** Validates Load references against the fields guaranteed by the selected workload. */
+    public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine,
+                                               Map<String, Object> inputs, Path source, String fieldPrefix,
+                                               String diagnosticCode, Scope scope, Set<String> availableLoadFields) {
         Map<String, Object> vars = definitions == null ? new LinkedHashMap<String, Object>() : definitions;
         Validation validation = new Validation(inputs, source, fieldPrefix, diagnosticCode,
-                inputs != null || source != null, scope);
+                inputs != null || source != null, scope, availableLoadFields);
         for (Map.Entry<String, Object> entry : vars.entrySet()) {
             String name = entry.getKey();
             String field = validation.variableField(name);
@@ -65,11 +72,11 @@ public final class ExecutionBootstrapVariables {
         Map<String, Object> vars = validate(definitions, engine, null, null, "vars",
                 DiagnosticCodes.DEBUG_INVALID, scope);
         Map<String, Set<String>> dependencies = dependencies(vars, engine,
-                new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false, scope));
+                new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false, scope, null));
         List<String> order = new ArrayList<String>();
         Set<String> visited = new LinkedHashSet<String>();
         Set<String> active = new LinkedHashSet<String>();
-        Validation validation = new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false, scope);
+        Validation validation = new Validation(null, null, "vars", DiagnosticCodes.DEBUG_INVALID, false, scope, null);
         for (String name : vars.keySet()) visit(name, dependencies, visited, active, order, validation);
 
         Set<String> published = new LinkedHashSet<String>();
@@ -194,6 +201,7 @@ public final class ExecutionBootstrapVariables {
             throw validation.invalid("Context path '" + path + "' is unavailable during execution bootstrap", field);
 
         boolean inputPath = false;
+        boolean loadPath = false;
         boolean allowed = false;
         if ("EXEC".equals(root) && child != null) {
             if ("INPUT".equals(child)) {
@@ -203,6 +211,7 @@ public final class ExecutionBootstrapVariables {
                 allowed = segments.size() >= 3 && keyAt(segments, 2) != null;
             } else if ("LOAD".equals(child)) {
                 allowed = validation.scope == Scope.LOAD;
+                loadPath = allowed;
             } else if (isOneOf(child, "ID", "RUN_ID", "OUTPUT_DIR", "STARTED_AT", "RUN_STARTED_AT")) {
                 allowed = segments.size() == 2;
             }
@@ -219,6 +228,32 @@ public final class ExecutionBootstrapVariables {
             if (!optional && status != CaseRuntimeContext.InputPathStatus.FOUND)
                 throw validation.invalid("Bootstrap expression references missing input '" + path + "'", field);
         }
+        if (loadPath) validateLoadPath(segments, path, field, validation);
+    }
+
+    private static void validateLoadPath(List<CaseRuntimeContext.Segment> segments, String path, String field,
+                                         Validation validation) {
+        if (segments.size() == 2) return; // EXEC.LOAD is the initialized identity map itself.
+        CaseRuntimeContext.Segment selector = segments.get(2);
+        if (selector.index != null)
+            throw validation.invalid("Bootstrap expression contains an invalid selector under EXEC.LOAD in '"
+                    + path + "'", field);
+        String loadField = selector.key;
+        boolean known = CaseRuntimeContext.isLoadContextField(loadField);
+        boolean optional = CaseRuntimeContext.isOptionalReference(path);
+        if (!known) {
+            if (!optional) throw validation.invalid("Bootstrap expression references missing Load field '"
+                    + path + "'", field);
+            return; // Optional Context lookup turns a missing map key into null.
+        }
+        if (validation.availableLoadFields != null && !validation.availableLoadFields.contains(loadField)) {
+            if (!optional) throw validation.invalid("Bootstrap expression references unavailable Load field '"
+                    + path + "'", field);
+            return; // For example, USER_ID is absent in arrival-rate workloads.
+        }
+        if (segments.size() > 3)
+            throw validation.invalid("Bootstrap expression contains structurally invalid Load path '"
+                    + path + "'", field);
     }
 
     private static String keyAt(List<CaseRuntimeContext.Segment> segments, int index) {
@@ -246,15 +281,17 @@ public final class ExecutionBootstrapVariables {
         private final String diagnosticCode;
         private final boolean checkInputReferences;
         private final Scope scope;
+        private final Set<String> availableLoadFields;
 
         private Validation(Map<String, Object> inputs, Path source, String fieldPrefix, String diagnosticCode,
-                           boolean checkInputReferences, Scope scope) {
+                           boolean checkInputReferences, Scope scope, Set<String> availableLoadFields) {
             this.inputs = inputs;
             this.source = source;
             this.fieldPrefix = fieldPrefix == null || fieldPrefix.trim().isEmpty() ? "vars" : fieldPrefix;
             this.diagnosticCode = diagnosticCode == null ? DiagnosticCodes.DEBUG_INVALID : diagnosticCode;
             this.checkInputReferences = checkInputReferences;
             this.scope = scope == null ? Scope.DEBUG : scope;
+            this.availableLoadFields = availableLoadFields;
         }
 
         private String variableField(String name) { return fieldPrefix + "." + name; }
