@@ -3113,6 +3113,63 @@ required field、upload source 衝突及不安全 local path
 instance、host/port、operation、transport、時間及 transfer/command
 詳情；command input 和 represented payload 不會複製到 evidence。由
 environment 提供的 identity path 仍會遮蔽。</p>
+<p>Native SSH failure 在 invocation <code>error.category</code> 和
+<code>SSH.error.category</code> 發布穩定分類：</p>
+<table>
+<thead>
+<tr class="header">
+<th>Category</th>
+<th>意義</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>SSH_CONNECTION_ERROR</code></td>
+<td>非 timeout 的 connection、host verification 或 channel setup
+失敗；backend 無法可靠識別 authentication 時亦使用此類別。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_AUTH_ERROR</code></td>
+<td>Java backend 識別到 authentication
+rejection/cancellation，或無法初始化配置的 identity。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_TRANSPORT_ERROR</code></td>
+<td>OpenSSH 回傳 255；可能是 connection/authentication failure，亦可能是
+remote command 自己 exit 255。ATT 保留 stderr 及 exit
+code，不依本地化訊息猜測。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_TIMEOUT</code> / <code>SSH_POOL_TIMEOUT</code></td>
+<td>Operation/connect deadline 或 concurrency wait 到期。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_REMOTE_EXIT</code></td>
+<td>Remote command 完成但 exit 非零（OpenSSH 255 使用上述類別）。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_RESULT_PARSE_ERROR</code></td>
+<td>stdout parsing 失敗。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_UPLOAD_ERROR</code> / <code>SSH_DOWNLOAD_ERROR</code></td>
+<td>Connection setup 後對應 transfer 失敗，包括 remote
+permission、missing path 或 protocol error。</td>
+</tr>
+<tr class="even">
+<td><code>SSH_PATH</code> / <code>SSH_ARGUMENT</code></td>
+<td>Local containment/security check 或 argument validation 失敗。</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_INTERRUPTED</code></td>
+<td>Caller 中斷 operation。</td>
+</tr>
+</tbody>
+</table>
+<p>Transfer connection/channel failure 保留
+<code>phase: connect|channel</code>；timeout evidence 亦保留相應 timeout
+budget。所有 failure 都保留選定 operation 與實際 transport。Transfer
+error 仍不可自動 timeout replay。</p>
 <p>Native Resource Helper call 使用一個 absolute Action deadline，涵蓋
 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP
 transfer。Per-call <code>timeoutMs</code> 或 helper

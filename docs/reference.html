@@ -3460,6 +3460,67 @@ evidence contains the logical helper, selected instance, host/port,
 operation, transport, timing and transfer/command details; command input
 and represented payload content are not copied into evidence.
 Environment-supplied identity paths remain redacted.</p>
+<p>Native SSH failures expose stable categories in both invocation
+<code>error.category</code> and <code>SSH.error.category</code>:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Category</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>SSH_CONNECTION_ERROR</code></td>
+<td>Connection, host verification, or channel setup failed without a
+timeout; also used when the backend cannot identify authentication
+reliably.</td>
+</tr>
+<tr class="even">
+<td><code>SSH_AUTH_ERROR</code></td>
+<td>The Java backend identifies authentication rejection/cancellation or
+cannot initialize the configured identity.</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_TRANSPORT_ERROR</code></td>
+<td>OpenSSH returned 255. This may indicate connection/authentication
+failure or a remote command that itself exited 255; ATT retains stderr
+and exit code without guessing from localized diagnostics.</td>
+</tr>
+<tr class="even">
+<td><code>SSH_TIMEOUT</code> / <code>SSH_POOL_TIMEOUT</code></td>
+<td>Operation/connect deadline or concurrency wait expired.</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_REMOTE_EXIT</code></td>
+<td>A remote command completed with a non-zero exit (OpenSSH 255 uses
+the category above).</td>
+</tr>
+<tr class="even">
+<td><code>SSH_RESULT_PARSE_ERROR</code></td>
+<td>stdout parsing failed.</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_UPLOAD_ERROR</code> / <code>SSH_DOWNLOAD_ERROR</code></td>
+<td>The corresponding transfer failed after connection setup, including
+remote permission/missing-path/protocol errors.</td>
+</tr>
+<tr class="even">
+<td><code>SSH_PATH</code> / <code>SSH_ARGUMENT</code></td>
+<td>Local containment/security checks or argument validation
+failed.</td>
+</tr>
+<tr class="odd">
+<td><code>SSH_INTERRUPTED</code></td>
+<td>The caller interrupted the operation.</td>
+</tr>
+</tbody>
+</table>
+<p>Transfer connection/channel failures retain
+<code>phase: connect|channel</code>; timeout evidence also retains the
+applicable timeout budgets. All failures keep their selected operation
+and actual transport. Transfer errors remain ineligible for automatic
+timeout replay.</p>
 <p>Native Resource Helper calls use one absolute Action deadline
 covering concurrency-pool wait, connection and channel setup, and
 command or SFTP transfer. A per-call <code>timeoutMs</code> or helper
