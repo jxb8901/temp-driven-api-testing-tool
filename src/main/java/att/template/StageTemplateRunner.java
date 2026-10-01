@@ -1097,7 +1097,8 @@ public class StageTemplateRunner {
         Object value = output.get("assertion");
         if (value != null) return String.valueOf(value);
         if ("TIMEOUT".equals(output.get("status")))
-            return "TIMEOUT: " + String.valueOf(output.get("diagnostic"));
+            return "TIMEOUT: " + String.valueOf(output.get("diagnostic") != null
+                    ? output.get("diagnostic") : output.get("error"));
         return "";
     }
     private Map<String, Object> diagnosticLocation(att.validation.DiagnosticException diagnostic) {

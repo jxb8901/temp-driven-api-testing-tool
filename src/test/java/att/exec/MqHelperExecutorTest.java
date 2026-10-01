@@ -649,7 +649,7 @@ class MqHelperExecutorTest {
         TemplateAction action = new TemplateAction("mqRequest", map("type", "tool", "timeoutMs", 100,
                 "call", "#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', payload='request', waitMs=20)}",
                 "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"),
-                        "when", "#{${output.status} == 'TIMEOUT' && ${output.evidence.mq.invocations[0].reasonCode?} != 2033}")),
+                        "when", "#{${output.status} == 'TIMEOUT' AND ${output.evidence.mq.invocations[0].reasonCode?} != 2033}")),
                 att.Version.TEMPLATE_SCHEMA);
         CaseRuntimeContext context = context(caseDir);
         context.beginStage(new StageCaseData("mq", "MQ", Collections.<String,Object>emptyMap()), "MQ", tempDir);

@@ -127,7 +127,7 @@ class DirectDbActionRetryRuntimeTest {
     void dbConditionReadsTheCurrentAttemptResultAndEvidence() throws Exception {
         ScriptedProvider provider = new ScriptedProvider(Behavior.EMPTY_THEN_ROW);
         TemplateAction action = queryAction("poll", 3, 0, "ASSERTION", null);
-        action.retry().put("when", "#{${output.status} == 'FAIL' && ${output.attempt} == 1 && ${output.result.rowCount} == 0}");
+        action.retry().put("when", "#{${output.status} == 'FAIL' AND ${output.attempt} == 1 AND ${output.result.rowCount} == 0}");
         RunResult run = run(provider, action);
         assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
         assertEquals(2, provider.executions);

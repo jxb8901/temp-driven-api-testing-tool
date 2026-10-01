@@ -13,7 +13,7 @@ class RetryWhenRuntimeTest {
     @TempDir Path tempDir;
 
     @Test void assertionRetryReadsCurrentAttemptAndPreservesHistory() throws Exception {
-        Run run = run("ASSERTION", "#{${output.status} == 'FAIL' && ${output.attempt} == 1 && length(${output.result}) == 2}",
+        Run run = run("ASSERTION", "#{${output.status} == 'FAIL' AND ${output.attempt} == 1 AND length(${output.result}) == 2}",
                 "#{${output.attempt} >= 2}");
         assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
         assertEquals(2, run.context.resolve("EXEC.ACTIONS.call.output.attempt"));
