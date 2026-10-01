@@ -29,7 +29,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Regression proof that one canonical component is portable across execution modes. */
@@ -119,6 +122,61 @@ class LoadCrossModeTest {
                         "STEADY", Instant.now(), "VU-1", scenario.inputs()));
         assertEquals(ResultStatus.PASS, result.status());
         assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.loadTool.output.result")).contains("typed-load"));
+    }
+
+    @Test void groupedToolSidecarOverridesSurviveQuickLoadPromotion() throws Exception {
+        Path project = fixture();
+        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.1\ntools:\n"
+                + "  echo:\n    arguments: {value: from-sidecar}\n");
+        Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new att.config.ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig grouped = new ToolConfig("group.echo", "echo", "group", "Echo", "Grouped Echo",
+                java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("group.echo", grouped), null, null);
+        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "group.echo",
+                "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
+
+        Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
+
+        assertEquals("typed-load", map(promoted.get("arguments")).get("value"));
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
+                options.debugTargetType(), options.debugTargetId(), map(promoted.get("inputs")), map(promoted.get("vars")),
+                map(promoted.get("arguments")), null, options);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("group-tool-debug-load", "group-tool-debug-load-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+
+        assertEquals(ResultStatus.PASS, result.status());
+        String output = String.valueOf(result.context().resolve("EXEC.ACTIONS.loadTool.output.result"));
+        assertTrue(output.contains("typed-load"), output);
+        assertFalse(output.contains("from-sidecar"), output);
+    }
+
+    @Test void missingStaticBootstrapInputFailsBeforeLoadSchedulingWithWorkloadSourceLocation() throws Exception {
+        Path project = fixture();
+        Path source = write(project, "load/missing-bootstrap-input.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: first\n    target: {type: template, id: SHARED}\n    load: {users: 1, duration: 1s}\n"
+                + "  - id: second\n    target: {type: template, id: SHARED}\n"
+                + "    inputs: {customer: {id: C001}}\n"
+                + "    vars:\n      account: '${EXEC.INPUT.customer.account}'\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario parsed = new LoadScenarioLoader(project).load(source);
+        LoadScenario selected = parsed.forWorkload(parsed.workload("second"));
+        FrameworkConfig config = config();
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(selected);
+
+        att.validation.DiagnosticException diagnostic = assertThrows(att.validation.DiagnosticException.class,
+                () -> new LoadTargetValidator(project, config).validate(selected, target));
+
+        assertEquals("workloads[1].vars.account", diagnostic.field());
+        assertEquals(source.toString(), diagnostic.file());
+        assertNotNull(diagnostic.source());
+        assertEquals(10, diagnostic.source().line());
+        assertTrue(diagnostic.format().contains("^"), diagnostic.format());
+        assertTrue(diagnostic.detail().contains("workloadId: second"), diagnostic.detail());
     }
 
     @SuppressWarnings("unchecked")

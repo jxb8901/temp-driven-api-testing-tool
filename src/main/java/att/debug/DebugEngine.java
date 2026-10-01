@@ -79,7 +79,8 @@ public final class DebugEngine {
         if ("template".equals(type) || "flow".equals(type)) {
             UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
-            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine);
+            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
+                    "vars", DiagnosticCodes.DEBUG_INVALID);
         }
         new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                 resolved.flows, input.path, "debug", input.inputs, input.vars);
@@ -146,7 +147,8 @@ public final class DebugEngine {
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
             UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
-            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine);
+            att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
+                    "vars", DiagnosticCodes.DEBUG_INVALID);
             if (options.verbose() && !options.quiet())
                 consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
                         + " case=" + testCase.caseId() + " resolved=" + input.path);
@@ -306,16 +308,25 @@ public final class DebugEngine {
             if (att.core.CliSetOverrides.hasNamespace(overrides, "vars") && "tool".equals(type))
                 throw debugError("--set vars.* is not supported for Tool targets", "Tool Debug uses its explicit arguments contract.");
             Map<String, Object> inputs = DebugInput.map(map.get("inputs"));
-            Map<String, Object> vars = DebugInput.map(map.get("vars"));
+            Object rawVars = map.get("vars");
+            UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
+                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            if (rawVars != null && !(rawVars instanceof Map))
+                validateDebugVariables(rawVars, type, path, inputs, bootstrapEngine);
+            Map<String, Object> vars = DebugInput.map(rawVars);
             inputs = att.core.CliSetOverrides.apply(inputs, overrides, "input");
             vars = att.core.CliSetOverrides.apply(vars, overrides, "vars");
+            vars = validateDebugVariables(vars, type, path, inputs, bootstrapEngine);
             if (map.containsKey("inputs") || att.core.CliSetOverrides.hasNamespace(overrides, "input")) map.put("inputs", inputs);
             if (map.containsKey("vars") || att.core.CliSetOverrides.hasNamespace(overrides, "vars")) map.put("vars", vars);
-            if ("tool".equals(type) && att.core.CliSetOverrides.hasNamespace(overrides, "arg")) {
-                Map<String, Object> arguments = new DebugInput(path, map, type, id, config).arguments;
-                map.put("arguments", att.core.CliSetOverrides.apply(arguments, overrides, "arg"));
+            if ("tool".equals(type)) {
+                // Resolve the sidecar's representation-specific arguments once, then retain only
+                // the effective root map so a later DebugInput cannot prefer stale nested values.
+                Map<String, Object> arguments = new LinkedHashMap<String, Object>(
+                        new DebugInput(path, map, type, id, config).arguments);
+                arguments = att.core.CliSetOverrides.apply(arguments, overrides, "arg");
+                map.put("arguments", arguments);
             }
-            validateDebugVariables(map.get("vars"), type, path);
             return new DebugInput(path, map, type, id, config);
         } catch (DiagnosticException e) {
             throw e;
@@ -383,51 +394,30 @@ public final class DebugEngine {
                 null, null, suggestion, null);
     }
 
-    private void validateDebugVariables(Object raw, String targetType, Path path) {
-        if (raw == null) return;
-        if (!(raw instanceof Map)) throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
-                "Invalid debug.vars", "vars must be a YAML object/map", path.toString(), "vars",
-                null, null, null, null, null,
-                "Use vars: {name: value} only for standalone Template or Flow Debug.", null);
-        if ("tool".equals(targetType) && !((Map<?, ?>) raw).isEmpty())
-            throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
-                    "Debug vars are not supported for Tool targets",
-                    "debug.vars is supported only for standalone Template and Flow targets",
-                    path.toString(), "vars", null, null, null, null, null,
-                    "Use the Tool arguments contract for standalone Tool Debug.", null);
-        for (Map.Entry<?, ?> entry : ((Map<?, ?>) raw).entrySet()) {
-            String name = String.valueOf(entry.getKey());
-            if (!name.matches("[A-Za-z_][A-Za-z0-9_]*"))
-                throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
-                        "Invalid debug.vars name", "name='" + name + "' must match [A-Za-z_][A-Za-z0-9_]*",
-                        path.toString(), "vars." + name, null, null, null, null, null,
-                        "Use a simple runtime variable name such as refNo or txnSeq.", null);
-            validateDebugValue(entry.getValue(), "vars." + name, path);
+    private Map<String, Object> validateDebugVariables(Object raw, String targetType, Path path,
+                                                        Map<String, Object> inputs,
+                                                        UnifiedTemplateEngine bootstrapEngine) {
+        if (raw != null && !(raw instanceof Map)) {
+            DiagnosticException error = new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                    "Invalid debug.vars", "vars must be a YAML object/map", path.toString(), "vars",
+                    null, null, null, null, null,
+                    "Use vars: {name: value} only for standalone Template or Flow Debug.", null);
+            throw YamlSupport.locate(error, path, "vars");
         }
-    }
-
-    private void validateDebugValue(Object value, String field, Path path) {
-        if (value == null || value instanceof String || value instanceof Boolean || value instanceof Number) return;
-        if (value instanceof Map) {
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                if (!(entry.getKey() instanceof String))
-                    throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
-                            "Invalid debug.vars value", "Map keys must be strings at " + field,
-                            path.toString(), field, null, null, null, null, null,
-                            "Use string keys in debug.vars maps.", null);
-                validateDebugValue(entry.getValue(), field + "." + entry.getKey(), path);
+        Map<String, Object> vars = DebugInput.map(raw);
+        if ("tool".equals(targetType)) {
+            if (!vars.isEmpty()) {
+                DiagnosticException error = new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
+                        "Debug vars are not supported for Tool targets",
+                        "debug.vars is supported only for standalone Template and Flow targets",
+                        path.toString(), "vars", null, null, null, null, null,
+                        "Use the Tool arguments contract for standalone Tool Debug.", null);
+                throw YamlSupport.locate(error, path, "vars");
             }
-            return;
+            return vars;
         }
-        if (value instanceof Iterable) {
-            int index = 0;
-            for (Object item : (Iterable<?>) value) validateDebugValue(item, field + "[" + index++ + "]", path);
-            return;
-        }
-        throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID,
-                "Unsupported debug.vars value type", "field=" + field + ", type=" + value.getClass().getName(),
-                path.toString(), field, null, null, null, null, null,
-                "Use YAML null, string, boolean, number, map, or list values.", null);
+        return att.core.ExecutionBootstrapVariables.validate(vars, bootstrapEngine, inputs, path,
+                "vars", DiagnosticCodes.DEBUG_INVALID);
     }
 
     private void appendError(CaseExecutionLog log, DiagnosticException error) {
@@ -522,14 +512,14 @@ public final class DebugEngine {
             this.stageKey = key == null ? "DEBUG" : String.valueOf(key);
             Map<String, Object> rootArguments = map(root.get("arguments"));
             Map<String, Object> selectedArguments = rootArguments;
-            if ("tool".equals(type)) {
+            if ("tool".equals(type) && !root.containsKey("arguments")) {
                 Map<String, Object> tools = map(root.get("tools"));
                 ToolConfig tool = findTool(config, id);
                 String local = tool == null ? id : tool.localKey();
                 Map<String, Object> selected = map(tools.get(local));
                 if (selected.isEmpty()) selected = map(tools.get(id));
                 Map<String, Object> toolArguments = map(selected.get("arguments"));
-                if (!toolArguments.isEmpty()) selectedArguments = toolArguments;
+                selectedArguments = toolArguments;
             }
             this.arguments = selectedArguments;
         }

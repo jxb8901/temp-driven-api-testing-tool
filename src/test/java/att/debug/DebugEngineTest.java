@@ -82,6 +82,27 @@ class DebugEngineTest {
         assertTrue(new String(Files.readAllBytes(tool.logPath()), StandardCharsets.UTF_8).contains("typed"));
     }
 
+    @Test void groupedToolSidecarArgumentsAreOverriddenBeforeDebugInvocation() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        java.util.Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig grouped = new ToolConfig("group.echo", "echo", "group", "Echo", "Grouped Echo",
+                java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("group.echo", grouped), null, null);
+        Files.createDirectories(project.resolve("config/tools"));
+        Files.write(project.resolve("config/tools/group.debug.yaml"), (
+                "schemaVersion: att-debug/v1.1\ntools:\n  echo:\n    arguments: {value: from-sidecar}\n")
+                .getBytes(StandardCharsets.UTF_8));
+
+        DebugEngine.Result result = run(project, config, "tool", "group.echo", "--set", "arg.value=debug-overridden");
+
+        assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().format());
+        String log = new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8);
+        assertTrue(log.contains("debug-overridden"), log);
+        assertFalse(log.contains("from-sidecar"), log);
+    }
+
     @Test void standaloneAndNestedFlowBootstrapPreservesExplicitNull() throws Exception {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/WRAPPER"));
@@ -209,6 +230,34 @@ class DebugEngineTest {
         assertNotNull(result.diagnostic());
         assertEquals("ATT-DEBUG-001", result.diagnostic().code());
         assertTrue(result.diagnostic().detail().contains("bad-name"), result.diagnostic().format());
+    }
+
+    @Test void bootstrapDiagnosticsLocateCycleAndUnavailableRootAtVarsSource() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        Path cycle = project.resolve("templates/SIMPLE/debug.yaml");
+        Files.write(cycle, ("schemaVersion: att-debug/v1.1\nvars:\n  first: '${EXEC.VARS.second}'\n"
+                + "  second: '${EXEC.VARS.first}'\n").getBytes(StandardCharsets.UTF_8));
+
+        DebugEngine.Result cycleResult = run(project, config, "template", "SIMPLE");
+
+        assertEquals(ResultStatus.INVALID, cycleResult.status());
+        assertNotNull(cycleResult.diagnostic());
+        assertEquals("vars.first", cycleResult.diagnostic().field());
+        assertNotNull(cycleResult.diagnostic().source());
+        assertTrue(cycleResult.diagnostic().source().line() > 0);
+        assertTrue(cycleResult.diagnostic().format().contains("^"), cycleResult.diagnostic().format());
+
+        Path unavailable = project.resolve("templates/SIMPLE/debug.yaml");
+        Files.write(unavailable, ("schemaVersion: att-debug/v1.1\nvars:\n  result: '${EXEC.ACTIONS.prior.output}'\n")
+                .getBytes(StandardCharsets.UTF_8));
+        DebugEngine.Result unavailableResult = run(project, config, "template", "SIMPLE");
+        assertEquals(ResultStatus.INVALID, unavailableResult.status());
+        assertNotNull(unavailableResult.diagnostic());
+        assertEquals("vars.result", unavailableResult.diagnostic().field());
+        assertNotNull(unavailableResult.diagnostic().source());
+        assertTrue(unavailableResult.diagnostic().format().contains("^"), unavailableResult.diagnostic().format());
     }
 
     @Test void missingSidecarIsDiagnosticAndDoesNotTouchNormalRunOutput() throws Exception {

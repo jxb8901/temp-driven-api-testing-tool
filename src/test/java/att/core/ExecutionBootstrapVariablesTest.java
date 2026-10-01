@@ -67,6 +67,22 @@ class ExecutionBootstrapVariablesTest {
                 () -> ExecutionBootstrapVariables.validate(mapOf("value", "#{file.delete(path='x')}"), engine()));
     }
 
+    @Test void bootstrapSafetyUsesCanonicalBuiltInAliases() throws Exception {
+        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.string"));
+        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.number"));
+        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.boolean"));
+        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("misc.prettyprint"));
+        assertTrue(DefaultBuiltInProvider.isSafeForBootstrap("format.pretty"));
+        assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("date.sysdate"));
+        assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("file.delete"));
+        assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("seq.next"));
+        assertFalse(DefaultBuiltInProvider.isSafeForBootstrap("misc.randomchoice"));
+
+        CaseRuntimeContext context = context("EXEC-ALIAS");
+        ExecutionBootstrapVariables.evaluate(mapOf("text", "#{misc.string(23)}"), context, engine());
+        assertEquals("23", context.require("EXEC.VARS.text"));
+    }
+
     @Test void failedEvaluationRollsBackPreviouslyResolvedEntries() {
         CaseRuntimeContext context = context("EXEC-9");
         Map<String, Object> definitions = mapOf("first", "ready", "broken", "#{1 / 0}");

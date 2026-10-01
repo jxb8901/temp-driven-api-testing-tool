@@ -397,6 +397,30 @@ public final class CaseRuntimeContext {
         if (segments.isEmpty()) throw new IllegalArgumentException("Context path must contain at least one segment");
     }
 
+    /** Returns whether an EXEC.INPUT path exists in the supplied typed input tree. A terminal null is present. */
+    public static boolean containsInputPath(Map<?, ?> input, String path) {
+        final java.util.List<Segment> segments;
+        try { segments = parsePath(requiredReferencePath(path)); }
+        catch (RuntimeException invalidPath) { return false; }
+        if (segments.size() < 2 || !"EXEC".equalsIgnoreCase(segments.get(0).key)
+                || !"INPUT".equalsIgnoreCase(segments.get(1).key)) return false;
+        Object current = input == null ? java.util.Collections.emptyMap() : input;
+        for (int index = 2; index < segments.size(); index++) {
+            Segment segment = segments.get(index);
+            if (current instanceof Map && segment.index == null) {
+                Map<?, ?> map = (Map<?, ?>) current;
+                if (!map.containsKey(segment.key)) return false;
+                current = map.get(segment.key);
+            } else if (current instanceof java.util.List && segment.index != null) {
+                java.util.List<?> list = (java.util.List<?>) current;
+                if (segment.index.intValue() < 0 || segment.index.intValue() >= list.size()) return false;
+                current = list.get(segment.index.intValue());
+            } else return false;
+            if (current == null && index + 1 < segments.size()) return false;
+        }
+        return true;
+    }
+
     private Resolution resolution(String path) {
         java.util.List<Segment> requested;
         try { requested = parsePath(path); }

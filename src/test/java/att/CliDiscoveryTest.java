@@ -23,12 +23,12 @@ class CliDiscoveryTest {
         FrameworkConfig config = config();
         Map<String, Object> result = CliDiscovery.debug(root, config);
         @SuppressWarnings("unchecked") List<Map<String, Object>> targets = (List<Map<String, Object>>) result.get("targets");
-        assertEquals(4, targets.size());
+        assertEquals(1, targets.size());
         Map<String, Object> withSidecar = find(targets, "template", "TARGET");
-        Map<String, Object> withoutSidecar = find(targets, "template", "NO_SIDECAR");
         assertTrue(withSidecar.containsKey("sidecar"));
-        assertFalse(withoutSidecar.containsKey("sidecar"));
         assertTrue(String.valueOf(withSidecar.get("command")).contains("debug template"));
+        assertFalse(targets.stream().anyMatch(target -> "NO_SIDECAR".equals(target.get("id"))));
+        assertTrue(targets.stream().allMatch(target -> Files.isRegularFile(Paths.get(String.valueOf(target.get("sidecar"))))));
         assertFalse(Files.exists(root.resolve("output")), "discovery must not create Debug output");
     }
 

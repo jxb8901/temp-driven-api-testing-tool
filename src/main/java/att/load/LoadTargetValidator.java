@@ -18,7 +18,15 @@ public final class LoadTargetValidator {
         try {
             att.template.UnifiedTemplateEngine bootstrapEngine = new att.template.UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
-            att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine);
+            LoadWorkload workload = scenario.workload();
+            String varsField = workload.sourceIndex() < 0 ? "vars"
+                    : "workloads[" + workload.sourceIndex() + "].vars";
+            try {
+                att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine, scenario.inputs(),
+                        scenario.source(), varsField, att.validation.DiagnosticCodes.LOAD_INVALID);
+            } catch (att.validation.DiagnosticException error) {
+                throw error.withDetail("workloadId: " + workload.id());
+            }
             new PackageValidator(projectRoot, config).validateDebugTarget(target.template(), testCase, stage, target.flows(),
                     scenario.source(), "load", scenario.inputs(), scenario.vars());
         } catch (Exception e) {

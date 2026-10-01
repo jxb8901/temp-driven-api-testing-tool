@@ -25,6 +25,7 @@ public final class LoadWorkload {
     private final int maxConcurrent;
     private final String overloadPolicy;
     private final Map<String, Object> thresholds;
+    private final int sourceIndex;
 
     public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
                         Map<String, Object> inputs, LoadScenario.Model model, int users,
@@ -33,7 +34,7 @@ public final class LoadWorkload {
                         int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds) {
         this(id, targetType, targetId, targetArguments, inputs, Collections.<String, Object>emptyMap(), model,
                 users, arrivalRatePerSecond, arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy,
-                maxConcurrent, overloadPolicy, thresholds);
+                maxConcurrent, overloadPolicy, thresholds, -1);
     }
 
     public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
@@ -41,6 +42,16 @@ public final class LoadWorkload {
                         double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
                         Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
                         int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds) {
+        this(id, targetType, targetId, targetArguments, inputs, vars, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy,
+                thresholds, -1);
+    }
+
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds, int sourceIndex) {
         this.id = id;
         this.targetType = targetType;
         this.targetId = targetId;
@@ -59,6 +70,7 @@ public final class LoadWorkload {
         this.maxConcurrent = maxConcurrent;
         this.overloadPolicy = overloadPolicy;
         this.thresholds = immutable(thresholds);
+        this.sourceIndex = sourceIndex;
     }
 
     public String id() { return id; }
@@ -79,6 +91,8 @@ public final class LoadWorkload {
     public int maxConcurrent() { return maxConcurrent; }
     public String overloadPolicy() { return overloadPolicy; }
     public Map<String, Object> thresholds() { return thresholds; }
+    /** Zero-based index in the source scenario, or -1 for in-memory promoted workloads. */
+    public int sourceIndex() { return sourceIndex; }
 
     Map<String, Object> toMap(boolean includeExecutionData, boolean summary) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();

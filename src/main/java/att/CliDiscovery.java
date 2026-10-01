@@ -184,10 +184,11 @@ public final class CliDiscovery {
                                        String id, String displayName) {
         try {
             Path sidecar = engine.validateDiscoverableTarget(type, id);
+            if (sidecar == null) return;
             Map<String, Object> entry = new LinkedHashMap<String, Object>();
             entry.put("type", type); entry.put("id", id); entry.put("name", displayName);
             entry.put("command", "./att.sh debug " + type + " " + shellQuote(id));
-            if (sidecar != null) entry.put("sidecar", sidecar.toAbsolutePath().normalize().toString());
+            entry.put("sidecar", sidecar.toAbsolutePath().normalize().toString());
             targets.add(entry);
         } catch (Exception ignored) { }
     }

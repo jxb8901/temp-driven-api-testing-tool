@@ -55,7 +55,7 @@ public final class LoadScenarioLoader {
                     att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.3.schema.json"), map,
                     version, Version.LOAD_SCHEMA_CURRENT);
             SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_CURRENT, "load scenario");
-            return semanticCurrent(source, map);
+            return semanticCurrent(source, map, true);
         } catch (DiagnosticException e) {
             throw e;
         } catch (SemanticFailure e) {
@@ -125,7 +125,7 @@ public final class LoadScenarioLoader {
         root.put("workloads", java.util.Collections.<Object>singletonList(workload));
         try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.3.schema.json"), root); }
         catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
-        return semanticCurrent(source, root);
+        return semanticCurrent(source, root, false);
     }
 
     private DiagnosticException quickLoadFailure(Path source, String field, String detail) {
@@ -141,7 +141,7 @@ public final class LoadScenarioLoader {
         Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put(key, value); return result;
     }
 
-    private LoadScenario semanticCurrent(Path source, Map<String, Object> root) {
+    private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario) {
         List<Object> raw = list(root.get("workloads"), "workloads");
         if (raw.isEmpty()) throw failure("workloads", "workloads must contain at least one workload");
         List<LoadWorkload> workloads = new ArrayList<LoadWorkload>();
@@ -155,7 +155,7 @@ public final class LoadScenarioLoader {
             if (!WORKLOAD_ID.matcher(id).matches()) throw failure(prefix + ".id", "workload id must match [A-Za-z0-9][A-Za-z0-9._-]*");
             if (!ids.add(id)) throw failure(prefix + ".id", "duplicate workload id '" + id + "'");
             Map<String, Object> thresholds = mapOptional(map.get("thresholds"), prefix + ".thresholds");
-            LoadWorkload workload = parseWorkload(id, map, prefix + ".", thresholds);
+            LoadWorkload workload = parseWorkload(id, map, prefix + ".", thresholds, sourceIsScenario ? i : -1);
             if (model == null) model = workload.model();
             else if (model != workload.model()) throw failure(prefix + ".load", "mixed closed and arrivalRate workload models are not supported in " + Version.LOAD_SCHEMA_CURRENT);
             if (warmup == null) {
@@ -178,7 +178,8 @@ public final class LoadScenarioLoader {
                 .withExecIdFormat(format);
     }
 
-    private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix, Map<String, Object> thresholds) {
+    private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
+                                       Map<String, Object> thresholds, int sourceIndex) {
         Map<String, Object> target = map(root.get("target"), prefix + "target");
         String type = string(target.get("type"), prefix + "target.type");
         String targetId = string(target.get("id"), prefix + "target.id");
@@ -217,7 +218,7 @@ public final class LoadScenarioLoader {
         ThinkTimePolicy thinkTime = thinkTime(execution.get("thinkTime"), prefix + "execution.thinkTime");
         validateThresholds(model, thresholds, prefix + "thresholds");
         return new LoadWorkload(id, type, targetId, arguments, inputs, vars, model, users, rate, rateText,
-                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds);
+                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, sourceIndex);
     }
 
     private ThinkTimePolicy thinkTime(Object value, String field) {
