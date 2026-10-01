@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.3
+schemaVersion: att-template/v3.4
 name: PAYMENT_VERIFY
 description: Verify payment API response, CT records and application logs.
 

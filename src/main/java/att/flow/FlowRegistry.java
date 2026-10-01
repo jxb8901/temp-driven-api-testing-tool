@@ -179,7 +179,7 @@ public final class FlowRegistry {
         if (typed) rejectRemovedActionContract(map, descriptor);
         if (!typed) {
             Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, flowVersion);
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.3.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.4.schema.json");
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     flowVersion, Version.FLOW_SCHEMA);
             throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
@@ -188,7 +188,7 @@ public final class FlowRegistry {
         }
         boolean currentVersion = true;
         boolean previousVersion = false;
-        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.3.schema.json");
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-flow-v3.4.schema.json");
         att.validation.SchemaMigrationGuidance.verify(schema, schema, map, flowVersion, Version.FLOW_SCHEMA);
         Map<String, Object> actionContract = new LinkedHashMap<String, Object>();
         String templateVersion = Version.TEMPLATE_SCHEMA;
@@ -196,7 +196,7 @@ public final class FlowRegistry {
         actionContract.put("name", text(map.get("name")));
         actionContract.put("description", text(map.get("description")));
         actionContract.put("actions", map.get("actions"));
-        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.3.schema.json");
+        Path templateSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.4.schema.json");
         att.validation.JsonSchemaVerifier.verify(templateSchema, actionContract);
         SchemaSupport.requireVersion(map, flowVersion, "flow");
         SchemaSupport.rejectUnknown(map, "flow", "schemaVersion", "id", "name", "description", "actions");

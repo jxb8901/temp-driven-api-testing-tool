@@ -6,6 +6,7 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -240,12 +241,28 @@ public final class LoadReportWriter {
         if (reference == null || reference.trim().isEmpty() || reference.indexOf('\\') >= 0) return null;
         try {
             Path base = runDirectory.toAbsolutePath().normalize();
+            if (!Files.isDirectory(base, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(base)) return null;
             Path raw = Paths.get(reference);
             Path target = (raw.isAbsolute() ? raw : base.resolve(raw)).normalize();
-            return target.startsWith(base) && Files.isRegularFile(target) ? target : null;
+            if (!target.startsWith(base) || hasSymbolicLinkComponent(base, target)) return null;
+            if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(target)) return null;
+            Path realBase = base.toRealPath();
+            Path realTarget = target.toRealPath();
+            return realTarget.startsWith(realBase) ? target : null;
         } catch (RuntimeException ignored) {
             return null;
+        } catch (IOException ignored) {
+            return null;
         }
+    }
+
+    private boolean hasSymbolicLinkComponent(Path base, Path target) {
+        Path current = base;
+        for (Path component : base.relativize(target)) {
+            current = current.resolve(component);
+            if (Files.isSymbolicLink(current)) return true;
+        }
+        return false;
     }
 
     private String encodePath(String value) {

@@ -21,9 +21,19 @@ public final class SshCommandRunner {
     interface JavaClient {
         CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot)
                 throws IOException, InterruptedException;
+        default CommandResult run(SshConfig ssh, String remoteCommand, Duration connectTimeout,
+                                  Duration timeout, Path projectRoot)
+                throws IOException, InterruptedException {
+            return run(ssh, remoteCommand, timeout, projectRoot);
+        }
         default CommandResult run(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot,
                                   CommandRunner.CapturePolicy capture) throws IOException, InterruptedException {
             return run(ssh, remoteCommand, timeout, projectRoot);
+        }
+        default CommandResult run(SshConfig ssh, String remoteCommand, Duration connectTimeout,
+                                  Duration timeout, Path projectRoot, CommandRunner.CapturePolicy capture)
+                throws IOException, InterruptedException {
+            return run(ssh, remoteCommand, timeout, projectRoot, capture);
         }
     }
 
@@ -81,12 +91,17 @@ public final class SshCommandRunner {
 
     Execution runRaw(SshConfig ssh, String remoteCommand, Duration timeout, Path projectRoot)
             throws IOException, InterruptedException {
+        return runRaw(ssh, timeout, timeout, remoteCommand, projectRoot);
+    }
+
+    Execution runRaw(SshConfig ssh, Duration connectTimeout, Duration timeout, String remoteCommand, Path projectRoot)
+            throws IOException, InterruptedException {
         if (localAvailable.getAsBoolean()) {
-            List<String> argv = openSshArgv(ssh, remoteCommand, projectRoot);
+            List<String> argv = openSshArgv(ssh, remoteCommand, projectRoot, connectTimeout);
             return new Execution(commandRunner.run(argv, timeout, projectRoot), argv, "openssh");
         }
         if (warned.compareAndSet(false, true)) warningOutput.println(FALLBACK_WARNING);
-        return new Execution(javaClient.run(ssh, remoteCommand, timeout, projectRoot),
+        return new Execution(javaClient.run(ssh, remoteCommand, connectTimeout, timeout, projectRoot),
                 java.util.Collections.singletonList(remoteCommand), "mwiede/jsch");
     }
 
@@ -104,10 +119,19 @@ public final class SshCommandRunner {
     }
 
     static List<String> openSshArgv(SshConfig ssh, String remoteCommand, Path projectRoot) {
+        return openSshArgv(ssh, remoteCommand, projectRoot, null);
+    }
+
+    static List<String> openSshArgv(SshConfig ssh, String remoteCommand, Path projectRoot, Duration connectTimeout) {
         List<String> argv = new ArrayList<String>();
         argv.add("ssh");
         argv.add("-o"); argv.add("BatchMode=yes");
         argv.add("-o"); argv.add("StrictHostKeyChecking=yes");
+        if (connectTimeout != null) {
+            long milliseconds = Math.max(1L, connectTimeout.toMillis());
+            long seconds = Math.max(1L, (milliseconds + 999L) / 1000L);
+            argv.add("-o"); argv.add("ConnectTimeout=" + seconds);
+        }
         argv.add("-p"); argv.add(String.valueOf(ssh.port()));
         if (!ssh.identityFile().isEmpty()) {
             Path identity = Paths.get(ssh.identityFile());

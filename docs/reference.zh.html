@@ -857,7 +857,7 @@ Template 路徑。絕對路徑、部分路徑、以及逃逸出
 href="reference.zh/08_reliability_execution_control.md">Reliability</a>。</p>
 <h3 id="23-template">2.3 Template</h3>
 <p>只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用
-att-template/v3.3。每個 Template 都需要非空且有序的 actions map，以及
+att-template/v3.4。每個 Template 都需要非空且有序的 actions map，以及
 description。</p>
 <p>每個 Action 依類型使用不同契約。Render 回傳原樣
 String，不寫入檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation
@@ -871,7 +871,7 @@ href="reference.zh/07_expressions.md">Expressions and Built-ins</a>
 href="reference.zh/04_execution_modes/load.md">Load</a> 定義 ID
 initialization scope。</p>
 <h3 id="24-flow">2.4 Flow</h3>
-<p>Flow 是可重用的 Template logic，使用 <code>att-flow/v3.3</code>，並由
+<p>Flow 是可重用的 Template logic，使用 <code>att-flow/v3.4</code>，並由
 <code>flow.yaml</code> 定義。必填欄位為
 <code>schemaVersion</code>、versioned canonical <code>id</code>（例如
 <code>common.payment.v1</code>）、<code>name</code>、<code>description</code>
@@ -898,7 +898,7 @@ lifetime；environment selection 由 <a
 href="reference.zh/09_configuration.md">Configuration</a> 定義。</p>
 <h2 id="03-actions-與-typed-values">03 Actions 與 Typed Values</h2>
 <p>本章定義 ATT 現行 Action 契約。Template 使用
-att-template/v3.3。每個完成的 Action 都會在 output.result
+att-template/v3.4。每個完成的 Action 都會在 output.result
 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite
 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper
 章節。</p>
@@ -4852,11 +4852,11 @@ truth：<code>schemas/catalog.yaml</code>）：</p>
 </tr>
 <tr class="odd">
 <td>Template</td>
-<td>att-template/v3.3</td>
+<td>att-template/v3.4</td>
 </tr>
 <tr class="even">
 <td>Flow</td>
-<td>att-flow/v3.3</td>
+<td>att-flow/v3.4</td>
 </tr>
 <tr class="odd">
 <td>Debug input</td>

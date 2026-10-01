@@ -138,7 +138,7 @@ Stage `required`, `runWhen` and `onFailure` behavior is defined in [Reliability]
 
 ### 2.3 Template
 
-A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
+A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.4. Each Template has a non-empty ordered actions map and a required description.
 
 Each Action has a type-specific contract. Render returns the exact rendered String without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
@@ -146,7 +146,7 @@ See [Actions and Typed Values](14_actions.md) for the complete field list, examp
 
 ### 2.4 Flow
 
-A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.3`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](14_actions.md) owns Flow results and Assign behavior; [Context](03_runtime_context.md) owns scope lifetime.
+A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.4`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](14_actions.md) owns Flow results and Assign behavior; [Context](03_runtime_context.md) owns scope lifetime.
 
 ### 2.5 Authoring lifecycle
 

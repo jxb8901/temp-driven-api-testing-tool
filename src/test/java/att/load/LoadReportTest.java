@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -109,22 +111,33 @@ class LoadReportTest {
                 Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
                 0, "", Collections.emptyMap(), Collections.emptyMap());
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
-        evidence.put("items", Collections.<Map<String, Object>>singletonList(new LinkedHashMap<String, Object>() {{
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        items.add(new LinkedHashMap<String, Object>() {{
             put("workloadId", "safe"); put("iterationId", "iteration-1"); put("status", "FAILURE");
             put("caseLog", "../outside/case.log"); put("path", "samples/retained.json");
-        }}));
-        LoadRunResult result = new LoadRunResult("evidence-links", scenario, started, started.plusSeconds(1),
-                new LoadMetricsSnapshot(Collections.<String, Object>emptyMap(), Collections.<String, Map<String, Object>>emptyMap()),
-                LoadThresholdSummary.empty(), evidence, Collections.<String, Object>emptyMap());
+        }});
         Path runDirectory = temp.resolve("load/evidence-links");
         Files.createDirectories(runDirectory.resolve("samples"));
         Files.write(runDirectory.resolve("samples/retained.json"), Collections.singletonList("evidence"), StandardCharsets.UTF_8);
+        Path outside = temp.resolve("outside");
+        Files.createDirectories(outside);
+        Files.write(outside.resolve("secret.json"), Collections.singletonList("secret"), StandardCharsets.UTF_8);
+        Files.createSymbolicLink(runDirectory.resolve("samples/escaped.json"), outside.resolve("secret.json"));
+        items.add(new LinkedHashMap<String, Object>() {{
+            put("workloadId", "symlink"); put("iterationId", "iteration-2"); put("status", "FAILURE");
+            put("path", "samples/escaped.json");
+        }});
+        evidence.put("items", items);
+        LoadRunResult result = new LoadRunResult("evidence-links", scenario, started, started.plusSeconds(1),
+                new LoadMetricsSnapshot(Collections.<String, Object>emptyMap(), Collections.<String, Map<String, Object>>emptyMap()),
+                LoadThresholdSummary.empty(), evidence, Collections.<String, Object>emptyMap());
         Path report = new LoadReportWriter().write(temp, result);
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(html.contains("Case Log"));
         assertTrue(html.contains("Not retained"));
         assertFalse(html.contains("href=\"../../outside/case.log\""));
         assertTrue(html.contains("href=\"../samples/retained.json\""));
+        assertFalse(html.contains("href=\"../samples/escaped.json\""));
     }
 
     @Test void reportHandlesEmptyMetricsAndRuntimeErrorStatus() throws Exception {

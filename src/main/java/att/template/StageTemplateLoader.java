@@ -153,7 +153,7 @@ public final class StageTemplateLoader {
         boolean typed = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
         if (!typed) {
             Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.3.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.4.schema.json");
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     schemaVersion, Version.TEMPLATE_SCHEMA);
             throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
@@ -163,7 +163,7 @@ public final class StageTemplateLoader {
         boolean current = true;
         boolean previousVersion = false;
         boolean modern = true;
-        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.3.schema.json");
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.4.schema.json");
         att.validation.SchemaMigrationGuidance.verify(schema, schema, map, schemaVersion, Version.TEMPLATE_SCHEMA);
         SchemaSupport.requireVersion(map, schemaVersion, "template");
         SchemaSupport.rejectUnknown(map, "template", "schemaVersion", "name", "description", "actions");
@@ -215,7 +215,7 @@ public final class StageTemplateLoader {
                     ? "Remove the common Action result block. Keep the typed value in output.result; configure optional helper output with helper evidence.output. Render returns String; Log uses value and format."
                     : "Field '" + field + "' is no longer part of the Action contract. Render returns String and Log uses message, value, and format.";
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
-                    "Removed common Action result field '" + field + "'", "Action " + actionId + " uses a field removed by att-template/v3.3",
+                    "Removed common Action result field '" + field + "'", "Action " + actionId + " uses a field removed by " + Version.TEMPLATE_SCHEMA,
                     descriptor.toString(), "actions." + actionId + "." + field, null, null, null, null, actionId, replacement, null);
         }
     }

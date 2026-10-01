@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.3
+schemaVersion: att-template/v3.4
 name: PAYMENT_INVOKE
 description: Render payment request XML as a String and invoke the payment API.
 

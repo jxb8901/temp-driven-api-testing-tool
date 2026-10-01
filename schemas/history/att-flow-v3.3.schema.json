@@ -130,6 +130,15 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*$"
         },
+        "templateFormat": {
+          "enum": [
+            "auto",
+            "text",
+            "json",
+            "yaml",
+            "xml"
+          ]
+        },
         "value": {},
         "format": {
           "enum": [
@@ -172,6 +181,24 @@
             "required": [
               "payload"
             ]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "render"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "templateFormat"
+              ]
+            }
           }
         },
         {

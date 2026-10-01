@@ -34,8 +34,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeoutException;
 
 /** Executes the common SSH Resource Helper operations without changing Tool semantics. */
 public final class SshResourceExecutor {
@@ -74,17 +78,21 @@ public final class SshResourceExecutor {
         try {
             if (helper == null) throw argument("Unknown SSH helper: " + helperId, "SSH_ARGUMENT");
             validateArguments(operation, supplied);
+            if ("all".equals(helper.strategy()))
+                throw argument("Native SSH Resource Helper calls do not support selection.strategy=all; use random or roundRobin", "SSH_ARGUMENT");
             target = helper.instances().get(helper.select(helper.strategy()));
             if (target == null) throw argument("SSH helper has no selectable instance: " + helperId, "SSH_ARGUMENT");
             long timeoutMs = operationTimeout(supplied, requestedTimeoutMs, helper.commandTimeoutMs());
+            long deadlineNanos = deadline(timeoutMs);
             permit = limits.computeIfAbsent(helper.id().toLowerCase(Locale.ROOT), key -> new Semaphore(helper.maxConcurrency(), true));
-            if (!permit.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS))
+            long poolWaitNanos = remainingNanos(deadlineNanos);
+            if (poolWaitNanos <= 0L || !permit.tryAcquire(poolWaitNanos, TimeUnit.NANOSECONDS))
                 throw argument("SSH helper concurrency limit timed out: " + helper.id(), "SSH_POOL_TIMEOUT");
             acquired = true;
             Map<String, Object> result;
-            if ("execute".equals(operation)) result = executeCommand(name, helper, target, supplied, timeoutMs, context, log);
-            else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, context);
-            else if ("download".equals(operation)) result = download(name, helper, target, supplied, timeoutMs, context);
+            if ("execute".equals(operation)) result = executeCommand(name, helper, target, supplied, timeoutMs, deadlineNanos, context, log);
+            else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, deadlineNanos, context);
+            else if ("download".equals(operation)) result = download(name, helper, target, supplied, timeoutMs, deadlineNanos, context);
             else throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, or download", "SSH_ARGUMENT");
             return success(name, id, result.get("result"), result, safeInput, started);
         } catch (InterruptedException interrupted) {
@@ -103,13 +111,15 @@ public final class SshResourceExecutor {
 
     private Map<String, Object> executeCommand(String name, SshHelperConfig helper, SshConfig target,
                                                Map<String, Object> input, long timeoutMs,
+                                               long deadlineNanos,
                                                CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         String command = requiredString(input.get("command"), "command");
         String format = input.get("stdoutFormat") == null ? "text" : requiredString(input.get("stdoutFormat"), "stdoutFormat").toLowerCase(Locale.ROOT);
         if (!("text".equals(format) || "json".equals(format) || "yaml".equals(format) || "xml".equals(format)))
             throw argument("stdoutFormat must be text, json, yaml, or xml", "SSH_ARGUMENT");
         Instant started = Instant.now();
-        SshCommandRunner.Execution execution = commandRunner.runRaw(target, command, Duration.ofMillis(timeoutMs), projectRoot);
+        SshCommandRunner.Execution execution = commandRunner.runRaw(target, connectDuration(helper, deadlineNanos),
+                remainingDuration(deadlineNanos), command, projectRoot);
         CommandResult commandResult = execution.result();
         String stdout = commandResult.stdout();
         String stderr = redact(commandResult.stderr(), target);
@@ -125,6 +135,7 @@ public final class SshResourceExecutor {
         evidence.put("stdoutTruncated", commandResult.stdoutTruncated());
         evidence.put("stderrTruncated", commandResult.stderrTruncated());
         evidence.put("timeoutMs", timeoutMs);
+        evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
         evidence.put("stderr", stderr);
         if (commandResult.timedOut()) throw operation("SSH command timed out", "SSH_TIMEOUT", evidence);
         if (commandResult.exitCode() != 0)
@@ -180,7 +191,8 @@ public final class SshResourceExecutor {
     }
 
     private Map<String, Object> upload(String name, SshHelperConfig helper, SshConfig target,
-                                       Map<String, Object> input, long timeoutMs, CaseRuntimeContext context) throws Exception {
+                                       Map<String, Object> input, long timeoutMs, long deadlineNanos,
+                                       CaseRuntimeContext context) throws Exception {
         String remotePath = requiredRemotePath(input.get("remotePath"));
         boolean hasLocal = input.containsKey("localPath");
         boolean hasPayload = input.containsKey("payload");
@@ -191,7 +203,12 @@ public final class SshResourceExecutor {
         String mode;
         if (hasLocal) {
             Path local = resolveExistingLocal(requiredString(input.get("localPath"), "localPath"), context);
-            bytes = transferClient.upload(target, local, null, remotePath, overwrite, Duration.ofMillis(timeoutMs), projectRoot);
+            bytes = transferWithDeadline(new Callable<Long>() {
+                @Override public Long call() throws Exception {
+                    return transferClient.upload(target, local, null, remotePath, overwrite,
+                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot);
+                }
+            }, deadlineNanos).longValue();
             mode = "local-file";
         } else {
             Object payload = input.get("payload");
@@ -199,13 +216,21 @@ public final class SshResourceExecutor {
             if (payload instanceof byte[]) content = ((byte[]) payload).clone();
             else if (payload instanceof CharSequence) content = String.valueOf(payload).getBytes(StandardCharsets.UTF_8);
             else throw argument("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation", "SSH_ARGUMENT");
-            bytes = transferClient.upload(target, null, content, remotePath, overwrite, Duration.ofMillis(timeoutMs), projectRoot);
+            final byte[] represented = content;
+            bytes = transferWithDeadline(new Callable<Long>() {
+                @Override public Long call() throws Exception {
+                    return transferClient.upload(target, null, represented, remotePath, overwrite,
+                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot);
+                }
+            }, deadlineNanos).longValue();
             mode = "represented-payload";
         }
         Map<String, Object> evidence = commonEvidence(helper, target, "upload", "sftp", started);
         evidence.put("remotePath", remotePath);
         evidence.put("transferMode", mode);
         evidence.put("bytesTransferred", bytes);
+        evidence.put("timeoutMs", timeoutMs);
+        evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
         evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         Map<String, Object> summary = new LinkedHashMap<String, Object>();
         summary.put("remotePath", remotePath);
@@ -218,17 +243,25 @@ public final class SshResourceExecutor {
     }
 
     private Map<String, Object> download(String name, SshHelperConfig helper, SshConfig target,
-                                         Map<String, Object> input, long timeoutMs, CaseRuntimeContext context) throws Exception {
+                                         Map<String, Object> input, long timeoutMs, long deadlineNanos,
+                                         CaseRuntimeContext context) throws Exception {
         String remotePath = requiredRemotePath(input.get("remotePath"));
         String localText = requiredString(input.get("localPath"), "localPath");
         boolean overwrite = bool(input.get("overwrite"), false, "overwrite");
         Path local = resolveDestination(localText, context, overwrite);
         Instant started = Instant.now();
-        long bytes = transferClient.download(target, remotePath, local, overwrite, Duration.ofMillis(timeoutMs), projectRoot);
+        long bytes = transferWithDeadline(new Callable<Long>() {
+            @Override public Long call() throws Exception {
+                return transferClient.download(target, remotePath, local, overwrite,
+                        connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot);
+            }
+        }, deadlineNanos).longValue();
         Map<String, Object> evidence = commonEvidence(helper, target, "download", "sftp", started);
         evidence.put("remotePath", remotePath);
         evidence.put("localPath", portable(local));
         evidence.put("bytesTransferred", bytes);
+        evidence.put("timeoutMs", timeoutMs);
+        evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
         evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         Map<String, Object> summary = new LinkedHashMap<String, Object>();
         summary.put("remotePath", remotePath);
@@ -301,12 +334,62 @@ public final class SshResourceExecutor {
 
     private long operationTimeout(Map<String, Object> input, Long requested, int fallback) throws SshOperationException {
         Object value = input.get("timeoutMs");
-        if (value == null) return requested == null ? fallback : requested.longValue();
-        if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).longValue())
-            throw argument("timeoutMs must be an integer from 1 to 3600000", "SSH_ARGUMENT");
-        long timeout = ((Number) value).longValue();
-        if (timeout < 1L || timeout > 3600000L) throw argument("timeoutMs must be an integer from 1 to 3600000", "SSH_ARGUMENT");
-        return timeout;
+        long configured;
+        if (value == null) configured = fallback;
+        else {
+            if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).longValue())
+                throw argument("timeoutMs must be an integer from 1 to 3600000", "SSH_ARGUMENT");
+            configured = ((Number) value).longValue();
+            if (configured < 1L || configured > 3600000L) throw argument("timeoutMs must be an integer from 1 to 3600000", "SSH_ARGUMENT");
+        }
+        if (requested != null) {
+            if (requested.longValue() < 1L) throw argument("SSH action timeout must be at least 1 ms", "SSH_ARGUMENT");
+            configured = Math.min(configured, requested.longValue());
+        }
+        return configured;
+    }
+
+    private long deadline(long timeoutMs) {
+        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+    }
+
+    private long remainingNanos(long deadlineNanos) {
+        return deadlineNanos - System.nanoTime();
+    }
+
+    private Duration remainingDuration(long deadlineNanos) throws SshOperationException {
+        long remaining = remainingNanos(deadlineNanos);
+        if (remaining <= 0L) throw operation("SSH operation timed out", "SSH_TIMEOUT", null);
+        return Duration.ofNanos(remaining);
+    }
+
+    private Duration connectDuration(SshHelperConfig helper, long deadlineNanos) throws SshOperationException {
+        Duration remaining = remainingDuration(deadlineNanos);
+        return remaining.compareTo(Duration.ofMillis(helper.connectTimeoutMs())) > 0
+                ? Duration.ofMillis(helper.connectTimeoutMs()) : remaining;
+    }
+
+    private <T> T transferWithDeadline(Callable<T> operation, long deadlineNanos) throws Exception {
+        long remaining = remainingNanos(deadlineNanos);
+        if (remaining <= 0L) throw operation("SSH transfer timed out", "SSH_TIMEOUT", null);
+        FutureTask<T> task = new FutureTask<T>(operation);
+        Thread worker = new Thread(task, "att-ssh-transfer");
+        worker.setDaemon(true);
+        worker.start();
+        try {
+            return task.get(remaining, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException timeout) {
+            task.cancel(true);
+            throw operation("SSH transfer timed out", "SSH_TIMEOUT", null, timeout);
+        } catch (ExecutionException failure) {
+            Throwable cause = failure.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            if (cause instanceof Error) throw (Error) cause;
+            throw new IOException(String.valueOf(cause), cause);
+        } catch (InterruptedException interrupted) {
+            task.cancel(true);
+            throw interrupted;
+        }
     }
 
     private Path resolveExistingLocal(String value, CaseRuntimeContext context) throws IOException {
@@ -429,8 +512,16 @@ public final class SshResourceExecutor {
 interface SshTransferClient {
     long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
                 Duration timeout, Path projectRoot) throws Exception;
+    default long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
+                        Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
+        return upload(target, source, payload, remotePath, overwrite, timeout, projectRoot);
+    }
     long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
                   Duration timeout, Path projectRoot) throws Exception;
+    default long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
+                          Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
+        return download(target, remotePath, localPath, overwrite, timeout, projectRoot);
+    }
 }
 
 /** SFTP transfer implementation used for represented payloads and file transfers. */
@@ -451,9 +542,14 @@ final class JschSshTransferClient implements SshTransferClient {
 
     @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
                                  Duration timeout, Path projectRoot) throws Exception {
+        return upload(ssh, source, payload, remotePath, overwrite, timeout, timeout, projectRoot);
+    }
+
+    @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
+                                 Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
         Connection connection = null;
         try {
-            connection = open(ssh, projectRoot, timeout);
+            connection = open(ssh, projectRoot, connectTimeout, timeout);
             ChannelSftp channel = connection.channel;
             if (!overwrite && exists(channel, remotePath)) throw new IOException("Remote destination exists: " + remotePath);
             if (source != null) {
@@ -468,12 +564,17 @@ final class JschSshTransferClient implements SshTransferClient {
 
     @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
                                    Duration timeout, Path projectRoot) throws Exception {
+        return download(ssh, remotePath, localPath, overwrite, timeout, timeout, projectRoot);
+    }
+
+    @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
+                                   Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
         if (Files.exists(localPath) && !overwrite) throw new IOException("Local destination exists: " + localPath);
         Path parent = localPath.getParent();
         Path temporary = Files.createTempFile(parent == null ? Paths.get(".") : parent, ".att-ssh-", ".part");
         Connection connection = null;
         try {
-            connection = open(ssh, projectRoot, timeout);
+            connection = open(ssh, projectRoot, connectTimeout, timeout);
             ChannelSftp channel = connection.channel;
             channel.get(remotePath, temporary.toString());
             long size = Files.size(temporary);
@@ -492,6 +593,10 @@ final class JschSshTransferClient implements SshTransferClient {
     }
 
     private Connection open(SshConfig ssh, Path projectRoot, Duration timeout) throws Exception {
+        return open(ssh, projectRoot, timeout, timeout);
+    }
+
+    private Connection open(SshConfig ssh, Path projectRoot, Duration connectTimeout, Duration timeout) throws Exception {
         if (!Files.isRegularFile(knownHosts) || Files.isSymbolicLink(knownHosts) || !Files.isReadable(knownHosts))
             throw new IOException("Java SSH transfer requires a readable non-symlink known_hosts file");
         JSch jsch = new JSch(); jsch.setKnownHosts(knownHosts.toString());
@@ -503,10 +608,20 @@ final class JschSshTransferClient implements SshTransferClient {
         Session session = jsch.getSession(ssh.user(), ssh.host(), ssh.port());
         session.setConfig("StrictHostKeyChecking", "yes");
         session.setConfig("PreferredAuthentications", "publickey,gssapi-with-mic");
-        session.connect((int) Math.min(Integer.MAX_VALUE, Math.max(1L, timeout.toMillis())));
+        long deadline = System.nanoTime() + timeout.toNanos();
+        long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeout.toNanos());
+        session.connect(remainingMillis(connectDeadline));
+        session.setTimeout(remainingMillis(deadline));
         ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
-        channel.connect((int) Math.min(Integer.MAX_VALUE, Math.max(1L, timeout.toMillis())));
+        channel.connect(remainingMillis(deadline));
+        session.setTimeout(remainingMillis(deadline));
         return new Connection(session, channel);
+    }
+
+    private static int remainingMillis(long deadline) throws IOException {
+        long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (remaining <= 0L) throw new IOException("Java SSH transfer timed out");
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, remaining));
     }
 
     private boolean exists(ChannelSftp channel, String path) throws SftpException {

@@ -23,12 +23,12 @@ class FlowRegistryTest {
     }
 
     @Test void acceptsCurrentTypedOutputContractAndRejectsHistoricalFlowSchema() throws Exception {
-        flow("current", "schemaVersion: att-flow/v3.3\nid: common.current.v1\nname: Current\ndescription: Current flow\nactions:\n"
+        flow("current", "schemaVersion: att-flow/v3.4\nid: common.current.v1\nname: Current\ndescription: Current flow\nactions:\n"
                 + "  render: {type: render, payload: request.json}\n");
         assertDoesNotThrow(() -> new FlowRegistry(root, root.resolve("templates")));
 
         deleteFlows();
-        flow("historical", valid("common.old.v1", "note", "${CASE.value}").replace("att-flow/v3.3", "att-flow/v3.0"));
+        flow("historical", valid("common.old.v1", "note", "${CASE.value}").replace("att-flow/v3.4", "att-flow/v3.0"));
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> new FlowRegistry(root, root.resolve("templates")));
         assertTrue(error.getMessage().contains("Unsupported Flow schemaVersion"));
@@ -47,7 +47,7 @@ class FlowRegistryTest {
 
         deleteFlows();
         flow("leaf", valid("common.leaf.v1", "leafAction", "${CASE.value}"));
-        flow("caller", "schemaVersion: att-flow/v3.3\nid: common.caller.v1\nname: Caller\ndescription: Caller\nactions:\n  call: {type: flow, use: common.leaf.v1, with: {value: x}}\n");
+        flow("caller", "schemaVersion: att-flow/v3.4\nid: common.caller.v1\nname: Caller\ndescription: Caller\nactions:\n  call: {type: flow, use: common.leaf.v1, with: {value: x}}\n");
         assertTrue(assertThrows(IllegalArgumentException.class,
                 () -> new FlowRegistry(root, root.resolve("templates"))).getMessage().contains("with"));
     }
@@ -79,7 +79,7 @@ class FlowRegistryTest {
             flow("leaf-" + index, valid("perf.leaf" + index + ".v1", "note" + index, "${CASE.caseId}"));
         }
         for (int caller = 0; caller < 20; caller++) {
-            StringBuilder yaml = new StringBuilder("schemaVersion: att-flow/v3.3\nid: perf.caller" + caller + ".v1\nname: Caller\ndescription: Caller\nactions:\n");
+            StringBuilder yaml = new StringBuilder("schemaVersion: att-flow/v3.4\nid: perf.caller" + caller + ".v1\nname: Caller\ndescription: Caller\nactions:\n");
             for (int offset = 0; offset < 100; offset++) {
                 int leaf = (caller * 100 + offset) % 180;
                 yaml.append("  call").append(caller).append('_').append(offset)
@@ -93,7 +93,7 @@ class FlowRegistryTest {
 
     @Test void selectedRegistryLoadsOnlyReferencedDependencyClosure() throws Exception {
         flow("selected", valid("common.selected.v1", "selectedAction", "${CASE.value}"));
-        flow("unselected-invalid", "schemaVersion: att-flow/v3.3\nid: common.invalid.v1\nthis: is not a valid Flow\n");
+        flow("unselected-invalid", "schemaVersion: att-flow/v3.4\nid: common.invalid.v1\nthis: is not a valid Flow\n");
         FlowRegistry registry = new FlowRegistry(root, root.resolve("templates"), false);
         java.util.Map<String,Object> raw = new java.util.LinkedHashMap<String,Object>();
         raw.put("type", "flow"); raw.put("use", "common.selected.v1");
@@ -124,19 +124,19 @@ class FlowRegistryTest {
     }
 
     @Test void rejectsMalformedNestedFlowUseBeforeRuntime() throws Exception {
-        flow("bad-use", "schemaVersion: att-flow/v3.3\nid: common.bad-use.v1\nname: Bad\ndescription: Bad\nactions:\n  call: {type: flow, use: bad}\n");
+        flow("bad-use", "schemaVersion: att-flow/v3.4\nid: common.bad-use.v1\nname: Bad\ndescription: Bad\nactions:\n  call: {type: flow, use: bad}\n");
         IllegalArgumentException invalidUse = assertThrows(IllegalArgumentException.class,
                 () -> new FlowRegistry(root, root.resolve("templates")));
         assertTrue(invalidUse.getMessage().contains("Flow use") || invalidUse.getMessage().contains("pattern"), invalidUse.getMessage());
     }
 
     private String valid(String id, String actionId, String expression) {
-        return "schemaVersion: att-flow/v3.3\nid: " + id + "\nname: Test\ndescription: Test Flow\nactions:\n  "
+        return "schemaVersion: att-flow/v3.4\nid: " + id + "\nname: Test\ndescription: Test Flow\nactions:\n  "
                 + actionId + ": {type: assign, name: " + actionId + "Value, expression: '" + expression + "'}\n";
     }
 
     private String caller(String id, String actionId, String target) {
-        return "schemaVersion: att-flow/v3.3\nid: " + id + "\nname: Caller\ndescription: Caller\nactions:\n  "
+        return "schemaVersion: att-flow/v3.4\nid: " + id + "\nname: Caller\ndescription: Caller\nactions:\n  "
                 + actionId + ": {type: flow, use: " + target + "}\n";
     }
 

@@ -143,7 +143,7 @@ class LoadMqPoolingTest {
         Path payload = flowDirectory.resolve("request.xml");
         Files.write(payload, "<request/>\n".getBytes("UTF-8"));
         Files.write(flowDirectory.resolve("flow.yaml"), (
-                "schemaVersion: att-flow/v3.3\n"
+                "schemaVersion: att-flow/v3.4\n"
                 + "id: load.mq.request.v1\nname: Load MQ request\ndescription: scheduler MQ flow\nactions:\n"
                 + "  request:\n    type: tool\n    call: \"#{mq.broker.request(file='" + payload.toString()
                 + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}\"\n").getBytes("UTF-8"));
@@ -228,9 +228,9 @@ class LoadMqPoolingTest {
         TemplateAction action = new TemplateAction("request", map(
                 "type", "tool",
                 "call", "#{mq.broker.request(file='" + payload.toString()
-                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.3");
+                        + "', requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}"), "att-template/v3.4");
         StageTemplate template = new StageTemplate("MQ", directory, Collections.singletonList(action),
-                "att-template/v3.3", directory.resolve("template.yaml"));
+                "att-template/v3.4", directory.resolve("template.yaml"));
         FlowRegistry flows = new FlowRegistry(project, project.resolve("templates"), false);
         return new LoadTarget("template", "MQ", template, flows, project.resolve("templates"), project.resolve("scenario.yaml"));
     }

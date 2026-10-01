@@ -1919,7 +1919,10 @@ public final class PackageValidator {
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
             throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + parsed.name());
-        if (config.sshHelper(parts[1]) == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
+        att.config.SshHelperConfig helper = config.sshHelper(parts[1]);
+        if (helper == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
+        if ("all".equals(helper.strategy()))
+            throw new IllegalArgumentException("Native SSH Resource Helper calls do not support selection.strategy=all; use random or roundRobin");
         String operation = parts[2];
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();

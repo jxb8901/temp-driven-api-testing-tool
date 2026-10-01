@@ -33,10 +33,10 @@ class FlowRuntimeTest {
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
     @Test void nestedFailureRetainsInnerSourceAndCallChainAtTopLevel() throws Exception {
-        writeFlow("inner-error", "schemaVersion: att-flow/v3.3\nid: common.inner-error.v1\nname: Inner\ndescription: Inner\nactions:\n  bad: {type: log, message: '${CASE.notPresent}'}\n");
-        writeFlow("outer-error", "schemaVersion: att-flow/v3.3\nid: common.outer-error.v1\nname: Outer\ndescription: Outer\nactions:\n  nested: {type: flow, use: common.inner-error.v1}\n");
+        writeFlow("inner-error", "schemaVersion: att-flow/v3.4\nid: common.inner-error.v1\nname: Inner\ndescription: Inner\nactions:\n  bad: {type: log, message: '${CASE.notPresent}'}\n");
+        writeFlow("outer-error", "schemaVersion: att-flow/v3.4\nid: common.outer-error.v1\nname: Outer\ndescription: Outer\nactions:\n  nested: {type: flow, use: common.inner-error.v1}\n");
         StageTemplate template = new StageTemplate("T", tempDir, Collections.singletonList(
-                flowAction("outer", "common.outer-error.v1", "stop")), "att-template/v3.3");
+                flowAction("outer", "common.outer-error.v1", "stop")), "att-template/v3.4");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             ValidationResult result = new StageTemplateRunner(new UnifiedTemplateEngine(null),
@@ -82,12 +82,12 @@ class FlowRuntimeTest {
     }
 
     @Test void skippedInternalActionsProducePassAndFailedFlowHasOnlyStandardOutcome() throws Exception {
-        writeFlow("skip", "schemaVersion: att-flow/v3.3\nid: common.skip.v1\nname: Skip\ndescription: Skip\nactions:\n  optional: {type: log, message: never, runWhen: 'false'}\n");
-        writeFlow("fail", "schemaVersion: att-flow/v3.3\nid: common.fail.v1\nname: Fail\ndescription: Fail\nactions:\n  reject: {type: assert, assert: 'false'}\n");
+        writeFlow("skip", "schemaVersion: att-flow/v3.4\nid: common.skip.v1\nname: Skip\ndescription: Skip\nactions:\n  optional: {type: log, message: never, runWhen: 'false'}\n");
+        writeFlow("fail", "schemaVersion: att-flow/v3.4\nid: common.fail.v1\nname: Fail\ndescription: Fail\nactions:\n  reject: {type: assert, assert: 'false'}\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
                 flowAction("skipFlow", "common.skip.v1", "continue"),
-                flowAction("failFlow", "common.fail.v1", "continue")), "att-template/v3.3");
+                flowAction("failFlow", "common.fail.v1", "continue")), "att-template/v3.4");
         CaseRuntimeContext context = context();
         List<ValidationResult> results;
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
@@ -102,11 +102,11 @@ class FlowRuntimeTest {
     }
 
     @Test void skippedFlowInvocationDoesNotRunChildrenAndKeepsStandardOutcome() throws Exception {
-        writeFlow("outer-skip", "schemaVersion: att-flow/v3.3\nid: common.outer-skip.v1\nname: Skip\ndescription: Skip\nactions:\n  unreachable: {type: log, message: never}\n");
+        writeFlow("outer-skip", "schemaVersion: att-flow/v3.4\nid: common.outer-skip.v1\nname: Skip\ndescription: Skip\nactions:\n  unreachable: {type: log, message: never}\n");
         Map<String,Object> values = new LinkedHashMap<String,Object>();
         values.put("type", "flow"); values.put("use", "common.outer-skip.v1"); values.put("runWhen", "false");
         StageTemplate template = new StageTemplate("T", tempDir,
-                Collections.singletonList(new TemplateAction("skippedFlow", values, "att-template/v3.3")), "att-template/v3.3");
+                Collections.singletonList(new TemplateAction("skippedFlow", values, "att-template/v3.4")), "att-template/v3.4");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             assertEquals(ResultStatus.SKIPPED, new StageTemplateRunner(new UnifiedTemplateEngine(null),
@@ -119,10 +119,10 @@ class FlowRuntimeTest {
     }
 
     @Test void publishesTypedActionOutputWithoutImplicitFilePersistence() throws Exception {
-        writeFlow("save", "schemaVersion: att-flow/v3.3\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n");
+        writeFlow("save", "schemaVersion: att-flow/v3.4\nid: common.save.v1\nname: Save\ndescription: Save\nactions:\n  saveValue:\n    type: tool\n    call: '#{upper(value=${CASE.caseId})}'\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir,
-                Collections.singletonList(flowAction("saveFlow", "common.save.v1", "stop")), "att-template/v3.3");
+                Collections.singletonList(flowAction("saveFlow", "common.save.v1", "stop")), "att-template/v3.4");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             assertEquals(ResultStatus.PASS, new StageTemplateRunner(new UnifiedTemplateEngine(null), flows)
@@ -135,12 +135,12 @@ class FlowRuntimeTest {
     }
 
     @Test void appliesStopAndContinueWithinFlow() throws Exception {
-        writeFlow("continue", "schemaVersion: att-flow/v3.3\nid: common.continue.v1\nname: Continue\ndescription: Continue\nactions:\n  rejectContinue: {type: assert, assert: 'false', onFailure: continue}\n  afterContinue: {type: log, message: continued}\n");
-        writeFlow("stop", "schemaVersion: att-flow/v3.3\nid: common.stop.v1\nname: Stop\ndescription: Stop\nactions:\n  rejectStop: {type: assert, assert: 'false'}\n  afterStop: {type: log, message: unreachable}\n");
+        writeFlow("continue", "schemaVersion: att-flow/v3.4\nid: common.continue.v1\nname: Continue\ndescription: Continue\nactions:\n  rejectContinue: {type: assert, assert: 'false', onFailure: continue}\n  afterContinue: {type: log, message: continued}\n");
+        writeFlow("stop", "schemaVersion: att-flow/v3.4\nid: common.stop.v1\nname: Stop\ndescription: Stop\nactions:\n  rejectStop: {type: assert, assert: 'false'}\n  afterStop: {type: log, message: unreachable}\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
                 flowAction("continues", "common.continue.v1", "continue"),
-                flowAction("stops", "common.stop.v1", "continue")), "att-template/v3.3");
+                flowAction("stops", "common.stop.v1", "continue")), "att-template/v3.4");
         CaseRuntimeContext context = context();
         List<ValidationResult> results;
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
@@ -155,13 +155,13 @@ class FlowRuntimeTest {
     }
 
     @Test void flowReadsPriorTemplateActionsAndAssignsCaseVariables() throws Exception {
-        writeFlow("copy", "schemaVersion: att-flow/v3.3\nid: common.copy.v1\nname: Copy\ndescription: Copy\nactions:\n  copyReference: {type: assign, name: copiedRef, expression: '${EXEC.VARS.SrcRefNo}'}\n  auditReference: {type: log, message: '${EXEC.VARS.copiedRef}'}\n");
+        writeFlow("copy", "schemaVersion: att-flow/v3.4\nid: common.copy.v1\nname: Copy\ndescription: Copy\nactions:\n  copyReference: {type: assign, name: copiedRef, expression: '${EXEC.VARS.SrcRefNo}'}\n  auditReference: {type: log, message: '${EXEC.VARS.copiedRef}'}\n");
         FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
         Map<String,Object> seed = new LinkedHashMap<String,Object>();
         seed.put("type", "assign"); seed.put("name", "SrcRefNo"); seed.put("expression", "REF-001");
         StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
-                new TemplateAction("seed", seed, "att-template/v3.3"),
-                flowAction("copyFlow", "common.copy.v1", "stop")), "att-template/v3.3");
+                new TemplateAction("seed", seed, "att-template/v3.4"),
+                flowAction("copyFlow", "common.copy.v1", "stop")), "att-template/v3.4");
         CaseRuntimeContext context = context();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null), flows).execute("verify", template, context, log);
@@ -175,16 +175,16 @@ class FlowRuntimeTest {
     @Test void movingRenderActionIntoFlowKeepsCaseExpressionsAndResultUnchanged() throws Exception {
         String payload = "case=${CASE.caseId}\nref=${CASE.SrcRefNo}\namount=${CASE.amount}\nchannel=${CASE.channel}\n";
         Files.write(tempDir.resolve("request.txt"), payload.getBytes(StandardCharsets.UTF_8));
-        writeFlow("render", "schemaVersion: att-flow/v3.3\nid: common.render.v1\nname: Render\ndescription: Render\nactions:\n"
+        writeFlow("render", "schemaVersion: att-flow/v3.4\nid: common.render.v1\nname: Render\ndescription: Render\nactions:\n"
                 + "  renderRequest: {type: render, payload: request.txt}\n");
         Files.write(tempDir.resolve("templates/flows/render/request.txt"), payload.getBytes(StandardCharsets.UTF_8));
 
         Map<String,Object> render = new LinkedHashMap<String,Object>();
         render.put("type", "render"); render.put("payload", "request.txt");
         StageTemplate inlineTemplate = new StageTemplate("INLINE", tempDir,
-                Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.3")), "att-template/v3.3");
+                Collections.singletonList(new TemplateAction("renderRequest", render, "att-template/v3.4")), "att-template/v3.4");
         StageTemplate flowTemplate = new StageTemplate("FLOW", tempDir,
-                Collections.singletonList(flowAction("renderFlow", "common.render.v1", "stop")), "att-template/v3.3");
+                Collections.singletonList(flowAction("renderFlow", "common.render.v1", "stop")), "att-template/v3.4");
 
         Map<String,Object> data = new LinkedHashMap<String,Object>();
         data.put("SrcRefNo", "REF-001"); data.put("amount", "125.50"); data.put("channel", "FPS");
@@ -223,7 +223,7 @@ class FlowRuntimeTest {
     private TemplateAction flowAction(String id, String use, String onFailure) {
         Map<String,Object> values = new LinkedHashMap<String,Object>();
         values.put("type", "flow"); values.put("use", use); values.put("onFailure", onFailure);
-        return new TemplateAction(id, values, "att-template/v3.3");
+        return new TemplateAction(id, values, "att-template/v3.4");
     }
 
     private void writeFlow(String name, String yaml) throws Exception {

@@ -20,7 +20,7 @@ class StageTemplateRunnerTest {
         Path templateDir = tempDir.resolve("templates/context-path");
         Files.createDirectories(templateDir);
         String reference = "${output.result.EaiRtn.EaiCode}";
-        String templateText = "schemaVersion: att-template/v3.3\nname: Context path\ndescription: Runtime source mapping\n"
+        String templateText = "schemaVersion: att-template/v3.4\nname: Context path\ndescription: Runtime source mapping\n"
                 + "actions:\n  invoke:\n    type: tool\n    call: >-\n"
                 + "      #{sample(value=" + reference + ")}\n";
         Path descriptor = templateDir.resolve("template.yaml");
@@ -53,7 +53,7 @@ class StageTemplateRunnerTest {
         att.TestSchemas.install(tempDir);
         Path templateDir = tempDir.resolve("templates/tool-assert-source");
         Files.createDirectories(templateDir);
-        String templateText = "schemaVersion: att-template/v3.3\nname: Tool assert source\ndescription: Assertion source\n"
+        String templateText = "schemaVersion: att-template/v3.4\nname: Tool assert source\ndescription: Assertion source\n"
                 + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: >-\n"
                 + "      ${output.result.missing} == 'OK'\n";
         Path descriptor = templateDir.resolve("template.yaml");
@@ -96,7 +96,7 @@ class StageTemplateRunnerTest {
         Path templateDir = tempDir.resolve("templates/" + templateId);
         Files.createDirectories(templateDir);
         String reference = "${output.result.missing}";
-        String templateText = "schemaVersion: att-template/v3.3\nname: Tool report source\ndescription: Report source\n"
+        String templateText = "schemaVersion: att-template/v3.4\nname: Tool report source\ndescription: Report source\n"
                 + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: \"true\"\n"
                 + "    " + field + ": >-\n      " + reference + "\n";
         Path descriptor = templateDir.resolve("template.yaml");
@@ -132,7 +132,7 @@ class StageTemplateRunnerTest {
         att.TestSchemas.install(tempDir);
         Path templateDir = tempDir.resolve("templates/collector-source");
         Files.createDirectories(templateDir);
-        String templateText = "schemaVersion: att-template/v3.3\nname: Collector source\ndescription: Collector source\n"
+        String templateText = "schemaVersion: att-template/v3.4\nname: Collector source\ndescription: Collector source\n"
                 + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    evidence:\n"
                 + "      broken:\n        call: >-\n          #{capture(value=${output.result.missing})}\n        onFailure: stop\n";
         Path descriptor = templateDir.resolve("template.yaml");
@@ -165,7 +165,7 @@ class StageTemplateRunnerTest {
         att.TestSchemas.install(tempDir);
         Path flowDir = tempDir.resolve("templates/flows/diagnostic/source");
         Files.createDirectories(flowDir);
-        String flowText = "schemaVersion: att-flow/v3.3\nid: diagnostic.source.v1\nname: Diagnostic source\n"
+        String flowText = "schemaVersion: att-flow/v3.4\nid: diagnostic.source.v1\nname: Diagnostic source\n"
                 + "description: Flow diagnostic source\nactions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: >-\n"
                 + "      ${output.result.missing} == 'OK'\n";
         Files.write(flowDir.resolve("flow.yaml"), flowText.getBytes("UTF-8"));
@@ -197,11 +197,11 @@ class StageTemplateRunnerTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
         context.beginStage(new StageCaseData("prepare", "T", Collections.<String,Object>emptyMap()), "T", tempDir);
         List<TemplateAction> actions = Arrays.asList(
-                new TemplateAction("json", map("type", "tool", "call", "#{upper('abc')}"), "att-template/v3.3"),
-                new TemplateAction("text", map("type", "tool", "call", "#{upper('def')}"), "att-template/v3.3"));
+                new TemplateAction("json", map("type", "tool", "call", "#{upper('abc')}"), "att-template/v3.4"),
+                new TemplateAction("text", map("type", "tool", "call", "#{upper('def')}"), "att-template/v3.4"));
 
         List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null))
-                .execute("prepare", new StageTemplate("T", tempDir, actions, "att-template/v3.3"), context,
+                .execute("prepare", new StageTemplate("T", tempDir, actions, "att-template/v3.4"), context,
                         new CaseExecutionLog(caseDir.resolve("case.log")));
 
         assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS),
@@ -483,7 +483,7 @@ class StageTemplateRunnerTest {
                 Path caseDir = tempDir.resolve("http-collector-failure-" + mode);
                 Files.createDirectories(caseDir);
                 Path descriptor = caseDir.resolve("template.yaml");
-                String templateText = "schemaVersion: att-template/v3.3\nname: T\ndescription: HTTP collector source\n"
+                String templateText = "schemaVersion: att-template/v3.4\nname: T\ndescription: HTTP collector source\n"
                         + "actions:\n  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n    assert: \"${output.result} == 'OK'\"\n"
                         + "    evidence:\n      snapshot:\n        call: \"#{snapshot()}\"\n        onFailure: " + mode + "\n";
                 Files.write(descriptor, templateText.getBytes("UTF-8"));

@@ -18,7 +18,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,6 +73,104 @@ class SshResourceHelperTest {
         assertEquals("SSH_ARGUMENT", ((Map<?, ?>) rejected.invocation().get("error")).get("category"));
     }
 
+    @Test void rejectsAllSelectionForNativeResourceCallsInsteadOfSelectingOneHost() throws Exception {
+        Map<String, SshConfig> instances = new LinkedHashMap<String, SshConfig>();
+        instances.put("one", new SshConfig("one.example", "deploy", 22, ""));
+        instances.put("two", new SshConfig("two.example", "deploy", 22, ""));
+        ToolInvocationResult result = executor(new CommandResult(0, "ok", "", false), null, "all", instances)
+                .execute("application", "execute", map("command", "health"), context(), 1000L, "ssh-all",
+                        new CaseExecutionLog(root.resolve("all.log")));
+
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_ARGUMENT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        assertTrue(String.valueOf(((Map<?, ?>) result.invocation().get("error")).get("message")).contains("selection.strategy=all"));
+    }
+
+    @Test void poolWaitConsumesTheSameActionDeadlineAsTheRunningOperation() throws Exception {
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> {
+                    entered.countDown();
+                    release.await();
+                    return new CommandResult(0, "ok", "", false);
+                }, System.err);
+        Map<String, SshConfig> instances = Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, ""));
+        SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), null,
+                "single", instances, 1, 10000, runner);
+        FutureTask<ToolInvocationResult> first = new FutureTask<ToolInvocationResult>(() -> executor.execute(
+                "application", "execute", map("command", "slow"), context(), 1000L, "ssh-pool-1",
+                new CaseExecutionLog(root.resolve("pool-1.log"))));
+        Thread firstThread = new Thread(first, "ssh-pool-first");
+        firstThread.start();
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+
+        ToolInvocationResult second = executor.execute("application", "execute", map("command", "wait"),
+                context(), 60L, "ssh-pool-2", new CaseExecutionLog(root.resolve("pool-2.log")));
+
+        assertFalse(second.executionSuccess());
+        assertEquals("SSH_POOL_TIMEOUT", ((Map<?, ?>) second.invocation().get("error")).get("category"));
+        release.countDown();
+        assertTrue(first.get(1, TimeUnit.SECONDS).executionSuccess());
+    }
+
+    @Test void nativeCommandReceivesCappedConnectAndOuterTimeouts() throws Exception {
+        final List<Duration> connectTimeouts = new ArrayList<Duration>();
+        final List<Duration> operationTimeouts = new ArrayList<Duration>();
+        SshCommandRunner.JavaClient javaClient = new SshCommandRunner.JavaClient() {
+            @Override public CommandResult run(SshConfig target, String command, Duration timeout, Path projectRoot) {
+                return new CommandResult(0, "ok", "", false);
+            }
+
+            @Override public CommandResult run(SshConfig target, String command, Duration connectTimeout,
+                                               Duration timeout, Path projectRoot) {
+                connectTimeouts.add(connectTimeout);
+                operationTimeouts.add(timeout);
+                return new CommandResult(0, "ok", "", false);
+            }
+        };
+        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false, javaClient, System.err);
+        Map<String, SshConfig> instances = Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, ""));
+        ToolInvocationResult result = executor(new CommandResult(0, "ok", "", false), null,
+                "single", instances, 2, 25, runner).execute("application", "execute",
+                map("command", "health", "timeoutMs", 500), context(), 40L, "ssh-timeout",
+                new CaseExecutionLog(root.resolve("timeout.log")));
+
+        assertTrue(result.executionSuccess());
+        assertEquals(1, connectTimeouts.size());
+        assertEquals(1, operationTimeouts.size());
+        assertTrue(connectTimeouts.get(0).toMillis() <= 25L);
+        assertTrue(operationTimeouts.get(0).toMillis() <= 40L);
+    }
+
+    @Test void blockedSftpTransferIsBoundedByTheActionDeadline() throws Exception {
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        SshTransferClient blocked = new FakeTransfer() {
+            @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath,
+                                          boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
+                entered.countDown();
+                release.await();
+                return 0L;
+            }
+        };
+        SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), blocked);
+        Path source = root.resolve("blocked.txt");
+        Files.write(source, "blocked".getBytes(StandardCharsets.UTF_8));
+
+        long started = System.nanoTime();
+        ToolInvocationResult result = executor.execute("application", "upload",
+                map("remotePath", "/srv/blocked", "localPath", source.toString()), context(), 60L,
+                "ssh-transfer-timeout", new CaseExecutionLog(root.resolve("transfer-timeout.log")));
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertFalse(result.executionSuccess());
+        assertEquals("SSH_TIMEOUT", ((Map<?, ?>) result.invocation().get("error")).get("category"));
+        assertTrue(elapsedMs < 1000L, "transfer exceeded absolute deadline: " + elapsedMs + "ms");
+        release.countDown();
+    }
+
     @Test void uploadsAndDownloadsOnlyThroughControlledCaseOutput() throws Exception {
         FakeTransfer transfer = new FakeTransfer();
         SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), transfer);
@@ -101,15 +204,29 @@ class SshResourceHelperTest {
     }
 
     private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer) {
-        SshHelperConfig helper = new SshHelperConfig("application", "Application", "", "single", 2,
+        return executor(commandResult, transfer, "single",
                 Collections.singletonMap("one", new SshConfig("example.test", "deploy", 22, "")));
+    }
+
+    private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer,
+                                         String strategy, Map<String, SshConfig> instances) {
+        return executor(commandResult, transfer, strategy, instances, 2, 10000, null);
+    }
+
+    private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer,
+                                         String strategy, Map<String, SshConfig> instances,
+                                         int maxConcurrency, int connectTimeoutMs, SshCommandRunner providedRunner) {
+        SshHelperConfig helper = new SshHelperConfig("application", "Application", "", strategy, maxConcurrency,
+                connectTimeoutMs, 60000, instances);
         Map<String, SshHelperConfig> helpers = Collections.singletonMap("application", helper);
         FrameworkConfig config = new FrameworkConfig(root, root.resolve("report"), root.resolve("logs"), "SIT", 5000,
                 root, root, Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap(), helpers,
                 Collections.emptyMap(), null, null, Collections.emptyList(), "", "", Collections.emptyList(),
                 Collections.emptyList(), 1, "ignore", "", false, null);
-        SshCommandRunner runner = new SshCommandRunner(new CommandRunner(), () -> false,
-                (target, command, timeout, project) -> commandResult, System.err);
+        SshCommandRunner runner = providedRunner == null
+                ? new SshCommandRunner(new CommandRunner(), () -> false,
+                (target, command, timeout, project) -> commandResult, System.err)
+                : providedRunner;
         return new SshResourceExecutor(root, config, runner, transfer == null ? new FakeTransfer() : transfer);
     }
 
@@ -125,7 +242,7 @@ class SshResourceHelperTest {
         return result;
     }
 
-    private static final class FakeTransfer implements SshTransferClient {
+    private static class FakeTransfer implements SshTransferClient {
         private final Map<String, byte[]> remote = new LinkedHashMap<String, byte[]>();
 
         @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,

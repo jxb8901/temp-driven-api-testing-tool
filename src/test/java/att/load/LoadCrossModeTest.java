@@ -74,7 +74,7 @@ class LoadCrossModeTest {
     @Test void loadDebugPromotionEvaluatesOverridesPerExecutionWithoutSharingValues() throws Exception {
         Path project = fixture();
         FrameworkConfig config = config();
-        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.3\n"
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.4\n"
                 + "name: SHARED\ndescription: bootstrap fixture\nactions:\n"
                 + "  check:\n    type: log\n    message: 'value=${EXEC.VARS.refNo}|id=${EXEC.VARS.executionId}'\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {amount: 17}\n"
@@ -185,7 +185,7 @@ class LoadCrossModeTest {
     @Test void optionalMissingInputsSurviveLoadBootstrapIncludingExpressionBlocks() throws Exception {
         Path project = fixture();
         FrameworkConfig config = config();
-        write(project, "templates/OPTIONAL/template.yaml", "schemaVersion: att-template/v3.3\nname: OPTIONAL\n"
+        write(project, "templates/OPTIONAL/template.yaml", "schemaVersion: att-template/v3.4\nname: OPTIONAL\n"
                 + "description: optional bootstrap references\nactions:\n"
                 + "  check: {type: log, message: 'optional=${EXEC.VARS.customerId}|block=${EXEC.VARS.region}'}\n");
         Path source = write(project, "load/optional-bootstrap-input.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
@@ -347,12 +347,12 @@ class LoadCrossModeTest {
         att.TestSchemas.install(project);
         Files.createDirectories(project.resolve("templates/SHARED"));
         Files.createDirectories(project.resolve("templates/flows/shared/echo"));
-        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.3\n"
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.4\n"
                 + "name: SHARED\ndescription: cross-mode fixture\nactions:\n"
                 + "  direct:\n    type: log\n    message: \"value=${EXEC.INPUT.value}\"\n"
                 + "  invoke:\n    type: tool\n    call: \"#{echo(value=${EXEC.INPUT.value})}\"\n"
                 + "  nested:\n    type: flow\n    use: shared.echo.v1\n");
-        write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.3\n"
+        write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.4\n"
                 + "id: shared.echo.v1\nname: Shared Echo\ndescription: cross-mode flow\nactions:\n"
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs:\n  value: shared-value\n");

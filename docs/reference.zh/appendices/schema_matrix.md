@@ -12,8 +12,8 @@
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.3 |
-| Flow | att-flow/v3.3 |
+| Template | att-template/v3.4 |
+| Flow | att-flow/v3.4 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |

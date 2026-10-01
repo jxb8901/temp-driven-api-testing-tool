@@ -35,14 +35,14 @@ class JsonSchemaVerifierTest {
 
     @Test void activeTemplateAndFlowLogsAcceptSqlplusAndRequireValueWithFormat() throws Exception {
         Path root = Paths.get("").toAbsolutePath();
-        Path templateSchema = root.resolve("schemas/att-template-v3.3.schema.json");
-        String template = "{\"schemaVersion\":\"att-template/v3.3\",\"name\":\"T\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
+        Path templateSchema = root.resolve("schemas/att-template-v3.4.schema.json");
+        String template = "{\"schemaVersion\":\"att-template/v3.4\",\"name\":\"T\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(templateSchema, template));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(templateSchema,
                 template.replace("\"value\":\"${EXEC.INPUT.result}\",", "\"message\":\"summary\",")));
 
-        Path flowSchema = root.resolve("schemas/att-flow-v3.3.schema.json");
-        String flow = "{\"schemaVersion\":\"att-flow/v3.3\",\"id\":\"common.log.v1\",\"name\":\"Log\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
+        Path flowSchema = root.resolve("schemas/att-flow-v3.4.schema.json");
+        String flow = "{\"schemaVersion\":\"att-flow/v3.4\",\"id\":\"common.log.v1\",\"name\":\"Log\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(flowSchema, flow));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(flowSchema,
                 flow.replace("\"value\":\"${EXEC.INPUT.result}\",", "\"message\":\"summary\",")));

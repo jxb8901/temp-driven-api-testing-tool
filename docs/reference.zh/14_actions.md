@@ -1,6 +1,6 @@
 ## 03 Actions 與 Typed Values
 
-本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.3。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper 章節。
+本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.4。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper 章節。
 
 ### Action 類型
 

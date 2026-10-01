@@ -207,7 +207,7 @@ Stage `required`, `runWhen` and `onFailure` behavior is defined in [Reliability]
 
 ### 2.3 Template
 
-A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
+A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.4. Each Template has a non-empty ordered actions map and a required description.
 
 Each Action has a type-specific contract. Render returns the exact rendered String without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
@@ -215,7 +215,7 @@ See [Actions and Typed Values](reference/14_actions.md) for the complete field l
 
 ### 2.4 Flow
 
-A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.3`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/14_actions.md) owns Flow results and Assign behavior; [Context](reference/03_runtime_context.md) owns scope lifetime.
+A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.4`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/14_actions.md) owns Flow results and Assign behavior; [Context](reference/03_runtime_context.md) owns scope lifetime.
 
 ### 2.5 Authoring lifecycle
 
@@ -227,7 +227,7 @@ Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs 
 
 ## 03 Actions and Typed Values
 
-This chapter defines the active ATT action contract. Templates use att-template/v3.3. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
+This chapter defines the active ATT action contract. Templates use att-template/v3.4. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper and HTTPHelper chapters for resource configuration.
 
 ### Action types
 
@@ -2319,8 +2319,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.3 |
-| Flow | att-flow/v3.3 |
+| Template | att-template/v3.4 |
+| Flow | att-flow/v3.4 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
