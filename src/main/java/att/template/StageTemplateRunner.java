@@ -760,6 +760,12 @@ public class StageTemplateRunner {
             Object exitCode = invocation.get("exitCode");
             if (exitCode == null) exitCode = nestedValue(invocation.get("error"), "exitCode", "reasonCode");
             if (exitCode != null) error.put("exitCode", exitCode);
+            if (invocation.get("error") instanceof Map) {
+                Map<?, ?> nativeError = (Map<?, ?>) invocation.get("error");
+                for (String field : new String[] {"type", "sqlState", "vendorCode", "cancellation"}) {
+                    if (nativeError.containsKey(field)) error.put(field, nativeError.get(field));
+                }
+            }
             if (error.get("category") == null && "ERROR".equalsIgnoreCase(String.valueOf(invocation.get("status")))) {
                 error.put("category", "OPERATION_FAILED");
             }

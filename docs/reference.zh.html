@@ -3640,7 +3640,16 @@ truncation（如 <code>stderrTruncated</code> 或
 <code>stderrArtifactTruncated</code>），该 record 的 free-form failure
 detail 也会被省略，以避免短 secret 被切断后泄漏 prefix/suffix。没有
 private token 时可保留 bounded preview。Primitive array 的完整 list
-rendering 和单独 element 都会在相同 node/token budget 内 redact。</p>
+rendering 和单独 element 都会在相同 node/token budget 内 redact。 DB
+returned failure 会从 native <code>result.error</code> 提取安全
+summary（<code>type</code>、bounded/redacted
+<code>message</code>、<code>sqlState</code>、<code>vendorCode</code>
+和安全 cancellation metadata），保留于 DB evidence 的 <code>error</code>
+并用于 collector 的 <code>error</code>；不会发布 rows、parameters、SQL
+text 或 raw result。失败 command 的 <code>stdout</code> 可作为独立
+diagnostic evidence，按与 <code>stderr</code> 相同的
+bounded/redacted/omission policy 处理；不会作为
+<code>error.message</code> 或恢复失败 <code>result</code>。</p>
 <p>有 retry 时，请查看
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>。即使后一个
 attempt 成功，较早的 failed collector record 仍会保留；top-level

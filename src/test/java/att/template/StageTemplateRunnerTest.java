@@ -1333,11 +1333,13 @@ class StageTemplateRunnerTest {
                 assertEquals("ERROR", context.resolve(invocation + ".status"));
                 assertEquals(2, context.resolve(invocation + ".exitCode"));
                 assertEquals(Boolean.TRUE, context.resolve(invocation + ".inputOmitted"));
-                for (String field : Arrays.asList("input", "argv", "logicalArgv", "command", "stdout", "rawOutput", "output")) {
+                for (String field : Arrays.asList("input", "argv", "logicalArgv", "command", "rawOutput", "output")) {
                     assertNull(context.resolve(invocation + "." + field), field);
                 }
                 assertEquals(oversized ? CollectorExceptionEvidence.OMITTED_TEXT : "Denied token [REDACTED_SECRET]",
                         context.resolve(invocation + ".stderr"));
+                assertEquals(oversized ? CollectorExceptionEvidence.OMITTED_TEXT : "[REDACTED_SECRET] [REDACTED_SECRET]",
+                        context.resolve(invocation + ".stdout"));
                 if (oversized) assertEquals(Boolean.TRUE, context.resolve(invocation + ".inputRedactionLimited"));
                 String message = String.valueOf(context.resolve(path + ".error.message"));
                 assertTrue(message.contains("exitCode=2"), message);
@@ -1384,6 +1386,45 @@ class StageTemplateRunnerTest {
             assertEquals("app01", projected.evidence().get("sshHelper"));
             assertEquals(2, projected.exitCode());
             assertEquals(2, projected.evidence().get("exitCode"));
+        }
+    }
+
+    @Test void failedCommandCollectorKeepsSafeStdoutDiagnosticWithoutPromotingItToMessage() throws Exception {
+        String secret = "stdout-private-token-729";
+        String stdout = "Access denied for " + secret;
+        for (String mode : Arrays.asList("continue", "stop")) {
+            Path caseDir = tempDir.resolve("stdout-diagnostic-" + mode);
+            Files.createDirectories(caseDir);
+            TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                    Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+            CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+            context.beginStage(new StageCaseData("invoke", "T", map("secret", secret)), "T", tempDir);
+            Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("secret",
+                    new ToolArgumentConfig("secret", "Secret", "", true, ""));
+            Map<String, ToolConfig> tools = Collections.singletonMap("sample",
+                    new ToolConfig("sample", "Sample", "test", "fake ${secret}", "text", arguments));
+            FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "evidence", map("diagnostic", map("call", "#{sample(secret=${EXEC.INPUT.secret})}", "onFailure", mode))));
+            List<ValidationResult> results;
+            try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                results = new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir, config,
+                        new FixedRunner(2, stdout, "")))).execute("invoke",
+                        new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+            }
+            assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+            String path = "ACTIONS.call.output.evidence.collectors.diagnostic";
+            assertNull(context.resolve(path + ".result"));
+            assertEquals("Access denied for [REDACTED_SECRET]",
+                    context.resolve(path + ".evidence.tool.invocations[0].stdout"));
+            assertEquals("", context.resolve(path + ".evidence.tool.invocations[0].stderr"));
+            String message = String.valueOf(context.resolve(path + ".error.message"));
+            assertTrue(message.contains("exitCode=2"), message);
+            assertFalse(message.contains("Access denied"));
+            assertFalse(att.validation.JsonSupport.write(context.resolve(path)).contains(secret));
+            String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+            assertFalse(caseLog.contains(secret));
+            assertTrue(caseLog.contains("Access denied for [REDACTED_SECRET]"));
         }
     }
 

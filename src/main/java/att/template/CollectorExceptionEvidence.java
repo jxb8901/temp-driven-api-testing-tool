@@ -30,10 +30,10 @@ final class CollectorExceptionEvidence {
         "inputOmitted", "inputRedactionLimited", "failureDetailsOmitted", "evidenceTruncated", "messageTruncated", "instancesTruncated", "instanceCount",
         "durationMs", "timeoutMs", "groupId", "toolKey", "sshHelper", "instance",
         "host", "sshPort", "sshTransport", "selectionStrategy", "selectionSource",
-        "httpHelper", "mqHelper", "dbHelper", "helper", "helperId", "operation", "reasonCode", "statusCode",
-        "message", "error", "cleanupWarning",
+        "httpHelper", "mqHelper", "dbHelper", "db", "helper", "helperId", "operation", "reasonCode", "statusCode",
+        "message", "error", "cleanupWarning", "timeoutSeconds", "toolTimeoutMs", "effectiveTimeoutSeconds",
         "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated",
-        "stdoutArtifactTruncated", "stderrArtifactTruncated", "stderr"
+        "stdoutArtifactTruncated", "stderrArtifactTruncated", "stderr", "stdout"
     };
     private static final String[] INSTANCE_FIELDS = {
         "instance", "host", "port", "transport", "status", "exitCode", "durationMs",
@@ -45,7 +45,7 @@ final class CollectorExceptionEvidence {
 
     private static final String[] DIAGNOSTIC_FIELDS = {
         "code", "severity", "type", "category", "field", "message", "detail", "hint",
-        "status", "exitCode", "reasonCode", "statusCode", "inputRedactionLimited",
+        "status", "exitCode", "reasonCode", "statusCode", "sqlState", "vendorCode", "timeoutMs", "inputRedactionLimited",
         "failureDetailsOmitted", "messageTruncated", "evidenceTruncated"
     };
 
@@ -84,16 +84,26 @@ final class CollectorExceptionEvidence {
         }
         redaction.tokens.sort((left, right) -> Integer.compare(right.length(), left.length()));
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+        Map<String, Object> dbFailure = null;
         for (String kind : new String[] {"tool", "http", "db", "mq"}) {
             List<Map<?, ?>> nodes = invocationNodes(nativeEvidence.get(kind), redaction);
             if (nodes.isEmpty()) continue;
             Map<String, Object> group = new LinkedHashMap<String, Object>();
             List<Object> projected = new ArrayList<Object>();
-            for (Map<?, ?> node : nodes) projected.add(projectNode(node, redaction));
+            for (Map<?, ?> node : nodes) {
+                Map<String, Object> safeNode = projectNode(node, redaction);
+                projected.add(safeNode);
+                if ("db".equals(kind) && dbFailure == null && safeNode.get("error") instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> summary = (Map<String, Object>) safeNode.get("error");
+                    if (!summary.isEmpty()) dbFailure = summary;
+                }
+            }
             group.put("invocations", projected);
             evidence.put(kind, group);
         }
         Map<String, Object> safeInvocation = projectNode(invocation, redaction);
+        if (dbFailure != null && !safeInvocation.containsKey("error")) safeInvocation.put("error", dbFailure);
         Map<String, Object> diagnostic = failure.operationResult().diagnostic();
         Map<String, Object> safeDiagnostic = diagnostic == null ? null : fields(diagnostic, DIAGNOSTIC_FIELDS, redaction);
         // Failed results can be raw stdout/payload echoes, so only publish failure metadata.
@@ -140,10 +150,22 @@ final class CollectorExceptionEvidence {
         }
         if (source.containsKey("input")) evidence.put("inputOmitted", Boolean.TRUE);
         Object error = source.get("error");
-        if (error instanceof Map) evidence.put("error", fields((Map<?, ?>) error, DIAGNOSTIC_FIELDS, redaction));
+        if (error == null && "db".equals(source.get("type")) && source.get("result") instanceof Map) {
+            error = ((Map<?, ?>) source.get("result")).get("error");
+        }
+        if (error instanceof Map) evidence.put("error", errorSummary((Map<?, ?>) error, redaction));
         Object diagnostic = source.get("diagnostic");
         if (diagnostic instanceof Map) evidence.put("diagnostic", fields((Map<?, ?>) diagnostic, DIAGNOSTIC_FIELDS, redaction));
         return evidence;
+    }
+
+    private static Map<String, Object> errorSummary(Map<?, ?> source, Redaction redaction) {
+        Map<String, Object> summary = fields(source, DIAGNOSTIC_FIELDS, redaction);
+        if (source.get("cancellation") instanceof Map) {
+            summary.put("cancellation", fields((Map<?, ?>) source.get("cancellation"),
+                    new String[] {"requested", "mechanism", "confirmed"}, redaction));
+        }
+        return summary;
     }
 
     private static Map<String, Object> fields(Map<?, ?> source, String[] names, Redaction redaction) {
@@ -151,7 +173,7 @@ final class CollectorExceptionEvidence {
         for (String field : names) {
             Object value = source.get(field);
             if (value instanceof String) {
-                boolean freeForm = "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field)
+                boolean freeForm = "stdout".equals(field) || "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field)
                         || "message".equals(field) || "detail".equals(field) || "hint".equals(field);
                 target.put(field, freeForm ? freeText((String) value, redaction, target, field, truncatedDetails(source)) : bound((String) value));
                 if (((String) value).length() > TEXT_LIMIT) {

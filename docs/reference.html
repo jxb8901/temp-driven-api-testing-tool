@@ -4372,7 +4372,16 @@ that record's free-form failure details are also omitted to avoid
 leaking a split short secret's prefix/suffix. Without private tokens,
 bounded previews can remain available. Primitive arrays redact both the
 complete list rendering and individual elements within the same
-node/token budgets.</p>
+node/token budgets. Returned DB failures extract a safe summary from
+native <code>result.error</code> (<code>type</code>, bounded/redacted
+<code>message</code>, <code>sqlState</code>, <code>vendorCode</code>,
+and safe cancellation metadata), retain it as DB evidence
+<code>error</code>, and use it for the collector's <code>error</code>;
+rows, parameters, SQL text, and raw results are omitted. Failed command
+<code>stdout</code> can remain as separate diagnostic evidence under the
+same bounded/redacted/omission policy as <code>stderr</code>; it is not
+used as <code>error.message</code> or restored as the failed
+<code>result</code>.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
 Earlier failed collector records remain available after a later
