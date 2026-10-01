@@ -1,4 +1,4 @@
-## 01 Overview and Concepts
+## 01 Overview and Product Model
 
 ATT separates test intent from integration mechanics. Test data is versioned in workbook/sidecar/snapshot form; Templates and Flows define reusable behavior; Resources connect that behavior to external systems.
 
@@ -45,4 +45,17 @@ SSHHelper --/
 
 A normal package contains `config/`, `testcase/`, `templates/`, `tools/`, `schemas/` and generated `output/`. Paths and identifiers are validated before execution. Credentials belong in environment variables or external secret handling, not committed YAML.
 
-For a guided package build, use `docs/quick-start.md`. The rest of this manual is normative lookup documentation.
+For a guided package build, use [Quick Start](../quick-start.md). The rest of this manual is normative lookup documentation.
+
+### How to use this manual
+
+| Goal | Go to |
+|---|---|
+| Build the first ATT package | [Quick Start](../quick-start.md) |
+| Understand the core ATT model | Chapters 1–5 |
+| Configure DB/MQ/HTTP/SSH | [Resources](05_resources/index.md) |
+| Find a CLI option | [CLI Reference](10_cli.md) |
+| Diagnose a failure | [Validation and Troubleshooting](12_validation_diagnostics.md) |
+| Upgrade an older package | [Appendix C](appendices/migrations.md) |
+
+Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other chapters summarize and link to that owner.

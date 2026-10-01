@@ -1,6 +1,6 @@
 # ATT Load Scenario Examples
 
-本目錄的範例均使用 ATT 3.6.2 現行 schema att-load/v1.4。每個 scenario 以 workloads 清單配置 target；root defaults 可供多個 workload 共用。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
+本目錄的範例均使用 ATT 現行 schema att-load/v1.3。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
 
 ## 範例索引
 

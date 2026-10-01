@@ -19,3 +19,5 @@ python3 tools/verify_documentation.py
 ```
 
 Tutorial material belongs in `docs/quick-start.md`; maintainer internals belong in `docs/system-design/`. Completed migration plans, old versioned manuals, and issue-specific design notes belong in `docs/history/` rather than beside current documentation.
+
+See the [documentation style and terminology policy](../documentation-style.md) for chapter ownership, current-version rules and canonical English terms in Traditional Chinese prose.

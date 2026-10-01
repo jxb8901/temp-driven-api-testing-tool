@@ -1,6 +1,6 @@
-### 14.1 Schema 與版本矩陣
+## Appendix A — Schema 與 Version Matrix
 
-ATT 3.6.2 現行 schema：
+現行 active schemas（source of truth：`schemas/catalog.yaml`）：
 
 | Artifact | 現行 schema |
 |---|---|
@@ -20,5 +20,8 @@ ATT 3.6.2 現行 schema：
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
 | CI summary | att-ci-summary/v2.1 |
+| JUnit XML | att-junit/v2.1 |
+| Load policy profile | att-load-profile/v1.0 |
 
 本次調整的 resource/config schema 舊版本已移至 schemas/history，僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。schemas/catalog.yaml 是 repository authoritative catalog。Package validation 會驗證已註冊的 schema resource 本身；封存不代表舊版本仍有 runtime compatibility。
+

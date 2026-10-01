@@ -1,4 +1,4 @@
-### 5.5 HTTPHelper
+### 7.5 HTTPHelper
 
 HTTPHelper is an environment-bound HTTP resource. The selected config profile binds a stable logical helper ID to its base URL. Descriptors use att-httphelper/v1.1.
 

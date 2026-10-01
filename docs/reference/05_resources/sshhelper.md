@@ -1,4 +1,4 @@
-### 5.4 SSHHelper: logical SSH targets
+### 7.6 SSHHelper: logical SSH targets
 
 #### SSH Resource Helper operations
 

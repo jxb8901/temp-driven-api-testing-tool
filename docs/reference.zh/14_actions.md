@@ -1,6 +1,6 @@
-## 14 動作與型別化值
+## 03 Actions 與 Typed Values
 
-本章定義 ATT 3.6.2 現行 Action 契約。Template 使用 att-template/v3.3。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。資源配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。
+本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.3。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper 章節。
 
 ### Action 類型
 
@@ -108,7 +108,7 @@ callPayment:
       timeoutMs: 10000
       onFailure: continue
   assert: >-
-    ${output.replyReceived} == true
+    ${output.result.replyReceived} == true
 ```
 
 包含 assertion 在內，Action active 時可使用：
@@ -185,21 +185,23 @@ evidence:
     maxChars: 10000
 ~~~
 
-此設定會在 operation metadata 旁加入有長度上限的人類可讀快照，不會改變 output.result 或 response parsing。Load 的 evidence.resources.output 可設 inherit（預設）或 none。none 會略過 resource-output 格式化與檔案物化。Metrics-only iteration 不建立 execution 目錄。Iteration evidence 被保留後，符合條件的 resource output 才會延遲格式化至該 workspace。
+此設定會在 operation metadata 旁加入有長度上限的人類可讀 Snapshot，不會改變 output.result 或 response parsing。Load 的 evidence.resources.output 可設 inherit（預設）或 none。none 會略過 resource-output 格式化與檔案物化。Metrics-only iteration 不建立 execution 目錄。Iteration evidence 被保留後，符合條件的 resource output 才會延遲格式化至該 workspace。
 
-### 移除欄位與遷移
+### Action output 與 evidence path
 
-ATT 3.6.2 每種 resource 只接受現行 schema。歷史版本存放於 schemas/history，不是 active contract。
-
-| 舊配置 | 3.6.2 形式 |
+| Path | 意義與可用時機 |
 |---|---|
-| Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊欄位；將 output.result 當作原樣 String；沒有隱式檔案替代方案 |
-| Log file | 將 typed value 直接傳入 Log.value |
-| Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ | 將 Render String 直接作為 HTTP body 或 MQ payload |
-| 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List，String + requestFormat 會失敗 |
+| `output.result` | Action active（包括 assertion）期間的 primary typed result。 |
+| `output.evidence.collectors.<id>.result` | Active Tool evidence collector 的 typed result。 |
+| `output.evidence.collectors.<id>.status` | Collector 的 `PASS`／`ERROR` status。 |
+| `output.evidence.collectors.<id>.error` | Collector 失敗時的 bounded failure summary；有可用訊息時包含非空 `message`。 |
+| `output.evidence.collectors.<id>.evidence` | 保留 bounded/redacted 的 underlying Tool/resource evidence，包括 executor 提供的 resource identity 與 native failure fields。 |
+| `EXEC.ACTIONS.<actionId>.output.result` | Action 完成後發布的 primary typed result。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | 發布後最後／勝出的 collector result。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | 發布後最後／勝出的 collector status。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | 發布後的 collector failure summary 與保留的 operation evidence。 |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | 該 collector attempt 的 failure summary 與 underlying evidence。 |
 
-Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。
+String、Number、Boolean、null、Map、List、DocumentValue 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
-[META Runtime and Context Model](03_runtime_context.md) 說明 META lifecycle；[Load Mode](04_execution_modes/load.md) 說明 execution identity 和 retained evidence 路徑。

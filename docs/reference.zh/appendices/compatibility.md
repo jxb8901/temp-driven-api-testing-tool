@@ -1,4 +1,4 @@
-### 14.2 相容性與已棄用 Alias
+## Appendix B — Compatibility 與 Deprecated Aliases
 
 Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套 current model。新 authoring 使用 canonical `EXEC`、`META`、Action-local `output`、current schema、`--env` 與目前 Tool/DB/MQ contract。
 
