@@ -1306,7 +1306,7 @@ class StageTemplateRunnerTest {
                 arguments.put("secret", new ToolArgumentConfig("secret", "Secret", "", true, ""));
                 arguments.put("payload", new ToolArgumentConfig("payload", "Payload", "", true, ""));
                 Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
-                tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake", "text", arguments));
+                tools.put("sample", new ToolConfig("sample", "Sample", "test", "fake ${secret} ${payload}", "text", arguments));
                 FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
                 CommandRunner process = new CommandRunner() {
                     @Override public CommandResult run(List<String> argv, java.time.Duration timeout, Path directory,
