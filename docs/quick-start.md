@@ -263,7 +263,7 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 | call scripts/programs or framework-native Tools | [Tool](reference/05_resources/tools.md) |
 | query/update a database, including query timeout/retry | [DBHelper](reference/05_resources/dbhelper.md) |
 | send/receive/request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
-| switch SIT/UAT resource bindings | [Environment and Test Data](reference/06_environment_testdata.md) |
+| switch SIT/UAT resource bindings | [Environment and Test Data](reference/09_configuration.md) |
 | use `${...}` and `#{...}` correctly | [Expressions](reference/07_expressions.md) |
 | add assertion, timeout, retry, `runWhen`, `onFailure` | [Reliability and Execution Control](reference/08_reliability_execution_control.md) |
 | look up commands and options | [CLI Reference](reference/10_cli.md) |

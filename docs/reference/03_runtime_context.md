@@ -1,8 +1,8 @@
-## 03 Runtime and Context Model
+## 04 Runtime and Context Model
 
 Run, Debug and Load share one canonical EXEC/META expression model. EXEC changes through framework lifecycle and explicit input/variable/action publication. META is curated, immutable and secret-safe.
 
-Standalone Debug bootstrap values are mapped into these canonical roots: `inputs` populates `EXEC.INPUT`, while Template/Flow `vars` seeds `EXEC.VARS` before the target starts. See [Standalone Debug](04_execution_modes/debug.md) for the v1.1 schema, typed literal rules and protected framework roots.
+Standalone Debug bootstrap values are mapped into these canonical roots: `inputs` populates `EXEC.INPUT`, while Template/Flow `vars` seeds `EXEC.VARS` before the target starts. See [Standalone Debug](04_execution_modes/debug.md) for the current schema, typed literal rules and protected framework roots.
 
 ### Identity roots
 
@@ -68,66 +68,10 @@ Entering a Template, Flow, Tool or helper invocation publishes metadata for that
 
 EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs and restores them after completion. EXEC.VARS is shared across later Stages in a Case. EXEC.ACTIONS is scoped to the active Template or Flow. An Action reads local output while running and publishes its envelope at EXEC.ACTIONS.<id>.output.
 
-### Action output and evidence paths
-
-| Path | Meaning and availability |
-|---|---|
-| `output.result` | Primary typed Action result while the Action is active, including its assertion. |
-| `output.evidence.collectors.<id>.result` | Typed result of an active Tool evidence collector. |
-| `output.evidence.collectors.<id>.status` | Collector `PASS`/`ERROR` status while the Action is active. |
-| `output.evidence.collectors.<id>.error` | Bounded failure summary with a non-blank `message` when the collector fails. |
-| `output.evidence.collectors.<id>.evidence` | Preserved bounded/redacted underlying Tool/resource evidence, including resource identity and native failure fields when supplied. |
-| `EXEC.ACTIONS.<actionId>.output.result` | Published primary typed result after the Action completes. |
-| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | Published final/winning collector result. |
-| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | Published final/winning collector status. |
-| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | Published collector failure summary and preserved operation evidence. |
-| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
-| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | Failure summary and underlying evidence for that specific collector attempt. |
-
-Strings, numbers, booleans, null, maps, lists and DocumentValue remain typed across Action/Template/Flow boundaries.
-
-### Execution bootstrap variables
-
-Debug sidecars and current Load workloads can seed a canonical initial `EXEC.VARS` tree for Template/Flow execution. The order is: resolve and validate the target and definitions; initialize `EXEC.RUN_ID`, `EXEC.INPUT`, `EXEC.LOAD`, stable META and execution timestamps; generate and publish `EXEC.ID`; establish `EXEC.OUTPUT_DIR`; evaluate vars; then start the Template/Flow. Debug follows the same rule with its initialized identity and output paths.
-
-Values use the ordinary ATT expression parser. An exact `${...}` retains the referenced type (including null, numbers, lists and maps); interpolation into surrounding text produces a string; `#{...}` preserves its typed result. Maps and lists recurse while keys remain literal. Vars dependencies are resolved independent of declaration order; missing bootstrap vars and direct/indirect cycles are errors. Each Load execution evaluates an isolated copy, so concurrent users/workloads do not share mutable values. The first regular `assign` may replace an initial value.
-
-The available roots are initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other named `EXEC.VARS` entries, and stable META project/source/target/template metadata. Actions, action-local `output`, invocation-scoped META, and external or stateful calls are unavailable. Only safe pure built-ins are allowed; normal expression syntax and type rules are reused. `--set vars.path=value` changes the raw definition before evaluation.
-
-### Load execution ID initialization
-
-Load uses schema att-load/v1.3. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
-
-Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
-
-Only deterministic, side-effect-free built-ins are allowed. External Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem functions are rejected. seq.next() is neither allowed nor required. Use stable identity components:
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
-~~~
-
-Arrival-rate has no USER_ID:
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
-~~~
-
-IDs must be non-empty, path-safe single segments and unique within the Load run. Duplicate or unsafe values fail before the target starts; ATT does not append a hidden suffix.
-
-### Run, execution and evidence navigation
-
-| Identity | Meaning | Scope | Artifact role |
-|---|---|---|---|
-| EXEC.RUN_ID | Enclosing ATT run. | Run. | Run root, summary and report. |
-| EXEC.ID | Current Case/Debug/Load execution. | Execution. | Key for logs/evidence when a workspace exists. |
-| EXEC.OUTPUT_DIR | Workspace path associated with EXEC.ID. | Execution. | Physical Run/Debug workspace or planned lazy Load workspace. |
-
-Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. In Load, EXEC.OUTPUT_DIR and CASE.outputDirectory remain at output/load/<RUN_ID>/executions/<EXEC.ID>/ throughout the iteration. When retained, a copy of its artifacts is also stored under samples/<EXEC.ID>/ or failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory after the scheduler releases their temporary workspace. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
-
-DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler counters in expressions; pass business variation through EXEC.INPUT.
-
 ### Optional lookup and compatibility
 
 ${path} is strict. ${path?} returns null for an allowed missing map/list path; it does not make malformed syntax or illegal scope access valid. Legacy CASE, RUN and ACTIONS aliases remain only where they map one-to-one to canonical data. New Templates should use EXEC and META.
+
+### Lifecycle navigation
+
+[Actions](14_actions.md) owns Action-local `output` and publication at `EXEC.ACTIONS.<id>.output`. [Debug](04_execution_modes/debug.md) and [Load](04_execution_modes/load.md) own bootstrap variables, identity initialization and available scope. [Results](11_results_reports_evidence.md) owns artifact navigation.

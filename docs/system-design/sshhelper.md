@@ -4,7 +4,7 @@ Status: Maintainer documentation. The [Reference Manual](../reference/05_resourc
 
 ## Resolution and validation
 
-The config loader verifies `att-config/v2.7`, applies one `environments.<name>` shallow list replacement, loads `att-sshhelper/v1.0` descriptors, and resolves v2.7 Tool-group `ssh.helper` bindings against the selected registry. There is no Action-level routing state. The descriptor loader preserves list order in a `LinkedHashMap`, rejects unsafe/duplicate paths and case-insensitive duplicate IDs, and constructs immutable effective `SshConfig` instances by applying defaults followed by per-instance overrides. Schema and semantic checks reject unknown fields, missing effective host/user, invalid ports/strategy and missing logical bindings before external execution. Older v2.6/v2.2 direct SSH paths remain separate and unchanged.
+The config loader verifies `att-config/v2.10`, applies one `environments.<name>` shallow list replacement, loads `att-sshhelper/v1.0` descriptors, and resolves current Tool group `ssh.helper` bindings against the selected registry. There is no Action-level routing state. The descriptor loader preserves list order in a `LinkedHashMap`, rejects unsafe/duplicate paths and case-insensitive duplicate IDs, and constructs immutable effective `SshConfig` instances by applying defaults followed by per-instance overrides. Schema and semantic checks reject unknown fields, missing effective host/user, invalid ports/strategy and missing logical bindings before external execution. Older v2.6/v2.2 direct SSH paths remain separate and unchanged.
 
 ```text
 CLI --env -> effective config -> SSHHelper registry -> Tool group binding

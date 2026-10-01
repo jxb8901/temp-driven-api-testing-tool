@@ -1,4 +1,4 @@
-### 4.2 Standalone Debug
+### 6.2 Standalone Debug
 
 Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
@@ -10,7 +10,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
 
-Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Historical `att-debug/v1.0` remains archived and must be migrated to v1.1.
+Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Appendix C](../appendices/migrations.md).
 
 #### Standalone Debug bootstrap data
 
@@ -75,9 +75,100 @@ Use the output directory to separate diagnosis stages:
 | Symptom | Check |
 |---|---|
 | `Debug input file does not exist` | Add the sidecar beside the selected target or pass `--input` explicitly. |
-| `Debug input uses a historical schemaVersion` | Upgrade `att-debug/v1.0` to `att-debug/v1.1`; add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
+| `Debug input uses a historical schemaVersion` | Use the active Debug schema; see [Appendix C](../appendices/migrations.md); add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
 | `target` or dependency validation fails | Confirm the target type/id and inspect the reported dependency field; unrelated workbook files are not required. |
 | MQ reports a missing/unsafe payload | Verify the absolute package path or the relative Case-output path; remove traversal and symlinks. |
 | The action runs but output is unexpected | Read `case.log`, `result.yaml` and the action artifacts under `output/debug/<debugId>/`; compare rendered inputs with the selected environment. |
 
 Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory; see the Load evidence retention section in Chapter 4 when the same target is exercised by a load run.
+
+#### Configuration examples
+
+The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.1` document.
+
+Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
+
+```yaml
+schemaVersion: att-debug/v1.1
+case:
+  caseName: PAYMENT debug
+  amount: 100
+  environment: SIT
+stage:
+  key: invoke
+  values:
+    channel: WEB
+    sourceRef: SRC-001
+```
+
+Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
+
+Flow sidecar (`templates/flows/common/compose/debug.yaml`):
+
+```yaml
+schemaVersion: att-debug/v1.1
+case:
+  caseName: Compose debug
+  traceId: TRACE-001
+stage:
+  key: DEBUG
+  values:
+    mode: SIT
+inputs:
+  source: payment
+  suffix: -debug
+```
+
+Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available as `${EXEC.INPUT.source}` and, when there is no same-named Case value, as the compatibility alias `${EXEC.INPUT.source}`.
+
+Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
+
+```yaml
+schemaVersion: att-debug/v1.1
+case:
+  RefNo: REF001
+tools:
+  invokeApi:
+    arguments:
+      requestId: REF001
+      requestType: PAYMENT
+      requestFile: /tmp/payment-request.xml
+      apiLogPath: /tmp/payment-api.log
+```
+
+Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the group-local Tool key. Values must be scalar or list values accepted by the Tool descriptor; map literals are not supported by the standalone Tool adapter.
+
+Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
+
+```yaml
+schemaVersion: att-debug/v1.1
+arguments:
+  requestFile: /tmp/payment-request.xml
+  environment: SIT
+```
+
+Run it with `./att.sh debug tool invokePaymentApi`. For an ungrouped Tool, root `arguments` is passed directly; it is not wrapped under `tools`.
+
+An explicit file overrides sidecar discovery, which is useful for temporary values in CI or local diagnosis:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml \
+  --output-dir /tmp/att-debug --format json
+```
+
+The selected input is validated before execution. Missing files, invalid schema, unknown or missing Tool arguments, and other input/configuration errors return exit code `2`. Framework-owned values such as `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.OUTPUT_DIR`, `EXEC.VARS`, and `EXEC.ACTIONS`, together with the corresponding `CASE.*`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, and `DB.*` aliases, remain authoritative even if they appear in the input `case` map. Mode/scheduler diagnostics are not expression-visible. `EXEC.STAGES` is not a canonical Context node; Stage history remains in the legacy `CASE.STAGES` evidence view.
+
+Each invocation writes:
+
+```text
+output/debug/<debugId>/
+├── case.log
+├── result.yaml
+└── artifacts/
+    └── case.yaml
+```
+
+`result.yaml` contains the target, status, exit code, duration, input path, Case ID, action results, diagnostic (when present), and evidence locations. Synthetic framework-owned fields always win over same-named values in `case`; debug inputs cannot replace `CASE.caseId`, `CASE.workbookId`, `CASE.groupId`, `CASE.rowCaseId`, `CASE.outputDirectory`, the legacy `CASE.STAGES` evidence view, `CASE.DB`, `CASE.VARS`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, or `DB.*`. Debug output is independent of ordinary `output/latest-run.yaml` and report lifecycle.
+
+For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics go to stderr.
+

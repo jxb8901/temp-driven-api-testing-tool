@@ -1,6 +1,6 @@
-# ATT 3.6.0 environment profile examples
+# ATT environment profile examples
 
-ATT 3.6.0 uses `att-config/v2.10` profiles to select resource descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper and Tool Group schemas are listed in [the configuration reference](../../docs/reference/09_configuration.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.10` profiles to select resource descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper and Tool Group schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema_matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 

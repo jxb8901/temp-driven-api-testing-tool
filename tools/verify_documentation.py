@@ -68,6 +68,9 @@ def numbered_heading_shape(path):
         match = re.match(r"^(#{1,6})\s+([0-9]+(?:\.[0-9]+)*)\b", line)
         if match:
             shape.append((len(match.group(1)), match.group(2)))
+        appendix = re.match(r"^(#{1,6})\s+Appendix\s+([A-D])\b", line)
+        if appendix:
+            shape.append((len(appendix.group(1)), "Appendix " + appendix.group(2)))
     return shape
 
 
@@ -398,7 +401,7 @@ def check_ownership_links():
             "quick-start.md", "quick-start.zh.md", "reference.html", "reference.zh.html",
             "reference/02_test_authoring.md", "reference/04_execution_modes/debug.md",
             "reference/04_execution_modes/load.md", "reference/05_resources/dbhelper.md",
-            "reference/05_resources/mqhelper.md", "reference/06_environment_testdata.md",
+            "reference/05_resources/mqhelper.md", "reference/09_configuration.md",
             "reference/07_expressions.md", "reference/12_validation_diagnostics.md",
             "reference/13_ci_packaging_operations.md", "system-design/runtime-execution.md",
             "history/README.md"):
@@ -442,6 +445,11 @@ def main():
 
     run_gate("generated Reference freshness",
              [sys.executable, "tools/build_reference_manual.py", "--check"])
+    run_gate("current documentation contracts",
+             [sys.executable, "tools/documentation_contracts.py"])
+    run_gate("documentation contract regression tests",
+             [sys.executable, "-m", "unittest", "discover", "-s", "tools",
+              "-p", "test_documentation_contracts.py"])
     run_gate("Reference semantic coverage",
              [sys.executable, "tools/validate_reference_content.py"])
 
@@ -466,6 +474,9 @@ def main():
         DOCS / "reference.zh.md",
     ]
     markdown_files += list((DOCS / "system-design").rglob("*.md"))
+    markdown_files += list((DOCS / "reference").rglob("*.md"))
+    markdown_files += list((DOCS / "reference.zh").rglob("*.md"))
+    markdown_files += list((ROOT / "examples").rglob("*.md"))
     for path in markdown_files:
         if path.is_file():
             check_markdown_links(path)

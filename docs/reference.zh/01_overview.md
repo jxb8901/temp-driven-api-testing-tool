@@ -1,4 +1,4 @@
-## 01 概覽與核心概念
+## 01 概覽與 Product Model
 
 ATT 把測試意圖與整合機制分離。測試數據以 workbook／sidecar／snapshot 版本化；Template 與 Flow 定義可重用行為；Resource 把這些行為連接到外部系統。
 
@@ -44,3 +44,16 @@ MQHelper -/
 一般 package 包含 `config/`、`testcase/`、`templates/`、`tools/`、`schemas/` 和生成的 `output/`。ATT 在執行前驗證 path 與 identifier。Credential 應放在環境變數或外部 secrets 管理，不應提交到 YAML。
 
 需要逐步建立一個可工作的 package，請使用 `docs/quick-start.md`；本 Reference 其餘內容是規範性查閱文件。
+
+### 如何使用本手冊
+
+| 目標 | 文件 |
+|---|---|
+| 建立第一個 ATT package | [Quick Start](../quick-start.zh.md) |
+| 理解核心 ATT model | Chapters 1–5 |
+| 配置 DB/MQ/HTTP/SSH | [Resources](05_resources/index.md) |
+| 查閱 CLI option | [CLI Reference](10_cli.md) |
+| 診斷失敗 | [Validation and Troubleshooting](12_validation_diagnostics.md) |
+| 升級舊 package | [Appendix C](appendices/migrations.md) |
+
+Reference 定義 public contract；README、Quick Start 與 examples 按特定任務說明這份 contract。每項 contract 由一個 semantic owner 定義，其他章節提供摘要並連結至 owner。

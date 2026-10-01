@@ -1,4 +1,4 @@
-### 4.3 Load Mode
+### 6.3 Load Mode
 
 ATT accepts att-load/v1.3 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target, its inputs, bootstrap vars and pacing policy. ATT validates the scenario and all targets before a scheduler starts.
 
@@ -61,7 +61,7 @@ duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends
 
 #### Load identity and output layout
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Runtime and Context Model](../03_runtime_context.md) for field availability and function restrictions.
+Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See the execution ID initialization section below for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -122,4 +122,29 @@ evidence: {mode: failures}
 ./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
 ~~~
 
-Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). The previous v1.2 schema is retained for migration diagnostics; upgrade its schemaVersion to v1.3 to use workload vars. Historical v1.0/v1.1 schemas are also not accepted as active versions. See [Migrations](../appendices/migrations.md).
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). Schema migration is documented in [Appendix C](../appendices/migrations.md).
+
+### Load execution ID initialization
+
+Load uses schema att-load/v1.3. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
+
+Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
+
+Only deterministic, side-effect-free built-ins are allowed. External Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem functions are rejected. seq.next() is neither allowed nor required. Use stable identity components:
+
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
+~~~
+
+Arrival-rate has no USER_ID:
+
+~~~yaml
+execution:
+  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
+~~~
+
+IDs must be non-empty, path-safe single segments and unique within the Load run. Duplicate or unsafe values fail before the target starts; ATT does not append a hidden suffix.
+
+
+execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Appendix C](../appendices/migrations.md) for schema migration.

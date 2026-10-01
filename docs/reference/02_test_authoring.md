@@ -4,6 +4,15 @@
 
 This chapter explains the normal day-to-day workflow in the same order that data moves through ATT.
 
+| Need | Use |
+|---|---|
+| Stage execution entry point | Template |
+| Reusable Template logic | Flow |
+| One ordered operation | Action |
+| External capability | Resource |
+| Case/stage business input | EXEC.INPUT |
+| Cross-Action mutable state | EXEC.VARS |
+
 ### 2.1 Workbook
 
 #### Workbook, sidecar, and snapshot relationship
@@ -98,7 +107,18 @@ Effective: Case ID, Case name, Template, Parameters
 
 ATT does not concatenate parent and child labels. Header matching removes spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace from both the effective Excel header and configured sidecar/report label; matching otherwise remains case-sensitive. For example, `案例 編號`, `案例\n編號`, and `案例編號` identify the same column. Every effective header must exist exactly once after this normalization, so two physical headers that differ only by whitespace are a duplicate-header error. Testcase loading and result-workbook writing use this same projection; result columns that do not already exist are written to the final header row.
 
-#### Stages and template selection
+#### Workbook sidecar
+
+| Object | Allowed properties | Required/constraints |
+|---|---|---|
+| root | `schemaVersion`, `id`, `excel`, `stages`, `report`, `x-*` | schemaVersion, package-unique id, excel, non-empty stages required |
+| `excel` | `sheet`, `headerRows`, `caseId`, `tags`, `dataColumns` | sheet, caseId, tags required; headerRows ≥ 1 |
+| `stages[]` | `key`, `template`, `dataColumns`, `required`, `runWhen`, `onFailure` | key/template required; key has no dot |
+| `report` | `columns` | values are strings |
+
+Only the sidecar root permits `x-*`; `excel`, stages, and sidecar `report` reject extensions and other unknown fields. The sidecar cannot override timeout, retry, tools, dbhelpers, template root, environment, or output root.
+
+### 2.2 Stage
 
 Each sidecar stage has a dot-free `key` and a `template` field naming the physical Excel selector column. The selector cell may contain a symbolic template name, full relative template path, or YAML map:
 
@@ -113,28 +133,25 @@ ATT first resolves `name` as a globally unique symbolic name. Only when no symbo
 
 All selector-map keys, including `name`, are copied into the stage Context. `stages[].dataColumns` adds more stage-private values. A duplicate key between the selector map and stage data columns is an error.
 
-#### Stage execution controls
 
-| Setting | Values/default | Meaning |
-|---|---|---|
-| `required` | boolean/`false` | Whether a blank selector is an error |
-| `runWhen` | `normal`/default, `onSuccess`, `onFailure`, `always` | When the stage is eligible to run |
-| `onFailure` | `stop`/default, `continue` | Whether later eligible work may continue |
+Stage `required`, `runWhen` and `onFailure` behavior is defined in [Reliability](08_reliability_execution_control.md).
 
-`continue` never changes FAIL or ERROR into PASS. It only permits later eligible work to run.
+### 2.3 Template
 
-| Earlier outcome | Later `normal` | `onSuccess` | `onFailure` | `always` |
-|---|---:|---:|---:|---:|
-| PASS | Run | Run | Skip | Run |
-| FAIL/ERROR with `stop` | Skip | Skip | Run | Run |
-| FAIL/ERROR with `continue` | Run | Skip | Run | Run |
-
-Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evidence collection.
-
-### 2.2 Template
-
-A directory is a callable Template only when it directly contains template.yaml. ATT 3.6.0 uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
+A directory is a callable Template only when it directly contains template.yaml. ATT uses att-template/v3.3. Each Template has a non-empty ordered actions map and a required description.
 
 Each Action has a type-specific contract. Render returns DocumentValue without writing a file. Tool/DB/HTTP/MQ actions publish the native typed operation result. Log formats typed values for human observation. Assign publishes values to EXEC.VARS, and Flow runs in a nested Action scope.
 
-See [Actions and Typed Values](14_actions.md) for the complete field list, examples, typed result/evidence model, DocumentValue behavior, HTTP/MQ boundaries and migration guidance. [Expressions and Built-ins](07_expressions.md) covers the shared expression engine and Load ID initialization scope.
+See [Actions and Typed Values](14_actions.md) for the complete field list, examples, typed result/evidence model, DocumentValue behavior, HTTP/MQ boundaries and migration guidance. [Expressions and Built-ins](07_expressions.md) covers the shared expression language; [Load](04_execution_modes/load.md) owns ID initialization.
+
+### 2.4 Flow
+
+A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.3`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](14_actions.md) owns Flow results and Assign behavior; [Context](03_runtime_context.md) owns scope lifetime.
+
+### 2.5 Authoring lifecycle
+
+After changing a Workbook, generate its Snapshot, review and commit the diff. After changing a Sidecar, Template, Flow or Resource, run `./att.sh validate --package`. Use [Debug](04_execution_modes/debug.md) to isolate an authoring check and [Run](04_execution_modes/run.md) to execute Testcases. Follow [Quick Start](../quick-start.md) to build the first package.
+
+### Test data ownership
+
+Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs enter `EXEC.INPUT`; [Context](03_runtime_context.md) defines their scope and lifetime. Environment selection belongs to [Configuration](09_configuration.md).

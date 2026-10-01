@@ -263,7 +263,7 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 | 調用 script/program 或 framework-native Tool | [Tool](reference.zh/05_resources/tools.md) |
 | 查詢／更新資料庫，包括 query timeout/retry | [DBHelper](reference.zh/05_resources/dbhelper.md) |
 | 發送／接收／request MQ message | [MQHelper](reference.zh/05_resources/mqhelper.md) |
-| 在 SIT/UAT 間切換 resource binding | [Environment and Test Data](reference.zh/06_environment_testdata.md) |
+| 在 SIT/UAT 間切換 resource binding | [Environment and Test Data](reference.zh/09_configuration.md) |
 | 正確使用 `${...}` / `#{...}` | [Expressions](reference.zh/07_expressions.md) |
 | 使用 assertion、timeout、retry、`runWhen`、`onFailure` | [Reliability and Execution Control](reference.zh/08_reliability_execution_control.md) |
 | 查 CLI command / option | [CLI Reference](reference.zh/10_cli.md) |

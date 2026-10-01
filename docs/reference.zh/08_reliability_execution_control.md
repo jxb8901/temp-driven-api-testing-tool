@@ -36,4 +36,32 @@ DB transaction finalization 與 DB/MQ resource cleanup 在相應 execution lifec
 ERROR > INVALID > FAIL > PASS > SKIPPED
 ```
 
-未來 fixture（#38）與 DB Action-level timeout/retry（#39）應延伸本章既有概念，而不是再建立一套 reliability model。
+### Stage execution controls
+
+| Setting | Values/default | 說明 |
+|---|---|---|
+| `required` | boolean / `false` | Blank selector 是否為 error |
+| `runWhen` | `normal`（default）、`onSuccess`、`onFailure`、`always` | Stage eligibility |
+| `onFailure` | `stop`（default）、`continue` | Failure 後是否允許後續 eligible work |
+
+`continue` 不會把 FAIL 或 ERROR 改成 PASS。
+
+| Earlier outcome | Later `normal` | `onSuccess` | `onFailure` | `always` |
+|---|---:|---:|---:|---:|
+| PASS | Run | Run | Skip | Run |
+| FAIL/ERROR with `stop` | Skip | Skip | Run | Run |
+| FAIL/ERROR with `continue` | Run | Skip | Run | Run |
+
+Rollback/diagnostics 使用 `onFailure`；cleanup 或 final Evidence 使用 `always`。
+
+### Tool timeout precedence
+
+Tool Action timeout 優先於 Tool descriptor timeout，再優先於 global timeout。Sidecar、Stage 與 Template 不定義 timeout/retry defaults。Call-backed DB Tool 的 DBHelper statement timeout 仍是 backend ceiling。每次 supported primary retry attempt 都會在 assertion 前執行 collectors。
+
+### Direct DB Timeout 與 Retry eligibility
+
+Direct DB Action 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。明確的 Action timeout 會覆蓋 DBHelper `statement.timeoutSeconds` 預設值；未設定時才使用 helper timeout。JDBC statement timeout 以秒向上取整，ATT 仍保留毫秒級 deadline cancellation；每次 retry attempt 都重新取得完整 Action timeout，`retry.intervalMs` 的等待時間不計入該 attempt timeout。
+
+Direct `query` Action 亦可使用標準 retry block：`maxAttempts` 2–10、`intervalMs` 0–3,600,000，`retryOn` 必須是非空且不重複的 `ASSERTION` / `TIMEOUT` 列表。使用 `ASSERTION` 時必須同時定義 Action `assert`。一般 SQL error 為 terminal，不會自動 retry。啟用 retry 後，每次 query attempt 會保留在 `output.attempts[n]`；top-level `output.result` / `output.evidence` 永遠代表 final 或 winning attempt，並以 `winningAttempt` 或 `finalAttempt` 記錄終止 attempt 編號。
+
+Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 timeout 或 database/transport failure 後，ATT 通常無法證明 mutation 是否已送達或 commit；自動重放可能造成重複業務變更。因此，需要 application-specific idempotent retry 時應由作者明確建模，而不是啟用通用 DB Action retry。
