@@ -161,29 +161,38 @@ public final class ExecutionBootstrapVariables {
         catch (RuntimeException error) {
             throw validation.invalid("Invalid optional Context path '" + path + "': " + error.getMessage(), field);
         }
-        try { CaseRuntimeContext.validateReferencePath(requiredPath); }
+        final List<CaseRuntimeContext.Segment> segments;
+        try { segments = CaseRuntimeContext.parsePath(requiredPath); }
         catch (RuntimeException error) {
             throw validation.invalid("Invalid Context path '" + path + "': " + error.getMessage(), field);
         }
-        String upper = requiredPath.toUpperCase(java.util.Locale.ROOT);
-        if (upper.equals("EXEC.ACTIONS") || upper.startsWith("EXEC.ACTIONS.") || upper.startsWith("EXEC.ACTIONS[")
-                || upper.equals("ACTIONS") || upper.startsWith("ACTIONS.") || upper.startsWith("ACTIONS[")
-                || upper.equals("OUTPUT") || upper.startsWith("OUTPUT.") || upper.startsWith("OUTPUT[")
-                || upper.startsWith("CASE.ACTIONS") || upper.startsWith("CASE.STAGES")
-                || upper.startsWith("META.TOOL") || upper.startsWith("META.DBHELPER")
-                || upper.startsWith("META.MQHELPER") || upper.startsWith("META.HTTPHELPER"))
+        if (segments.isEmpty())
+            throw validation.invalid("Bootstrap expression contains an empty Context path", field);
+
+        String root = keyAt(segments, 0);
+        String child = keyAt(segments, 1);
+        if (("EXEC".equals(root) && "ACTIONS".equals(child))
+                || "ACTIONS".equals(root) || "output".equals(root)
+                || ("CASE".equals(root) && ("ACTIONS".equals(child) || "STAGES".equals(child)))
+                || ("META".equals(root) && isOneOf(child, "TOOL", "DBHELPER", "MQHELPER", "HTTPHELPER")))
             throw validation.invalid("Context path '" + path + "' is unavailable during execution bootstrap", field);
 
-        boolean inputPath = upper.equals("EXEC.INPUT") || upper.startsWith("EXEC.INPUT.") || upper.startsWith("EXEC.INPUT[");
-        boolean allowed = upper.equals("EXEC.RUN_ID") || upper.equals("EXEC.ID") || upper.equals("EXEC.OUTPUT_DIR")
-                || upper.equals("EXEC.STARTED_AT") || upper.equals("EXEC.RUN_STARTED_AT")
-                || inputPath
-                || upper.equals("EXEC.LOAD") || upper.startsWith("EXEC.LOAD.") || upper.startsWith("EXEC.LOAD[")
-                || upper.startsWith("EXEC.VARS.") || upper.startsWith("EXEC.VARS[")
-                || upper.equals("META.PROJECT") || upper.startsWith("META.PROJECT.") || upper.startsWith("META.PROJECT[")
-                || upper.equals("META.SOURCE") || upper.startsWith("META.SOURCE.") || upper.startsWith("META.SOURCE[")
-                || upper.equals("META.TARGET") || upper.startsWith("META.TARGET.") || upper.startsWith("META.TARGET[")
-                || upper.equals("META.TEMPLATE") || upper.startsWith("META.TEMPLATE.") || upper.startsWith("META.TEMPLATE[");
+        boolean inputPath = false;
+        boolean allowed = false;
+        if ("EXEC".equals(root) && child != null) {
+            if ("INPUT".equals(child)) {
+                inputPath = true;
+                allowed = true;
+            } else if ("VARS".equals(child)) {
+                allowed = segments.size() >= 3 && keyAt(segments, 2) != null;
+            } else if ("LOAD".equals(child)) {
+                allowed = true;
+            } else if (isOneOf(child, "ID", "RUN_ID", "OUTPUT_DIR", "STARTED_AT", "RUN_STARTED_AT")) {
+                allowed = segments.size() == 2;
+            }
+        } else if ("META".equals(root) && isOneOf(child, "PROJECT", "SOURCE", "TARGET", "TEMPLATE")) {
+            allowed = true;
+        }
         if (!allowed) throw validation.invalid("Context path '" + path + "' is not an initialized bootstrap root", field);
         if (inputPath && validation.checkInputReferences) {
             CaseRuntimeContext.InputPathStatus status = CaseRuntimeContext.probeInputPath(validation.inputs, path);
@@ -194,6 +203,18 @@ public final class ExecutionBootstrapVariables {
             if (!optional && status != CaseRuntimeContext.InputPathStatus.FOUND)
                 throw validation.invalid("Bootstrap expression references missing input '" + path + "'", field);
         }
+    }
+
+    private static String keyAt(List<CaseRuntimeContext.Segment> segments, int index) {
+        if (index < 0 || index >= segments.size()) return null;
+        CaseRuntimeContext.Segment segment = segments.get(index);
+        return segment.index == null ? segment.key : null;
+    }
+
+    private static boolean isOneOf(String value, String... choices) {
+        if (value == null) return false;
+        for (String choice : choices) if (choice.equals(value)) return true;
+        return false;
     }
 
     private static String join(List<String> names) {

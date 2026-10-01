@@ -405,8 +405,8 @@ public final class CaseRuntimeContext {
         final java.util.List<Segment> segments;
         try { segments = parsePath(requiredReferencePath(path)); }
         catch (RuntimeException invalidPath) { return InputPathStatus.INVALID_PATH; }
-        if (segments.size() < 2 || !"EXEC".equalsIgnoreCase(segments.get(0).key)
-                || !"INPUT".equalsIgnoreCase(segments.get(1).key)) return InputPathStatus.INVALID_PATH;
+        if (segments.size() < 2 || !"EXEC".equals(segments.get(0).key)
+                || !"INPUT".equals(segments.get(1).key)) return InputPathStatus.INVALID_PATH;
         Object current = input == null ? java.util.Collections.emptyMap() : input;
         for (int index = 2; index < segments.size(); index++) {
             if (current == null) return InputPathStatus.NULL_INTERMEDIATE;
@@ -433,8 +433,8 @@ public final class CaseRuntimeContext {
     /** Returns the top-level EXEC.VARS key selected by a parsed Context path, if any. */
     static String executionVariableName(String path) {
         java.util.List<Segment> segments = parsePath(requiredReferencePath(path));
-        if (segments.size() < 3 || !"EXEC".equalsIgnoreCase(segments.get(0).key)
-                || !"VARS".equalsIgnoreCase(segments.get(1).key) || segments.get(2).index != null) return null;
+        if (segments.size() < 3 || !"EXEC".equals(segments.get(0).key)
+                || !"VARS".equals(segments.get(1).key) || segments.get(2).index != null) return null;
         return segments.get(2).key;
     }
 
@@ -1400,7 +1400,7 @@ public final class CaseRuntimeContext {
         return true;
     }
 
-    private static java.util.List<Segment> parsePath(String path) {
+    static java.util.List<Segment> parsePath(String path) {
         if (path == null) throw new IllegalArgumentException("Context path is null");
         java.util.List<Segment> result = new java.util.ArrayList<Segment>();
         int position = 0;
@@ -1472,8 +1472,8 @@ public final class CaseRuntimeContext {
         private static Resolution ambiguous(java.util.List<String> candidates) { return new Resolution(ResolutionStatus.AMBIGUOUS, null, null, "<root>", null, null, new java.util.ArrayList<String>(candidates)); }
     }
 
-    private static final class Segment {
-        private final String key; private final Integer index;
+    static final class Segment {
+        final String key; final Integer index;
         private Segment(String key, Integer index) { this.key = key; this.index = index; }
         private static Segment key(String value) { return new Segment(value, null); }
         private static Segment index(int value) { return new Segment(null, Integer.valueOf(value)); }
