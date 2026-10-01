@@ -1428,6 +1428,42 @@ class StageTemplateRunnerTest {
         }
     }
 
+    @Test void mqRootCompletionReasonAndSafeHttpLocationSurviveProjection() {
+        Map<String, Object> reason = map("type", "MQ_ERROR", "completionCode", 2,
+                "reasonCode", 2059, "reason", "MQRC_Q_MGR_NOT_AVAILABLE", "message", "Unavailable");
+        Map<String, Object> mq = map("type", "mq", "status", "ERROR", "completionCode", 2,
+                "reasonCode", 2059, "reason", "MQRC_Q_MGR_NOT_AVAILABLE", "error", reason,
+                "queueManager", "QM1", "physicalInstance", "one", "host", "localhost",
+                "port", 1414, "channel", "APP.CHANNEL", "transport", "client", "payload", "private payload");
+        ToolInvocationResult projectedMq = CollectorExceptionEvidence.project(new ToolInvocationResult("mq", "mq", null,
+                map("status", "ERROR"), false, ActionExecutionResult.evidence("mq", mq)));
+        Map<?, ?> mqNode = (Map<?, ?>) ((List<?>) ((Map<?, ?>) projectedMq.evidence().get("mq")).get("invocations")).get(0);
+        assertEquals(2, mqNode.get("completionCode"));
+        assertEquals(2059, mqNode.get("reasonCode"));
+        assertEquals("MQRC_Q_MGR_NOT_AVAILABLE", mqNode.get("reason"));
+        assertEquals(2, ((Map<?, ?>) mqNode.get("error")).get("completionCode"));
+        assertEquals("MQRC_Q_MGR_NOT_AVAILABLE", ((Map<?, ?>) mqNode.get("error")).get("reason"));
+        assertFalse(mqNode.containsKey("payload"));
+        assertEquals(projectedMq.evidence(), CollectorExceptionEvidence.project(projectedMq).evidence());
+
+        String secret = "http-private-token-739";
+        String safeUrl = "https://api.example/orders/731";
+        Map<String, Object> http = map("status", "ERROR", "helperId", "orders", "method", "POST",
+                "url", safeUrl, "statusCode", 503, "input", map("token", secret),
+                "error", map("type", "HTTP_ERROR", "message", "Denied " + secret),
+                "body", secret, "query", map("token", secret));
+        ToolInvocationResult projectedHttp = CollectorExceptionEvidence.project(new ToolInvocationResult("http", "http", secret,
+                map("status", "ERROR"), false, ActionExecutionResult.evidence("http", http)));
+        Map<?, ?> httpNode = (Map<?, ?>) ((List<?>) ((Map<?, ?>) projectedHttp.evidence().get("http")).get("invocations")).get(0);
+        assertEquals("POST", httpNode.get("method"));
+        assertEquals(safeUrl, httpNode.get("url"));
+        assertEquals(503, httpNode.get("statusCode"));
+        assertFalse(httpNode.containsKey("body"));
+        assertFalse(httpNode.containsKey("query"));
+        assertFalse(att.validation.JsonSupport.write(projectedHttp.evidence()).contains(secret));
+        assertEquals(projectedHttp.evidence(), CollectorExceptionEvidence.project(projectedHttp).evidence());
+    }
+
     private final class PrivateCollectorEngine extends UnifiedTemplateEngine {
         private PrivateCollectorEngine() { super(null, new PrivateCollectorBuiltIns()); }
         @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,

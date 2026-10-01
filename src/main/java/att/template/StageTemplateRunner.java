@@ -762,7 +762,7 @@ public class StageTemplateRunner {
             if (exitCode != null) error.put("exitCode", exitCode);
             if (invocation.get("error") instanceof Map) {
                 Map<?, ?> nativeError = (Map<?, ?>) invocation.get("error");
-                for (String field : new String[] {"type", "sqlState", "vendorCode", "cancellation"}) {
+                for (String field : new String[] {"type", "sqlState", "vendorCode", "cancellation", "completionCode", "reasonCode", "reason"}) {
                     if (nativeError.containsKey(field)) error.put(field, nativeError.get(field));
                 }
             }

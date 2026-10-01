@@ -3649,7 +3649,15 @@ summary（<code>type</code>、bounded/redacted
 text 或 raw result。失败 command 的 <code>stdout</code> 可作为独立
 diagnostic evidence，按与 <code>stderr</code> 相同的
 bounded/redacted/omission policy 处理；不会作为
-<code>error.message</code> 或恢复失败 <code>result</code>。</p>
+<code>error.message</code> 或恢复失败 <code>result</code>。 MQ evidence
+的 root 和 error summary 会保留
+<code>completionCode</code>、<code>reasonCode</code> 和 bounded symbolic
+<code>reason</code>。安全 location metadata 包括 HTTP
+<code>method</code>/executor-sanitized <code>url</code>（不包含
+query），以及 MQ
+<code>queueManager</code>、<code>physicalInstance</code>、<code>host</code>、<code>port</code>、<code>channel</code>
+和 <code>transport</code>；URL 额外受 free-text input-redaction/omission
+policy 保护。</p>
 <p>有 retry 时，请查看
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>。即使后一个
 attempt 成功，较早的 failed collector record 仍会保留；top-level
