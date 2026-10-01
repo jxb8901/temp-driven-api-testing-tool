@@ -43,7 +43,7 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 
 ### Dbhelper 配置
 
-| 路径 | 必填/默認值 | 約束 |
+| 路徑 | 必填/默認值 | 約束 |
 |---|---|---|
 | `schemaVersion` | 必填 | `att-dbhelper/v2.6` |
 | `id` | 必填 | `[A-Za-z_][A-Za-z0-9_-]*`；全包忽略大小寫後唯一 |
@@ -51,18 +51,18 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 | `connection.url` | 必填 | 非空 JDBC URL |
 | `connection.username/password` | `""` | 字符串；可用完整 `${ENV:NAME}` |
 | `connection.driverClass` | `""` | 可選顯式 class；默認 JDBC discovery |
-| `connection.properties` | `{}` | 字符串键和值；敏感键在錯誤中淨化 |
-| `connection.readOnly` | `false` | 布尔值；update Action 在 prepare 前拒絕 |
+| `connection.properties` | `{}` | 字符串鍵和值；敏感鍵在錯誤中淨化 |
+| `connection.readOnly` | `false` | 布爾值；update Action 在 prepare 前拒絕 |
 | `connection.isolation` | `driverDefault` | `driverDefault`／`readUncommitted`／`readCommitted`／`repeatableRead`／`serializable` |
 | `statement.timeoutSeconds` | `30` | 每個 statement 使用的整數 1–3600 秒 |
 | `transaction.scope` | `case` | `case` 或 `statement` |
 | `transaction.onEnd` | `rollback` | `commit` 或 `rollback` |
 | `result.maxRows` | `1000` | 整數 1–1000000 |
 | `result.maxCellBytes` | `1048576` | 整數 1–1073741824 |
-| `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小于 maxCellBytes |
+| `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小於 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
 | `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感業務數據 |
-| `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大于 `maxSize`，timeout 至少 250ms |
+| `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
 
-validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 會在執行前校驗。
+validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
 

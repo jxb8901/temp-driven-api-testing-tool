@@ -1,6 +1,6 @@
 ## 11 結果、報告與 Evidence
 
-### 运行目錄
+### 運行目錄
 
 ```text
 <outputDirectory>/<RunID>/
@@ -14,17 +14,17 @@
 └── executions/<EXEC.ID>/...
 ```
 
-Run ID 和 Case ID 在校驗後保持原样。只有 `run.yaml` 状態為 `COMPLETE` 才表示运行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調试。
+Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPLETE` 才表示運行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調試。
 
 ### 人類可讀 HTML 報告
 
-`report/index.html` 是主要終端用户報表。可以直接從磁盘打開。组按 `workbookId.groupId` 汇总；界面把 `groupId` 標记為 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標题的升序/降序排序。Duration 按數值排序。
+`report/index.html` 是主要終端用戶報表。可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
-展開的 Case 包含完整 Case ID、名称、状態、持續時間、Expected 和 Actual 结果、每條记錄 Action 结果的一行、詳細執行日志，以及 `.log`/`case.yaml` 的顯式链接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 联接；Actual 是所有非空运行時 `actual` 的有序 LF 联接。
+展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
 
 ### Tool evidence collector 失敗
 
-Evidence collector 是 operation 完成後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可以维持 `PASS`，而 collector 會獨立记錄為 `ERROR`：
+Evidence collector 是 operation 完成後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可以維持 `PASS`，而 collector 會獨立記錄為 `ERROR`：
 
 ```yaml
 evidence:
@@ -35,43 +35,43 @@ evidence:
     onFailure: continue
 ```
 
-請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等价的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 時會在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 則记錄 collector failure 及其 source file/field。`error.message` 會從 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 會留在 `evidence`。Failed collector evidence 會被 bounded/redacted；raw input、payload、argv、output、resolved command text 與 failed `result` 不會發布。完整 projection、numeric budgets 與 security guarantees 見 [Appendix D](appendices/limits_defaults.md)。
+請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等價的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 時會在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 則記錄 collector failure 及其 source file/field。`error.message` 會從 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 會留在 `evidence`。Failed collector evidence 會被 bounded/redacted；raw input、payload、argv、output、resolved command text 與 failed `result` 不會發布。完整 projection、numeric budgets 與 security guarantees 見 [Appendix D](appendices/limits_defaults.md)。
 
-有 retry 時，請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使後一個 attempt 成功，较早的 failed collector record 仍會保留；top-level collector record 代表最後／胜出的 attempt。使用 `onFailure: stop` 時，Action 可以失敗，但其 diagnostic 仍會包含 collector root-cause message 和保留的 evidence。同一 structured record 也會寫入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打開 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw output。
+有 retry 時，請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使後一個 attempt 成功，較早的 failed collector record 仍會保留；top-level collector record 代表最後／勝出的 attempt。使用 `onFailure: stop` 時，Action 可以失敗，但其 diagnostic 仍會包含 collector root-cause message 和保留的 evidence。同一 structured record 也會寫入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打開 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw output。
 
-### 结果 Workbook
+### 結果 Workbook
 
-ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的结果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。结果回填使用與 testcase loader 相同的 Excel 顯示格式和空白规范化规則讀取 Case ID，因此带前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
+ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的結果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。結果回填使用與 testcase loader 相同的 Excel 顯示格式和空白規範化規則讀取 Case ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
 
 ### JUnit XML
 
 每個 ATT Case 對應一個 `<testcase>`：
 
-| ATT 状態 | JUnit 表示 |
+| ATT 狀態 | JUnit 表示 |
 |---|---|
-| PASS | 無 failure 子節点 |
+| PASS | 無 failure 子節點 |
 | FAIL | `<failure>` |
 | ERROR | `<error>` |
 | SKIPPED | `<skipped>` |
 | INVALID | `<error type="ATTValidationError">` |
 
-文本會被 XML 轉義。JUnit XML 與 HTML 使用 `report.junit.caseLogEmbedThresholdBytes`。低于或等于阈值的日志會被嵌入；更大的日志使用相對链接。`0` 始終使用链接。
+文本會被 XML 轉義。JUnit XML 與 HTML 使用 `report.junit.caseLogEmbedThresholdBytes`。低於或等於閾值的日誌會被嵌入；更大的日誌使用相對鏈接。`0` 始終使用鏈接。
 
-### CI JSON 汇总
+### CI JSON 彙總
 
-`ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、环境、時間、聚合状態/統計、持續時間統計、每個 Case 记錄、诊斷計數、報表/產物路径以及輸入清單哈希。
+`ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。
 
-### 运行清單與可復现性
+### 運行清單與可復現性
 
-`run.yaml` 使用 `schemaVersion: att-run/v2.1`，记錄 ATT/構建身份、Java/OS/locale/timezone、校驗模式、环境、時間戳、状態/摘要、輸出路径，以及有效配置、Tool group 文件、call-backed Tool SQL 文件（`tool-sql`）、Workbook、Sidecar、解析 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
+`run.yaml` 使用 `schemaVersion: att-run/v2.1`，記錄 ATT/構建身份、Java/OS/locale/timezone、校驗模式、環境、時間戳、狀態/摘要、輸出路徑，以及有效配置、Tool group 文件、call-backed Tool SQL 文件（`tool-sql`）、Workbook、Sidecar、解析 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
 
-### 文档、歸档和清理
+### 文檔、歸檔和清理
 
 | 命令 | 輸出/行為 |
 |---|---|
-| `docs` | 在 `build/docs/index.html` 生成可搜索离線包文档；Testcases 按 Workbook 和 Sheet 分组 |
-| `report --run-id <id>` | 從完成證據重建两個 HTML 報告 |
-| `build` | 歸档最新完成 run，不執行测试 |
+| `docs` | 在 `build/docs/index.html` 生成可搜索離線包文檔；Testcases 按 Workbook 和 Sheet 分組 |
+| `report --run-id <id>` | 從完成證據重建兩個 HTML 報告 |
+| `build` | 歸檔最新完成 run，不執行測試 |
 | `clean` | 刪除配置輸出目錄、`build/docs` 與 `build/att-*.tar.gz` |
 
 ### Run、execution 與 evidence 導覽
@@ -89,7 +89,7 @@ DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 sche
 
 ### 生成輸出模式摘要
 
-| 產物 | 顶層必需契約 |
+| 產物 | 頂層必需契約 |
 |---|---|
 | `run.yaml` | `schemaVersion`、`att`、`runtime`、`run`、`validation`、`inputs`、`cases`、`summary`、`outputs` |
 | Validation JSON | `schemaVersion`、`attVersion`、`valid`、`mode`、`summary`、`diagnostics` |

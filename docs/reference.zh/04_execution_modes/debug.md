@@ -84,9 +84,9 @@ Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`�
 
 #### CLI configuration examples
 
-`run`、`debug` 和 `load` 默認采用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource attempt、retry、assertion 和錯誤事件會即時寫出並及時 flush。實時 Case-log 镜像復用與 `case.log` 相同的脱敏 append 路径；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事實來源。並發 Case-log 區塊會带有 Case ID 前缀。`--quiet` 抑制詳細實時進度，但保留最終摘要和錯誤。使用 `--format json` 時，机器可讀內容仍寫入 stdout，實時進度寫入 stderr。Load 只定期輸出有界計數/速率並節流錯誤，不會為每個成功 iteration 輸出一大段內容。
+`run`、`debug` 和 `load` 默認採用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource attempt、retry、assertion 和錯誤事件會即時寫出並及時 flush。實時 Case-log 鏡像復用與 `case.log` 相同的脫敏 append 路徑；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事實來源。並發 Case-log 區塊會帶有 Case ID 前綴。`--quiet` 抑制詳細實時進度，但保留最終摘要和錯誤。使用 `--format json` 時，機器可讀內容仍寫入 stdout，實時進度寫入 stderr。Load 只定期輸出有界計數/速率並節流錯誤，不會為每個成功 iteration 輸出一大段內容。
 
-以下每個文件都是完整的 `att-debug/v1.1` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和臨時覆盖值的不同寫法。
+以下每個文件都是完整的 `att-debug/v1.1` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
 
 Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
 
@@ -109,7 +109,7 @@ stage:
 ./att.sh debug template PAYMENT_INVOKE
 ```
 
-Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆盖同名 Case-level input，Stage 结束後恢復。對應的 `CASE.*` 路径仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據视圖。
+Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆蓋同名 Case-level input，Stage 結束後恢復。對應的 `CASE.*` 路徑仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據視圖。
 
 Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
 
@@ -133,9 +133,9 @@ inputs:
 ./att.sh debug flow common.compose.v1
 ```
 
-Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果没有名為 `inputs` 的業務字段，舊定義仍可用只讀兼容视圖 `${CASE.inputs.source}`，但不會把整棵 `inputs` 子樹重復寫入 `EXEC.INPUT`。
+Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果沒有名為 `inputs` 的業務字段，舊定義仍可用只讀兼容視圖 `${CASE.inputs.source}`，但不會把整棵 `inputs` 子樹重復寫入 `EXEC.INPUT`。
 
-分组 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
+分組 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.1
@@ -156,9 +156,9 @@ tools:
 ./att.sh debug tool fpp.invokeApi
 ```
 
-`invokeApi` 是 Tool group 內的 local key；參數值必须是 Tool descriptor 接受的 scalar 或 list。Standalone Tool adapter 不接受用 map literal 表示普通 Tool 參數。
+`invokeApi` 是 Tool group 內的 local key；參數值必須是 Tool descriptor 接受的 scalar 或 list。Standalone Tool adapter 不接受用 map literal 表示普通 Tool 參數。
 
-未分组 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
+未分組 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.1
@@ -173,9 +173,9 @@ arguments:
 ./att.sh debug tool invokePaymentApi
 ```
 
-未分组 Tool 使用根 `arguments`；不需要再包一層 `tools.invokePaymentApi.arguments`。
+未分組 Tool 使用根 `arguments`；不需要再包一層 `tools.invokePaymentApi.arguments`。
 
-臨時覆盖自動發现的 sidecar：
+臨時覆蓋自動發現的 sidecar：
 
 ```sh
 ./att.sh debug template PAYMENT_INVOKE \
@@ -183,7 +183,7 @@ arguments:
   --output-dir /tmp/att-debug --format json
 ```
 
-明确指定的 `--input` 優先于目標旁邊的 `debug.yaml`。缺少文件、schema 錯誤、未知或缺少 Tool 參數等輸入／配置錯誤會返回 exit code `2`，並在诊斷中標出 `Debug input: ...`。
+明確指定的 `--input` 優先於目標旁邊的 `debug.yaml`。缺少文件、schema 錯誤、未知或缺少 Tool 參數等輸入／配置錯誤會返回 exit code `2`，並在診斷中標出 `Debug input: ...`。
 
 保護字段例子：
 
@@ -196,5 +196,5 @@ case:
   STAGES: {shouldNotReplace: true}
 ```
 
-即使輸入包含這些字段，`EXEC.ID`、`EXEC.RUN_ID`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及對應的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。模式及 scheduler 诊斷不會暴露給 expressions。`EXEC.STAGES` 不是 canonical Context 節点；Stage 历史仍由舊的 `CASE.STAGES` 證據视圖保存。诊斷時查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
+即使輸入包含這些字段，`EXEC.ID`、`EXEC.RUN_ID`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及對應的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。模式及 scheduler 診斷不會暴露給 expressions。`EXEC.STAGES` 不是 canonical Context 節點；Stage 歷史仍由舊的 `CASE.STAGES` 證據視圖保存。診斷時查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
 

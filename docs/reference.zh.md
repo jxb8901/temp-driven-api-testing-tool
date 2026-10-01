@@ -84,7 +84,7 @@ Reference 定義 public contract；README、Quick Start 與 examples 按特定�
 
 #### Workbook、Sidecar 和 Snapshot 之間的關系
 
-每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必须具有相同的基名且位于同一目錄：
+每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
 
 ```text
 testcase/payment_regression.xlsx
@@ -92,7 +92,7 @@ testcase/payment_regression.yaml
 testcase/payment_regression.xml
 ```
 
-Sidecar 將 Excel 结構映射為 ATT 概念。它負责 sheet 映射、表頭、Testcase 數據、有序 Stage 及可選報告列標簽；timeout/retry 不屬于 Workbook 配置。
+Sidecar 將 Excel 結構映射為 ATT 概念。它負責 sheet 映射、表頭、Testcase 數據、有序 Stage 及可選報告列標簽；timeout/retry 不屬於 Workbook 配置。
 
 ```yaml
 schemaVersion: att-sidecar/v2.2
@@ -112,11 +112,11 @@ stages:
     onFailure: stop
 ```
 
-根 `id` 是必需的，並且必须在整個包中唯一。`excel.sheet` 可以接受一個 sheet 名称，或以逗號分隔的 `groupId=sheetName` 條目。如果只給出一個 sheet 且没有 group ID，ATT 會使用 `default`。完整 Case ID 的形式始終是 `workbookId.groupId.rowCaseId`，並且必须在整個包中唯一。
+根 `id` 是必需的，並且必須在整個包中唯一。`excel.sheet` 可以接受一個 sheet 名稱，或以逗號分隔的 `groupId=sheetName` 條目。如果只給出一個 sheet 且沒有 group ID，ATT 會使用 `default`。完整 Case ID 的形式始終是 `workbookId.groupId.rowCaseId`，並且必須在整個包中唯一。
 
-在修改 Excel 後，執行 `./att.sh snapshot --suite testcase/payment_regression.xlsx`。生成的 `payment_regression.xml` 使用模式 `att-testcases/v2.4`，並僅存儲歸一化後的 Sidecar 映射語義。它保留 group、Case、標簽、map/list 和 Stage 順序，使用顯式值類型，並排除样式和無關 Workbook 內容。包含 LF 或 XML 特殊字符 `&`、`<`、`>` 的字符串值會使用 CDATA；文字 `]]>` 會被拆分成相邻 CDATA 段，並在解析時精确重建。LF 前的空格或制表符會使用 `&#32;`/`&#9;` 插入两個 CDATA 段之間，從而保留值而不触發 Git 行尾空白警告。請审查並提交該 XML；不要手工修改它。
+在修改 Excel 後，執行 `./att.sh snapshot --suite testcase/payment_regression.xlsx`。生成的 `payment_regression.xml` 使用模式 `att-testcases/v2.4`，並僅存儲歸一化後的 Sidecar 映射語義。它保留 group、Case、標簽、map/list 和 Stage 順序，使用顯式值類型，並排除樣式和無關 Workbook 內容。包含 LF 或 XML 特殊字符 `&`、`<`、`>` 的字符串值會使用 CDATA；文字 `]]>` 會被拆分成相鄰 CDATA 段，並在解析時精確重建。LF 前的空格或製表符會使用 `&#32;`/`&#9;` 插入兩個 CDATA 段之間，從而保留值而不觸發 Git 行尾空白警告。請審查並提交該 XML；不要手工修改它。
 
-普通 `run` 和每一種 `validate` 模式都會保持只讀，如果 XML 缺失、無效、非规范或過期，則會在輸出创建前失敗。`run --update-snapshot` 會顯式允許 ATT 在應用相同驗證與校驗规則前，僅為選中的完整 Workbook 刷新已更改的 Snapshot。它不會寫入部分 Case/標簽 Snapshot，不會在更新期間調用 Tool，拒絕 Snapshot 符號链接，並且當與 `--dry-run` 组合使用時仍會執行授權更新。字節內容完全相同的 Snapshot 不會被重寫。
+普通 `run` 和每一種 `validate` 模式都會保持只讀，如果 XML 缺失、無效、非規範或過期，則會在輸出創建前失敗。`run --update-snapshot` 會顯式允許 ATT 在應用相同驗證與校驗規則前，僅為選中的完整 Workbook 刷新已更改的 Snapshot。它不會寫入部分 Case/標簽 Snapshot，不會在更新期間調用 Tool，拒絕 Snapshot 符號鏈接，並且當與 `--dry-run` 組合使用時仍會執行授權更新。字節內容完全相同的 Snapshot 不會被重寫。
 
 #### 映射數據列
 
@@ -137,7 +137,7 @@ alias=ColumnName(yaml)
 dataColumns: amount=金額, note="備註,補充", formula="規則=值", payload="請求(yaml)"(yaml)
 ```
 
-最後的 `(yaml)` 是 ATT 的解析標记。在最後一個例子中，物理 Excel 表頭名是 `請求(yaml)`。
+最後的 `(yaml)` 是 ATT 的解析標記。在最後一個例子中，物理 Excel 表頭名是 `請求(yaml)`。
 
 #### 空白值
 
@@ -145,13 +145,13 @@ dataColumns: amount=金額, note="備註,補充", formula="規則=值", payload=
 
 必需 Stage 選擇器會拒絕空白值。可選 Stage 如果選擇器為空白，則跳過。
 
-#### 公式、日期、百分比和科学记數法單元格
+#### 公式、日期、百分比和科學記數法單元格
 
-V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 Stage 數據列中使用公式單元格。公式定義與缓存/顯示结果可能不一致，因此不能用于生成可信的語義 Snapshot。請在 Excel 中重新計算後將结果粘贴為字面值，或者在專门的 ATT 步骤中進行計算。
+V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 Stage 數據列中使用公式單元格。公式定義與緩存/顯示結果可能不一致，因此不能用於生成可信的語義 Snapshot。請在 Excel 中重新計算後將結果粘貼為字面值，或者在專門的 ATT 步驟中進行計算。
 
-與配置 Testcase 列相交且位于 `excel.headerRows` 以下的合並區域也會被拒絕。完全位于配置表頭區域內的合並展示單元格則允許。
+與配置 Testcase 列相交且位於 `excel.headerRows` 以下的合並區域也會被拒絕。完全位於配置表頭區域內的合並展示單元格則允許。
 
-對于非公式單元格，ATT 導入顯示文本。其精确表示遵循 Workbook 單元格格式和运行時區域设置：
+對於非公式單元格，ATT 導入顯示文本。其精確表示遵循 Workbook 單元格格式和運行時區域設置：
 
 | Excel 值與格式 | Context 值 |
 |---|---|
@@ -160,11 +160,11 @@ V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 S
 | `123000` 格式化為 `0.00E+00` | `1.23E+05` |
 | `000123` 以文本形式存儲/格式化 | `000123` |
 
-普通列仍然是字符串。`(yaml)` 列可能將顯示文本轉換為其他 YAML 類型。對于日期、百分比、科学計數、账號或代碼這類文本，應該使用引號把 YAML 標量包起來，以便保持為字符串。
+普通列仍然是字符串。`(yaml)` 列可能將顯示文本轉換為其他 YAML 類型。對於日期、百分比、科學計數、賬號或代碼這類文本，應該使用引號把 YAML 標量包起來，以便保持為字符串。
 
 #### 多行表頭
 
-`headerRows: 2` 表示第 1–2 行是表頭，數據從第 3 行開始。ATT 會扫描每個物理列從上到下，使用最後一個非空且已去除首尾空白的表頭單元格：
+`headerRows: 2` 表示第 1–2 行是表頭，數據從第 3 行開始。ATT 會掃描每個物理列從上到下，使用最後一個非空且已去除首尾空白的表頭單元格：
 
 ```text
 第 1 行：基础数据 |           | 执行 |
@@ -172,44 +172,44 @@ V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 S
 有效值：Case ID, Case name, Template, Parameters
 ```
 
-ATT 不會拼接父子標簽。表頭匹配會移除空格、制表符、換行符、NBSP 以及其他 Unicode 空白字符；匹配其余部分仍區分大小寫。例如，`案例 編號`、`案例\n編號`、`案例編號` 會被视為同一列。每個有效表頭在歸一化後必须唯一，因此僅因空白差異而不同的两個物理表頭會被認為是重復表頭錯誤。Testcase 加載和结果 Workbook 寫回使用相同的投影逻辑；结果列如果原本不存在，則會寫入最終表頭行。
+ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行符、NBSP 以及其他 Unicode 空白字符；匹配其餘部分仍區分大小寫。例如，`案例 編號`、`案例\n編號`、`案例編號` 會被視為同一列。每個有效表頭在歸一化後必須唯一，因此僅因空白差異而不同的兩個物理表頭會被認為是重復表頭錯誤。Testcase 加載和結果 Workbook 寫回使用相同的投影邏輯；結果列如果原本不存在，則會寫入最終表頭行。
 
-#### WorkbookSidecar
+#### Workbook / Sidecar
 
 | 對象 | 允許屬性 | 必填/約束 |
 |---|---|---|
 | 根對象 | `schemaVersion`、`id`、`excel`、`stages`、`report`、`x-*` | `schemaVersion`、包內唯一 `id`、`excel`、非空 `stages` 必需 |
 | `excel` | `sheet`、`headerRows`、`caseId`、`tags`、`dataColumns` | `sheet`、`caseId`、`tags` 必需；`headerRows >= 1` |
-| `stages[]` | `key`、`template`、`dataColumns`、`required`、`runWhen`、`onFailure` | `key`/`template` 必需；`key` 不能含点號 |
+| `stages[]` | `key`、`template`、`dataColumns`、`required`、`runWhen`、`onFailure` | `key`/`template` 必需；`key` 不能含點號 |
 | `report` | `columns` | 值為字符串 |
 
-只有 Sidecar 根對象允許 `x-*`；`excel`、stages 和 Sidecar `report` 拒絕擴展和其他未知字段。Sidecar 不能覆盖 timeout、retry、Tool、Template 根、环境或輸出根。
+只有 Sidecar 根對象允許 `x-*`；`excel`、stages 和 Sidecar `report` 拒絕擴展和其他未知字段。Sidecar 不能覆蓋 timeout、retry、Tool、Template 根、環境或輸出根。
 
 ### 2.2 Stage
 
-每個 SidecarStage 都有一個不含点號的 `key`，以及一個命名物理 Excel 選擇器列的 `template` 字段。選擇器單元格可以包含符號 Template 名、完整相對 Template 路径，或 YAML 映射：
+每個 Sidecar Stage 都有一個不含點號的 `key`，以及一個命名物理 Excel 選擇器列的 `template` 字段。選擇器單元格可以包含符號 Template 名、完整相對 Template 路徑，或 YAML 映射：
 
 | 單元格值 | 含義 |
 |---|---|
-| `PAYMENT_INVOKE` | 符號名称簡寫 |
-| `payment/local/CT001` | 相對 `templates.root` 的完整路径簡寫 |
-| `name: PAYMENT_INVOKE` | 明确的符號名称映射 |
-| `name: PAYMENT_INVOKE` 加其他键 | Template 選擇 + Stage 私有行數據 |
+| `PAYMENT_INVOKE` | 符號名稱簡寫 |
+| `payment/local/CT001` | 相對 `templates.root` 的完整路徑簡寫 |
+| `name: PAYMENT_INVOKE` | 明確的符號名稱映射 |
+| `name: PAYMENT_INVOKE` 加其他鍵 | Template 選擇 + Stage 私有行數據 |
 
-ATT 會先將 `name` 作為全局唯一的符號名解析。只有在没有符號名匹配時，才會尝试完整相對 Template 路径。絕對路径、部分路径、以及逃逸出 `templates.root` 的路径都是非法的。
+ATT 會先將 `name` 作為全局唯一的符號名解析。只有在沒有符號名匹配時，才會嘗試完整相對 Template 路徑。絕對路徑、部分路徑、以及逃逸出 `templates.root` 的路徑都是非法的。
 
-所有選擇器映射键（包括 `name`）都會復制到 Stage Context 中。`stages[].dataColumns` 會增加更多 Stage 私有值。選擇器映射與 Stage 數據列之間如果出现重復键，則報錯。
+所有選擇器映射鍵（包括 `name`）都會復制到 Stage Context 中。`stages[].dataColumns` 會增加更多 Stage 私有值。選擇器映射與 Stage 數據列之間如果出現重復鍵，則報錯。
 
 
 Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](reference.zh/08_reliability_execution_control.md)。
 
 ### 2.3 Template
 
-只有直接包含 template.yaml 的目錄才是可呼叫 Template。ATT 使用 att-template/v3.3。每個 Template 都需要非空且有序的 actions map，以及 description。
+只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.3。每個 Template 都需要非空且有序的 actions map，以及 description。
 
 每個 Action 依類型使用不同契約。Render 回傳 DocumentValue，不寫入檔案。Tool/DB/HTTP/MQ action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
-完整欄位、範例、typed result/evidence model、DocumentValue 行為、HTTP/MQ boundary 與 migration guidance，請參閱[Action 與型別化值](reference.zh/14_actions.md)。[Expressions and Built-ins](reference.zh/07_expressions.md) 說明共用 expression engine 與 Load ID initialization scope。
+完整欄位、範例、typed result/evidence model、DocumentValue 行為、HTTP/MQ boundary 與 migration guidance，請參閱[Action 與型別化值](reference.zh/14_actions.md)。[Expressions and Built-ins](reference.zh/07_expressions.md) 定義共用 expression language；[Load](reference.zh/04_execution_modes/load.md) 定義 ID initialization scope。
 
 ### 2.4 Flow
 
@@ -546,7 +546,7 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 - `and`
 - `or`
 
-`like` 是大小寫不敏感的操作符關键词，但规范寫法使用小寫。它匹配完整值，並使用 SQL 风格通配符：
+`like` 是大小寫不敏感的操作符關鍵詞，但規範寫法使用小寫。它匹配完整值，並使用 SQL 風格通配符：
 
 - `%` 匹配零個或多個字符
 - `_` 匹配恰好一個字符
@@ -554,32 +554,32 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 
 ### 內建函數
 
-內建函數通過 `#{...}` 調用。Canonical 名称使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 與 `seq.*` package；舊 flat 名称保留為兼容 alias。Tool group 同样以 `group.tool` 组成 package-like 調用名；配置 Tool 不得占用 built-in package root 或任何 canonical／legacy built-in 名称。
+內建函數通過 `#{...}` 調用。Canonical 名稱使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 與 `seq.*` package；舊 flat 名稱保留為兼容 alias。Tool group 同樣以 `group.tool` 組成 package-like 調用名；配置 Tool 不得佔用 built-in package root 或任何 canonical／legacy built-in 名稱。
 
 | 函數 | 目的 | 示例 |
 |---|---|---|
-| `seq.next` | 返回 run-scoped `Long`；可選名称及宽度用于獨立計數或精确宽度的零填充文字 | `#{seq.next('payment', 10)}` |
+| `seq.next` | 返回 run-scoped `Long`；可選名稱及寬度用於獨立計數或精確寬度的零填充文字 | `#{seq.next('payment', 10)}` |
 | `str.upper/lower/trim` | 大小寫與首尾空白處理 | `#{str.upper(value=${EXEC.INPUT.currency})}` |
-| `str.ltrim/rtrim` | 去除前導／尾随空白 | `#{str.ltrim(${EXEC.INPUT.reference})}` |
-| `str.length` | 返回文本长度 | `#{str.length(value=${EXEC.INPUT.reference})}` |
+| `str.ltrim/rtrim` | 去除前導／尾隨空白 | `#{str.ltrim(${EXEC.INPUT.reference})}` |
+| `str.length` | 返回文本長度 | `#{str.length(value=${EXEC.INPUT.reference})}` |
 | `str.concat` | 拼接參數 | `#{str.concat(a='PAY-', b=${EXEC.INPUT.caseId})}` |
 | `str.substr/indexOf` | 截取子串／返回位置 | `#{str.substr(${EXEC.INPUT.reference}, 0, 8)}` |
-| `str.contains/startsWith/endsWith` | 测试字面包含、前缀、後缀 | `#{str.contains(${EXEC.INPUT.message}, 'SUCCESS')}` |
+| `str.contains/startsWith/endsWith` | 測試字面包含、前綴、後綴 | `#{str.contains(${EXEC.INPUT.message}, 'SUCCESS')}` |
 | `str.replace` | 字面替換 | `#{str.replace(${EXEC.INPUT.reference}, '-', '')}` |
 | `str.lpad/rpad` | 左／右填充 | `#{str.lpad(${EXEC.INPUT.sequence}, 8, '0')}` |
 | `str.repeat` | 重復值 | `#{str.repeat(3, '9')}` |
 | `date.sysdate/systimestamp` | 返回系統日期／時間戳 | `#{date.sysdate('yyyyMMdd')}` |
 | `date.format` | 格式化 ISO 日期 | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
-| `date.add` | 日期增减 | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `file.exists/directoryExists` | 测试常规文件／目錄 | `#{file.exists(${EXEC.INPUT.requestText})}` |
-| `file.size/mkdirs` | 返回文件大小／创建目錄樹 | `#{file.size(${EXEC.INPUT.requestText})}` |
+| `date.add` | 日期增減 | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
+| `file.exists/directoryExists` | 測試常規文件／目錄 | `#{file.exists(${EXEC.INPUT.requestText})}` |
+| `file.size/mkdirs` | 返回文件大小／創建目錄樹 | `#{file.size(${EXEC.INPUT.requestText})}` |
 | `file.copy/move/delete` | 復制、移動、刪除文件 | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
 | `misc.string/number/boolean` | 類型轉換與歸一化 | `#{misc.number(value='12.50')}` |
 | `misc.coalesce/nvl` | 返回非空值或默認值 | `#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}` |
-| `misc.iif` | 從布尔值選擇两個值之一 | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
-| `misc.randomChoice` | 從輸入中随机選擇 | `#{misc.randomChoice('A', 'B', 'C')}` |
-| `misc.dbText` | 將穩定 typed DB result 格式化為 SQL*Plus 风格文字 | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
-| `misc.prettyPrint` | 將 Map/List/array/tree 确定性格式化為縮進文字 | `#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
+| `misc.iif` | 從布爾值選擇兩個值之一 | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
+| `misc.randomChoice` | 從輸入中隨機選擇 | `#{misc.randomChoice('A', 'B', 'C')}` |
+| `misc.dbText` | 將穩定 typed DB result 格式化為 SQL*Plus 風格文字 | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
+| `misc.prettyPrint` | 將 Map/List/array/tree 確定性格式化為縮進文字 | `#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
 
 #### `seq.next` run-scoped 序列
 
@@ -602,9 +602,9 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 
 `width` 必須是 1 至 1000 的整數。序列名稱必須是非空白文字；只有一個位置參數時，數字代表 `width`，字串代表序列名稱。超過兩個參數、混合具名與位置參數、無效參數型別、空白名稱、小數／零／負數／超出範圍的 width 都會報錯；diagnostic 會指出 `seq.next` 及錯誤的參數數量、型別或範圍。若補零後的數值位數超過 `width`，或底層 `Long` 計數器溢位，求值會明確失敗；ATT 不會截斷序列值，也不會默默超出指定寬度。
 
-`misc.dbText` 只接受一個位置參數或具名 `value`。參數必须是直接 DB Action、DB expression 或 DB-backed Tool 返回的穩定 query／update result。它與 DB `output.result` 的 text presentation 共用同一個确定性 formatter，並且没有 JDBC、transaction、connection 或 cache side effect。
+`misc.dbText` 只接受一個位置參數或具名 `value`。參數必須是直接 DB Action、DB expression 或 DB-backed Tool 返回的穩定 query／update result。它與 DB `output.result` 的 text presentation 共用同一個確定性 formatter，並且沒有 JDBC、transaction、connection 或 cache side effect。
 
-`misc.prettyPrint`（alias：`prettyPrint`、`format.pretty`）接受一個位置參數或具名 `value`，递歸格式化 Map、List、Iterable、array、scalar 與 null。Linked Map 保留插入順序，其他 Map 按 key 排序；輸出使用两個空格縮進，並带有循环和深度保護。它不會修改輸入值。
+`misc.prettyPrint`（alias：`prettyPrint`、`format.pretty`）接受一個位置參數或具名 `value`，遞歸格式化 Map、List、Iterable、array、scalar 與 null。Linked Map 保留插入順序，其他 Map 按 key 排序；輸出使用兩個空格縮進，並帶有循環和深度保護。它不會修改輸入值。
 
 ### Expression scope 與錯誤
 
@@ -736,9 +736,9 @@ Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`�
 
 #### CLI configuration examples
 
-`run`、`debug` 和 `load` 默認采用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource attempt、retry、assertion 和錯誤事件會即時寫出並及時 flush。實時 Case-log 镜像復用與 `case.log` 相同的脱敏 append 路径；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事實來源。並發 Case-log 區塊會带有 Case ID 前缀。`--quiet` 抑制詳細實時進度，但保留最終摘要和錯誤。使用 `--format json` 時，机器可讀內容仍寫入 stdout，實時進度寫入 stderr。Load 只定期輸出有界計數/速率並節流錯誤，不會為每個成功 iteration 輸出一大段內容。
+`run`、`debug` 和 `load` 默認採用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource attempt、retry、assertion 和錯誤事件會即時寫出並及時 flush。實時 Case-log 鏡像復用與 `case.log` 相同的脫敏 append 路徑；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事實來源。並發 Case-log 區塊會帶有 Case ID 前綴。`--quiet` 抑制詳細實時進度，但保留最終摘要和錯誤。使用 `--format json` 時，機器可讀內容仍寫入 stdout，實時進度寫入 stderr。Load 只定期輸出有界計數/速率並節流錯誤，不會為每個成功 iteration 輸出一大段內容。
 
-以下每個文件都是完整的 `att-debug/v1.1` 文档，展示 Template、Flow、分组 Tool、未分组 Tool 和臨時覆盖值的不同寫法。
+以下每個文件都是完整的 `att-debug/v1.1` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
 
 Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
 
@@ -761,7 +761,7 @@ stage:
 ./att.sh debug template PAYMENT_INVOKE
 ```
 
-Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆盖同名 Case-level input，Stage 结束後恢復。對應的 `CASE.*` 路径仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據视圖。
+Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆蓋同名 Case-level input，Stage 結束後恢復。對應的 `CASE.*` 路徑仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據視圖。
 
 Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
 
@@ -785,9 +785,9 @@ inputs:
 ./att.sh debug flow common.compose.v1
 ```
 
-Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果没有名為 `inputs` 的業務字段，舊定義仍可用只讀兼容视圖 `${CASE.inputs.source}`，但不會把整棵 `inputs` 子樹重復寫入 `EXEC.INPUT`。
+Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果沒有名為 `inputs` 的業務字段，舊定義仍可用只讀兼容視圖 `${CASE.inputs.source}`，但不會把整棵 `inputs` 子樹重復寫入 `EXEC.INPUT`。
 
-分组 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
+分組 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.1
@@ -808,9 +808,9 @@ tools:
 ./att.sh debug tool fpp.invokeApi
 ```
 
-`invokeApi` 是 Tool group 內的 local key；參數值必须是 Tool descriptor 接受的 scalar 或 list。Standalone Tool adapter 不接受用 map literal 表示普通 Tool 參數。
+`invokeApi` 是 Tool group 內的 local key；參數值必須是 Tool descriptor 接受的 scalar 或 list。Standalone Tool adapter 不接受用 map literal 表示普通 Tool 參數。
 
-未分组 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
+未分組 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.1
@@ -825,9 +825,9 @@ arguments:
 ./att.sh debug tool invokePaymentApi
 ```
 
-未分组 Tool 使用根 `arguments`；不需要再包一層 `tools.invokePaymentApi.arguments`。
+未分組 Tool 使用根 `arguments`；不需要再包一層 `tools.invokePaymentApi.arguments`。
 
-臨時覆盖自動發现的 sidecar：
+臨時覆蓋自動發現的 sidecar：
 
 ```sh
 ./att.sh debug template PAYMENT_INVOKE \
@@ -835,7 +835,7 @@ arguments:
   --output-dir /tmp/att-debug --format json
 ```
 
-明确指定的 `--input` 優先于目標旁邊的 `debug.yaml`。缺少文件、schema 錯誤、未知或缺少 Tool 參數等輸入／配置錯誤會返回 exit code `2`，並在诊斷中標出 `Debug input: ...`。
+明確指定的 `--input` 優先於目標旁邊的 `debug.yaml`。缺少文件、schema 錯誤、未知或缺少 Tool 參數等輸入／配置錯誤會返回 exit code `2`，並在診斷中標出 `Debug input: ...`。
 
 保護字段例子：
 
@@ -848,7 +848,7 @@ case:
   STAGES: {shouldNotReplace: true}
 ```
 
-即使輸入包含這些字段，`EXEC.ID`、`EXEC.RUN_ID`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及對應的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。模式及 scheduler 诊斷不會暴露給 expressions。`EXEC.STAGES` 不是 canonical Context 節点；Stage 历史仍由舊的 `CASE.STAGES` 證據视圖保存。诊斷時查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
+即使輸入包含這些字段，`EXEC.ID`、`EXEC.RUN_ID`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及對應的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。模式及 scheduler 診斷不會暴露給 expressions。`EXEC.STAGES` 不是 canonical Context 節點；Stage 歷史仍由舊的 `CASE.STAGES` 證據視圖保存。診斷時查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
 
 ### 6.3 Load 模式
 
@@ -1079,15 +1079,15 @@ Action result 規則見[Action 與型別化值](reference.zh/14_actions.md)；ty
 
 ### Tool 定義中的 `command` 表達式
 
-Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `arguments` 映射中聲明的键。canonical 文档及新配置應使用 `${input.<argument>}`：
+Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `arguments` 映射中聲明的鍵。canonical 文檔及新配置應使用 `${input.<argument>}`：
 
 | 形式 | 含義 |
 |---|---|
 | `${input.requestText}` | canonical Tool 本地輸入引用 |
 | `${TOOL.input.requestText}` | legacy 完整別名；會產生 `CONTEXT_TOOL_INPUT_SHORTHAND` |
-| `${requestText}` | deprecated shorthand；僅在唯一對應已聲明參數時兼容，並產生迁移 warning |
+| `${requestText}` | deprecated shorthand；僅在唯一對應已聲明參數時兼容，並產生遷移 warning |
 
-`${TOOL.input.argument}` 與 `${argument}` 只有在名称恰好對應當前 Tool 一個已聲明參數時才會接受，並產生 `CONTEXT_TOOL_INPUT_SHORTHAND`；`att validate` 會給出精确的 `${input.argument}` 替換。未聲明或有歧義的 shorthand 會報錯。command-backed 與 call-backed Tool 使用相同规則。
+`${TOOL.input.argument}` 與 `${argument}` 只有在名稱恰好對應當前 Tool 一個已聲明參數時才會接受，並產生 `CONTEXT_TOOL_INPUT_SHORTHAND`；`att validate` 會給出精確的 `${input.argument}` 替換。未聲明或有歧義的 shorthand 會報錯。command-backed 與 call-backed Tool 使用相同規則。
 
 例如：
 
@@ -1112,11 +1112,11 @@ tools:
         required: true
 ```
 
-每個 YAML command list item 在 render 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分词。ATT 不會啟動本地 shell。
+每個 YAML command list item 在 render 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
 
 #### 引號、Context value 與 atomic argv
 
-Tool call 內的引號屬于 ATT expression grammar，並不是 shell quote。外層 `'...'` 或 `"..."` delimiter 在調用前會移除；另一種引號是普通字符；與 delimiter 相同的引號可用反斜線 escape。Quoted value 內嵌 `${...}` 會做 interpolation；未加引號的 canonical Context path 則直接传递 typed value。
+Tool call 內的引號屬於 ATT expression grammar，並不是 shell quote。外層 `'...'` 或 `"..."` delimiter 在調用前會移除；另一種引號是普通字符；與 delimiter 相同的引號可用反斜線 escape。Quoted value 內嵌 `${...}` 會做 interpolation；未加引號的 canonical Context path 則直接傳遞 typed value。
 
 以下 Tool 會把每個輸入保持為一個 argv：
 
@@ -1138,7 +1138,7 @@ tools:
         required: true
 ```
 
-當 call 同時包含多層引號時，建议使用 YAML block scalar：
+當 call 同時包含多層引號時，建議使用 YAML block scalar：
 
 ```yaml
 singleQuote:
@@ -1166,22 +1166,22 @@ mixedQuotesAndContext:
     )}
 ```
 
-Child process 收到的三條 message 分別是 `Customer O'Reilly`、`status="READY"`，以及例如 `O'Reilly said "READY" for payment.payment.TC001`。Context value 自身包含任一種引號時，無需 caller 做 shell escaping，仍只占一個 argv。
+Child process 收到的三條 message 分別是 `Customer O'Reilly`、`status="READY"`，以及例如 `O'Reilly said "READY" for payment.payment.TC001`。Context value 自身包含任一種引號時，無需 caller 做 shell escaping，仍只佔一個 argv。
 
-如果坚持把 call 寫成單行，還需额外處理獨立的 YAML escaping 層：
+如果堅持把 call 寫成單行，還需額外處理獨立的 YAML escaping 層：
 
 ```yaml
 call: "#{writeAudit(message='status=\"READY\"', sourceFile=${EXEC.INPUT.sourceFile})}"
 call: '#{writeAudit(message="O''Reilly", sourceFile=${EXEC.INPUT.sourceFile})}'
 ```
 
-第一行是為 YAML double-quoted scalar escape 雙引號；第二行是為 YAML single-quoted scalar 把 apostrophe 寫成两個。之後 expression engine 才會解析所得的 `#{...}`。
+第一行是為 YAML double-quoted scalar escape 雙引號；第二行是為 YAML single-quoted scalar 把 apostrophe 寫成兩個。之後 expression engine 才會解析所得的 `#{...}`。
 
-普通 process-backed Tool 不會讓 shell 重新解释已解析輸入。Context value 內的 `$HOME`、`$(date)`、`a*.xml`、`|`、`>` 與引號都按字面传递。需要 shell-like behavior 時應使用经過审查的 wrapper；随包提供的 `fpp.exehelper` 和 `fpp.loghelper` 只提供上文明确說明的 pathname expansion。
+普通 process-backed Tool 不會讓 shell 重新解釋已解析輸入。Context value 內的 `$HOME`、`$(date)`、`a*.xml`、`|`、`>` 與引號都按字面傳遞。需要 shell-like behavior 時應使用經過審查的 wrapper；隨包提供的 `fpp.exehelper` 和 `fpp.loghelper` 只提供上文明確說明的 pathname expansion。
 
 ### Tool 定義中的 `call` 表達式
 
-Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並只允許 pure built-in 與一個主要 DB query/scalar/update。`${input.customerId}` 來自外層 Tool call，不是 Case 全局變量；`CASE`／`ACTIONS` 等 root 在定義中不可見。Inline SQL 與 package-contained SQL file 內容都在此 scope render，测试數據仍應放在 `params` 並使用 JDBC `?`。
+Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並只允許 pure built-in 與一個主要 DB query/scalar/update。`${input.customerId}` 來自外層 Tool call，不是 Case 全局變量；`CASE`／`ACTIONS` 等 root 在定義中不可見。Inline SQL 與 package-contained SQL file 內容都在此 scope render，測試數據仍應放在 `params` 並使用 JDBC `?`。
 
 ### Inline Tool descriptor fields
 
@@ -1238,7 +1238,7 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 
 ### Dbhelper 配置
 
-| 路径 | 必填/默認值 | 約束 |
+| 路徑 | 必填/默認值 | 約束 |
 |---|---|---|
 | `schemaVersion` | 必填 | `att-dbhelper/v2.6` |
 | `id` | 必填 | `[A-Za-z_][A-Za-z0-9_-]*`；全包忽略大小寫後唯一 |
@@ -1246,20 +1246,20 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 | `connection.url` | 必填 | 非空 JDBC URL |
 | `connection.username/password` | `""` | 字符串；可用完整 `${ENV:NAME}` |
 | `connection.driverClass` | `""` | 可選顯式 class；默認 JDBC discovery |
-| `connection.properties` | `{}` | 字符串键和值；敏感键在錯誤中淨化 |
-| `connection.readOnly` | `false` | 布尔值；update Action 在 prepare 前拒絕 |
+| `connection.properties` | `{}` | 字符串鍵和值；敏感鍵在錯誤中淨化 |
+| `connection.readOnly` | `false` | 布爾值；update Action 在 prepare 前拒絕 |
 | `connection.isolation` | `driverDefault` | `driverDefault`／`readUncommitted`／`readCommitted`／`repeatableRead`／`serializable` |
 | `statement.timeoutSeconds` | `30` | 每個 statement 使用的整數 1–3600 秒 |
 | `transaction.scope` | `case` | `case` 或 `statement` |
 | `transaction.onEnd` | `rollback` | `commit` 或 `rollback` |
 | `result.maxRows` | `1000` | 整數 1–1000000 |
 | `result.maxCellBytes` | `1048576` | 整數 1–1073741824 |
-| `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小于 maxCellBytes |
+| `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小於 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
 | `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感業務數據 |
-| `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大于 `maxSize`，timeout 至少 250ms |
+| `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
 
-validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路径、ID、字段、SQL 文件和 template call 會在執行前校驗。
+validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
 
 ### 7.4 MQHelper
 
@@ -1405,7 +1405,7 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.10` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.10 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一台，UAT 綁定兩台，Tool／Action 不必修改：
+在 `att-config/v2.10` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.10 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
@@ -1450,9 +1450,9 @@ tools:
 
 Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 不支援 SSH。現行 Tool Group schema 為 v2.9。Command-backed Tool 使用 `stdoutFormat`（`text|json|yaml|xml`）設定 stdout parsing；call-backed Tool 保留 native result type。舊 config/group schema 僅供 migration reference。SSH routing detail 不會發布為 `META.SSHHELPER`；公開 META 欄位及原因請見[Runtime Context](reference.zh/03_runtime_context.md)。Action／per-call 層沒有 strategy override。
 
-Strategy 優先序：group override，再到 helper 預設。單 instance 不需 strategy（`single`）；多 instance 必須指定。`random` 均勻選一台，`roundRobin` 以 thread-safe 循環計數器選一台，明確的 `all` 在並發上限內對每台各執行一次。**`all` 會在每台主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某台。每台依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
+Strategy 優先序：group override，再到 helper 預設。單 instance 不需 strategy（`single`）；多 instance 必須指定。`random` 均勻選一臺，`roundRobin` 以 thread-safe 循環計數器選一臺，明確的 `all` 在並發上限內對每臺各執行一次。**`all` 會在每臺主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某臺。每臺依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
 
-單主機時解析後的 `output.result` 仍是舊有 scalar／object。Evidence 新增 `sshHelper`、`instance`、`host`、`selectionStrategy`、`selectionSource`（`helper` 或 `toolGroup`）、transport、起訖／持續時間、exit code、輸出及錯誤。`all` 時 `output.result` 包含 `sshHelper`、有效 `selectionStrategy`、`selectionSource`，以及依 descriptor 順序以 ID 為 key 的 `instances`；每筆有 `instance`、`host`、`port`、`transport`、`startedAt`、`endedAt`、`durationMs`、`status`，在適用時另有 `exitCode`、`stdout`、`stderr`、`rawOutput`、解析後 `output` 或 `error`。命令正常完成時即使 `exitCode` 非零，仍是 `status: PASS`；exit code 是供 Action assertion 判斷的證據，不屬操作失敗。只有執行、輸出解析、取消或 timeout 錯誤才令 operation 失敗，其他主機證據仍會保留。Assertion 可查 `${output.result.instances.app1.exitCode}`、`${output.result.instances.app1.status}` 或 `${output.result.instances.app1.output}`。Evidence 不記錄認證內容或環境提供的私鑰路徑；私鑰應放在 package 外，命令中亦不要放秘密。
+單主機時解析後的 `output.result` 仍是舊有 scalar／object。Evidence 新增 `sshHelper`、`instance`、`host`、`selectionStrategy`、`selectionSource`（`helper` 或 `toolGroup`）、transport、起訖／持續時間、exit code、輸出及錯誤。`all` 時 `output.result` 包含 `sshHelper`、有效 `selectionStrategy`、`selectionSource`，以及依 descriptor 順序以 ID 為 key 的 `instances`；每筆有 `instance`、`host`、`port`、`transport`、`startedAt`、`endedAt`、`durationMs`、`status`，在適用時另有 `exitCode`、`stdout`、`stderr`、`rawOutput`、解析後 `output` 或 `error`。命令正常完成時即使 `exitCode` 非零，仍是 `status: PASS`；exit code 是供 Action assertion 判斷的證據，不屬操作失敗。只有執行、輸出解析、取消或 timeout 錯誤才令 operation 失敗，其他主機證據仍會保留。Assertion 可查 `${output.result.instances.app1.exitCode}`、`${output.result.instances.app1.status}` 或 `${output.result.instances.app1.output}`。Evidence 不記錄認證內容或環境提供的私鑰路徑；私鑰應放在 package 外，命令中亦不要放祕密。
 
 單主機及 `all` 執行都會在 argv、transport stderr（包括串流寫入的 Case log 診斷）及 exception evidence 遮蔽環境提供的私鑰路徑。上述不記錄保證適用於 ATT metadata 和 transport 診斷；解析後的業務 stdout 不變，因此命令不可輸出私鑰路徑。
 
@@ -1528,35 +1528,35 @@ Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 tim
 
 ## 09 Configuration 與 Environments
 
-本章是作者编寫配置時的權威阅讀參考。下面提到的 [`schemas/`](../schemas) 仍是机器可讀契約。模式校驗會先于跨字段和文件系統校驗執行。
+本章是作者編寫配置時的權威閱讀參考。下面提到的 [`schemas/`](../schemas) 仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
 ### 配置層與優先級
 
-| 層級 | 來源 | 所管辖內容 |
+| 層級 | 來源 | 所管轄內容 |
 |---|---|---|
-| 全局 | `config/config.yaml` | 輸出目錄/环境/运行時默認值、Template 根、報告、XML 模式、全局 Tool、组路径、可選全局 SSH |
+| 全局 | `config/config.yaml` | 輸出目錄/環境/運行時默認值、Template 根、報告、XML 模式、全局 Tool、組路徑、可選全局 SSH |
 | DB helper | `dbhelpers` 引用的獨立 YAML | 一個 JDBC 實例的連接、statement timeout、交易、result limit 與 evidence policy |
 | MQ helper | `mqhelpers` 引用的獨立 YAML | v1.2 IBM MQ logical group、instances、transport、response parsing、pool 與 evidence policy |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
 | HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
-| Tool group | 配置的 YAML 路径 | 组身份、可選 script/SSH、分组 Tool |
+| Tool group | 配置的 YAML 路徑 | 組身份、可選 script/SSH、分組 Tool |
 | Workbook | `<workbook>.yaml` | Excel 映射、Stage、Workbook 標簽 |
 | Template | `template.yaml` | Template 身份和有序 Action |
-| CLI | 命令選項 | 選擇、Run ID、輸出覆盖、展示、CI 格式 |
+| CLI | 命令選項 | 選擇、Run ID、輸出覆蓋、展示、CI 格式 |
 
-Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/08_reliability_execution_control.md)。CLI 的 `--output-dir` 和 `--run-id` 會在一次命令中覆盖相應默認值。一個層級中合法的字段，若放在別的層級中也會被拒絕。
+Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/08_reliability_execution_control.md)。CLI 的 `--output-dir` 和 `--run-id` 會在一次命令中覆蓋相應默認值。一個層級中合法的字段，若放在別的層級中也會被拒絕。
 
-### ATT 多环境 Profile 選擇
+### ATT 多環境 Profile 選擇
 
 `att-config/v2.10` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper descriptor lists。各綁定方式見 resource chapters。
 
-ATT 使用一份 common `att-config/v2.10` 加上 `environments` map 選擇环境；不通過修改 Action 或增加环境專用 Tool ID 來選擇环境。SIT、UAT、PREPROD 及 production-like 环境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.10` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
 ```
 
-推荐目錄：
+推薦目錄：
 
 ```text
 config/
@@ -1565,7 +1565,7 @@ config/
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-common config 保留现有 templates、testcase root、run/execution/report 设置、`toolGroups` 和 global `tools` registry。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
+common config 保留現有 templates、testcase root、run/execution/report 設置、`toolGroups` 和 global `tools` registry。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
 
 ```yaml
 # config/config.yaml
@@ -1586,11 +1586,11 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的迁移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮减成 `tools: {}` 或 `toolGroups: []`。
+可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
 
 SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
 
-两種环境使用完全相同的 Action 定義：
+兩種環境使用完全相同的 Action 定義：
 
 ```yaml
 actions:
@@ -1619,7 +1619,7 @@ actions:
       )}
 ```
 
-根級 `environment` 是 default profile；大小寫不敏感的 `--env` 會覆盖它。Profile 中的 `dbhelpers`、`mqhelpers`、`sshhelpers` 與 `httphelpers` 各自是整組 shallow replacement，省略才會继承 common list；不支持 generic recursive merge，其他 profile 字段都會被拒絕。未知 profile 名称會在 validation 或 external execution 前失敗。四種執行模式使用同一個 selector：
+根級 `environment` 是 default profile；大小寫不敏感的 `--env` 會覆蓋它。Profile 中的 `dbhelpers`、`mqhelpers`、`sshhelpers` 與 `httphelpers` 各自是整組 shallow replacement，省略才會繼承 common list；不支持 generic recursive merge，其他 profile 字段都會被拒絕。未知 profile 名稱會在 validation 或 external execution 前失敗。四種執行模式使用同一個 selector：
 
 ```sh
 # SIT
@@ -1635,7 +1635,7 @@ actions:
 ./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
-CI 對每個目標环境分別執行 `validate --package` 和 `run --all`：
+CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：
 
 ```sh
 ./att.sh validate --config config/config.yaml --env SIT --package
@@ -1644,11 +1644,11 @@ CI 對每個目標环境分別執行 `validate --package` 和 `run --all`：
 ./att.sh run --config config/config.yaml --env UAT --all
 ```
 
-這個设計使 Testcase、Template、Flow 和 Action 可以從 SIT promotion 到 UAT，不需要编辑；selected config 在 execution 前定義完整 resource registry，因此 validation 也是 deterministic 的。`orders`、`payment` 等 logical ID 表示能力，不表示 physical endpoint；topology 應屬于配置層。不要僅為選擇 endpoint 而创建 `orders_sit`、`orders_uat` 或在 Action 中加入环境條件。若 testcase/template root、report policy 或 package structure 确實不同，才使用不同 top-level config。
+這個設計使 Testcase、Template、Flow 和 Action 可以從 SIT promotion 到 UAT，不需要編輯；selected config 在 execution 前定義完整 resource registry，因此 validation 也是 deterministic 的。`orders`、`payment` 等 logical ID 表示能力，不表示 physical endpoint；topology 應屬於配置層。不要僅為選擇 endpoint 而創建 `orders_sit`、`orders_uat` 或在 Action 中加入環境條件。若 testcase/template root、report policy 或 package structure 確實不同，才使用不同 top-level config。
 
-YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 應使用 `${ENV:NAME}`，由本地环境或 CI secret store 提供。DBHelper 對 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 僅對 username/password 支持該解析，host、queue manager、channel 和 numeric port 通常直接寫在 selected descriptor 中。resolved secret 不會進入 profile metadata、diagnostics、reports 或 generated docs。
+YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 應使用 `${ENV:NAME}`，由本地環境或 CI secret store 提供。DBHelper 對 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 僅對 username/password 支持該解析，host、queue manager、channel 和 numeric port 通常直接寫在 selected descriptor 中。resolved secret 不會進入 profile metadata、diagnostics、reports 或 generated docs。
 
-當同一 package 只在基礎设施绑定上不同，應使用 profiles；當 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。完整 config migration 見 [Appendix C](reference.zh/appendices/migrations.md)。
+當同一 package 只在基礎設施綁定上不同，應使用 profiles；當 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。完整 config migration 見 [Appendix C](reference.zh/appendices/migrations.md)。
 
 ### Schema catalog
 
@@ -1737,13 +1737,13 @@ Allowed global object properties are:
 
 See [Appendix C](reference.zh/appendices/migrations.md) for removed configuration fields.
 
-### 標識符和路径約束
+### 標識符和路徑約束
 
 Run ID 和完整 Case ID 會直接用作目錄名，ATT 不會對合法標識做 slug 化或哈希處理。
 
-Run ID 必须非空、最多 128 個 Unicode 碼点，不能是 `.` 或 `..`，不得含前導/尾随空白或尾随 `.`，且不能包含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|`、NUL、控制字符。Windows 设备名（如 `CON`、`NUL`、`COM1`、`LPT1`）會按大小寫不敏感方式拒絕。
+Run ID 必須非空、最多 128 個 Unicode 碼點，不能是 `.` 或 `..`，不得含前導/尾隨空白或尾隨 `.`，且不能包含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|`、NUL、控制字符。Windows 設備名（如 `CON`、`NUL`、`COM1`、`LPT1`）會按大小寫不敏感方式拒絕。
 
-`workbookId`、`groupId`、`rowCaseId` 同样遵循相同字符规則。`workbookId` 與 `groupId` 不能含点號，因為点號用于分隔三個组件；`rowCaseId` 可含点號。Template 路径相對 `templates.root`；render glob 匹配必须保持在 Template 下。明确聲明的 resource file input 和 evidence output 路径必须保持在各自配置根目錄內；ATT 會规范化並检查包含性。
+`workbookId`、`groupId`、`rowCaseId` 同樣遵循相同字符規則。`workbookId` 與 `groupId` 不能含點號，因為點號用於分隔三個組件；`rowCaseId` 可含點號。Template 路徑相對 `templates.root`；render glob 匹配必須保持在 Template 下。明確聲明的 resource file input 和 evidence output 路徑必須保持在各自配置根目錄內；ATT 會規範化並檢查包含性。
 
 ### Topology 與 secrets
 
@@ -1762,11 +1762,11 @@ Run、Validate、Debug、Load 透過同一 effective configuration 解析所選 
 
 該配置使用統一表達式引擎，但擁有獨立的非 Case 作用域。它只支持一個大小寫敏感的值引用：
 
-| 占位符 | 值 |
+| 佔位符 | 值 |
 |---|---|
-| `${suiteName}` | 源 Workbook basename，去掉结尾的小寫 `.xlsx` 後缀；例如 `testcase/payment_regression.xlsx` 變為 `payment_regression` |
+| `${suiteName}` | 源 Workbook basename，去掉結尾的小寫 `.xlsx` 後綴；例如 `testcase/payment_regression.xlsx` 變為 `payment_regression` |
 
-配置字符串必须顯式引用 `${suiteName}`，無论它用于文本插值還是內建函數參數。ATT 没有定義其他通用 non-runtime/configuration expression roots。call 內的裸 `suiteName` 會被拒絕。合法示例包括：
+配置字符串必須顯式引用 `${suiteName}`，無論它用於文本插值還是內建函數參數。ATT 沒有定義其他通用 non-runtime/configuration expression roots。call 內的裸 `suiteName` 會被拒絕。合法示例包括：
 
 ```yaml
 report:
@@ -1783,7 +1783,7 @@ fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
 fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 ```
 
-但不支持如 `${RUN_ID}`、`${WORKBOOK_ID}`、`${ENVIRONMENT}`、`${EXEC.INPUT.caseId}` 等运行時值引用。
+但不支持如 `${RUN_ID}`、`${WORKBOOK_ID}`、`${ENVIRONMENT}`、`${EXEC.INPUT.caseId}` 等運行時值引用。
 
 
 ### Feature configuration owners
@@ -1807,69 +1807,69 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 |---|---|---:|
 | `help` | 顯示語法和選項；無命令時默認 | 否 |
 | `version` | 輸出 ATT 版本 | 否 |
-| `validate` | 校驗包或選中依赖闭包 | 否 |
-| `snapshot` | 生成同名规范 testcase XML | 否 |
+| `validate` | 校驗包或選中依賴閉包 | 否 |
+| `snapshot` | 生成同名規範 testcase XML | 否 |
 | `run` | 校驗並執行已選 Case | 是，dry-run 除外 |
 | `debug` | 使用 debug sidecar 執行一個 Template、Flow 或 Tool | 是 |
 | `load` | 執行已聲明的 scenario，或將 Debug sidecar promotion 為 Quick Load | 是 |
-| `docs` | 生成可搜索的包文档 | 否 |
+| `docs` | 生成可搜索的包文檔 | 否 |
 | `report` | 為已完成 run 重新生成報表 | 否 |
-| `build` | 歸档最新已完成 run | 否 |
-| `clean` | 刪除文档化的 ATT 生成輸出 | 否 |
+| `build` | 歸檔最新已完成 run | 否 |
+| `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 
 ### 命令語法
 
-表格中使用 Linux/macOS 啟動器 `./att.sh`。Windows 上使用 `att.bat`，命令與選項相同。`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不會触發配置的 testcase Tool。Windows 校驗會检查 `.sh` 文件是否存在並路径是否安全，跳過 POSIX 啟動/可執行兼容性，並輸出一條警告列出受影响 Tool；一次校驗 PASS 並不證明這些腳本能在 Windows 上运行。运行前請提供並测试 Windows 原生等价物。二進制發布要求 Java 8+；源碼樹 `att.bat` 會在可用時使用 Maven，否則要求存在 `target\classes`。
+表格中使用 Linux/macOS 啟動器 `./att.sh`。Windows 上使用 `att.bat`，命令與選項相同。`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不會觸發配置的 testcase Tool。Windows 校驗會檢查 `.sh` 文件是否存在並路徑是否安全，跳過 POSIX 啟動/可執行兼容性，並輸出一條警告列出受影響 Tool；一次校驗 PASS 並不證明這些腳本能在 Windows 上運行。運行前請提供並測試 Windows 原生等價物。二進制發布要求 Java 8+；源碼樹 `att.bat` 會在可用時使用 Maven，否則要求存在 `target\classes`。
 
 | 語法 | 說明 |
 |---|---|
-| `./att.sh` 或 `./att.sh help` | 顯示帮助 |
+| `./att.sh` 或 `./att.sh help` | 顯示幫助 |
 | `./att.sh version` | 輸出版本 |
-| `./att.sh snapshot` | 未指定 selector 時递歸生成 `testcase.root` 下所有 Snapshot；等同于 `--all` |
+| `./att.sh snapshot` | 未指定 selector 時遞歸生成 `testcase.root` 下所有 Snapshot；等同於 `--all` |
 | `./att.sh snapshot --suite <xlsx>` | 生成一個同名 XML Snapshot |
-| `./att.sh snapshot --all` | 递歸生成 `testcase.root` 下所有 Snapshot |
-| `./att.sh snapshot --suite-dir <dir>` | 在某目錄下递歸生成 Snapshot |
-| `./att.sh validate --package` | 校驗整個包；默認范围 |
-| `./att.sh validate --selected <selection>` | 校驗選中依赖闭包 |
-| `./att.sh validate --package --format json` | 向 stdout 輸出單個校驗 JSON 文档 |
-| `./att.sh run --all` | 运行所有發现的 Case |
-| `./att.sh run --suite <xlsx>` | 运行一個 Workbook；可重復 |
-| `./att.sh run --suite-dir <dir>` | 在目錄下發现 Workbook |
+| `./att.sh snapshot --all` | 遞歸生成 `testcase.root` 下所有 Snapshot |
+| `./att.sh snapshot --suite-dir <dir>` | 在某目錄下遞歸生成 Snapshot |
+| `./att.sh validate --package` | 校驗整個包；默認範圍 |
+| `./att.sh validate --selected <selection>` | 校驗選中依賴閉包 |
+| `./att.sh validate --package --format json` | 向 stdout 輸出單個校驗 JSON 文檔 |
+| `./att.sh run --all` | 運行所有發現的 Case |
+| `./att.sh run --suite <xlsx>` | 運行一個 Workbook；可重復 |
+| `./att.sh run --suite-dir <dir>` | 在目錄下發現 Workbook |
 | `./att.sh run <selection> --case <workbookId.groupId.rowCaseId>` | 包含一個完整 Case ID |
 | `./att.sh run <selection> --tag <tag>` | 包含一個標簽 |
 | `./att.sh run <selection> --exclude-tag <tag>` | 排除一個標簽 |
-| `./att.sh run <selection> --dry-run` | 僅校驗/规划，不執行 Tool |
+| `./att.sh run <selection> --dry-run` | 僅校驗/規劃，不執行 Tool |
 | `./att.sh run <selection> --update-snapshot` | 在校驗前顯式刷新已更改的完整 WorkbookSnapshot |
 | `./att.sh run <selection> --fail-fast` | 在首次 FAIL/ERROR 後停止調度 |
 | `./att.sh run <selection> --rerun-failed` | 重新選擇先前 FAIL/ERROR 的 Case |
-| `./att.sh run <selection> --run-id <id>` | 设置最終 run 目錄名 |
-| `./att.sh run <selection> --output-dir <dir>` | 覆盖輸出根目錄 |
+| `./att.sh run <selection> --run-id <id>` | 設置最終 run 目錄名 |
+| `./att.sh run <selection> --output-dir <dir>` | 覆蓋輸出根目錄 |
 | `./att.sh run <selection> --ci-output junit,json` | 寫出 CI XML/JSON 與 JUnit HTML |
-| `./att.sh run <selection> --format json` | 輸出机器可讀摘要 |
+| `./att.sh run <selection> --format json` | 輸出機器可讀摘要 |
 | `./att.sh run <selection> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
 | `./att.sh run <selection> --verbose` | 為兼容性保留；詳細實時進度已是默認行為 |
-| `./att.sh debug` | 發现可运行的 Tool、Template 和 Flow；只顯示實際存在的默認 sidecar |
-| `./att.sh debug template <id>` | 執行一個 Template；自動發现 `<template-dir>/debug.yaml` |
-| `./att.sh debug flow <id>` | 執行一個规范 Flow；自動發现 `<flow-dir>/debug.yaml` |
-| `./att.sh debug tool <id>` | 執行一個 Tool；自動發现 `config/tools/<group>.debug.yaml` |
-| `./att.sh debug <type> <id> --input <file>` | 覆盖目標自動發现的 debug 輸入 |
-| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆盖 typed `EXEC.INPUT` 值；可重復使用 |
-| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆盖一個 Tool argument；可重復使用 |
-| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆盖 Template/Flow bootstrap `EXEC.VARS` |
-| `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔离到 `<dir>/debug/<debugId>/` |
-| `./att.sh debug <type> <id> --format json` | 輸出紧凑机器可讀摘要；完整證據仍在 `result.yaml` |
+| `./att.sh debug` | 發現可運行的 Tool、Template 和 Flow；只顯示實際存在的默認 sidecar |
+| `./att.sh debug template <id>` | 執行一個 Template；自動發現 `<template-dir>/debug.yaml` |
+| `./att.sh debug flow <id>` | 執行一個規範 Flow；自動發現 `<flow-dir>/debug.yaml` |
+| `./att.sh debug tool <id>` | 執行一個 Tool；自動發現 `config/tools/<group>.debug.yaml` |
+| `./att.sh debug <type> <id> --input <file>` | 覆蓋目標自動發現的 debug 輸入 |
+| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
+| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |
+| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆蓋 Template/Flow bootstrap `EXEC.VARS` |
+| `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
+| `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
-| `./att.sh load` | 發现 `load/` 下有效的 `att-load/*` scenario；報告無效的已聲明 scenario |
+| `./att.sh load` | 發現 `load/` 下有效的 `att-load/*` scenario；報告無效的已聲明 scenario |
 | `./att.sh load <scenario.yaml> --quiet` | 抑制定期實時進度；保留最終摘要和錯誤 |
 | `./att.sh load <scenario.yaml> --verbose` | 為兼容性保留；有界實時進度已是默認行為 |
 | `./att.sh load --debug <type> <id>` | 使用 `load/load.yaml` policy，將 Debug sidecar promotion 為普通單 workload Load run |
-| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | 覆盖單 workload `EXEC.INPUT`；多 workload scenario 不支持未限定覆盖 |
-| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | 覆盖單 workload Tool scenario 的 argument |
-| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | 覆盖單 workload Template/Flow bootstrap vars |
+| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | 覆蓋單 workload `EXEC.INPUT`；多 workload scenario 不支持未限定覆蓋 |
+| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | 覆蓋單 workload Tool scenario 的 argument |
+| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | 覆蓋單 workload Template/Flow bootstrap vars |
 | `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
 | `./att.sh docs` | 生成 `build/docs/index.html` |
-| `./att.sh build` | 在 `build/` 中歸档最新完成 run |
-| `./att.sh clean` | 刪除文档化生成輸出 |
+| `./att.sh build` | 在 `build/` 中歸檔最新完成 run |
+| `./att.sh clean` | 刪除文檔化生成輸出 |
 
 ### Debug input 與 output
 
@@ -1879,10 +1879,10 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本章 option matrix�
 
 | 代碼 | 含義 |
 |---:|---|
-| 0 | 命令/运行成功，且無 FAIL、ERROR、INVALID |
+| 0 | 命令/運行成功，且無 FAIL、ERROR、INVALID |
 | 1 | 至少一個 FAIL，且無 ERROR/INVALID |
 | 2 | CLI/配置/校驗/INVALID 失敗 |
-| 3 | 至少一個 ERROR，或不可恢復运行時失敗 |
+| 3 | 至少一個 ERROR，或不可恢復運行時失敗 |
 
 ### 完整 CLI option matrix
 
@@ -1929,7 +1929,7 @@ evidence: {mode: failures}
 
 ## 11 結果、報告與 Evidence
 
-### 运行目錄
+### 運行目錄
 
 ```text
 <outputDirectory>/<RunID>/
@@ -1943,17 +1943,17 @@ evidence: {mode: failures}
 └── executions/<EXEC.ID>/...
 ```
 
-Run ID 和 Case ID 在校驗後保持原样。只有 `run.yaml` 状態為 `COMPLETE` 才表示运行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調试。
+Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPLETE` 才表示運行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調試。
 
 ### 人類可讀 HTML 報告
 
-`report/index.html` 是主要終端用户報表。可以直接從磁盘打開。组按 `workbookId.groupId` 汇总；界面把 `groupId` 標记為 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標题的升序/降序排序。Duration 按數值排序。
+`report/index.html` 是主要終端用戶報表。可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
-展開的 Case 包含完整 Case ID、名称、状態、持續時間、Expected 和 Actual 结果、每條记錄 Action 结果的一行、詳細執行日志，以及 `.log`/`case.yaml` 的顯式链接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 联接；Actual 是所有非空运行時 `actual` 的有序 LF 联接。
+展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
 
 ### Tool evidence collector 失敗
 
-Evidence collector 是 operation 完成後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可以维持 `PASS`，而 collector 會獨立记錄為 `ERROR`：
+Evidence collector 是 operation 完成後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可以維持 `PASS`，而 collector 會獨立記錄為 `ERROR`：
 
 ```yaml
 evidence:
@@ -1964,43 +1964,43 @@ evidence:
     onFailure: continue
 ```
 
-請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等价的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 時會在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 則记錄 collector failure 及其 source file/field。`error.message` 會從 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 會留在 `evidence`。Failed collector evidence 會被 bounded/redacted；raw input、payload、argv、output、resolved command text 與 failed `result` 不會發布。完整 projection、numeric budgets 與 security guarantees 見 [Appendix D](reference.zh/appendices/limits_defaults.md)。
+請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等價的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 時會在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 則記錄 collector failure 及其 source file/field。`error.message` 會從 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 會留在 `evidence`。Failed collector evidence 會被 bounded/redacted；raw input、payload、argv、output、resolved command text 與 failed `result` 不會發布。完整 projection、numeric budgets 與 security guarantees 見 [Appendix D](reference.zh/appendices/limits_defaults.md)。
 
-有 retry 時，請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使後一個 attempt 成功，较早的 failed collector record 仍會保留；top-level collector record 代表最後／胜出的 attempt。使用 `onFailure: stop` 時，Action 可以失敗，但其 diagnostic 仍會包含 collector root-cause message 和保留的 evidence。同一 structured record 也會寫入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打開 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw output。
+有 retry 時，請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使後一個 attempt 成功，較早的 failed collector record 仍會保留；top-level collector record 代表最後／勝出的 attempt。使用 `onFailure: stop` 時，Action 可以失敗，但其 diagnostic 仍會包含 collector root-cause message 和保留的 evidence。同一 structured record 也會寫入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打開 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw output。
 
-### 结果 Workbook
+### 結果 Workbook
 
-ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的结果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。结果回填使用與 testcase loader 相同的 Excel 顯示格式和空白规范化规則讀取 Case ID，因此带前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
+ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的結果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。結果回填使用與 testcase loader 相同的 Excel 顯示格式和空白規範化規則讀取 Case ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
 
 ### JUnit XML
 
 每個 ATT Case 對應一個 `<testcase>`：
 
-| ATT 状態 | JUnit 表示 |
+| ATT 狀態 | JUnit 表示 |
 |---|---|
-| PASS | 無 failure 子節点 |
+| PASS | 無 failure 子節點 |
 | FAIL | `<failure>` |
 | ERROR | `<error>` |
 | SKIPPED | `<skipped>` |
 | INVALID | `<error type="ATTValidationError">` |
 
-文本會被 XML 轉義。JUnit XML 與 HTML 使用 `report.junit.caseLogEmbedThresholdBytes`。低于或等于阈值的日志會被嵌入；更大的日志使用相對链接。`0` 始終使用链接。
+文本會被 XML 轉義。JUnit XML 與 HTML 使用 `report.junit.caseLogEmbedThresholdBytes`。低於或等於閾值的日誌會被嵌入；更大的日誌使用相對鏈接。`0` 始終使用鏈接。
 
-### CI JSON 汇总
+### CI JSON 彙總
 
-`ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、环境、時間、聚合状態/統計、持續時間統計、每個 Case 记錄、诊斷計數、報表/產物路径以及輸入清單哈希。
+`ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。
 
-### 运行清單與可復现性
+### 運行清單與可復現性
 
-`run.yaml` 使用 `schemaVersion: att-run/v2.1`，记錄 ATT/構建身份、Java/OS/locale/timezone、校驗模式、环境、時間戳、状態/摘要、輸出路径，以及有效配置、Tool group 文件、call-backed Tool SQL 文件（`tool-sql`）、Workbook、Sidecar、解析 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
+`run.yaml` 使用 `schemaVersion: att-run/v2.1`，記錄 ATT/構建身份、Java/OS/locale/timezone、校驗模式、環境、時間戳、狀態/摘要、輸出路徑，以及有效配置、Tool group 文件、call-backed Tool SQL 文件（`tool-sql`）、Workbook、Sidecar、解析 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
 
-### 文档、歸档和清理
+### 文檔、歸檔和清理
 
 | 命令 | 輸出/行為 |
 |---|---|
-| `docs` | 在 `build/docs/index.html` 生成可搜索离線包文档；Testcases 按 Workbook 和 Sheet 分组 |
-| `report --run-id <id>` | 從完成證據重建两個 HTML 報告 |
-| `build` | 歸档最新完成 run，不執行测试 |
+| `docs` | 在 `build/docs/index.html` 生成可搜索離線包文檔；Testcases 按 Workbook 和 Sheet 分組 |
+| `report --run-id <id>` | 從完成證據重建兩個 HTML 報告 |
+| `build` | 歸檔最新完成 run，不執行測試 |
 | `clean` | 刪除配置輸出目錄、`build/docs` 與 `build/att-*.tar.gz` |
 
 ### Run、execution 與 evidence 導覽
@@ -2018,7 +2018,7 @@ DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 sche
 
 ### 生成輸出模式摘要
 
-| 產物 | 顶層必需契約 |
+| 產物 | 頂層必需契約 |
 |---|---|
 | `run.yaml` | `schemaVersion`、`att`、`runtime`、`run`、`validation`、`inputs`、`cases`、`summary`、`outputs` |
 | Validation JSON | `schemaVersion`、`attVersion`、`valid`、`mode`、`summary`、`diagnostics` |
@@ -2049,68 +2049,68 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 現行 schema 位於 [`schemas/`](../schemas)，較舊定義位於 [`schemas/history/`](../schemas/history)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 
-然後根據诊斷代碼和结構化位置排查。不要针對人類可讀消息做自動化判斷。
+然後根據診斷代碼和結構化位置排查。不要針對人類可讀消息做自動化判斷。
 
 | 類別 | 典型原因 | 修正措施 |
 |---|---|---|
-| `ATT-TC` | 缺失/過期 Snapshot、Sidecar/Sheet/表頭錯誤、重復 Case ID | 检查 Snapshot/基名、sheet 映射、有效表頭和完整 ID |
-| `ATT-CTX` | 未知或歧義 Context 路径 | 检查請求/當前/缺失字段、最近建议或规范候選 |
-| `ATT-STG` | 必需選擇器為空白、選擇器 YAML 無效、Stage 键重復 | 检查選擇器形式、`name`、別名和 required 標志 |
-| `ATT-TPL` | 未知/重復 Template、Action 或負載無效 | 检查符號名/完整路径、描述符、Action 類型和本地文件 |
-| `ATT-CFG` | 未知字段、重復键、schema 類型/枚举錯誤 | 與第 6 章對照並移除不支持字段 |
-| `ATT-TOOL` | 未知/缺失參數、進程或解析失敗 | 對比調用契約，检查退出碼和有界 stdout/stderr capture evidence |
-| `ATT-PATH` | 非法 ID 或路径逃逸 | 移除非法字符，並保持內容在配置根目錄下 |
-| `ATT-RUN` | 超時、非零退出、渲染/运行時失敗 | 检查 Case 日志和 Action/Tool 證據 |
+| `ATT-TC` | 缺失/過期 Snapshot、Sidecar/Sheet/表頭錯誤、重復 Case ID | 檢查 Snapshot/基名、sheet 映射、有效表頭和完整 ID |
+| `ATT-CTX` | 未知或歧義 Context 路徑 | 檢查請求/當前/缺失字段、最近建議或規範候選 |
+| `ATT-STG` | 必需選擇器為空白、選擇器 YAML 無效、Stage 鍵重復 | 檢查選擇器形式、`name`、別名和 required 標志 |
+| `ATT-TPL` | 未知/重復 Template、Action 或負載無效 | 檢查符號名/完整路徑、描述符、Action 類型和本地文件 |
+| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 與第 6 章對照並移除不支持字段 |
+| `ATT-TOOL` | 未知/缺失參數、進程或解析失敗 | 對比調用契約，檢查退出碼和有界 stdout/stderr capture evidence |
+| `ATT-PATH` | 非法 ID 或路徑逃逸 | 移除非法字符，並保持內容在配置根目錄下 |
+| `ATT-RUN` | 超時、非零退出、渲染/運行時失敗 | 檢查 Case 日誌和 Action/Tool 證據 |
 
-### 常見问题
+### 常見問題
 
-#### 為什么 Excel 看起來没问题，但 Case ID 被拒絕？
+#### 為什麼 Excel 看起來沒問題，但 Case ID 被拒絕？
 
-ATT 導入的是顯示單元格文本，然後應用严格的 ID 安全检查。检查隐藏的首尾空白、尾随 `.`、路径字符、控制字符以及 Windows 设备名。以文本形式保存標識符，以保留前導零。
+ATT 導入的是顯示單元格文本，然後應用嚴格的 ID 安全檢查。檢查隱藏的首尾空白、尾隨 `.`、路徑字符、控制字符以及 Windows 設備名。以文本形式保存標識符，以保留前導零。
 
-#### 两张 sheet 能同時包含 `TC001` 吗？
+#### 兩張 sheet 能同時包含 `TC001` 嗎？
 
-可以。給 sheet 不同的 group ID，即可生成例如 `payment.payment.TC001` 和 `payment.batch.TC001` 這样的 ID。
+可以。給 sheet 不同的 group ID，即可生成例如 `payment.payment.TC001` 和 `payment.batch.TC001` 這樣的 ID。
 
-#### 為什么 `N/A` 變成空了？
+#### 為什麼 `N/A` 變成空了？
 
 ATT 會在數據映射和 Stage 選擇前，把 `N/A`、`NA`、`NULL`、`NONE`、空和僅空白值歸一化為 blank。
 
-#### 為什么 Context 變量失敗？
+#### 為什麼 Context 變量失敗？
 
-ATT 會把缺失路径视作作者/运行時錯誤，而不是静默渲染成空字符串。遵循 `ATT-CTX-001` 的 `requestedPath`、`currentNode`、`missingSegment` 和最近建议，检查大小寫敏感的作用域、物理表頭/別名、Stage key、Action ID，以及可用性時間点。後缀簡寫必须唯一識別一個可讀逻辑路径；當 validation 能識別 canonical current-scope replacement 時，會以 `CONTEXT_LEGACY_PATH` 發出迁移 warning。`ATT-CTX-002` 會列出所有冲突候選，以便你加长後缀或使用规范路径。聲明的可選字段即使值為空白，仍然是有效空字符串。
+ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空字符串。遵循 `ATT-CTX-001` 的 `requestedPath`、`currentNode`、`missingSegment` 和最近建議，檢查大小寫敏感的作用域、物理表頭/別名、Stage key、Action ID，以及可用性時間點。後綴簡寫必須唯一識別一個可讀邏輯路徑；當 validation 能識別 canonical current-scope replacement 時，會以 `CONTEXT_LEGACY_PATH` 發出遷移 warning。`ATT-CTX-002` 會列出所有衝突候選，以便你加長後綴或使用規範路徑。聲明的可選字段即使值為空白，仍然是有效空字符串。
 
-#### 為什么 FAIL 變成 ERROR？
+#### 為什麼 FAIL 變成 ERROR？
 
-假斷言是 FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O 失敗或运行時異常，都是 ERROR。應查看 Action 證據，而不只看最終聚合状態。
+假斷言是 FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O 失敗或運行時異常，都是 ERROR。應查看 Action 證據，而不只看最終聚合狀態。
 
-#### 為什么 Tool 跑了不止一次？
+#### 為什麼 Tool 跑了不止一次？
 
-它的 Action 啟用了重试，並收到了符合條件的非零退出碼。查看 Case 日志中的尝试列表和最終 Action 记錄。
+它的 Action 啟用了重試，並收到了符合條件的非零退出碼。查看 Case 日誌中的嘗試列表和最終 Action 記錄。
 
-#### 我能在 `command` 中使用 shell 管道吗？
+#### 我能在 `command` 中使用 shell 管道嗎？
 
-不能。ATT 會把 `|`、`>`、`<` 按字面值传递。把 shell 行為放到审查過的 Tool 腳本中。
+不能。ATT 會把 `|`、`>`、`<` 按字面值傳遞。把 shell 行為放到審查過的 Tool 腳本中。
 
-#### 為什么必需的 array 參數會拒絕 `[]`？
+#### 為什麼必需的 array 參數會拒絕 `[]`？
 
-必需項驗證發生在 argv 擴展之前。空 typed List 被视為缺失；請至少传入一個標量 item，或將參數设為 optional。
+必需項驗證發生在 argv 擴展之前。空 typed List 被視為缺失；請至少傳入一個標量 item，或將參數設為 optional。
 
 #### 我應該使用包校驗還是選中校驗？
 
-本地快速反馈請用 selected 模式。發布前、CI 推進、或共享包時請用 package 模式。
+本地快速反饋請用 selected 模式。發布前、CI 推進、或共享包時請用 package 模式。
 
-#### 報告能否不依赖服務器打開？
+#### 報告能否不依賴服務器打開？
 
-可以。保持生成的 run 目錄完整即可，相關相對链接仍可工作。
+可以。保持生成的 run 目錄完整即可，相關相對鏈接仍可工作。
 
-#### build 會不會再次執行测试？
+#### build 會不會再次執行測試？
 
-不會。它只是歸档一個已完成的持久化 run。
+不會。它只是歸檔一個已完成的持久化 run。
 
 ### 安全提醒
 
-不要把密碼、token、私钥或敏感客户數據放進 Workbook 單元格、Template 描述符、命令字符串、stdout 或 stderr。優先使用 Tool 腳本中经批准的秘密注入方式。在共享報表和歸档前進行审查。
+不要把密碼、token、私鑰或敏感客戶數據放進 Workbook 單元格、Template 描述符、命令字符串、stdout 或 stderr。優先使用 Tool 腳本中經批准的祕密注入方式。在共享報表和歸檔前進行審查。
 
 ### Validation JSON 合約
 
@@ -2137,11 +2137,11 @@ ATT 會把缺失路径视作作者/运行時錯誤，而不是静默渲染成空
 }
 ```
 
-每個诊斷都包含 `code`、`severity`、`message`、`file`、`field`、`sheet`、`row`、`column`、`template`、`action` 和 `suggestion`。不适用的字段為 `null`。當 package 和 case 驗證發现同一個根本錯誤時，ATT 輸出一條诊斷，並在适用時附带 `occurrences` 和 `affectedCases`；`summary.errors` 統計唯一诊斷，`summary.errorOccurrences` 保留原始出现次數。代碼穩定；自動化不能解析人類消息。
+每個診斷都包含 `code`、`severity`、`message`、`file`、`field`、`sheet`、`row`、`column`、`template`、`action` 和 `suggestion`。不適用的字段為 `null`。當 package 和 case 驗證發現同一個根本錯誤時，ATT 輸出一條診斷，並在適用時附帶 `occurrences` 和 `affectedCases`；`summary.errors` 統計唯一診斷，`summary.errorOccurrences` 保留原始出現次數。代碼穩定；自動化不能解析人類消息。
 
-ATT 可另外提供 `summary`、`detail`、`source`、`context` 和 `schemaViolations`。`source` 中的 `line`、`column`、`endLine`、`endColumn` 是 YAML 或 payload 文件的物理位置；顶層 `row` 和 `column` 仍表示 Excel 單元格。單行纯文本及可直接對應的引號字符串，表達式語法錯誤會指向具体字符；折叠、多行或经過轉義的 YAML 字符串若無法精确映射，則報告整個 scalar 范围。每項 Schema 錯誤保留自己的路径、關键字、消息及物理位置。`context` 可包含 Case、Stage、Flow ID 和嵌套調用链。表達式語法詳情在安全時會指出所在 Tool 調用參數（例如 `logFiles`）、意外 token 及带 caret 的有限邻近片段；可能含有凭據或敏感值的字段及整行不會顯示原文摘要。
+ATT 可另外提供 `summary`、`detail`、`source`、`context` 和 `schemaViolations`。`source` 中的 `line`、`column`、`endLine`、`endColumn` 是 YAML 或 payload 文件的物理位置；頂層 `row` 和 `column` 仍表示 Excel 單元格。單行純文本及可直接對應的引號字符串，表達式語法錯誤會指向具體字符；摺疊、多行或經過轉義的 YAML 字符串若無法精確映射，則報告整個 scalar 範圍。每項 Schema 錯誤保留自己的路徑、關鍵字、消息及物理位置。`context` 可包含 Case、Stage、Flow ID 和嵌套調用鏈。表達式語法詳情在安全時會指出所在 Tool 調用參數（例如 `logFiles`）、意外 token 及帶 caret 的有限鄰近片段；可能含有憑據或敏感值的字段及整行不會顯示原文摘要。
 
-运行時 Action 錯誤的结構化诊斷會传入 Case YAML、`run.yaml`、重新生成的報表、CI JSON 和 JUnit 錯誤詳情。嵌套 Flow 錯誤會指出內部 `flow.yaml` 及 Action，調用链說明 Template 如何到達該位置。Tool 與 DB evidence 在适用時记錄尝试次數、超時、解析／采集状態、參數绑定及取消操作；文件保存錯誤包含配置路径和允許的產物根目錄。
+運行時 Action 錯誤的結構化診斷會傳入 Case YAML、`run.yaml`、重新生成的報表、CI JSON 和 JUnit 錯誤詳情。嵌套 Flow 錯誤會指出內部 `flow.yaml` 及 Action，調用鏈說明 Template 如何到達該位置。Tool 與 DB evidence 在適用時記錄嘗試次數、超時、解析／採集狀態、參數綁定及取消操作；文件保存錯誤包含配置路徑和允許的產物根目錄。
 
 ## 13 CI、打包與運維
 
@@ -2289,33 +2289,33 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 ### Collector projection 與 redaction guarantees
 
-所有失敗 collector（包括 returned operation error 和 thrown Tool exception）都會先经過同一 public projection 再發布或寫 log。Projection 省略 raw input、payload、argv、output、resolved command text 和失敗 record 的 `result`，且不保證保留 `parserDiagnostic`。Native error/diagnostic 只保留安全 field；每個保留的 text field 限制為 1024 字元。`inputOmitted` 和 truncation flag 表示省略或截斷的 evidence。 Free-form message、stderr、per-instance error 和 cleanup warning 會在固定 budget 內 redact string、DocumentValue text 和 array input；最多检查 256 個 input node、8192 個 token 字元，每個 token 最多 1024 字元。Byte array 最多處理 128 byte（UTF-8、Base64、hex 和 Java decimal rendering），其他 array 最多 64 個 element；char array 最多 1024 字元。超出任一 budget、private token 少于 4 字元或遇到未知 input type 時，會用安全 marker 省略所有 free-form failure detail（包括 upstream-truncated secret prefix/head-tail echo），並设置 `inputRedactionLimited` 和 `failureDetailsOmitted`。超過 1024 字元的 free-form field 也會被省略並標记 truncated；structured metadata 继續保留。Structured status、category 和 resource identity 只做长度限制。SSH fan-out 會保留最多 64 個 instance 的 bounded metadata、error 和 stderr，優先保留失敗 instance；`instanceCount` 和 `instancesTruncated` 表示总數和省略的 instance。 若有 private token，且 operation 或 instance record 標记了 capture/detail truncation（如 `stderrTruncated` 或 `stderrArtifactTruncated`），該 record 的 free-form failure detail 也會被省略，以避免短 secret 被切斷後泄漏 prefix/suffix。没有 private token 時可保留 bounded preview。Primitive array 的完整 list rendering 和單獨 element 都會在相同 node/token budget 內 redact。 DB returned failure 會從 native `result.error` 提取安全 summary（`type`、bounded/redacted `message`、`sqlState`、`vendorCode` 和安全 cancellation metadata），保留于 DB evidence 的 `error` 並用于 collector 的 `error`；不會發布 rows、parameters、SQL text 或 raw result。失敗 command 的 `stdout` 可作為獨立 diagnostic evidence，按與 `stderr` 相同的 bounded/redacted/omission policy 處理；不會作為 `error.message` 或恢復失敗 `result`。 MQ evidence 的 root 和 error summary 會保留 `completionCode`、`reasonCode` 和 bounded symbolic `reason`。安全 location metadata 包括 HTTP `method` 和僅含 scheme/host/port 的 `url` origin，以及 MQ `queueManager`、`physicalInstance`、`host`、`port`、`channel` 和 `transport`。HTTP evidence 没有 resolved request input，因此失敗 collector 的 URL 一律省略 path、query、fragment 和 user info，並设置 `urlPathOmitted`；不添加 raw input。無法安全解析或超過 budget 的 URL 會以安全 marker 省略。
+所有失敗 collector（包括 returned operation error 和 thrown Tool exception）都會先經過同一 public projection 再發布或寫 log。Projection 省略 raw input、payload、argv、output、resolved command text 和失敗 record 的 `result`，且不保證保留 `parserDiagnostic`。Native error/diagnostic 只保留安全 field；每個保留的 text field 限制為 1024 字元。`inputOmitted` 和 truncation flag 表示省略或截斷的 evidence。 Free-form message、stderr、per-instance error 和 cleanup warning 會在固定 budget 內 redact string、DocumentValue text 和 array input；最多檢查 256 個 input node、8192 個 token 字元，每個 token 最多 1024 字元。Byte array 最多處理 128 byte（UTF-8、Base64、hex 和 Java decimal rendering），其他 array 最多 64 個 element；char array 最多 1024 字元。超出任一 budget、private token 少於 4 字元或遇到未知 input type 時，會用安全 marker 省略所有 free-form failure detail（包括 upstream-truncated secret prefix/head-tail echo），並設置 `inputRedactionLimited` 和 `failureDetailsOmitted`。超過 1024 字元的 free-form field 也會被省略並標記 truncated；structured metadata 繼續保留。Structured status、category 和 resource identity 只做長度限制。SSH fan-out 會保留最多 64 個 instance 的 bounded metadata、error 和 stderr，優先保留失敗 instance；`instanceCount` 和 `instancesTruncated` 表示總數和省略的 instance。 若有 private token，且 operation 或 instance record 標記了 capture/detail truncation（如 `stderrTruncated` 或 `stderrArtifactTruncated`），該 record 的 free-form failure detail 也會被省略，以避免短 secret 被切斷後泄漏 prefix/suffix。沒有 private token 時可保留 bounded preview。Primitive array 的完整 list rendering 和單獨 element 都會在相同 node/token budget 內 redact。 DB returned failure 會從 native `result.error` 提取安全 summary（`type`、bounded/redacted `message`、`sqlState`、`vendorCode` 和安全 cancellation metadata），保留於 DB evidence 的 `error` 並用於 collector 的 `error`；不會發布 rows、parameters、SQL text 或 raw result。失敗 command 的 `stdout` 可作為獨立 diagnostic evidence，按與 `stderr` 相同的 bounded/redacted/omission policy 處理；不會作為 `error.message` 或恢復失敗 `result`。 MQ evidence 的 root 和 error summary 會保留 `completionCode`、`reasonCode` 和 bounded symbolic `reason`。安全 location metadata 包括 HTTP `method` 和僅含 scheme/host/port 的 `url` origin，以及 MQ `queueManager`、`physicalInstance`、`host`、`port`、`channel` 和 `transport`。HTTP evidence 沒有 resolved request input，因此失敗 collector 的 URL 一律省略 path、query、fragment 和 user info，並設置 `urlPathOmitted`；不添加 raw input。無法安全解析或超過 budget 的 URL 會以安全 marker 省略。
 
 ### Advanced diagnostics
 
-#### 哪些意外異常會附带 stack trace？
+#### 哪些意外異常會附帶 stack trace？
 
 意外內部故障（例如 `NullPointerException`、`ClassCastException`、反射查找／存取失敗、其他非預期 runtime exception，或非 domain `IllegalStateException`，包括包在 wrapper cause 內的情況）會在 `case.log` 寫入有界的 `[ATT INTERNAL ERROR]` 區塊、執行 phase 及原始 cause chain。Validation `IllegalArgumentException`、已識別的 domain／transport failure、timeout／cancellation、assertion failure 與一般 MQ no-message outcome 仍保持精簡。同一 Throwable 即使同時被 resource executor 和 Action boundary 看見，每個 Case log 也只會寫一次。Resource-specific redaction（包括由 environment 提供的 SSH identity-file path）會註冊到該 Case log，並套用至後續 log write，避免外層 Action diagnostic 洩漏未出現在 sanitized stack 的內容。Stack 最多 180 行／16 KB；configured secrets 與敏感 key/value assignment 也會遮蔽。Public Action evidence 只保留簡短錯誤類型／phase，不加入 stack。Run、Debug 及 reusable Tool/HTTP/MQ/DB 共用這條 logging path。
 
-#### 為什么 `att.bat` 會要求 Maven，或者為什么 `.sh` Tool 在 Windows 上失敗？
+#### 為什麼 `att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 Windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到 `lib\att-*.jar`，只需要 Java 8+。源碼樹中，`att.bat` 會在 Maven 在 `PATH` 上時使用 Maven；没有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 确認啟動器後再校驗包。
+在二進制發布中，`att.bat` 會找到 `lib\att-*.jar`，只需要 Java 8+。源碼樹中，`att.bat` 會在 Maven 在 `PATH` 上時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗包。
 
-啟動器讓 ATT 自身跨平台；它無法翻译外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名称可解析為 `pwsh.exe`。维護多平台版本時，請保持參數契約和 stdout 輸出格式一致。
+啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 
-#### 為什么 ATT 說會使用 mwiede/jsch，或者 Java SSH 協商失敗？
+#### 為什麼 ATT 說會使用 mwiede/jsch，或者 Java SSH 協商失敗？
 
-當 `PATH` 中存在可執行 `ssh` 時，ATT 會優先使用本地 `ssh`。如果不存在，ATT 會打印 `local ssh command not found; ATT will use Java SSH library mwiede/jsch`，並改用 Java exec channel。這是自動回退，不是远程連通性测试。
+當 `PATH` 中存在可執行 `ssh` 時，ATT 會優先使用本地 `ssh`。如果不存在，ATT 會打印 `local ssh command not found; ATT will use Java SSH library mwiede/jsch`，並改用 Java exec channel。這是自動回退，不是遠程連通性測試。
 
-回退實现非常保守：ATT 包含 `com.github.mwiede:jsch:2.28.2`，但不捆绑 Bouncy Castle。它要求一個可讀、非符號链接的 `~/.ssh/known_hosts` 用作严格主机驗證。它不會讀取 `~/.ssh/config`，也不會自動使用 OpenSSH agent；需配置一個非交互可讀的 `identityFile`。密碼和交互式口令提示不支持。
+回退實現非常保守：ATT 包含 `com.github.mwiede:jsch:2.28.2`，但不捆綁 Bouncy Castle。它要求一個可讀、非符號鏈接的 `~/.ssh/known_hosts` 用作嚴格主機驗證。它不會讀取 `~/.ssh/config`，也不會自動使用 OpenSSH agent；需配置一個非交互可讀的 `identityFile`。密碼和交互式口令提示不支持。
 
-算法可用性取决于 Java 运行時：
+算法可用性取決於 Java 運行時：
 
 | 算法 | Java 回退限制 | 首選方案 |
 |---|---|---|
-| `ssh-ed25519`、`ssh-ed448` | 需要 Java 15+ 或 Bouncy Castle provider | 優先使用本地 OpenSSH 或 Java 15+；否則讓管理员把批准的 `bcprov-jdk18on` 加入运行時 classpath |
+| `ssh-ed25519`、`ssh-ed448` | 需要 Java 15+ 或 Bouncy Castle provider | 優先使用本地 OpenSSH 或 Java 15+；否則讓管理員把批准的 `bcprov-jdk18on` 加入運行時 classpath |
 | `curve25519-sha256`、`curve448-sha512` | 需要 Java 11+ 或 Bouncy Castle | 優先本地 OpenSSH 或 Java 11+；否則使用批准的 Bouncy Castle provider |
 | `chacha20-poly1305@openssh.com` | 在所有 Java 版本上都需要 Bouncy Castle | 優先本地 OpenSSH，或在服務端啟用 AES-GCM/CTR cipher，並添加 Bouncy Castle provider |
-| RSA/SHA-1 `ssh-rsa` 簽名 | 默認被 mwiede/jsch 禁用 | 更新服務端到 RSA/SHA-2 (`rsa-sha2-256`/`rsa-sha2-512`) 或其他现代 host/user-key 算法；不要在未经审查的情况下重啟 SHA-1 |
+| RSA/SHA-1 `ssh-rsa` 簽名 | 默認被 mwiede/jsch 禁用 | 更新服務端到 RSA/SHA-2 (`rsa-sha2-256`/`rsa-sha2-512`) 或其他現代 host/user-key 算法；不要在未經審查的情況下重啟 SHA-1 |
 
-協商失敗時，先用本地 `ssh -v` 復现連接，定位 host-key、key-exchange、cipher 或 user-key 不匹配。優先升級 Java 或服務端算法集合，而不是弱化 JSch 默認值。
+協商失敗時，先用本地 `ssh -v` 復現連接，定位 host-key、key-exchange、cipher 或 user-key 不匹配。優先升級 Java 或服務端算法集合，而不是弱化 JSch 默認值。
