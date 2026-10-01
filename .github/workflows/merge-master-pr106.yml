@@ -100,6 +100,22 @@ jobs:
           text = text.replace('"att-load/v1.3"', '"att-load/v1.4"')
           text = text.replace('"DocumentValue"', '"String"')
           validator.write_text(text, encoding='utf-8')
+
+          # The ZH operation-result paragraph overlaps with #105; keep #105's chapter
+          # structure but #106's current Render/SSH result semantics and canonical term.
+          zh = Path('docs/reference.zh/05_resources/operation_result.md')
+          text = zh.read_text(encoding='utf-8')
+          old = ('Command stdout 使用 stdoutFormat 解析；HTTP/MQ response 使用 responseFormat；'
+                 'DB operation 回傳 native typed value。Render 回傳 DocumentValue，'
+                 '詳見[Action 與型別化值](../14_actions.md)。')
+          new = ('Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH response 或 stdout 使用各自的 '
+                 'responseFormat；DB operation 回傳 native typed value。Render 回傳原樣 String，'
+                 '詳見[Action 與型別化值](../14_actions.md)。')
+          if old in text:
+              text = text.replace(old, new)
+          else:
+              text = text.replace('Render 回傳 DocumentValue', 'Render 回傳原樣 String')
+          zh.write_text(text, encoding='utf-8')
           PY
           python3 tools/build_reference_manual.py
       - name: Verify merged branch
