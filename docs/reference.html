@@ -2067,15 +2067,15 @@ href="reference/12_validation_diagnostics.md">Validation</a>.</p>
 <p>Removed APIs: <code>dbText</code>/<code>misc.dbText</code>,
 <code>prettyPrint</code>/<code>misc.prettyPrint</code>/<code>format.pretty</code>,
 all local <code>file.*</code> built-ins and their legacy aliases. Keep
-DB results typed and migrate display calls to Log <code>value:
-${EXEC.ACTIONS.queryOrders.output.result}</code> with <code>format:
-sqlplus</code>; use <code>format: json</code> or <code>yaml</code> for
-Maps/Lists. Read project content with <code>&amp;{...}</code> and
-inspect or change remote files with SSHHelper <code>stat</code>,
-<code>mkdirs</code>, <code>move</code>, and <code>delete</code>; use
-<code>upload</code>/<code>download</code> for transfers. ATT local
-output remains framework-owned. Removed calls fail with migration
-guidance.</p>
+DB results typed and migrate display calls to Log
+<code>value: ${EXEC.ACTIONS.queryOrders.output.result}</code> with
+<code>format: sqlplus</code>; use <code>format: json</code> or
+<code>yaml</code> for Maps/Lists. Read project content with
+<code>&amp;{...}</code> and inspect or change remote files with
+SSHHelper <code>stat</code>, <code>mkdirs</code>, <code>move</code>, and
+<code>delete</code>; use <code>upload</code>/<code>download</code> for
+transfers. ATT local output remains framework-owned. Removed calls fail
+with migration guidance.</p>
 <h2 id="06-execution-modes">06 Execution Modes</h2>
 <p>Run, Debug and Load are peer adapters over the same reusable
 Template/Flow/Tool/DB/MQ/HTTP/SSH execution semantics.</p>
@@ -3147,9 +3147,9 @@ root and contains one <code>att-dbhelper/v2.6</code> object:</p>
 <tr class="even">
 <td><code>evidence</code></td>
 <td>defaults</td>
-<td><code>sql: full|hash</code> defaults full; <code>parameters:
-values|types|masked</code> defaults values; optional <code>output:
-{format: json|yaml|xml|text|sqlplus, maxChars: 10000}</code></td>
+<td><code>sql: full|hash</code> defaults full;
+<code>parameters: values|types|masked</code> defaults values; optional
+<code>output: {format: json|yaml|xml|text|sqlplus, maxChars: 10000}</code></td>
 </tr>
 <tr class="odd">
 <td><code>pool</code></td>
@@ -3171,26 +3171,27 @@ case. <code>connection.isolation</code> is <code>driverDefault</code>,
 missing variables are errors. See <a
 href="reference/05_resources/dbhelper.md">DBHelper</a> for Action,
 expression, result, security, and lifecycle behaviour.</p>
-<p>DB/MQ/HTTP share the optional <code>evidence.output: {format: json,
-maxChars: 10000}</code> presentation policy. Supported formats are
-<code>text</code>, <code>json</code>, <code>yaml</code>,
-<code>xml</code>, and <code>sqlplus</code>; <code>sqlplus</code>
-requires a DB query/update result. <code>maxChars</code> defaults to
-10000 and accepts 1–1000000. Credentials are redacted before
-deterministic character truncation; snapshots contain
-<code>format</code>, <code>text</code>, and <code>truncated</code>.
-Formatting failure adds only a bounded <code>outputError</code> and
-changes neither typed <code>output.result</code> nor operation status.
-Normal Run/Debug invocations automatically include the snapshot in
-Action evidence and the Case log, without an extra Log Action; SQL,
-parameters, MQ payload metadata, and HTTP status/header diagnostics keep
-their own contracts. Load defers formatting until an iteration is
-retained, then materializes <code>resource-output.yaml</code>;
+<p>DB/MQ/HTTP share the optional
+<code>evidence.output: {format: json, maxChars: 10000}</code>
+presentation policy. Supported formats are <code>text</code>,
+<code>json</code>, <code>yaml</code>, <code>xml</code>, and
+<code>sqlplus</code>; <code>sqlplus</code> requires a DB query/update
+result. <code>maxChars</code> defaults to 10000 and accepts 1–1000000.
+Credentials are redacted before deterministic character truncation;
+snapshots contain <code>format</code>, <code>text</code>, and
+<code>truncated</code>. Formatting failure adds only a bounded
+<code>outputError</code> and changes neither typed
+<code>output.result</code> nor operation status. Normal Run/Debug
+invocations automatically include the snapshot in Action evidence and
+the Case log, without an extra Log Action; SQL, parameters, MQ payload
+metadata, and HTTP status/header diagnostics keep their own contracts.
+Load defers formatting until an iteration is retained, then materializes
+<code>resource-output.yaml</code>;
 <code>evidence.resources.output: none</code> skips it entirely.
 Presentation never introduces credential values into evidence.</p>
 <p>The <code>waitForOrder</code> query above needs no following Log
-Action: configure its DBHelper with <code>evidence: {sql: full,
-parameters: masked, output: {format: sqlplus, maxChars: 10000}}</code>
+Action: configure its DBHelper with
+<code>evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}</code>
 to retain an automatic SQL*Plus-style row snapshot. <code>sql</code>
 controls SQL evidence, <code>parameters</code> controls parameter
 representation, and <code>output</code> controls human-readable
@@ -3345,21 +3346,22 @@ validation.</p>
 <p>The machine-readable field constraints remain in <a
 href="../schemas/att-mqhelper-v1.2.schema.json">the active MQ
 schema</a>.</p>
-<p>DB/MQ/HTTP share the optional <code>evidence.output: {format: json,
-maxChars: 10000}</code> presentation policy. Supported formats are
-<code>text</code>, <code>json</code>, <code>yaml</code>,
-<code>xml</code>, and <code>sqlplus</code>; <code>sqlplus</code>
-requires a DB query/update result. <code>maxChars</code> defaults to
-10000 and accepts 1–1000000. Credentials are redacted before
-deterministic character truncation; snapshots contain
-<code>format</code>, <code>text</code>, and <code>truncated</code>.
-Formatting failure adds only a bounded <code>outputError</code> and
-changes neither typed <code>output.result</code> nor operation status.
-Normal Run/Debug invocations automatically include the snapshot in
-Action evidence and the Case log, without an extra Log Action; SQL,
-parameters, MQ payload metadata, and HTTP status/header diagnostics keep
-their own contracts. Load defers formatting until an iteration is
-retained, then materializes <code>resource-output.yaml</code>;
+<p>DB/MQ/HTTP share the optional
+<code>evidence.output: {format: json, maxChars: 10000}</code>
+presentation policy. Supported formats are <code>text</code>,
+<code>json</code>, <code>yaml</code>, <code>xml</code>, and
+<code>sqlplus</code>; <code>sqlplus</code> requires a DB query/update
+result. <code>maxChars</code> defaults to 10000 and accepts 1–1000000.
+Credentials are redacted before deterministic character truncation;
+snapshots contain <code>format</code>, <code>text</code>, and
+<code>truncated</code>. Formatting failure adds only a bounded
+<code>outputError</code> and changes neither typed
+<code>output.result</code> nor operation status. Normal Run/Debug
+invocations automatically include the snapshot in Action evidence and
+the Case log, without an extra Log Action; SQL, parameters, MQ payload
+metadata, and HTTP status/header diagnostics keep their own contracts.
+Load defers formatting until an iteration is retained, then materializes
+<code>resource-output.yaml</code>;
 <code>evidence.resources.output: none</code> skips it entirely.
 Presentation never introduces credential values into evidence.</p>
 <h3 id="75-httphelper">7.5 HTTPHelper</h3>
@@ -3423,21 +3425,22 @@ set evidence.resources.output: none to skip optional resource-output
 formatting, or defer it until the iteration evidence is retained.</p>
 <p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
 for the shared project-file String and typed-result contract.</p>
-<p>DB/MQ/HTTP share the optional <code>evidence.output: {format: json,
-maxChars: 10000}</code> presentation policy. Supported formats are
-<code>text</code>, <code>json</code>, <code>yaml</code>,
-<code>xml</code>, and <code>sqlplus</code>; <code>sqlplus</code>
-requires a DB query/update result. <code>maxChars</code> defaults to
-10000 and accepts 1–1000000. Credentials are redacted before
-deterministic character truncation; snapshots contain
-<code>format</code>, <code>text</code>, and <code>truncated</code>.
-Formatting failure adds only a bounded <code>outputError</code> and
-changes neither typed <code>output.result</code> nor operation status.
-Normal Run/Debug invocations automatically include the snapshot in
-Action evidence and the Case log, without an extra Log Action; SQL,
-parameters, MQ payload metadata, and HTTP status/header diagnostics keep
-their own contracts. Load defers formatting until an iteration is
-retained, then materializes <code>resource-output.yaml</code>;
+<p>DB/MQ/HTTP share the optional
+<code>evidence.output: {format: json, maxChars: 10000}</code>
+presentation policy. Supported formats are <code>text</code>,
+<code>json</code>, <code>yaml</code>, <code>xml</code>, and
+<code>sqlplus</code>; <code>sqlplus</code> requires a DB query/update
+result. <code>maxChars</code> defaults to 10000 and accepts 1–1000000.
+Credentials are redacted before deterministic character truncation;
+snapshots contain <code>format</code>, <code>text</code>, and
+<code>truncated</code>. Formatting failure adds only a bounded
+<code>outputError</code> and changes neither typed
+<code>output.result</code> nor operation status. Normal Run/Debug
+invocations automatically include the snapshot in Action evidence and
+the Case log, without an extra Log Action; SQL, parameters, MQ payload
+metadata, and HTTP status/header diagnostics keep their own contracts.
+Load defers formatting until an iteration is retained, then materializes
+<code>resource-output.yaml</code>;
 <code>evidence.resources.output: none</code> skips it entirely.
 Presentation never introduces credential values into evidence.</p>
 <h3 id="76-sshhelper-logical-ssh-targets">7.6 SSHHelper: logical SSH
@@ -3740,16 +3743,15 @@ Actions stay unchanged. Inventory discovery, per-Action host override,
 distributed transactions, cross-host failover and orchestration are out
 of scope.</p>
 <p><code>stat(remotePath='/srv/app/result.xml')</code> uses SFTP lstat
-and returns typed <code>{path, exists}</code> plus <code>type:
-file|directory|other</code>, file <code>size</code>, and available ISO
-<code>modifiedAt</code>. A missing path is normal <code>exists:
-false</code>; permission/auth/transport errors still fail.
+and returns typed <code>{path, exists}</code> plus
+<code>type: file|directory|other</code>, file <code>size</code>, and
+available ISO <code>modifiedAt</code>. A missing path is normal
+<code>exists: false</code>; permission/auth/transport errors still fail.
 <code>mkdirs(remotePath='/srv/app/archive')</code> creates parents,
 succeeds for an existing directory, and rejects a non-directory.
-<code>move(sourcePath='/srv/app/out.xml',
-targetPath='/srv/app/archive/out.xml', overwrite=false)</code> renames
-on the same selected host; source must exist and replacing a target
-requires explicit overwrite. It neither stages bytes locally nor
+<code>move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)</code>
+renames on the same selected host; source must exist and replacing a
+target requires explicit overwrite. It neither stages bytes locally nor
 pre-deletes the target; servers unable to overwrite fail explicitly.
 <code>delete(remotePath='/srv/app/tmp.xml', missingOk=false)</code>
 supports regular files and empty directories; missingOk is explicit, and

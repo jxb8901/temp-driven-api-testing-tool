@@ -1825,7 +1825,8 @@ width 都會報錯；diagnostic 會指出 <code>seq.next</code>
 及錯誤的參數數量、型別或範圍。若補零後的數值位數超過
 <code>width</code>，或底層 <code>Long</code>
 計數器溢位，求值會明確失敗；ATT
-不會截斷序列值，也不會默默超出指定寬度。</p><h3 id="expression-scope-與錯誤">Expression scope 與錯誤</h3>
+不會截斷序列值，也不會默默超出指定寬度。</p>
+<h3 id="expression-scope-與錯誤">Expression scope 與錯誤</h3>
 <p>Expression language 由本章定義；可用 roots 與求值時機由欄位的
 semantic owner 定義：<a href="reference.zh/05_resources/tools.md">Tool
 command/call</a>、<a href="reference.zh/04_execution_modes/load.md">Load
@@ -1839,11 +1840,11 @@ href="reference.zh/12_validation_diagnostics.md">Validation</a>。</p>
 <p>已移除 presentation-only
 <code>dbText</code>／<code>misc.dbText</code>、<code>prettyPrint</code>／<code>misc.prettyPrint</code>／<code>format.pretty</code>
 和所有 local <code>file.*</code>／legacy file alias。DB result 保持
-typed；顯示時改用 Log <code>value:
-${EXEC.ACTIONS.queryOrders.output.result}</code> 加 <code>format:
-sqlplus</code>，Map/List 則使用 <code>format: json</code> 或
-<code>yaml</code>。Project content 使用 <code>&amp;{...}</code>；remote
-filesystem 使用 SSHHelper
+typed；顯示時改用 Log
+<code>value: ${EXEC.ACTIONS.queryOrders.output.result}</code> 加
+<code>format: sqlplus</code>，Map/List 則使用 <code>format: json</code>
+或 <code>yaml</code>。Project content 使用
+<code>&amp;{...}</code>；remote filesystem 使用 SSHHelper
 <code>stat</code>／<code>mkdirs</code>／<code>move</code>／<code>delete</code>，傳輸使用
 <code>upload</code>／<code>download</code>。ATT local output 由
 framework 管理。移除的 API 會提供 migration diagnostic。</p>
@@ -2861,9 +2862,8 @@ values 可能暴露敏感業務數據</td>
 <tr class="even">
 <td><code>evidence.output</code></td>
 <td>不啟用</td>
-<td><code>format:
-json|yaml|xml|text|sqlplus</code>；<code>maxChars</code> 預設
-10000（1–1000000）</td>
+<td><code>format: json|yaml|xml|text|sqlplus</code>；<code>maxChars</code>
+預設 10000（1–1000000）</td>
 </tr>
 <tr class="odd">
 <td><code>pool</code></td>
@@ -2878,8 +2878,9 @@ json|yaml|xml|text|sqlplus</code>；<code>maxChars</code> 預設
 <p>validate、docs、snapshot 與 dry-run 都不會打開 DB
 Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call
 會在執行前校驗。</p>
-<p>DB/MQ/HTTP 共用 <code>evidence.output: {format: json, maxChars:
-10000}</code> presentation policy；支援
+<p>DB/MQ/HTTP 共用
+<code>evidence.output: {format: json, maxChars: 10000}</code>
+presentation policy；支援
 <code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>、<code>sqlplus</code>，後者要求
 DB query/update result。<code>maxChars</code> 預設 10000，範圍
 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留
@@ -2894,11 +2895,12 @@ status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteratio
 materialize，<code>evidence.resources.output: none</code>
 完全跳過。Credential 不會因 presentation 被新增到 evidence。</p>
 <p>以上 <code>waitForOrder</code> query 無需後續 Log Action。DBHelper
-設定 <code>evidence: {sql: full, parameters: masked, output: {format:
-sqlplus, maxChars: 10000}}</code> 即會自動保留 SQL*Plus-style row
-snapshot；<code>sql</code> 決定 SQL evidence，<code>parameters</code>
-決定 parameter representation，<code>output</code>
-只控制人類可讀顯示。Assertion 和後續 Action 仍直接讀取 typed
+設定
+<code>evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}</code>
+即會自動保留 SQL*Plus-style row snapshot；<code>sql</code> 決定 SQL
+evidence，<code>parameters</code> 決定 parameter
+representation，<code>output</code> 只控制人類可讀顯示。Assertion 和後續
+Action 仍直接讀取 typed
 rows；<code>db.&lt;id&gt;.query</code>／<code>scalar</code> 亦遵循相同
 policy。</p>
 <h3 id="74-mqhelper">7.4 MQHelper</h3>
@@ -3042,8 +3044,9 @@ validation.</p>
 <p>The machine-readable field constraints remain in <a
 href="../schemas/att-mqhelper-v1.2.schema.json">the active MQ
 schema</a>.</p>
-<p>DB/MQ/HTTP 共用 <code>evidence.output: {format: json, maxChars:
-10000}</code> presentation policy；支援
+<p>DB/MQ/HTTP 共用
+<code>evidence.output: {format: json, maxChars: 10000}</code>
+presentation policy；支援
 <code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>、<code>sqlplus</code>，後者要求
 DB query/update result。<code>maxChars</code> 預設 10000，範圍
 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留
@@ -3115,8 +3118,9 @@ evidence.resources.output: none 略過可選 resource output
 formatting，或將其延至 iteration evidence 保留時。</p>
 <p>共用 typed-result 契約見<a href="reference.zh/14_actions.md">Action
 與型別化值</a>。</p>
-<p>DB/MQ/HTTP 共用 <code>evidence.output: {format: json, maxChars:
-10000}</code> presentation policy；支援
+<p>DB/MQ/HTTP 共用
+<code>evidence.output: {format: json, maxChars: 10000}</code>
+presentation policy；支援
 <code>text</code>、<code>json</code>、<code>yaml</code>、<code>xml</code>、<code>sqlplus</code>，後者要求
 DB query/update result。<code>maxChars</code> 預設 10000，範圍
 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留
@@ -3401,27 +3405,25 @@ v2.9，以 <code>ssh: {helper: application}</code> 取代實體
 discovery、Action 層指定主機、分散式交易、跨主機 failover 與
 orchestration 均不在此 schema 範圍。</p>
 <p><code>stat(remotePath='/srv/app/result.xml')</code> 透過 SFTP lstat
-回傳 typed <code>{path, exists}</code>，存在時包含 <code>type:
-file|directory|other</code>、file <code>size</code> 與可用的 ISO
-<code>modifiedAt</code>；missing path 是正常 <code>exists:
-false</code>，permission/auth/transport error
+回傳 typed <code>{path, exists}</code>，存在時包含
+<code>type: file|directory|other</code>、file <code>size</code> 與可用的
+ISO <code>modifiedAt</code>；missing path 是正常
+<code>exists: false</code>，permission/auth/transport error
 仍失敗。<code>mkdirs(remotePath='/srv/app/archive')</code> 建立
 parents，已有 directory 時冪等，遇到 non-directory
-時失敗。<code>move(sourcePath='/srv/app/out.xml',
-targetPath='/srv/app/archive/out.xml', overwrite=false)</code>
+時失敗。<code>move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)</code>
 在同一選定 host 上 rename，source 必須存在，已有 target 需明確允許
 overwrite；不下載／上傳，不預先刪除 target，server 不支援 overwrite
-時明確失敗。<code>delete(remotePath='/srv/app/tmp.xml',
-missingOk=false)</code> 支援 regular file 和 empty directory，missingOk
-必須明確開啟；non-empty directory、recursive 參數、wildcard／backslash
-path 都拒絕。所有 operation 只接受具名參數及可選
-<code>timeoutMs</code>，沿用 selection／concurrency／deadline／host
-verification／redacted identity／Run-Debug-Load execution。Filesystem
-operation error 使用
+時明確失敗。<code>delete(remotePath='/srv/app/tmp.xml', missingOk=false)</code>
+支援 regular file 和 empty directory，missingOk 必須明確開啟；non-empty
+directory、recursive 參數、wildcard／backslash path 都拒絕。所有
+operation 只接受具名參數及可選 <code>timeoutMs</code>，沿用
+selection／concurrency／deadline／host verification／redacted
+identity／Run-Debug-Load execution。Filesystem operation error 使用
 <code>SSH_STAT_ERROR</code>／<code>SSH_MKDIRS_ERROR</code>／<code>SSH_MOVE_ERROR</code>／<code>SSH_DELETE_ERROR</code>。沒有
-remote copy API；需要 copy 時明確使用 <code>execute(command='cp
-/srv/app/a /srv/app/b')</code>。Project file 使用
-<code>&amp;{...}</code>，local output 由 ATT 管理。</p>
+remote copy API；需要 copy 時明確使用
+<code>execute(command='cp /srv/app/a /srv/app/b')</code>。Project file
+使用 <code>&amp;{...}</code>，local output 由 ATT 管理。</p>
 <h2 id="08-可靠性與執行控制">08 可靠性與執行控制</h2>
 <p>本章集中定義 cross-cutting public execution behavior。</p>
 <h3 id="assertion-與-status">Assertion 與 status</h3>
