@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.1 - 2026-09-30
+
+- Preserve evidence collector root causes, structured resource evidence, diagnostics, and retry history for continue/stop handling (issue #94).
+- Attribute nested Tool, assertion, and evidence collector failures to their source fields, retaining Flow source locations (issue #95).
+
 ## 3.6.0 - 2026-09-30
 
 - Implement Issues #87 and #88: replace common result representation settings with typed `DocumentValue` results, preserve rendered documents through HTTP/MQ requests, add explicit log/resource evidence formatting, and configure Load `EXEC.ID` with runtime expressions.

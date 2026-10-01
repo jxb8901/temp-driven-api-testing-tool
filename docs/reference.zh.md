@@ -1,7 +1,7 @@
-# ATT V3.6.0 使用手冊與參考
+# ATT V3.6.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.6.0
+Version: 3.6.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -270,10 +270,14 @@ EXEC.INPUT 是 canonical input map。Stage 暫時 overlay Case input，完成後
 | `output.result` | Action active（包括 assertion）期間的 primary typed result。 |
 | `output.evidence.collectors.<id>.result` | Active Tool evidence collector 的 typed result。 |
 | `output.evidence.collectors.<id>.status` | Collector 的 `PASS`／`ERROR` status。 |
+| `output.evidence.collectors.<id>.error` | Collector 失敗時的 bounded failure summary；有可用訊息時包含非空 `message`。 |
+| `output.evidence.collectors.<id>.evidence` | 保留 bounded/redacted 的 underlying Tool/resource evidence，包括 executor 提供的 resource identity 與 native failure fields。 |
 | `EXEC.ACTIONS.<actionId>.output.result` | Action 完成後發布的 primary typed result。 |
 | `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | 發布後最後／勝出的 collector result。 |
 | `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | 發布後最後／勝出的 collector status。 |
+| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | 發布後的 collector failure summary 與保留的 operation evidence。 |
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
+| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | 該 collector attempt 的 failure summary 與 underlying evidence。 |
 
 String、Number、Boolean、null、Map、List、DocumentValue 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
@@ -1469,7 +1473,7 @@ Run ID 必须非空、最多 128 个 Unicode 码点，不能是 `.` 或 `..`，�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.6.0",
+  "attVersion": "3.6.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -1701,7 +1705,7 @@ case:
 | 2 | CLI/配置/校验/INVALID 失败 |
 | 3 | 至少一个 ERROR，或不可恢复运行时失败 |
 
-### 完整選項矩陣（3.6.0）
+### 完整選項矩陣（3.6.1）
 
 `--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.10` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
 
@@ -1767,6 +1771,23 @@ Run ID 和 Case ID 在校验后保持原样。只有 `run.yaml` 状态为 `COMPL
 `report/index.html` 是主要终端用户报表。可以直接从磁盘打开。组按 `workbookId.groupId` 汇总；界面把 `groupId` 标记为 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、对 workbook/group/full Case ID/tag 的大小写不敏感搜索，以及每列标题的升序/降序排序。Duration 按数值排序。
 
 展开的 Case 包含完整 Case ID、名称、状态、持续时间、Expected 和 Actual 结果、每条记录动作结果的一行、详细执行日志，以及 `.log`/`case.yaml` 的显式链接。Action Results 每行独立显示最终渲染的 Description，并写入 `run.yaml` 与 CI JSON。为兼容既有报表，Expected 仍是所有 assert 动作非空最终 description 与 `expected` 的有序 LF 联接；Actual 是所有非空运行时 `actual` 的有序 LF 联接。
+
+### Tool evidence collector 失败
+
+Evidence collector 是 operation 完成后的 observability，不是 primary Tool result。使用 `onFailure: continue` 时，primary Action 可以维持 `PASS`，而 collector 会独立记录为 `ERROR`：
+
+```yaml
+evidence:
+  appLog:
+    call: >-
+      #{ssh.app.execute(command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100')}
+    timeoutMs: 5000
+    onFailure: continue
+```
+
+请查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等价的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 时会在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 则记录 collector failure 及其 source file/field。`error.message` 会从 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 会留在 `evidence`。 所有失败 collector（包括 returned operation error 和 thrown Tool exception）都会先经过同一 public projection 再发布或写 log。Projection 省略 raw input、payload、argv、output、resolved command text 和失败 record 的 `result`，且不保证保留 `parserDiagnostic`。Native error/diagnostic 只保留安全 field；每个保留的 text field 限制为 1024 字元。`inputOmitted` 和 truncation flag 表示省略或截断的 evidence。 Free-form message、stderr、per-instance error 和 cleanup warning 会在固定 budget 内 redact string、DocumentValue text 和 array input；最多检查 256 个 input node、8192 个 token 字元，每个 token 最多 1024 字元。Byte array 最多处理 128 byte（UTF-8、Base64、hex 和 Java decimal rendering），其他 array 最多 64 个 element；char array 最多 1024 字元。超出任一 budget、private token 少于 4 字元或遇到未知 input type 时，会用安全 marker 省略所有 free-form failure detail（包括 upstream-truncated secret prefix/head-tail echo），并设置 `inputRedactionLimited` 和 `failureDetailsOmitted`。超过 1024 字元的 free-form field 也会被省略并标记 truncated；structured metadata 继续保留。Structured status、category 和 resource identity 只做长度限制。SSH fan-out 会保留最多 64 个 instance 的 bounded metadata、error 和 stderr，优先保留失败 instance；`instanceCount` 和 `instancesTruncated` 表示总数和省略的 instance。 若有 private token，且 operation 或 instance record 标记了 capture/detail truncation（如 `stderrTruncated` 或 `stderrArtifactTruncated`），该 record 的 free-form failure detail 也会被省略，以避免短 secret 被切断后泄漏 prefix/suffix。没有 private token 时可保留 bounded preview。Primitive array 的完整 list rendering 和单独 element 都会在相同 node/token budget 内 redact。 DB returned failure 会从 native `result.error` 提取安全 summary（`type`、bounded/redacted `message`、`sqlState`、`vendorCode` 和安全 cancellation metadata），保留于 DB evidence 的 `error` 并用于 collector 的 `error`；不会发布 rows、parameters、SQL text 或 raw result。失败 command 的 `stdout` 可作为独立 diagnostic evidence，按与 `stderr` 相同的 bounded/redacted/omission policy 处理；不会作为 `error.message` 或恢复失败 `result`。 MQ evidence 的 root 和 error summary 会保留 `completionCode`、`reasonCode` 和 bounded symbolic `reason`。安全 location metadata 包括 HTTP `method` 和仅含 scheme/host/port 的 `url` origin，以及 MQ `queueManager`、`physicalInstance`、`host`、`port`、`channel` 和 `transport`。HTTP evidence 没有 resolved request input，因此失败 collector 的 URL 一律省略 path、query、fragment 和 user info，并设置 `urlPathOmitted`；不添加 raw input。无法安全解析或超过 budget 的 URL 会以安全 marker 省略。
+
+有 retry 时，请查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使后一个 attempt 成功，较早的 failed collector record 仍会保留；top-level collector record 代表最后／胜出的 attempt。使用 `onFailure: stop` 时，Action 可以失败，但其 diagnostic 仍会包含 collector root-cause message 和保留的 evidence。同一 structured record 也会写入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打开 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 与 secret redaction 仍然有效；collector wrapper 不会开放无上限 raw output。
 
 ### 结果工作簿
 

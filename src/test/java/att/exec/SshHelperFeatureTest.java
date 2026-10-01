@@ -398,6 +398,48 @@ class SshHelperFeatureTest {
         assertEquals(0, active.get());
     }
 
+    @Test void collectorFanoutFailureKeepsSafePeerDetails() throws Exception {
+        group("all"); Path config = profileConfig();
+        write("config/ssh/sit.yaml", descriptor("  - {id: first, host: first.example}\n  - {id: second, host: second.example}\n", "all"));
+        write("config/ssh/uat.yaml", descriptor("  - {id: one, host: uat.example}\n", "roundRobin"));
+        FrameworkConfig effective = new FrameworkConfigLoader().load(config, root, "SIT");
+        for (boolean timeout : new boolean[] {false, true}) {
+            SshCommandRunner remote = new SshCommandRunner(new CommandRunner(), () -> false,
+                    (target, command, duration, project) -> {
+                        if (target.host().startsWith("second")) {
+                            if (timeout) return new CommandResult(-1, "", "timeout detail", true);
+                            throw new IOException("connection refused");
+                        }
+                        return new CommandResult(0, "private success payload", "", false);
+                    }, System.err);
+            CaseRuntimeContext runtime = context();
+            Map<String, Object> collector = new LinkedHashMap<String, Object>();
+            collector.put("call", "#{remote.echo()}"); collector.put("onFailure", "continue");
+            Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("hosts", collector);
+            Map<String, Object> fields = new LinkedHashMap<String, Object>();
+            fields.put("type", "tool"); fields.put("call", "#{upper('ok')}"); fields.put("evidence", evidence);
+            Path caseLog = root.resolve("collector-fanout-" + timeout + ".log");
+            try (CaseExecutionLog log = new CaseExecutionLog(caseLog)) {
+                List<ValidationResult> outcomes = new StageTemplateRunner(new UnifiedTemplateEngine(
+                        new ToolInvoker(root, effective, new CommandRunner(), remote))).execute("invoke",
+                        new StageTemplate("T", root, Collections.singletonList(new TemplateAction("call", fields))), runtime, log);
+                assertEquals(ResultStatus.PASS, outcomes.get(0).status(), outcomes.get(0).message());
+            }
+            String path = "ACTIONS.call.output.evidence.collectors.hosts.evidence.tool.invocations[0].instances";
+            assertEquals("PASS", runtime.resolve(path + ".first.status"));
+            assertEquals(timeout ? "TIMEOUT" : "ERROR", runtime.resolve(path + ".second.status"));
+            assertEquals("second.example", runtime.resolve(path + ".second.host"));
+            assertEquals(2222, runtime.resolve(path + ".second.port"));
+            assertNotNull(runtime.resolve(path + ".second.transport"));
+            assertTrue(String.valueOf(runtime.resolve(path + ".second.error"))
+                    .contains(timeout ? "timed out" : "connection refused"));
+            if (timeout) assertEquals("timeout detail", runtime.resolve(path + ".second.stderr"));
+            String published = att.validation.JsonSupport.write(runtime.resolve("ACTIONS.call.output.evidence.collectors.hosts"));
+            assertFalse(published.contains("private success payload"));
+            assertFalse(new String(Files.readAllBytes(caseLog), StandardCharsets.UTF_8).contains("private success payload"));
+        }
+    }
+
     private CaseRuntimeContext context() {
         TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
                 Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.6.0 Reference Manual</title>
+  <title>ATT V3.6.1 Reference Manual</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.6.0 Reference Manual</h1>
+<h1 class="title">ATT V3.6.1 Reference Manual</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v360-reference-manual"
-id="toc-att-v360-reference-manual">ATT V3.6.0 Reference Manual</a>
+<li><a href="#att-v361-reference-manual"
+id="toc-att-v361-reference-manual">ATT V3.6.1 Reference Manual</a>
 <ul>
 <li><a href="#01-overview-and-concepts"
 id="toc-01-overview-and-concepts">01 Overview and Concepts</a>
@@ -408,9 +408,9 @@ Load</a></li>
 id="toc-standalone-debug-inputs-and-outputs">Standalone debug inputs and
 outputs</a></li>
 <li><a href="#exit-codes" id="toc-exit-codes">Exit codes</a></li>
-<li><a href="#complete-option-matrix-360"
-id="toc-complete-option-matrix-360">Complete option matrix
-(3.6.0)</a></li>
+<li><a href="#complete-option-matrix-361"
+id="toc-complete-option-matrix-361">Complete option matrix
+(3.6.1)</a></li>
 </ul></li>
 <li><a href="#11-results-reports-and-evidence"
 id="toc-11-results-reports-and-evidence">11 Results, Reports, and
@@ -420,6 +420,9 @@ Evidence</a>
 directory</a></li>
 <li><a href="#human-html-report" id="toc-human-html-report">Human HTML
 report</a></li>
+<li><a href="#tool-evidence-collector-failures"
+id="toc-tool-evidence-collector-failures">Tool evidence collector
+failures</a></li>
 <li><a href="#result-workbook" id="toc-result-workbook">Result
 workbook</a></li>
 <li><a href="#junit-xml" id="toc-junit-xml">JUnit XML</a></li>
@@ -497,8 +500,8 @@ id="toc-144-limits-and-defaults">14.4 Limits and Defaults</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v360-reference-manual">ATT V3.6.0 Reference Manual</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.6.0 Status: Normative end-user
+<h1 id="att-v361-reference-manual">ATT V3.6.1 Reference Manual</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.6.1 Status: Normative end-user
 documentation; generated from modular sources</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -1185,6 +1188,17 @@ its assertion.</td>
 Action is active.</td>
 </tr>
 <tr class="even">
+<td><code>output.evidence.collectors.&lt;id&gt;.error</code></td>
+<td>Bounded failure summary with a non-blank <code>message</code> when
+the collector fails.</td>
+</tr>
+<tr class="odd">
+<td><code>output.evidence.collectors.&lt;id&gt;.evidence</code></td>
+<td>Preserved bounded/redacted underlying Tool/resource evidence,
+including resource identity and native failure fields when
+supplied.</td>
+</tr>
+<tr class="even">
 <td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.result</code></td>
 <td>Published primary typed result after the Action completes.</td>
 </tr>
@@ -1197,9 +1211,19 @@ Action is active.</td>
 <td>Published final/winning collector status.</td>
 </tr>
 <tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;id&gt;.error/evidence</code></td>
+<td>Published collector failure summary and preserved operation
+evidence.</td>
+</tr>
+<tr class="even">
 <td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;id&gt;.result/status</code></td>
 <td>Collector result/status for a specific retry attempt; earlier
 attempts remain after a later success.</td>
+</tr>
+<tr class="odd">
+<td><code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;id&gt;.error/evidence</code></td>
+<td>Failure summary and underlying evidence for that specific collector
+attempt.</td>
 </tr>
 </tbody>
 </table>
@@ -3909,7 +3933,7 @@ containment before reads and writes.</p>
 <div class="sourceCode" id="cb61"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.6.0&quot;</span><span class="fu">,</span></span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.6.1&quot;</span><span class="fu">,</span></span>
 <span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -4526,7 +4550,7 @@ JSON document; progress and human diagnostics go to stderr.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="complete-option-matrix-360">Complete option matrix (3.6.0)</h3>
+<h3 id="complete-option-matrix-361">Complete option matrix (3.6.1)</h3>
 <p><code>--config &lt;file&gt;</code> selects the base configuration.
 <code>--env &lt;name&gt;</code> selects one environment profile from an
 <code>att-config/v2.10</code> configuration and is valid for
@@ -4623,6 +4647,98 @@ grouping.</p>
 <p><code>report/junit.html</code> is a human-readable JUnit projection.
 It displays counts and one row per testcase with status, duration, and
 embedded case-log content or a relative artifact link.</p>
+<h3 id="tool-evidence-collector-failures">Tool evidence collector
+failures</h3>
+<p>An evidence collector is post-operation observability, not the
+primary Tool result. With <code>onFailure: continue</code>, the primary
+Action may remain <code>PASS</code> while the collector is independently
+recorded as <code>ERROR</code>:</p>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>      #{ssh.app.execute(command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;)}</span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span></code></pre></div>
+<p>Inspect
+<code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;collectorId&gt;</code>
+(or the equivalent <code>ACTIONS</code> compatibility view). The record
+contains <code>status</code>, <code>success</code>,
+<code>invocationId</code>, <code>result</code>, <code>error</code>, and
+the bounded/redacted underlying operation <code>evidence</code>; when an
+operation supplies structured diagnostics,
+<code>operationDiagnostic</code> retains safe fields from the native
+operation diagnostic. <code>diagnostic</code> identifies the collector
+failure and its source file/field. <code>error.message</code> is
+populated from the underlying exception, operation status/exit code, or
+a safe fallback. Resource identity and fields such as SSH
+helper/instance, exit code, bounded stderr, MQ reason codes, HTTP
+status, and timeout details remain under <code>evidence</code> when
+provided by the executor. All failed collectors, including returned
+operation errors and thrown Tool exceptions, pass through the same
+public projection before publication or logging. The projection omits
+raw input, payload, argv, output, resolved command text, and the failed
+record's <code>result</code>, and does not guarantee
+<code>parserDiagnostic</code>. Native error/diagnostic maps retain only
+safe fields; each retained text field is limited to 1024 characters.
+<code>inputOmitted</code> and truncation flags identify omitted or
+bounded evidence. Free-form messages, stderr, per-instance errors, and
+cleanup warnings redact string, DocumentValue text, and array inputs
+within a fixed budget: 256 input nodes, 8192 token characters, and 1024
+characters per token. Byte arrays are limited to 128 bytes (UTF-8,
+Base64, hexadecimal, and Java decimal renderings), other arrays to 64
+elements, and char arrays to 1024 characters. Exceeding any budget,
+encountering a private token shorter than 4 characters, or encountering
+an unknown input type omits all free-form failure details with a safe
+marker, including upstream-truncated secret prefixes or head/tail
+echoes, and sets <code>inputRedactionLimited</code> and
+<code>failureDetailsOmitted</code>. Free-form fields longer than 1024
+characters are also omitted and marked truncated; structured metadata
+remains available. Structured status, category, and resource identity
+are only length-bounded. SSH fan-out retains bounded metadata, errors,
+and stderr for up to 64 instances, prioritizing failures;
+<code>instanceCount</code> and <code>instancesTruncated</code> identify
+the total and omitted instances. When private tokens exist and an
+operation or instance record reports capture/detail truncation (such as
+<code>stderrTruncated</code> or <code>stderrArtifactTruncated</code>),
+that record's free-form failure details are also omitted to avoid
+leaking a split short secret's prefix/suffix. Without private tokens,
+bounded previews can remain available. Primitive arrays redact both the
+complete list rendering and individual elements within the same
+node/token budgets. Returned DB failures extract a safe summary from
+native <code>result.error</code> (<code>type</code>, bounded/redacted
+<code>message</code>, <code>sqlState</code>, <code>vendorCode</code>,
+and safe cancellation metadata), retain it as DB evidence
+<code>error</code>, and use it for the collector's <code>error</code>;
+rows, parameters, SQL text, and raw results are omitted. Failed command
+<code>stdout</code> can remain as separate diagnostic evidence under the
+same bounded/redacted/omission policy as <code>stderr</code>; it is not
+used as <code>error.message</code> or restored as the failed
+<code>result</code>. MQ resource nodes and error summaries retain
+<code>completionCode</code>, <code>reasonCode</code>, and bounded
+symbolic <code>reason</code>. Safe location metadata includes HTTP
+<code>method</code> and the <code>url</code> origin (scheme/host/port
+only), and MQ <code>queueManager</code>, <code>physicalInstance</code>,
+<code>host</code>, <code>port</code>, <code>channel</code>, and
+<code>transport</code>. HTTP evidence does not carry resolved request
+inputs, so failed collector URLs always omit path, query, fragment, and
+user info, with <code>urlPathOmitted</code> identifying omitted
+components; no raw input is added. URLs that cannot be safely parsed or
+exceed the budget are omitted with a safe marker.</p>
+<p>For retries, inspect
+<code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
+Earlier failed collector records remain available after a later
+successful attempt; the top-level collector record follows the
+final/winning attempt. With <code>onFailure: stop</code>, the Action can
+fail, but its diagnostic still includes the collector's root-cause
+message and preserved evidence. The same structured record is written to
+the
+<code>EVIDENCE &lt;action&gt; attempt=&lt;n&gt; collector=&lt;id&gt;</code>
+block in <code>case.log</code>, so the basic resource, category,
+message, exit code, and bounded stderr can be diagnosed without opening
+internal exception traces. Existing capture limits and secret redaction
+continue to apply; collector wrapping does not enable unbounded raw
+output.</p>
 <h3 id="result-workbook">Result workbook</h3>
 <p>ATT copies the source workbook and appends configured result columns
 using <code>report.mode: append-to-copy</code>. Set
@@ -4740,8 +4856,8 @@ Diagnostics</h2>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, helper, or tool
 change:</p>
-<div class="sourceCode" id="cb73"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb74"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>For one environment, use
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>.
 ATT 3.6.0 validates changed descriptor families against their active
@@ -5000,11 +5116,11 @@ Operations</h2>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb74"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb75"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
 Reference Manual, builds the application jar and release/source
 archives, and verifies the packaged launcher. It requires Java/Maven
@@ -5145,11 +5261,11 @@ expression results remain typed while they move through ATT.</p>
 <h3 id="render-and-documentvalue">Render and DocumentValue</h3>
 <p>Render returns a represented document. DocumentValue carries a format
 and the exact rendered text:</p>
-<div class="sourceCode" id="cb75"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
+<div class="sourceCode" id="cb76"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span></code></pre></div>
 <p>One source produces output.result as a DocumentValue. Multiple
 sources produce an ordered map keyed by template-root-relative source
 paths. templateFormat accepts auto, text, json, yaml or xml. auto
@@ -5161,15 +5277,15 @@ transport. Render creates no file and exposes no output.targetFiles. Use
 the original typed Context value for structured access, such as
 EXEC.INPUT.amount or a prior action's output.result.amount.</p>
 <p>Pass Render output directly to HTTP or MQ:</p>
-<div class="sourceCode" id="cb76"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb76-5"><a href="#cb76-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb76-6"><a href="#cb76-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
-<span id="cb76-7"><a href="#cb76-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb76-8"><a href="#cb76-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb77"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a><span class="fu">sendRequest</span><span class="kw">:</span></span>
+<span id="cb77-7"><a href="#cb77-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb77-8"><a href="#cb77-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
 <p>For MQ, pass the DocumentValue as payload. Do not add requestFormat
 to a DocumentValue. A resource encodes its exact text with its
 configured charset/CCSID. DocumentValue.format does not set MQMD.Format
@@ -5183,11 +5299,11 @@ file argument; Render does not create a handoff file.</p>
 <h3 id="tool-db-and-flow-results">Tool, DB and Flow results</h3>
 <p>A command-backed Tool declares stdoutFormat in its Tool
 descriptor:</p>
-<div class="sourceCode" id="cb77"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
-<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">getOrder</span><span class="kw">:</span></span>
-<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
-<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
+<div class="sourceCode" id="cb78"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">getOrder</span><span class="kw">:</span></span>
+<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">./get-order.sh</span><span class="kw">]</span></span>
+<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">stdoutFormat</span><span class="kw">:</span><span class="at"> json</span></span></code></pre></div>
 <p>stdoutFormat parses external stdout once into output.result; it is
 not output serialization. Call-backed Tools and DB/HTTP/MQ operations
 keep their native return types.</p>
@@ -5209,24 +5325,24 @@ lifecycle is:</p>
 <p>Collectors are diagnostic operations, not replacement Actions. Each
 collector has its own typed result and does not replace or mutate the
 primary <code>output.result</code>:</p>
-<div class="sourceCode" id="cb79"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
-<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
-<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
-<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
-<span id="cb79-7"><a href="#cb79-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
-<span id="cb79-8"><a href="#cb79-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb79-9"><a href="#cb79-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
-<span id="cb79-10"><a href="#cb79-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb79-11"><a href="#cb79-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
-<span id="cb79-12"><a href="#cb79-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
-<span id="cb79-13"><a href="#cb79-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
-<span id="cb79-14"><a href="#cb79-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
-<span id="cb79-15"><a href="#cb79-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
-<span id="cb79-16"><a href="#cb79-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb79-17"><a href="#cb79-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
+<div class="sourceCode" id="cb80"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">callPayment</span><span class="kw">:</span></span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a><span class="fu">  call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a>    #{mq.payment.request(</span>
+<span id="cb80-5"><a href="#cb80-5" aria-hidden="true" tabindex="-1"></a>      payload=${EXEC.ACTIONS.renderRequest.output.result},</span>
+<span id="cb80-6"><a href="#cb80-6" aria-hidden="true" tabindex="-1"></a>      responseFormat=&#39;xml&#39;</span>
+<span id="cb80-7"><a href="#cb80-7" aria-hidden="true" tabindex="-1"></a>    )}</span>
+<span id="cb80-8"><a href="#cb80-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb80-9"><a href="#cb80-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb80-10"><a href="#cb80-10" aria-hidden="true" tabindex="-1"></a><span class="fu">      call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb80-11"><a href="#cb80-11" aria-hidden="true" tabindex="-1"></a>        #{ssh.app.execute(</span>
+<span id="cb80-12"><a href="#cb80-12" aria-hidden="true" tabindex="-1"></a>          command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;</span>
+<span id="cb80-13"><a href="#cb80-13" aria-hidden="true" tabindex="-1"></a>        )}</span>
+<span id="cb80-14"><a href="#cb80-14" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span>
+<span id="cb80-15"><a href="#cb80-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span>
+<span id="cb80-16"><a href="#cb80-16" aria-hidden="true" tabindex="-1"></a><span class="fu">  assert</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb80-17"><a href="#cb80-17" aria-hidden="true" tabindex="-1"></a>    ${output.replyReceived} == true</span></code></pre></div>
 <p>While the containing Action, including its assertion, is active, use
 these paths:</p>
 <pre class="text"><code>${output.result}
@@ -5281,13 +5397,13 @@ collector.</p>
 <h3 id="log-typed-value-to-case-log">Log: typed value to Case log</h3>
 <p>Log is a presentation action and therefore has its own format
 field:</p>
-<div class="sourceCode" id="cb83"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
-<span id="cb83-2"><a href="#cb83-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
-<span id="cb83-3"><a href="#cb83-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
-<span id="cb83-4"><a href="#cb83-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
-<span id="cb83-5"><a href="#cb83-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
-<span id="cb83-6"><a href="#cb83-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
+<div class="sourceCode" id="cb84"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb84-1"><a href="#cb84-1" aria-hidden="true" tabindex="-1"></a><span class="fu">logOrder</span><span class="kw">:</span></span>
+<span id="cb84-2"><a href="#cb84-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> log</span></span>
+<span id="cb84-3"><a href="#cb84-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">level</span><span class="kw">:</span><span class="at"> INFO</span></span>
+<span id="cb84-4"><a href="#cb84-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
+<span id="cb84-5"><a href="#cb84-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
+<span id="cb84-6"><a href="#cb84-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
 <p>level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR.
 At least one of message or value is required. message is rendered as
 text. value accepts any typed value, including nested maps/lists. Exact
@@ -5318,11 +5434,11 @@ needs them after the Flow returns.</p>
 <h3 id="resource-output-evidence">Resource output evidence</h3>
 <p>Resource evidence is separate from the logical result. A helper may
 configure an optional evidence.output presentation policy:</p>
-<div class="sourceCode" id="cb84"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb84-1"><a href="#cb84-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb84-2"><a href="#cb84-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb84-3"><a href="#cb84-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb84-4"><a href="#cb84-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<div class="sourceCode" id="cb85"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb85-1"><a href="#cb85-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb85-2"><a href="#cb85-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb85-3"><a href="#cb85-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb85-4"><a href="#cb85-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>This adds a bounded human-readable snapshot beside operation
 metadata; it does not change output.result or response parsing. In Load,
 evidence.resources.output accepts inherit (default) or none. none skips
@@ -5531,19 +5647,19 @@ active runtime contracts.</td>
 </tbody>
 </table>
 <p>A Render-to-HTTP example:</p>
-<div class="sourceCode" id="cb85"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb85-1"><a href="#cb85-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
-<span id="cb85-2"><a href="#cb85-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
-<span id="cb85-3"><a href="#cb85-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
-<span id="cb85-4"><a href="#cb85-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb85-5"><a href="#cb85-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb85-6"><a href="#cb85-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb85-7"><a href="#cb85-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
-<p>For an abstract value, use requestFormat explicitly:</p>
 <div class="sourceCode" id="cb86"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb86-1"><a href="#cb86-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb86-2"><a href="#cb86-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb86-3"><a href="#cb86-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb86-1"><a href="#cb86-1" aria-hidden="true" tabindex="-1"></a><span class="fu">renderRequest</span><span class="kw">:</span></span>
+<span id="cb86-2"><a href="#cb86-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> render</span></span>
+<span id="cb86-3"><a href="#cb86-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> payload/request.xml</span></span>
+<span id="cb86-4"><a href="#cb86-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">templateFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
+<span id="cb86-5"><a href="#cb86-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb86-6"><a href="#cb86-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb86-7"><a href="#cb86-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.ACTIONS.renderRequest.output.result})}&quot;</span></span></code></pre></div>
+<p>For an abstract value, use requestFormat explicitly:</p>
+<div class="sourceCode" id="cb87"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb87-1"><a href="#cb87-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb87-2"><a href="#cb87-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb87-3"><a href="#cb87-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
 <p>For Load, migrate old single-target or v1.1 scenarios to
 att-load/v1.2 workloads form, then change the schemaVersion to
 att-load/v1.3 to enable workload-level vars. <code>inputs</code> remains

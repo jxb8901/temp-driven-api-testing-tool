@@ -74,6 +74,24 @@ public class CaseExecutionLog implements AutoCloseable {
         return lightweight(logicalPath, false);
     }
 
+    /**
+     * Keeps the executor log/path contract while discarding writes without serialization,
+     * buffering, mirroring or file reads. Collector runners own the public log record.
+     */
+    public static CaseExecutionLog discarding(Path logicalPath) throws IOException {
+        return new CaseExecutionLog(logicalPath, false, null, false) {
+            @Override public void registerSecretRedactions(List<String> values) {}
+            @Override public boolean appendInternalErrorOnce(Throwable error, String content) { return false; }
+            @Override public void append(String section, Object data) {}
+            @Override public void appendRaw(String section, String content) {}
+            @Override public void appendRawFile(String section, Path source, boolean truncated, long totalBytes) {}
+            @Override public void appendRawFile(String section, Path source, boolean truncated, long totalBytes,
+                    List<String> redactions) {}
+            @Override public void appendAction(String section, Map<String, Object> action) {}
+            @Override public void appendToolInvocation(String section, Map<String, Object> invocation) {}
+        };
+    }
+
     public Path path() {
         return path;
     }
