@@ -185,13 +185,14 @@ public final class FileExpressionResolver {
     }
 
     private CompiledFilePlan compilePlan(String authoredPath, Path sourceDirectory, Path canonical, String source) {
+        if (source.contains("&{"))
+            throw new IllegalArgumentException("Nested project-file expressions are not supported in v1: " + canonical);
         List<Segment> segments = new ArrayList<Segment>();
         int cursor = 0;
         while (cursor < source.length()) {
             int context = source.indexOf("${", cursor);
             int call = source.indexOf("#{", cursor);
-            int file = source.indexOf("&{", cursor);
-            int start = first(context, call, file);
+            int start = first(context, call);
             if (start < 0) { segments.add(new LiteralSegment(source.substring(cursor))); break; }
             if (start > cursor) segments.add(new LiteralSegment(source.substring(cursor, start)));
             if (start == context) {
@@ -205,28 +206,21 @@ public final class FileExpressionResolver {
                 CaseRuntimeContext.validateReferencePath(path);
                 segments.add(new ContextSegment(path, optional));
                 cursor = end + 1;
-            } else if (start == call) {
+            } else {
                 int end = matchingBrace(source, start + 2);
                 if (end < 0) throw new ExpressionSyntaxException(start, source.length(), "'}' to close expression block", "end of text");
                 String expression = source.substring(start, end + 1);
                 segments.add(new CallSegment(new ExpressionBlockEvaluator().compile(expression)));
                 cursor = end + 1;
-            } else {
-                int end = matchingBrace(source, start + 2);
-                if (end < 0) throw new ExpressionSyntaxException(start, source.length(), "'}' to close project-file expression", "end of text");
-                segments.add(new FileSegment(validateAuthoredPath(source.substring(start + 2, end))));
-                cursor = end + 1;
             }
         }
         if (source.isEmpty()) segments.add(new LiteralSegment(""));
         boolean dynamic = false;
-        List<String> references = new ArrayList<String>();
         for (Segment segment : segments) {
             if (!(segment instanceof LiteralSegment)) dynamic = true;
-            if (segment instanceof FileSegment) references.add(((FileSegment) segment).path);
         }
         return new CompiledFilePlan(authoredPath, sourceDirectory, canonical, source,
-                segments, !dynamic, references);
+                segments, !dynamic, Collections.<String>emptyList());
     }
 
     private ResolvedFile resolveFile(String authoredPath, Path sourceDirectory) throws Exception {
@@ -341,11 +335,6 @@ public final class FileExpressionResolver {
             });
         }
     }
-    private static final class FileSegment implements Segment {
-        private final String path; private FileSegment(String path) { this.path = path; }
-        @Override public Object evaluate(Runtime runtime) throws Exception { return runtime.file(path); }
-    }
-
     public static final class CompiledFilePlan {
         private final String authoredPath;
         private final Path sourceDirectory;
@@ -367,6 +356,8 @@ public final class FileExpressionResolver {
         public String authoredPath() { return authoredPath; }
         public Path sourceDirectory() { return sourceDirectory; }
         public Path file() { return file; }
+        /** Authored source for normal Context scope/order and call-contract validation. */
+        public String source() { return source; }
         public long sourceBytes() { return source.getBytes(StandardCharsets.UTF_8).length; }
         public boolean isStatic() { return staticConstant; }
         public List<String> filePaths() { return filePaths; }

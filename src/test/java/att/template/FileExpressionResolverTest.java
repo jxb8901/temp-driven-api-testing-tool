@@ -148,6 +148,71 @@ class FileExpressionResolverTest {
         assertEquals(1, snapshot.size());
     }
 
+    @Test void runtimeStringsNeverBecomeFileLocatorsInRunDebugOrLoad() throws Exception {
+        write("templates/T/private.txt", "private-content");
+        write("templates/T/request.txt", "${EXEC.INPUT.value}");
+        Path directory = project.resolve("templates/T");
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "suite", "sheet", "TC1", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.emptyMap(), null),
+                project, "RUN-1", project, project.resolve("case.log"));
+        context.beginStage(new att.core.StageCaseData("invoke", "T",
+                Collections.<String, Object>singletonMap("value", "&{templates/T/private.txt}")), "T", directory);
+        att.config.ToolConfig tool = new att.config.ToolConfig("literal", "literal", "", "Literal", "",
+                Collections.<String>emptyList(), "#{str.concat(a=${TOOL.input.value})}",
+                Collections.<String>emptyList(), "",
+                Collections.singletonMap("value", new att.config.ToolArgumentConfig("value", "", "", true, "")), null, null);
+        att.config.FrameworkConfig config = new att.config.FrameworkConfig(project, project, project, "SIT", 1000,
+                project, Collections.singletonMap("literal", tool), null, null);
+        att.exec.ToolInvoker invoker = new att.exec.ToolInvoker(project, config);
+        StageTemplate template = new StageTemplate("T", directory, Collections.singletonList(
+                new TemplateAction("request", values("type", "assign", "name", "request",
+                        "expression", "&{request.txt}"), Version.TEMPLATE_SCHEMA)), Version.TEMPLATE_SCHEMA);
+        FileExpressionResolver.FileExpressionSnapshot snapshot = new FileExpressionResolver(project).snapshotFor(template, null);
+        UnifiedTemplateEngine[] engines = {new UnifiedTemplateEngine(invoker), new UnifiedTemplateEngine(invoker),
+                UnifiedTemplateEngine.withFileSnapshot(invoker, null, null, null, new DefaultBuiltInProvider(), snapshot)};
+        for (UnifiedTemplateEngine engine : engines) {
+            try (UnifiedTemplateEngine.SourceScope ignored = engine.pushSourceDirectory(directory)) {
+                assertEquals("prefix &{templates/T/private.txt}", engine.render("prefix ${EXEC.INPUT.value}", context, null));
+                assertEquals("&{templates/T/private.txt}", engine.evaluate("${EXEC.INPUT.value}", context, null));
+                assertEquals("prefix &{templates/T/private.txt}",
+                        engine.render("prefix #{literal(value=${EXEC.INPUT.value})}", context, null));
+                assertEquals("&{templates/T/private.txt}",
+                        engine.evaluate("#{str.concat(a='${EXEC.INPUT.value}')}", context, null));
+                assertEquals("prefix &{templates/T/private.txt}", engine.render("prefix &{request.txt}", context, null));
+            }
+        }
+        assertEquals(1, snapshot.size());
+        assertEquals("private-content", UnifiedTemplateEngine.forProject(project)
+                .evaluate("&{templates/T/private.txt}", context, null));
+    }
+
+    @Test void nestedFileLocatorsAreRejectedInRunDebugAndLoadIncludingCallArguments() throws Exception {
+        Path directory = project.resolve("templates/T");
+        write("templates/T/part.txt", "part");
+        String[] contents = {"&{./part.txt}", "#{str.concat(a=&{./part.txt})}"};
+        for (int index = 0; index < contents.length; index++) {
+            String file = "nested" + index + ".txt";
+            write("templates/T/" + file, contents[index]);
+            StageTemplate template = new StageTemplate("T", directory, Collections.singletonList(
+                    new TemplateAction("nested", values("type", "assign", "name", "nested",
+                            "expression", "&{" + file + "}"), Version.TEMPLATE_SCHEMA)), Version.TEMPLATE_SCHEMA);
+            for (int mode = 0; mode < 2; mode++) {
+                FileExpressionResolver resolver = new FileExpressionResolver(project);
+                IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                        () -> resolver.evaluate(file, directory, runtime(Collections.<String, Object>emptyMap())));
+                assertTrue(error.getMessage().contains("Nested project-file expressions"));
+            }
+            assertThrows(IllegalArgumentException.class, () -> new FileExpressionResolver(project).snapshotFor(template, null));
+        }
+    }
+
+    private static Map<String, Object> values(Object... pairs) {
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        for (int index = 0; index < pairs.length; index += 2) values.put(String.valueOf(pairs[index]), pairs[index + 1]);
+        return values;
+    }
+
     private Path write(String relative, String value) throws Exception {
         Path file = project.resolve(relative);
         Files.createDirectories(file.getParent());

@@ -180,8 +180,7 @@ public class UnifiedTemplateEngine {
     }
 
     public String render(String text, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        String afterTools = renderTools(text, context, log);
-        return renderFileSources(renderValues(afterTools, context), context, log);
+        return renderAuthoredText(text, context, log, true);
     }
 
     /** Renders a non-Case expression scope (for example report filenames or Tool command arguments). */
@@ -296,7 +295,7 @@ public class UnifiedTemplateEngine {
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
-            @Override public String interpolate(String value) throws Exception { return renderFileSources(renderValues(value, context), context, log); }
+            @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
             @Override public boolean hasContext(String path) { return context.contains(path); }
             @Override public String file(String path) throws Exception { return evaluateFile(path, context, log); }
         });
@@ -1109,19 +1108,34 @@ public class UnifiedTemplateEngine {
         return output.toString();
     }
 
-    private String renderFileSources(String text, final CaseRuntimeContext context, final CaseExecutionLog log) throws Exception {
-        if (text == null || text.isEmpty() || text.indexOf("&{") < 0) return text == null ? "" : text;
-        if (fileExpressions == null)
-            throw new IllegalArgumentException("Project-file expressions require an ATT project-aware execution scope");
+    /** Evaluates authored spans once; values returned by nodes are never parsed again. */
+    private String renderAuthoredText(String text, CaseRuntimeContext context, CaseExecutionLog log,
+                                      boolean allowCalls) throws Exception {
+        if (text == null || text.isEmpty()) return text == null ? "" : text;
         StringBuilder output = new StringBuilder();
         int cursor = 0;
         while (cursor < text.length()) {
-            int start = text.indexOf("&{", cursor);
+            int contextStart = text.indexOf("${", cursor);
+            int callStart = allowCalls ? text.indexOf("#{", cursor) : -1;
+            int fileStart = text.indexOf("&{", cursor);
+            int start = -1;
+            for (int candidate : new int[]{contextStart, callStart, fileStart})
+                if (candidate >= 0 && (start < 0 || candidate < start)) start = candidate;
             if (start < 0) { output.append(text.substring(cursor)); break; }
             output.append(text.substring(cursor, start));
-            int end = text.indexOf('}', start + 2);
-            if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close project-file expression", "end of text");
-            output.append(evaluateFile(text.substring(start + 2, end), context, log));
+            int end = findToolEnd(text, start + 2);
+            if (end < 0) throw new ExpressionSyntaxException(start, text.length(),
+                    "'}' to close authored expression", "end of text");
+            String authored = text.substring(start, end + 1);
+            Object value;
+            if (start == contextStart) value = renderValues(authored, context);
+            else if (start == fileStart) value = evaluateFile(text.substring(start + 2, end), context, log);
+            else {
+                value = evaluateBlock(authored, context, log);
+                if (value instanceof Map)
+                    throw new IllegalArgumentException("A typed Map cannot be interpolated into text; use an exact typed expression");
+            }
+            output.append(value == null ? "" : String.valueOf(value));
             cursor = end + 1;
         }
         return output.toString();
@@ -1143,7 +1157,7 @@ public class UnifiedTemplateEngine {
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
-            @Override public String interpolate(String value) throws Exception { return renderFileSources(renderValues(value, context), context, log); }
+            @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
             @Override public boolean hasContext(String path) { return context.contains(path); }
             @Override public String file(String nested) throws Exception { return evaluateFile(nested, context, log); }
         });
@@ -1232,7 +1246,7 @@ public class UnifiedTemplateEngine {
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
                 return executeResolvedCall(name, arguments, context, log, null, false, null, "", false, false);
             }
-            @Override public String interpolate(String value) throws Exception { return renderFileSources(renderValues(value, context), context, log); }
+            @Override public String interpolate(String value) throws Exception { return renderAuthoredText(value, context, log, false); }
             @Override public boolean hasContext(String path) { return context.contains(path); }
             @Override public String file(String path) throws Exception { return evaluateFile(path, context, log); }
         });

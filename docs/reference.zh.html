@@ -1638,6 +1638,13 @@ SQL 風格通配符：</p>
 <li>匹配本身是大小寫敏感的</li>
 </ul>
 <h3 id="內建函數">內建函數</h3>
+<p>只有作者直接撰寫的 file-expression node 才會求值。Context value、Tool
+result 和 file output 即使包含 <code>&amp;{...}</code>，亦維持 literal
+String。檔案內的 Context path 和 call 依 enclosing Action 的一般
+ordering、scope 和 resource validation 規則驗證。V1 在
+Run、Debug、validation 和 Load snapshot discovery 都拒絕 project-file
+內容中的巢狀 <code>&amp;{...}</code>，包括 <code>#{...}</code> argument
+內的 locator。</p>
 <p>內建函數通過 <code>#{...}</code> 調用。Canonical 名稱使用
 framework-owned
 <code>str.*</code>、<code>date.*</code>、<code>file.*</code>、<code>misc.*</code>

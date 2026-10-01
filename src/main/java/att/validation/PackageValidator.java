@@ -314,7 +314,7 @@ public final class PackageValidator {
                                                FrameworkConfig config) {
         if (expression == null || expression.trim().isEmpty()) return;
         try {
-            validateFileExpressions(expression, template.directory());
+            validateFileExpressions(expression, template.directory(), config);
             for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(expression)) validateReferencedCall(call, config);
         } catch (Exception error) {
             throw locateReferencedError(error, template, action, field, sourceFile);
@@ -885,7 +885,7 @@ public final class PackageValidator {
                 for (Path payload : payloads) {
                     try {
                         String content = att.template.PayloadCache.readUtf8(payload);
-                        validateFileExpressions(content, payload.getParent());
+                        validateFileExpressions(content, payload.getParent(), config);
                         validateStaticContextStructure(content, syntaxEngine, completedActions, false, action.id());
                         for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(content)) validateCall(call, config);
                     } catch (Exception e) {
@@ -967,6 +967,7 @@ public final class PackageValidator {
                 }
             }
             if ("log".equals(type)) {
+                validateStaticValueTree(action.value(), syntaxEngine, completedActions, action.id());
                 validateStaticContextStructure(action.message(), syntaxEngine, completedActions, false, action.id());
                 validateStaticContextStructure(action.file(), syntaxEngine, completedActions, false, action.id());
                 for (Object value : action.fields().values()) validateStaticContextStructure(String.valueOf(value), syntaxEngine, completedActions, false, action.id());
@@ -1000,7 +1001,7 @@ public final class PackageValidator {
             try {
                 if (("assert".equals(fields[index]) || "runWhen".equals(fields[index])) && !values[index].trim().isEmpty())
                     validateAssertionExpression(values[index], engine, config);
-                else { engine.validateValueSyntax(values[index]); validateFileExpressions(values[index], template.directory()); engine.parseCalls(values[index]); }
+                else { engine.validateValueSyntax(values[index]); validateFileExpressions(values[index], template.directory(), config); engine.parseCalls(values[index]); }
             } catch (Exception error) {
                 throw att.config.YamlSupport.locate(DiagnosticException.wrap(DiagnosticCodes.TEMPLATE_INVALID,
                         "Invalid Action expression", error, null, null, "Correct the expression at the reported source location."),
@@ -1096,6 +1097,17 @@ public final class PackageValidator {
         }
     }
 
+    private void validateStaticValueTree(Object value, att.template.UnifiedTemplateEngine engine,
+                                         Set<String> availableActions, String actionId) {
+        if (value instanceof String) {
+            validateStaticContextStructure((String) value, engine, availableActions, false, actionId);
+        } else if (value instanceof Map) {
+            for (Object child : ((Map<?, ?>) value).values()) validateStaticValueTree(child, engine, availableActions, actionId);
+        } else if (value instanceof Iterable) {
+            for (Object child : (Iterable<?>) value) validateStaticValueTree(child, engine, availableActions, actionId);
+        }
+    }
+
     private void validateValueTreeSyntax(Object value, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         if (value instanceof String) { validateInlineExpressions((String) value, engine, config); return; }
         if (value instanceof Map) {
@@ -1169,6 +1181,15 @@ public final class PackageValidator {
     private void validateStaticContextStructure(String text, att.template.UnifiedTemplateEngine engine,
                                                 Set<String> availableActions, boolean currentOutputAvailable,
                                                 String currentActionId) {
+        try {
+            for (String filePath : fileExpressions.extractReferences(text)) {
+                att.template.FileExpressionResolver.CompiledFilePlan plan =
+                        fileExpressions.compile(filePath, validationSourceDirectories.get());
+                validateStaticContextStructure(plan.source(), engine, availableActions,
+                        currentOutputAvailable, currentActionId);
+            }
+        } catch (DiagnosticException error) { throw error; }
+        catch (Exception error) { throw new IllegalArgumentException(error.getMessage(), error); }
         for (String path : engine.parseContextPaths(text)) {
             String referencePath = att.core.CaseRuntimeContext.requiredReferencePath(path);
             String root = firstPathSegment(referencePath);
@@ -1761,14 +1782,17 @@ public final class PackageValidator {
 
     private void validateInlineExpressions(String text, att.template.UnifiedTemplateEngine engine, FrameworkConfig config) {
         engine.validateValueSyntax(text);
-        validateFileExpressions(text, validationSourceDirectories.get());
+        validateFileExpressions(text, validationSourceDirectories.get(), config);
         for (ToolCallParser.ParsedCall call : engine.parseCalls(text)) validateCall(call, config);
     }
 
-    private void validateFileExpressions(String text, Path sourceDirectory) {
+    private void validateFileExpressions(String text, Path sourceDirectory, FrameworkConfig config) {
         if (text == null || text.isEmpty()) return;
         try {
-            for (String path : fileExpressions.extractReferences(text)) fileExpressions.compile(path, sourceDirectory);
+            for (String path : fileExpressions.extractReferences(text)) {
+                att.template.FileExpressionResolver.CompiledFilePlan plan = fileExpressions.compile(path, sourceDirectory);
+                for (ToolCallParser.ParsedCall call : expressionEngine.parseCalls(plan.source())) validateCall(call, config);
+            }
         } catch (Exception error) {
             throw new IllegalArgumentException(error.getMessage(), error);
         }

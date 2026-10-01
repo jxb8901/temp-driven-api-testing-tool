@@ -2,8 +2,13 @@
 
 ## 3.6.2 - 2026-10-01
 
-- Follow up issues #89, #100, #101 and #102.
-- Unify Load descriptors on `att-load/v1.4`, return Render results as `String`, and retain direct Case Log links only when evidence is retained.
+- Add native SSH Resource Helper `execute`, `upload`, and `download` operations with typed stdout, bounded concurrency, one Action deadline, stable error categories, redacted diagnostics, controlled transfer paths, and timeout retry for `execute` only (issue #89).
+- Unify current Load descriptors on `att-load/v1.4`, preserve historical v1.3 threshold semantics, and keep policy-only Quick Load descriptors non-executable (issue #102).
+- Link retained Load evidence and Case Logs safely in portable reports, including canonical path containment and symlink-escape checks (issue #100).
+- Replace `DocumentValue` and `templateFormat` handling with String values at the Render boundary (issue #101), then retire Render Actions from current `att-template/v3.5` and `att-flow/v3.5`; retain v3.4 as a historical contract and migrate shipped templates, flows, examples, and EN/ZH manuals to project-file expressions (issue #107).
+- Add typed `&{project-file}` expressions that return exactly one UTF-8 String, enforce canonical project-root containment and static locators, and reject absolute paths, globs, unsafe targets, and nested file expressions inside project-file content in v1 (issue #107).
+- Cache immutable compiled file plans in Run/Debug, re-evaluate their Context/call nodes for each use, and freeze validated file identities, content, and plans for Load. Evaluate authored nodes once without rescanning runtime Context values, Tool results, or file output as expression syntax (issue #107).
+- Validate Context scope and Action ordering plus Tool/Helper call dependencies inside referenced files using the normal authoring contracts; add regression coverage for literal runtime locators, invalid dependencies, and consistent nested-file rejection across Run/Debug/Load (issue #107).
 
 ## 3.6.1 - 2026-09-30
 
