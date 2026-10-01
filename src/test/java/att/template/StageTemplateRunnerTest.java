@@ -1201,6 +1201,96 @@ class StageTemplateRunnerTest {
         }
     }
 
+    @Test void flaggedTruncatedCapturesOmitShortSecretFragments() throws Exception {
+        String secret = "short-private-token-246813579";
+        String preview = secret.substring(0, 12) + "...[CAPTURE_TRUNCATED]..."
+                + secret.substring(secret.length() - 8);
+        for (String flag : Arrays.asList("stderrTruncated", "stderrArtifactTruncated",
+                "messageTruncated", "evidenceTruncated")) {
+            Map<String, Object> source = map("input", map("token", secret), "status", "TIMEOUT",
+                    "sshHelper", "app", "instance", "one", "stderr", preview, flag, Boolean.TRUE,
+                    "instances", map("one", map("status", "TIMEOUT", "error", preview,
+                            "stderr", preview, "cleanupWarning", preview, flag, Boolean.TRUE)));
+            verifyPrivateCollectorFailure("truncated-" + flag, new ToolExecutionException("TIMEOUT",
+                    "Failure: " + preview, source, null, null),
+                    Arrays.asList(secret.substring(0, 12), secret.substring(secret.length() - 8)), true);
+            ToolExecutionException projected = CollectorExceptionEvidence.project(new ToolExecutionException("TIMEOUT",
+                    "Failure: " + preview, source, null, null));
+            assertEquals(Boolean.TRUE, projected.evidence().get(flag));
+            assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, projected.evidence().get("stderr"));
+            Map<?, ?> host = (Map<?, ?>) ((Map<?, ?>) projected.evidence().get("instances")).get("one");
+            assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, host.get("error"));
+            assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, host.get("stderr"));
+            assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, host.get("cleanupWarning"));
+            assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
+        }
+        // An executor's truncated diagnostic remains useful when there are no private tokens.
+        ToolExecutionException publicFailure = CollectorExceptionEvidence.project(new ToolExecutionException("TIMEOUT",
+                "public failure", map("stderr", "public preview", "stderrTruncated", Boolean.TRUE), null, null));
+        assertEquals("public preview", publicFailure.evidence().get("stderr"));
+    }
+
+    @Test void primitiveArrayElementsAreRedactedWhenEchoedAlone() throws Exception {
+        Map<String, Object> input = map("pins", new int[] {1234, 5678});
+        ToolExecutionException failure = new ToolExecutionException("TIMEOUT", "Invalid PIN 1234",
+                map("input", input, "status", "TIMEOUT", "sshHelper", "app", "instance", "one",
+                        "stderr", "PIN 5678 rejected; list=[1234, 5678]",
+                        "instances", map("one", map("status", "TIMEOUT", "error", "Invalid PIN 1234"))),
+                null, null);
+        verifyPrivateCollectorFailure("primitive-element", failure, Arrays.asList("1234", "5678"), false);
+        ToolExecutionException projected = CollectorExceptionEvidence.project(failure);
+        assertEquals("Invalid PIN [REDACTED_SECRET]", projected.getMessage());
+        assertFalse(Boolean.TRUE.equals(projected.evidence().get("inputRedactionLimited")));
+        assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
+    }
+
+    private void verifyPrivateCollectorFailure(String scenario, final ToolExecutionException failure,
+            List<String> fragments, boolean omitted) throws Exception {
+        for (String mode : Arrays.asList("continue", "stop")) {
+            Path caseDir = tempDir.resolve(scenario + "-" + mode);
+            Files.createDirectories(caseDir);
+            TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                    Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+            CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+            context.beginStage(new StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null) {
+                @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext runtime,
+                        CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs,
+                        boolean overwrite, boolean bypassCache) throws Exception {
+                    if (!call.startsWith("#{fail(")) return super.executeToolAttempt(call, runtime, log,
+                            invocationId, timeoutMs, saveAs, overwrite, bypassCache);
+                    throw failure;
+                }
+            };
+            TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
+                    "evidence", map("private", map("call", "#{fail()}", "onFailure", mode))));
+            List<ValidationResult> results;
+            try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                results = new StageTemplateRunner(engine).execute("invoke",
+                        new StageTemplate("T", tempDir, Collections.singletonList(action)), context, log);
+            }
+            assertEquals("continue".equals(mode) ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status());
+            String path = "ACTIONS.call.output.evidence.collectors.private";
+            assertEquals("TIMEOUT", context.resolve(path + ".status"));
+            assertEquals("TIMEOUT", context.resolve(path + ".error.category"));
+            String invocation = path + ".evidence.tool.invocations[0]";
+            assertEquals("app", context.resolve(invocation + ".sshHelper"));
+            assertEquals("one", context.resolve(invocation + ".instance"));
+            if (omitted) {
+                assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, context.resolve(path + ".error.message"));
+                assertEquals(Boolean.TRUE, context.resolve(invocation + ".failureDetailsOmitted"));
+            }
+            String published = att.validation.JsonSupport.write(context.resolve(path));
+            String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+            for (String fragment : fragments) {
+                assertFalse(published.contains(fragment), fragment);
+                assertFalse(caseLog.contains(fragment), fragment);
+                assertFalse(results.get(0).message().contains(fragment), fragment);
+            }
+            assertTrue(published.contains("[REDACTED_SECRET]"));
+        }
+    }
+
     private final class PrivateCollectorEngine extends UnifiedTemplateEngine {
         private PrivateCollectorEngine() { super(null, new PrivateCollectorBuiltIns()); }
         @Override public ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context,

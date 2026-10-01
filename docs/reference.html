@@ -4362,7 +4362,14 @@ remains available. Structured status, category, and resource identity
 are only length-bounded. SSH fan-out retains bounded metadata, errors,
 and stderr for up to 64 instances, prioritizing failures;
 <code>instanceCount</code> and <code>instancesTruncated</code> identify
-the total and omitted instances.</p>
+the total and omitted instances. When private tokens exist and an
+operation or instance record reports capture/detail truncation (such as
+<code>stderrTruncated</code> or <code>stderrArtifactTruncated</code>),
+that record's free-form failure details are also omitted to avoid
+leaking a split short secret's prefix/suffix. Without private tokens,
+bounded previews can remain available. Primitive arrays redact both the
+complete list rendering and individual elements within the same
+node/token budgets.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
 Earlier failed collector records remain available after a later

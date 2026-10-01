@@ -3632,7 +3632,13 @@ prefix/head-tail echo），并设置 <code>inputRedactionLimited</code> 和
 status、category 和 resource identity 只做长度限制。SSH fan-out
 会保留最多 64 个 instance 的 bounded metadata、error 和
 stderr，优先保留失败 instance；<code>instanceCount</code> 和
-<code>instancesTruncated</code> 表示总数和省略的 instance。</p>
+<code>instancesTruncated</code> 表示总数和省略的 instance。 若有 private
+token，且 operation 或 instance record 标记了 capture/detail
+truncation（如 <code>stderrTruncated</code> 或
+<code>stderrArtifactTruncated</code>），该 record 的 free-form failure
+detail 也会被省略，以避免短 secret 被切断后泄漏 prefix/suffix。没有
+private token 时可保留 bounded preview。Primitive array 的完整 list
+rendering 和单独 element 都会在相同 node/token budget 内 redact。</p>
 <p>有 retry 时，请查看
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>。即使后一个
 attempt 成功，较早的 failed collector record 仍会保留；top-level

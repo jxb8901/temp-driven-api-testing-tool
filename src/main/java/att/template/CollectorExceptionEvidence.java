@@ -72,7 +72,7 @@ final class CollectorExceptionEvidence {
             }
         }
         if (source.containsKey("input")) evidence.put("inputOmitted", Boolean.TRUE);
-        String message = freeText(failure.getMessage(), redaction, evidence, "message");
+        String message = freeText(failure.getMessage(), redaction, evidence, "message", truncatedDetails(source));
         String category = bound(failure.category());
         evidence.put("category", category);
         evidence.put("message", message);
@@ -86,7 +86,7 @@ final class CollectorExceptionEvidence {
             Object value = source.get(field);
             if (value instanceof String) {
                 boolean freeForm = "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field);
-                target.put(field, freeForm ? freeText((String) value, redaction, target, field) : bound((String) value));
+                target.put(field, freeForm ? freeText((String) value, redaction, target, field, truncatedDetails(source)) : bound((String) value));
                 if (((String) value).length() > TEXT_LIMIT) {
                     target.put(field + "Truncated", Boolean.TRUE);
                     target.put("evidenceTruncated", Boolean.TRUE);
@@ -98,12 +98,12 @@ final class CollectorExceptionEvidence {
         return target;
     }
 
-    private static String freeText(String value, Redaction redaction, Map<String, Object> target, String field) {
+    private static String freeText(String value, Redaction redaction, Map<String, Object> target, String field, boolean truncated) {
         if (value == null || value.isEmpty()) return "";
         // Full-value substitution cannot prove that an upstream-truncated echo is safe.
         // Omit details when private inputs cannot be completely inspected within the budget.
         // Also avoid scanning/materializing oversized diagnostic strings.
-        if (redaction.limited || value.length() > TEXT_LIMIT) {
+        if (redaction.limited || value.length() > TEXT_LIMIT || (truncated && !redaction.tokens.isEmpty())) {
             target.put("failureDetailsOmitted", Boolean.TRUE);
             if (value.length() > TEXT_LIMIT) {
                 target.put(field + "Truncated", Boolean.TRUE);
@@ -122,6 +122,15 @@ final class CollectorExceptionEvidence {
             }
         }
         return bound(safe);
+    }
+
+    private static boolean truncatedDetails(Map<?, ?> source) {
+        for (String flag : new String[] {"messageTruncated", "errorTruncated", "cleanupWarningTruncated",
+                "stderrTruncated", "stderrArtifactTruncated", "stdoutTruncated", "stdoutArtifactTruncated",
+                "evidenceTruncated"}) {
+            if (Boolean.TRUE.equals(source.get(flag))) return true;
+        }
+        return false;
     }
 
     /** A bounded inspection; exceeding any budget fails closed for free-form details. */
@@ -180,6 +189,10 @@ final class CollectorExceptionEvidence {
                     List<Object> elements = new ArrayList<Object>(length);
                     for (int index = 0; index < length; index++) elements.add(Array.get(value, index));
                     token(elements.toString());
+                    for (Object element : elements) {
+                        collect(element);
+                        if (limited) break;
+                    }
                 } else {
                     for (int index = 0; index < length; index++) {
                         collect(Array.get(value, index));
