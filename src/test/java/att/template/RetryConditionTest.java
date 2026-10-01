@@ -30,7 +30,7 @@ class RetryConditionTest {
     @Test void externalStatefulAndFileCallsAreRejectedBeforeExecution() {
         for (String value : new String[]{"#{mq.payment.request(payload='x')}", "#{db.orders.query(sql='select 1')}",
                 "#{http.api.get()}", "#{ssh.host.execute(command='x')}", "#{sample.tool()}", "#{seq('orders')}",
-                "#{random()}", "#{sysdate()}", "#{file.exists('x')}", "&{payload.xml}"})
+                "#{'#{seq(\'orders\')}'}", "seq('orders') == 1", "#{random()}", "#{sysdate()}", "#{file.exists('x')}", "&{payload.xml}"})
             assertThrows(DiagnosticException.class, () -> RetryCondition.validate(value), value);
     }
 

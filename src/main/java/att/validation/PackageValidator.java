@@ -1979,7 +1979,7 @@ public final class PackageValidator {
                 if (!(literal instanceof String || literal instanceof Map || literal instanceof List))
                     throw new IllegalArgumentException("MQ payload must be a String, Map, or List");
             } else if ("requestFormat".equals(argument.key()) || "responseFormat".equals(argument.key())) {
-                if (!(literal instanceof String) || !Arrays.asList("text", "json", "yaml", "xml").contains(literal))
+                if (!(literal instanceof String) || !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(literal))
                     throw new IllegalArgumentException("MQ " + argument.key() + " must be text, json, yaml, or xml");
             } else {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty()) {
