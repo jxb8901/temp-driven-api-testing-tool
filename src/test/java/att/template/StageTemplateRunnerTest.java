@@ -819,7 +819,8 @@ class StageTemplateRunnerTest {
         String timeoutLog = new String(Files.readAllBytes(caseTwo.resolve("case.log")), "UTF-8");
         assertTrue(timeoutLog.contains("Tool timed out: sample"));
         assertEquals(1, occurrences(timeoutLog, "Tool timed out: sample"));
-        assertEquals(1, occurrences(timeoutLog, "[ACTION call ERROR]"));
+        assertEquals("TIMEOUT", timeoutContext.resolve("EXEC.ACTIONS.call.output.status"));
+        assertEquals(1, occurrences(timeoutLog, "[ACTION call]"));
         assertFalse(timeoutLog.contains("TOOL:"));
 
         Path caseThree = tempDir.resolve("case3");

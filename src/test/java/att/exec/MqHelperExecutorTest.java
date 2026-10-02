@@ -113,7 +113,7 @@ class MqHelperExecutorTest {
                 map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
                 context(lazyIterationDirectory), null, "lazy-load-request");
 
-        assertTrue(result.success(), result.result().toString());
+        assertFalse(result.success(), result.result().toString());
         assertFalse(Files.exists(lazyIterationDirectory), "payload validation must not materialize a successful Load workspace");
         assertEquals(1, factory.connectedInstances.size(), "MQ connect must be reached after payload validation");
     }
@@ -407,7 +407,7 @@ class MqHelperExecutorTest {
         }
     }
 
-    @Test void requestNoReplyPreservesEffectiveWaitMsAndScopesBindNotFixedToRequestOutput() throws Exception {
+    @Test void requestNoReplyIsTimeoutAndPreservesNativeReasonMetadata() throws Exception {
         Path caseDir = tempDir.resolve("request-timeout-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
         FakeFactory factory = new FakeFactory(); factory.noMessage = true;
@@ -415,9 +415,16 @@ class MqHelperExecutorTest {
                 map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString(), "waitMs", 321),
                 context(caseDir), null, "request-2033");
 
-        assertTrue(result.success());
+        assertFalse(result.success());
         assertEquals(Boolean.FALSE, result.result().get("replyReceived"));
         assertEquals(321, result.result().get("waitMs"));
+        assertEquals(Boolean.TRUE, result.result().get("sent"));
+        assertEquals(2, result.result().get("completionCode"));
+        assertEquals(2033, result.result().get("reasonCode"));
+        assertEquals("MQRC_NO_MSG_AVAILABLE", result.result().get("reason"));
+        assertEquals("MQ_TIMEOUT", ((Map<?, ?>) result.result().get("error")).get("type"));
+        assertEquals("TIMEOUT", result.result().get("status"));
+        assertEquals("TIMEOUT", result.evidence().get("status"));
         assertEquals(java.util.Arrays.asList(Boolean.TRUE, Boolean.FALSE), factory.bindNotFixed);
     }
 
@@ -627,6 +634,81 @@ class MqHelperExecutorTest {
             assertTrue(caseLog.contains("QM1"));
             if ("stop".equals(mode)) assertTrue(results.get(0).message().contains("Queue manager unavailable"));
         }
+    }
+
+    @Test void request2033UsesTimeoutAndCommonRetryGateAcrossExecutionModes() throws Exception {
+        for (String mode : new String[]{"testcase", "debug", "load"}) {
+            for (String condition : new String[]{"absent", "#{true}", "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"}) {
+                Path caseDir = Files.createDirectories(tempDir.resolve(mode + "-" + condition.hashCode()));
+                FakeFactory factory = new FakeFactory(); factory.noMessage = true;
+                Map<String,Object> retry = map("maxAttempts", 2, "intervalMs", 0,
+                        "retryOn", Collections.singletonList("TIMEOUT"));
+                boolean suppress = condition.contains("reasonCode");
+                if (!"absent".equals(condition)) retry.put("when", condition);
+                TemplateAction action = new TemplateAction("mqRequest", map("type", "tool",
+                        "call", "#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', payload='request', waitMs=321)}",
+                        "retry", retry), att.Version.TEMPLATE_SCHEMA);
+                TestCase test = new TestCase(2, "g", "sheet", "TC1", Collections.<String>emptyList(),
+                        Collections.<String,Object>emptyMap(), Collections.emptyMap(), null);
+                CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"), mode);
+                context.beginStage(new StageCaseData("mq", "MQ", Collections.<String,Object>emptyMap()), "MQ", tempDir);
+                att.load.PooledMqTransportFactory pool = "load".equals(mode)
+                        ? new att.load.PooledMqTransportFactory(factory, 2, 1000L) : null;
+                MqTransport.Factory transport = pool == null ? factory : pool;
+                List<att.core.ValidationResult> results;
+                try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+                    results = new StageTemplateRunner(new UnifiedTemplateEngine(null, null,
+                            new MqHelperExecutor(tempDir, config(), transport)))
+                            .execute("mq", new StageTemplate("MQ", tempDir, Collections.singletonList(action)), context, log);
+                } finally { if (pool != null) pool.close(); }
+                // Suite/report aggregate operational failures remain ERROR; canonical Action outcome is TIMEOUT.
+                assertEquals(ResultStatus.ERROR, results.get(0).status());
+                assertEquals("TIMEOUT", context.resolve("EXEC.ACTIONS.mqRequest.output.status"));
+                assertEquals(suppress ? 1 : 2, factory.putCalls, mode + ": " + condition);
+                assertEquals(suppress ? 1 : 2, ((List<?>) context.resolve("EXEC.ACTIONS.mqRequest.output.attempts")).size());
+                String prefix = "EXEC.ACTIONS.mqRequest.output.evidence.mq.invocations[0].";
+                assertEquals(Boolean.TRUE, context.resolve(prefix + "sent"));
+                assertEquals(Boolean.FALSE, context.resolve(prefix + "replyReceived"));
+                assertEquals(2, context.resolve(prefix + "completionCode"));
+                assertEquals(2033, context.resolve(prefix + "reasonCode"));
+                assertEquals("MQRC_NO_MSG_AVAILABLE", context.resolve(prefix + "reason"));
+                assertEquals(321, context.resolve(prefix + "waitMs"));
+                assertEquals("TIMEOUT", context.resolve(prefix + "status"));
+                assertEquals(suppress ? "WHEN_FALSE" : "RETRY",
+                        context.resolve("EXEC.ACTIONS.mqRequest.output.attempts[0].retryDecision.reason"));
+                assertEquals(!"absent".equals(condition),
+                        context.resolve("EXEC.ACTIONS.mqRequest.output.attempts[0].retryDecision.whenEvaluated"));
+                String log = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+                for (String expected : new String[]{"TIMEOUT", "2033", "MQRC_NO_MSG_AVAILABLE", "completionCode", "replyReceived"})
+                    assertTrue(log.contains(expected), mode + ": " + expected + "\n" + log);
+                assertTrue(results.get(0).message().contains("TIMEOUT"), results.get(0).message());
+                assertTrue(results.get(0).message().contains("2033"), results.get(0).message());
+            }
+        }
+    }
+
+    @Test void mqGateStillAllowsAnOuterDeadlineTimeoutToRetry() throws Exception {
+        Path caseDir = Files.createDirectories(tempDir.resolve("gated-outer-timeout"));
+        FakeFactory factory = new FakeFactory(); factory.firstPutDelayMs = 300L;
+        TemplateAction action = new TemplateAction("mqRequest", map("type", "tool", "timeoutMs", 100,
+                "call", "#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', payload='request', waitMs=20)}",
+                "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"),
+                        "when", "#{${output.status} == 'TIMEOUT' AND ${output.evidence.mq.invocations[0].reasonCode?} != 2033}")),
+                att.Version.TEMPLATE_SCHEMA);
+        CaseRuntimeContext context = context(caseDir);
+        context.beginStage(new StageCaseData("mq", "MQ", Collections.<String,Object>emptyMap()), "MQ", tempDir);
+        List<att.core.ValidationResult> results;
+        try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+            results = new StageTemplateRunner(new UnifiedTemplateEngine(null, null, new MqHelperExecutor(tempDir, config(), factory)))
+                    .execute("mq", new StageTemplate("MQ", tempDir, Collections.singletonList(action)), context, log);
+        }
+        assertEquals(ResultStatus.PASS, results.get(0).status(), results.get(0).message());
+        assertEquals(2, factory.putCalls);
+        assertEquals("TIMEOUT", context.resolve("EXEC.ACTIONS.mqRequest.output.attempts[0].status"));
+        assertEquals(Boolean.TRUE, context.resolve("EXEC.ACTIONS.mqRequest.output.attempts[0].retryDecision.whenResult"));
+        assertEquals("PASS", context.resolve("EXEC.ACTIONS.mqRequest.output.status"));
+        assertFalse(context.contains("EXEC.ACTIONS.mqRequest.output.error"), "winning attempt must not inherit a timeout");
+        assertFalse(context.contains("EXEC.ACTIONS.mqRequest.output.diagnostic"));
     }
 
     private FrameworkConfig multiConfig(String strategy) {

@@ -76,3 +76,27 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.2.schema.json).
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
+
+#### Request/reply timeout 與重播策略
+
+`mq.<id>.request(...)` 收到 correlated reply 時為 PASS。PUT 成功後，correlated GET 回傳 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`）時，使用標準 TIMEOUT 與 `MQ_TIMEOUT` diagnostic，即使 outer Action deadline 尚未到期。原生 evidence 保留 `sent: true`、`replyReceived: false`、`completionCode: 2`、`reasonCode: 2033`、reason 名稱及有效 `waitMs`。其他 transport failure 維持既有 MQ ERROR 分類；outer deadline 與 pool borrow timeout 也走標準 TIMEOUT 路徑。
+
+Canonical Action outcome 為 `output.status: TIMEOUT`；suite/report 的 operation failure aggregate 仍為 ERROR，report message 與 Case log 顯示 TIMEOUT 及 MQRC 2033。當前 attempt 的原生 metadata 位於 `output.evidence.mq.invocations[0]`；完成後位於 `EXEC.ACTIONS.<actionId>.output.evidence.mq.invocations[0]`。
+
+未配置 `retry.when` 時，`retryOn: [TIMEOUT]` 可重新 PUT 整個 request。對有副作用的 request，使用 Boolean gate 排除已送出但無 reply 的情況：
+
+~~~yaml
+invokePayment:
+  type: tool
+  call: "#{mq.payment.request(payload=${EXEC.INPUT.requestText})}"
+  timeoutMs: 30000
+  retry:
+    maxAttempts: 3
+    intervalMs: 1000
+    retryOn: [TIMEOUT]
+    when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+Optional `?` path 在其他 timeout 沒有 MQ reason code 時回傳 null，因此允許一般 timeout retry；reasonCode 為 2033 時阻止第二次 PUT，最終 Action 仍是 TIMEOUT。ATT 不會推斷 idempotency 或去除重複訊息。需要反覆輪詢 reply 時，可使用 `send` 後執行 correlated `receive`。
+
+獨立 `receive` 明確保留非錯誤的 polling 契約：outer deadline 未到期時，即使 bounded wait 找不到訊息，2033 仍回傳 PASS 與 `received: false`；outer deadline 到期則為 TIMEOUT。此契約取代 先前為避免重播而不將 request/2033 分類為 TIMEOUT 的舊指引。請參閱[共用 retry 語義](../14_actions.md)。

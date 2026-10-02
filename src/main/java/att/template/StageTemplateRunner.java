@@ -393,6 +393,7 @@ public class StageTemplateRunner {
         if (!retry.isEmpty()) output.put("attempts", attempts);
 
         for (int number = 1; number <= maxAttempts; number++) {
+            beginAttempt(output, number);
             String invocationId = context.nextDbInvocationId(action.db());
             att.exec.DbInvocationResult result;
             appendResourceEvent(log, stageName, action.id(), "db", number, "START", null, null);
@@ -422,7 +423,7 @@ public class StageTemplateRunner {
 
             ActionExecutionResult operationResult = result.operationResult();
             appendResourceEvent(log, stageName, action.id(), "db", number,
-                    operationResult.executionSuccess() ? "PASS" : "ERROR", operationResult.durationMs(),
+                    operationResult.executionSuccess() ? "PASS" : "TIMEOUT".equals(dbFailureType(operationResult.result())) ? "TIMEOUT" : "ERROR", operationResult.durationMs(),
                     operationResult.executionSuccess() ? null : dbFailureType(operationResult.result()));
             publishOperationResult(output, operationResult);
             Map<String, Object> attempt = new LinkedHashMap<String, Object>();
@@ -437,15 +438,17 @@ public class StageTemplateRunner {
             if (!operationResult.executionSuccess()) {
                 String category = dbFailureType(operationResult.result());
                 if (category != null) attempt.put("category", category);
+                output.put("status", "TIMEOUT".equals(category) ? "TIMEOUT" : "ERROR");
+                output.put("success", false);
+                attempt.put("status", output.get("status"));
                 if (query && "TIMEOUT".equals(category)
-                        && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
+                        && shouldRetry(action, retryOn, "TIMEOUT", number, maxAttempts, context, output, attempt, log)) {
                     attempt.put("retryReason", "TIMEOUT");
                     appendResourceEvent(log, stageName, action.id(), "db", number, "RETRY", null, "TIMEOUT");
                     waitBeforeRetry(intervalMs);
                     continue;
                 }
                 if (!retry.isEmpty()) output.put("finalAttempt", number);
-                output.put("status", "ERROR"); output.put("success", false);
                 return ResultStatus.ERROR;
             }
 
@@ -459,7 +462,7 @@ public class StageTemplateRunner {
                 output.put("status", "PASS"); output.put("success", true);
                 return ResultStatus.PASS;
             }
-            if (!shouldRetry(retryOn, "ASSERTION", number, maxAttempts)) {
+            if (!shouldRetry(action, retryOn, "ASSERTION", number, maxAttempts, context, output, attempt, log)) {
                 if (!retry.isEmpty()) output.put("finalAttempt", number);
                 output.put("status", "FAIL"); output.put("success", false);
                 return ResultStatus.FAIL;
@@ -494,6 +497,7 @@ public class StageTemplateRunner {
         output.put("attempts", attempts);
         String kind = templateEngine.callKind(action.call());
         for (int number = 1; number <= maxAttempts; number++) {
+            beginAttempt(output, number);
             appendResourceEvent(log, stageName, action.id(), kind, number, "START", null, null);
             long operationStarted = System.nanoTime();
             try {
@@ -513,7 +517,7 @@ public class StageTemplateRunner {
                 invocation.put("attempt", number);
                 ActionExecutionResult operation = result.operationResult();
                 appendResourceEvent(log, stageName, action.id(), kind, number,
-                        operation.executionSuccess() ? "PASS" : "ERROR",
+                        operation.executionSuccess() ? "PASS" : operationTimeout(operation, result.invocation()) ? "TIMEOUT" : "ERROR",
                         operation.durationMs() >= 0L ? operation.durationMs() : elapsedMillis(operationStarted),
                         operation.executionSuccess() ? null : "OPERATION_FAILED");
                 Object selectedResult = resultValue(operation.result());
@@ -527,18 +531,18 @@ public class StageTemplateRunner {
                 if (invocation.get("HTTP") != null) node.put("HTTP", invocation.get("HTTP"));
                 if (invocation.get("SSH") != null) node.put("SSH", invocation.get("SSH"));
                 if (!operation.executionSuccess()) {
-                    if ((("mq".equals(kind) && "MQ_TIMEOUT".equals(mqErrorType(operation.outputMetadata())))
-                            || ("http".equals(kind) && httpTimeout(operation.outputMetadata()))
-                            || ("db".equals(kind) && "TIMEOUT".equals(dbFailureType(operation.result())))
-                            || sshTimeout(result.invocation()))
-                            && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
+                    boolean timedOut = operationTimeout(operation, result.invocation());
+                    output.put("status", timedOut ? "TIMEOUT" : "ERROR");
+                    output.put("success", false);
+                    invocation.put("status", output.get("status"));
+                    if (timedOut && shouldRetry(action, retryOn, "TIMEOUT", number, maxAttempts,
+                            context, output, invocation, log)) {
                         invocation.put("retryReason", "TIMEOUT");
                         appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
                         waitBeforeRetry(intervalMs);
                         continue;
                     }
                     output.put("finalAttempt", number);
-                    output.put("status", "ERROR"); output.put("success", false);
                     return ResultStatus.ERROR;
                 }
                 context.setActionOutput(output);
@@ -555,7 +559,7 @@ public class StageTemplateRunner {
                     output.put("status", "PASS"); output.put("success", true);
                     return ResultStatus.PASS;
                 }
-                if (!shouldRetry(retryOn, "ASSERTION", number, maxAttempts)) {
+                if (!shouldRetry(action, retryOn, "ASSERTION", number, maxAttempts, context, output, invocation, log)) {
                     output.put("finalAttempt", number);
                     output.put("status", "FAIL"); output.put("success", false);
                     return ResultStatus.FAIL;
@@ -564,7 +568,7 @@ public class StageTemplateRunner {
                 appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "ASSERTION");
                 waitBeforeRetry(intervalMs);
             } catch (att.exec.ToolExecutionException e) {
-                appendResourceEvent(log, stageName, action.id(), kind, number, "ERROR",
+                appendResourceEvent(log, stageName, action.id(), kind, number, "TIMEOUT".equals(e.category()) ? "TIMEOUT" : "ERROR",
                         elapsedMillis(operationStarted), e.category());
                 Map<String, Object> evidence = new LinkedHashMap<String, Object>(e.evidence());
                 evidence.put("attempt", number);
@@ -582,11 +586,19 @@ public class StageTemplateRunner {
                 if (evidence.get("TOOL") != null) node.put("TOOL", evidence.get("TOOL"));
                 if (evidence.get("DB") != null) node.put("DB", evidence.get("DB"));
                 if (evidence.get("SSH") != null) node.put("SSH", evidence.get("SSH"));
-                if ("TIMEOUT".equals(e.category()) && shouldRetry(retryOn, "TIMEOUT", number, maxAttempts)) {
+                output.put("status", "TIMEOUT".equals(e.category()) ? "TIMEOUT" : "ERROR");
+                output.put("success", false);
+                output.put("diagnostic", detailed(e, template, action, "call").toDiagnostic().toMap());
+                if ("TIMEOUT".equals(e.category()) && shouldRetry(action, retryOn, "TIMEOUT", number, maxAttempts,
+                        context, output, evidence, log)) {
                     evidence.put("retryReason", "TIMEOUT");
                     appendResourceEvent(log, stageName, action.id(), kind, number, "RETRY", null, "TIMEOUT");
                     waitBeforeRetry(intervalMs);
                     continue;
+                }
+                if ("TIMEOUT".equals(e.category())) {
+                    output.put("finalAttempt", number);
+                    return ResultStatus.ERROR;
                 }
                 throw e;
             }
@@ -938,8 +950,58 @@ public class StageTemplateRunner {
                 : evaluator.evaluate(String.valueOf(evaluated));
     }
 
-    private boolean shouldRetry(java.util.Set<String> retryOn, String reason, int attempt, int maxAttempts) {
-        return retryOn.contains(reason) && attempt < maxAttempts;
+    private void beginAttempt(Map<String, Object> output, int number) {
+        Object history = output.get("attempts");
+        output.clear();
+        if (history != null) output.put("attempts", history);
+        output.put("attempt", number);
+        output.put("status", "PASS");
+        output.put("success", true);
+        output.put("result", null);
+    }
+
+    private boolean operationTimeout(ActionExecutionResult operation, Map<String, Object> invocation) {
+        String type = mqErrorType(operation.outputMetadata());
+        return "MQ_TIMEOUT".equals(type) || "MQ_POOL_TIMEOUT".equals(type)
+                || httpTimeout(operation.outputMetadata()) || sshTimeout(invocation)
+                || "TIMEOUT".equals(dbFailureType(operation.result()));
+    }
+
+    private boolean shouldRetry(TemplateAction action, java.util.Set<String> retryOn, String reason,
+                                int attempt, int maxAttempts, CaseRuntimeContext context,
+                                Map<String, Object> output, Map<String, Object> record,
+                                CaseExecutionLog log) {
+        output.put("status", "ASSERTION".equals(reason) ? "FAIL" : "TIMEOUT");
+        output.put("success", false);
+        record.put("status", output.get("status"));
+        record.put("success", false);
+        boolean candidate = retryOn.contains(reason);
+        Map<String, Object> decision = new LinkedHashMap<String, Object>();
+        decision.put("category", reason);
+        decision.put("candidate", candidate);
+        decision.put("whenEvaluated", false);
+        decision.put("allowed", false);
+        record.put("retryDecision", decision);
+        if (!candidate || attempt >= maxAttempts) {
+            decision.put("reason", candidate ? "MAX_ATTEMPTS" : "CATEGORY_NOT_SELECTED");
+            return false;
+        }
+        context.setActionOutput(output);
+        boolean allowed = true;
+        if (action.retry().containsKey("when")) {
+            decision.put("whenEvaluated", true);
+            try {
+                allowed = RetryCondition.evaluate(action.retry().get("when"), context);
+                decision.put("whenResult", allowed);
+            } catch (RuntimeException error) {
+                decision.put("reason", "EXPRESSION_ERROR");
+                throw error;
+            }
+        }
+        decision.put("allowed", allowed);
+        decision.put("reason", allowed ? "RETRY" : "WHEN_FALSE");
+        if (!allowed) appendProgress(log, "RETRY SUPPRESSED", decision);
+        return allowed;
     }
 
     private void waitBeforeRetry(int intervalMs) throws InterruptedException {
@@ -1033,7 +1095,14 @@ public class StageTemplateRunner {
     private java.util.Set<String> strings(Object value) { java.util.Set<String> result = new java.util.LinkedHashSet<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
     private java.util.Set<Integer> integers(Object value) { java.util.Set<Integer> result = new java.util.LinkedHashSet<Integer>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(Integer.valueOf(String.valueOf(item))); return result; }
     private boolean stopOnFailure(TemplateAction action) { return !"continue".equals(action.onFailure()); }
-    private String assertionMessage(Map<String, Object> output) { Object value = output.get("assertion"); return value == null ? "" : String.valueOf(value); }
+    private String assertionMessage(Map<String, Object> output) {
+        Object value = output.get("assertion");
+        if (value != null) return String.valueOf(value);
+        if ("TIMEOUT".equals(output.get("status")))
+            return "TIMEOUT: " + String.valueOf(output.get("diagnostic") != null
+                    ? output.get("diagnostic") : output.get("error"));
+        return "";
+    }
     private Map<String, Object> diagnosticLocation(att.validation.DiagnosticException diagnostic) {
         return att.validation.DiagnosticRenderer.location(diagnostic.toDiagnostic());
     }
@@ -1080,6 +1149,7 @@ public class StageTemplateRunner {
                     "Check the action fields, Context references, input files, call arguments, and detailed Case-log evidence.", error);
         }
         String sourceField = "actions." + action.id() + "." + executionField;
+        if (typed.field() != null && typed.field().equals("retry.when")) sourceField = "actions." + action.id() + ".retry.when";
         if (typed.file() == null && typed.field() != null && (typed.field().startsWith("result") || typed.field().equals("sqlFile")))
             sourceField = "actions." + action.id() + "." + typed.field();
         return att.config.YamlSupport.locate(typed, template.sourceFile(), sourceField)
