@@ -13,9 +13,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -88,15 +95,15 @@ class TestdataRuntimeTest {
                 Collections.<String, Object>singletonMap("scope", "user"));
         TestdataInputResolver users = new TestdataInputResolver(registry, userPolicy, "users", "closed", null);
         Map<String, Object> mapping = Collections.<String, Object>singletonMap("value", "@{scoped}");
-        Object userA = users.resolve(mapping, null, "VU-A", "a1").get("value");
-        assertEquals(userA, users.resolve(mapping, null, "VU-A", "a2").get("value"));
-        assertNotEquals(userA, users.resolve(mapping, null, "VU-B", "b1").get("value"));
+        Object userA = users.resolve(mapping, null, "VU-1", "a1").get("value");
+        assertEquals(userA, users.resolve(mapping, null, "VU-1", "a2").get("value"));
+        assertNotEquals(userA, users.resolve(mapping, null, "VU-2", "b1").get("value"));
 
         TestdataInputResolver iterations = new TestdataInputResolver(registry,
-                Collections.<String, Object>emptyMap(), "iterations", "closed", null);
-        assertNotEquals(iterations.resolve(mapping, null, "VU-A", "i1").get("value"),
-                iterations.resolve(mapping, null, "VU-A", "i2").get("value"));
-        assertThrows(TestdataStopException.class, () -> iterations.resolve(mapping, null, "VU-A", "i3"));
+                Collections.<String, Object>emptyMap(), "iterations", "closed", null, 1);
+        assertNotEquals(iterations.resolve(mapping, null, "VU-1", "run-VU-1-1").get("value"),
+                iterations.resolve(mapping, null, "VU-1", "run-VU-1-2").get("value"));
+        assertThrows(TestdataStopException.class, () -> iterations.resolve(mapping, null, "VU-1", "run-VU-1-3"));
 
         Map<String, Object> workloadPolicy = Collections.<String, Object>singletonMap("scoped",
                 Collections.<String, Object>singletonMap("scope", "workload"));
@@ -106,6 +113,67 @@ class TestdataRuntimeTest {
 
         TestdataInputResolver arrivalRate = new TestdataInputResolver(registry, userPolicy, "rate", "arrivalRate", null);
         assertThrows(IllegalArgumentException.class, () -> arrivalRate.resolve(mapping, null, null, "a1"));
+    }
+
+    @Test void concurrentLoadIterationAssignmentsAreStableAcrossWorkerArrivalOrders() throws Exception {
+        List<String[]> scopes = new ArrayList<String[]>();
+        for (int user = 1; user <= 3; user++) {
+            for (int iteration = 1; iteration <= 3; iteration++) {
+                scopes.add(new String[]{"VU-" + user, "run-work-VU-" + user + "-" + iteration});
+            }
+        }
+        for (String strategy : Arrays.asList("sequential", "roundRobin")) {
+            StringBuilder data = new StringBuilder("schemaVersion: att-testdata/v1.0\nid: scoped\nrecords:\n");
+            for (int index = 0; index < 16; index++) data.append("  - record-").append(index).append('\n');
+            data.append("selection: {strategy: ").append(strategy).append(", exhaustion: recycle}\n");
+            Path descriptor = write("data/concurrent-" + strategy + ".yaml", data.toString());
+            TestdataRegistry registry = new TestdataRegistry(root, Collections.<Path>emptyList(), Arrays.asList(descriptor));
+            Map<String, Object> policy = Collections.<String, Object>singletonMap("scoped",
+                    Collections.<String, Object>singletonMap("scope", "iteration"));
+
+            Map<String, Object> firstRun = resolveConcurrently(registry, policy, scopes, false, "run-one");
+            Map<String, Object> secondRun = resolveConcurrently(registry, policy, scopes, true, "run-two");
+            assertEquals(firstRun, secondRun, strategy);
+            assertEquals(scopes.size(), new HashSet<Object>(firstRun.values()).size(), strategy);
+        }
+    }
+
+    private Map<String, Object> resolveConcurrently(TestdataRegistry registry, Map<String, Object> policy,
+                                                     List<String[]> scopes, boolean reverse, String runId) throws Exception {
+        final TestdataInputResolver resolver = new TestdataInputResolver(registry, policy, "work", "closed", null, 3);
+        final Map<String, Object> mapping = Collections.<String, Object>singletonMap("value", "@{scoped}");
+        final List<String[]> ordered = new ArrayList<String[]>(scopes);
+        if (reverse) Collections.reverse(ordered);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        String[] firstScope = ordered.remove(0);
+        String firstIterationId = runId + "-" + firstScope[1].substring(firstScope[1].indexOf('-') + 1);
+        result.put(firstScope[0] + "/" + firstScope[1].substring(firstScope[1].lastIndexOf('-') + 1),
+                resolver.resolve(mapping, null, firstScope[0], firstIterationId).get("value"));
+        final CountDownLatch ready = new CountDownLatch(ordered.size());
+        final CountDownLatch start = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(ordered.size());
+        try {
+            List<Future<Object>> values = new ArrayList<Future<Object>>();
+            for (final String[] scope : ordered) {
+                values.add(workers.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return resolver.resolve(mapping, null, scope[0], runId + "-" + scope[1].substring(scope[1].indexOf('-') + 1)).get("value");
+                }));
+            }
+            assertTrue(ready.await(5L, TimeUnit.SECONDS));
+            start.countDown();
+            for (int index = 0; index < ordered.size(); index++) {
+                String[] scope = ordered.get(index);
+                result.put(scope[0] + "/" + scope[1].substring(scope[1].lastIndexOf('-') + 1),
+                        values.get(index).get(5L, TimeUnit.SECONDS));
+            }
+            return result;
+        } finally {
+            start.countDown();
+            workers.shutdownNow();
+            assertTrue(workers.awaitTermination(5L, TimeUnit.SECONDS));
+        }
     }
 
     @Test void rejectsInputCyclesReservedMarkersMalformedReferencesAndCredentialFields() throws Exception {
@@ -178,11 +246,11 @@ class TestdataRuntimeTest {
                 Collections.<String, Object>singletonMap("selection",
                         Collections.<String, Object>singletonMap("strategy", "roundRobin")));
         TestdataInputResolver resolver = new TestdataInputResolver(new TestdataRegistry(root,
-                Collections.<Path>emptyList(), Arrays.asList(descriptor)), policy, "work", "closed", null);
+                Collections.<Path>emptyList(), Arrays.asList(descriptor)), policy, "work", "closed", null, 1);
         Map<String, Object> mapping = Collections.<String, Object>singletonMap("value", "@{override}");
-        resolver.resolve(mapping, null, "VU-1", "i1");
-        resolver.resolve(mapping, null, "VU-1", "i2");
-        assertThrows(IllegalStateException.class, () -> resolver.resolve(mapping, null, "VU-1", "i3"));
+        resolver.resolve(mapping, null, "VU-1", "run-VU-1-1");
+        resolver.resolve(mapping, null, "VU-1", "run-VU-1-2");
+        assertThrows(IllegalStateException.class, () -> resolver.resolve(mapping, null, "VU-1", "run-VU-1-3"));
     }
 
     private Path write(String relative, String content) throws Exception {

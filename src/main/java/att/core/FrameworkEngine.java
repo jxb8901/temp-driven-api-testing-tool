@@ -107,6 +107,9 @@ public class FrameworkEngine {
         for (ExecutionPlan.Suite suitePlan : plan.suites()) {
             Path suite = suitePlan.workbook();
             FrameworkConfig suiteConfig = suitePlan.config();
+            att.testdata.TestdataInputResolver testdataAllocator = options.dryRun() ? null
+                    : new att.testdata.TestdataInputResolver(new att.testdata.TestdataRegistry(
+                            projectRoot, suiteConfig.testdataDescriptors(), Collections.<Path>emptyList()));
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, suiteConfig);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, suiteConfig);
             att.exec.MqHelperExecutor mqHelperExecutor = new att.exec.MqHelperExecutor(projectRoot, suiteConfig);
@@ -119,7 +122,8 @@ public class FrameworkEngine {
             try {
                 for (TestCase testCase : cases) {
                     verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
-                    TestResult result = runCase(testCase, suiteConfig, options, runId, runStarted, runDirectory, suitePlan, templateRunner, dbHelperExecutor);
+                    TestResult result = runCase(testCase, suiteConfig, options, runId, runStarted, runDirectory,
+                            suitePlan, templateRunner, dbHelperExecutor, testdataAllocator);
                     verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
                     results.add(result);
                     suiteResults.add(result);
@@ -176,7 +180,9 @@ public class FrameworkEngine {
     }
 
     private TestResult runCase(TestCase testCase, FrameworkConfig suiteConfig, ExecutionOptions options, String runId, Instant runStartedAt, Path runDirectory,
-                               ExecutionPlan.Suite suitePlan, StageTemplateRunner templateRunner, att.exec.DbHelperExecutor dbHelperExecutor) throws Exception {
+                               ExecutionPlan.Suite suitePlan, StageTemplateRunner templateRunner,
+                               att.exec.DbHelperExecutor dbHelperExecutor,
+                               att.testdata.TestdataInputResolver testdataAllocator) throws Exception {
         if (!testCase.valid()) {
             return invalid(testCase, testCase.invalidReason());
         }
@@ -208,8 +214,7 @@ public class FrameworkEngine {
         dbHelperExecutor.beginCase();
         try {
             if (!options.dryRun()) {
-                att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
-                        new att.testdata.TestdataRegistry(projectRoot, suiteConfig.testdataDescriptors(), Collections.<Path>emptyList()));
+                att.testdata.TestdataInputResolver testdata = testdataAllocator.forExecutionScope(validatedCaseId);
                 Map<String, Object> resolvedCaseInput = testdata.resolve(testCase.caseData(), context, null, null);
                 context.replaceInputValues(resolvedCaseInput);
                 if (!testdata.selectionEvidence().isEmpty())

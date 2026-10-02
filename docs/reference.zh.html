@@ -926,9 +926,9 @@ records；只在 Case、Stage、Debug <code>inputs</code> 或 Load workload
 <code>inputs</code> mapping 中引用。完整 <code>@{id}</code> 會保留
 record 的原生 map/list/scalar 型別；<code>@{id.path}</code>
 可讀取巢狀值，也支援數字 list index。內嵌參照（例如
-<code>"ORD-${EXEC.INPUT.region}-@{accounts[0].id}"</code>）會產生文字，因此引用值必須是
-scalar。Mapping 中的 <code>${...}</code> 讀取已初始化的 bootstrap
-Context；建立 <code>EXEC.INPUT</code>
+<code>"ORD-@{accounts.id}"</code>）會產生文字，因此所選 record
+的欄位必須是 scalar。Mapping 中的 <code>${...}</code> 讀取已初始化的
+bootstrap Context；建立 <code>EXEC.INPUT</code>
 時不能再讀取它本身。<code>#{...}</code>、<code>&amp;{...}</code> 和
 <code>%{...}</code> 都不是 input-mapping expression。</p>
 <div class="sourceCode" id="cb8"><pre

@@ -986,8 +986,8 @@ or Load workload <code>inputs</code> mapping. An exact
 <code>@{id}</code> reference keeps the record's native map/list/scalar
 type; <code>@{id.path}</code> selects a nested value, including a
 numeric list index. Interpolated references such as
-<code>"ORD-${EXEC.INPUT.region}-@{accounts[0].id}"</code> produce text
-and therefore require a scalar value. <code>${...}</code> in a mapping
+<code>"ORD-@{accounts.id}"</code> produce text and therefore require a
+scalar value from the selected record. <code>${...}</code> in a mapping
 reads initialized bootstrap Context; a mapping cannot read from
 <code>EXEC.INPUT</code> while it is being constructed.
 <code>#{...}</code>, <code>&amp;{...}</code>, and <code>%{...}</code>

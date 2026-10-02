@@ -87,7 +87,8 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 LoadTarget target = targets.get(workload.id());
                 if (target == null) throw new IllegalArgumentException("Missing validated target for workload '" + workload.id() + "'");
                 att.testdata.TestdataInputResolver testdataResolver = new att.testdata.TestdataInputResolver(
-                        testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(), scenario.seed());
+                        testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(),
+                        scenario.seed(), Math.max(1, workload.users()));
                 IterationExecutor iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot,
                         testdataResolver);
                 LoadScheduler scheduler = child.model() == LoadScenario.Model.CLOSED

@@ -1,5 +1,6 @@
 """Regression tests for the documentation gate, independent of checked-in text."""
 import unittest
+from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      manifest_errors, structure_errors, overview_resource_errors,
                                      chapter_label_errors)
@@ -30,6 +31,21 @@ class DocumentationContractsTest(unittest.TestCase):
     def test_current_schemas_pass(self):
         self.assertEqual([], stale_claims("ATT 3.7.0; att-load/v1.5; config v2.11; att-testdata/v1.0",
                                           self.active, VERSION))
+
+    def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
+        root = Path(__file__).resolve().parents[1]
+        paths = (
+            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.html",
+            root / "docs/reference.zh.html",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("ORD-${EXEC.INPUT.region}", text)
+                self.assertNotIn("@{accounts[0].id}", text)
+                self.assertIn("@{accounts.id}", text)
 
     def test_explicit_historical_block_is_scoped_and_balanced(self):
         text = ("<!-- att-docs:historical -->\natt-load/v1.2\n"

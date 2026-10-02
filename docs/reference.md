@@ -352,7 +352,7 @@ Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs 
 
 ### Testdata registry and input mapping
 
-Use `att-testdata/v1.0` descriptors for reusable records, then reference them only from a Case, Stage, Debug `inputs`, or Load workload `inputs` mapping. An exact `@{id}` reference keeps the record's native map/list/scalar type; `@{id.path}` selects a nested value, including a numeric list index. Interpolated references such as `"ORD-${EXEC.INPUT.region}-@{accounts[0].id}"` produce text and therefore require a scalar value. `${...}` in a mapping reads initialized bootstrap Context; a mapping cannot read from `EXEC.INPUT` while it is being constructed. `#{...}`, `&{...}`, and `%{...}` are not input-mapping expressions.
+Use `att-testdata/v1.0` descriptors for reusable records, then reference them only from a Case, Stage, Debug `inputs`, or Load workload `inputs` mapping. An exact `@{id}` reference keeps the record's native map/list/scalar type; `@{id.path}` selects a nested value, including a numeric list index. Interpolated references such as `"ORD-@{accounts.id}"` produce text and therefore require a scalar value from the selected record. `${...}` in a mapping reads initialized bootstrap Context; a mapping cannot read from `EXEC.INPUT` while it is being constructed. `#{...}`, `&{...}`, and `%{...}` are not input-mapping expressions.
 
 ~~~yaml
 schemaVersion: att-testdata/v1.0

@@ -18,6 +18,9 @@ import java.util.regex.Pattern;
 public final class TestdataInputResolver {
     private static final Pattern REFERENCE = Pattern.compile("@\\{([^{}]+)}");
     private static final Pattern CONTEXT = Pattern.compile("\\$\\{([^{}]+)}");
+    private static final Pattern CLOSED_VU_ID = Pattern.compile("VU-([1-9][0-9]*)");
+    private static final Pattern ARRIVAL_ITERATION_ID = Pattern.compile("(?:^|-)arrival-([1-9][0-9]*)$");
+    private static final Pattern ITERATION_NUMBER = Pattern.compile("(?:^|-)([1-9][0-9]*)$");
     private final TestdataRegistry registry;
     private final Map<String, Object> workloadPolicies;
     private final boolean load;
@@ -25,28 +28,43 @@ public final class TestdataInputResolver {
     private final String executionScope;
     private final String model;
     private final Long defaultSeed;
-    private final ConcurrentHashMap<String, Selection> selections = new ConcurrentHashMap<String, Selection>();
-    private final ConcurrentHashMap<String, AtomicLong> counters = new ConcurrentHashMap<String, AtomicLong>();
+    private final int stableUserCount;
+    private final ConcurrentHashMap<String, Selection> selections;
+    private final ConcurrentHashMap<String, AtomicLong> counters;
     private final ThreadLocal<Map<String, Map<String, Object>>> currentEvidence = new ThreadLocal<Map<String, Map<String, Object>>>();
     private final ThreadLocal<String> currentEvidenceScope = new ThreadLocal<String>();
 
     public TestdataInputResolver(TestdataRegistry registry) {
-        this(registry, Collections.<String, Object>emptyMap(), false, "", "", "", null);
+        this(registry, Collections.<String, Object>emptyMap(), false, "", "", "", null, 0);
     }
 
     public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                  String workloadId, String model, Long defaultSeed) {
-        this(registry, workloadPolicies, true, workloadId, "", model, defaultSeed);
+        this(registry, workloadPolicies, workloadId, model, defaultSeed, 0);
+    }
+
+    public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
+                                 String workloadId, String model, Long defaultSeed, int stableUserCount) {
+        this(registry, workloadPolicies, true, workloadId, "", model, defaultSeed, stableUserCount);
     }
 
     public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                  String workloadId, String executionScope, String model, Long defaultSeed) {
-        this(registry, workloadPolicies, true, workloadId, executionScope, model, defaultSeed);
+        this(registry, workloadPolicies, true, workloadId, executionScope, model, defaultSeed, 0);
     }
 
     private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                   boolean load, String workloadId, String executionScope,
-                                  String model, Long defaultSeed) {
+                                  String model, Long defaultSeed, int stableUserCount) {
+        this(registry, workloadPolicies, load, workloadId, executionScope, model, defaultSeed,
+                stableUserCount, new ConcurrentHashMap<String, Selection>(), new ConcurrentHashMap<String, AtomicLong>());
+    }
+
+    private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
+                                  boolean load, String workloadId, String executionScope,
+                                  String model, Long defaultSeed, int stableUserCount,
+                                  ConcurrentHashMap<String, Selection> selections,
+                                  ConcurrentHashMap<String, AtomicLong> counters) {
         this.registry = registry;
         this.workloadPolicies = workloadPolicies == null ? Collections.<String, Object>emptyMap() : workloadPolicies;
         this.load = load;
@@ -54,6 +72,19 @@ public final class TestdataInputResolver {
         this.executionScope = executionScope == null ? "" : executionScope;
         this.model = model == null ? "" : model;
         this.defaultSeed = defaultSeed;
+        if (stableUserCount < 0) throw new IllegalArgumentException("Load testdata stable user count must not be negative");
+        this.stableUserCount = stableUserCount;
+        this.selections = selections;
+        this.counters = counters;
+    }
+
+    /** Creates a Testcase-local view that shares this Run's selection allocator. */
+    public TestdataInputResolver forExecutionScope(String scope) {
+        if (load) throw new IllegalStateException("Execution scopes are only available for Run testdata selection");
+        if (scope == null || scope.trim().isEmpty()) throw new IllegalArgumentException("Testdata execution scope must not be blank");
+        return new TestdataInputResolver(registry, workloadPolicies, false, workloadId, scope, model, defaultSeed,
+                stableUserCount,
+                selections, counters);
     }
 
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
@@ -205,17 +236,24 @@ public final class TestdataInputResolver {
             if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("scope: iteration requires an iterationId");
             scopeKey = workloadId + "|" + id + "|iteration|" + iterationId;
         }
-        Selection selected = selections.computeIfAbsent(scopeKey, key -> choose(descriptor, id, layer, scope, policy, key));
+        Selection selected = selections.computeIfAbsent(scopeKey,
+                key -> choose(descriptor, id, layer, scope, policy, key, userId, iterationId));
         return selected;
     }
 
     private Selection choose(TestdataDescriptor descriptor, String id, String layer, String scope,
-                             TestdataSelectionPolicy policy, String scopeKey) {
+                             TestdataSelectionPolicy policy, String scopeKey,
+                             String userId, String iterationId) {
         String strategy = policy == null ? "sequential" : policy.strategy();
         String exhaustion = policy == null ? "error" : policy.exhaustion();
-        String counterKey = workloadId + "|" + id + "|" + strategy + "|" + exhaustion;
-        AtomicLong counter = counters.computeIfAbsent(counterKey, key -> new AtomicLong());
-        long ordinal = counter.getAndIncrement();
+        long ordinal;
+        if (load) {
+            ordinal = loadOrdinal(scope, userId, iterationId);
+        } else {
+            String counterKey = workloadId + "|" + id + "|" + strategy + "|" + exhaustion;
+            AtomicLong counter = counters.computeIfAbsent(counterKey, key -> new AtomicLong());
+            ordinal = counter.getAndIncrement();
+        }
         long count = descriptor.count();
         long index;
         Long effectiveSeed = policy == null ? defaultSeed : policy.seed() == null ? defaultSeed : policy.seed();
@@ -243,6 +281,54 @@ public final class TestdataInputResolver {
             throw exhausted(id, count, exhaustion);
         }
         return selection(descriptor, id, index, layer, scope, policy, effectiveSeed);
+    }
+
+    private long loadOrdinal(String scope, String userId, String iterationId) {
+        if ("workload".equals(scope)) return 0L;
+        if ("user".equals(scope)) return stableUserOrdinal(userId);
+        if ("arrivalRate".equals(model)) {
+            java.util.regex.Matcher planned = ARRIVAL_ITERATION_ID.matcher(iterationId);
+            if (!planned.find()) throw new IllegalArgumentException("Arrival-rate iterationId must end with -arrival-<sequence>");
+            return positiveOrdinal(planned.group(1), "arrival-rate iteration sequence");
+        }
+        long userOrdinal = stableUserOrdinal(userId);
+        java.util.regex.Matcher perUserIteration = ITERATION_NUMBER.matcher(iterationId);
+        if (!perUserIteration.find()) throw new IllegalArgumentException("Closed-VU iterationId must end with its positive iteration number");
+        long iterationOrdinal = positiveOrdinal(perUserIteration.group(1), "closed-VU iteration number");
+        if (stableUserCount > 0) {
+            if (userOrdinal >= stableUserCount)
+                throw new IllegalArgumentException("Closed-VU userId exceeds the configured Load workload user count");
+            // Order closed-VU identities by iteration round, then VU number.
+            // The configured user count makes this ordinal unique and independent
+            // of which worker reaches the resolver first.
+            if (iterationOrdinal > (Long.MAX_VALUE - userOrdinal) / stableUserCount) return Long.MAX_VALUE;
+            return iterationOrdinal * stableUserCount + userOrdinal;
+        }
+        // Public resolver instances created without scheduler metadata still get
+        // a stable, collision-free order from the VU/iteration pair.
+        java.math.BigInteger rank = java.math.BigInteger.valueOf(iterationOrdinal)
+                .add(java.math.BigInteger.valueOf(userOrdinal));
+        rank = rank.multiply(rank.add(java.math.BigInteger.ONE)).divide(java.math.BigInteger.valueOf(2L))
+                .add(java.math.BigInteger.valueOf(iterationOrdinal));
+        return rank.compareTo(java.math.BigInteger.valueOf(Long.MAX_VALUE)) > 0
+                ? Long.MAX_VALUE : rank.longValue();
+    }
+
+    private static long stableUserOrdinal(String userId) {
+        if (userId == null) throw new IllegalArgumentException("Stable VU userId is required for testdata selection");
+        java.util.regex.Matcher match = CLOSED_VU_ID.matcher(userId);
+        if (!match.matches()) throw new IllegalArgumentException("Closed-VU userId must use the stable VU-<number> form");
+        return positiveOrdinal(match.group(1), "closed-VU user number");
+    }
+
+    private static long positiveOrdinal(String value, String description) {
+        try {
+            long number = Long.parseLong(value);
+            if (number < 1L) throw new NumberFormatException();
+            return number - 1L;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException("Testdata " + description + " is outside the supported range");
+        }
     }
 
     private Selection selection(TestdataDescriptor descriptor, String id, long index, String layer,

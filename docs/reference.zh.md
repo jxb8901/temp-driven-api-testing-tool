@@ -351,7 +351,7 @@ Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的 business inp
 
 ### Testdata Registry 與 Input Mapping
 
-可用 `att-testdata/v1.0` descriptor 儲存可重用 records；只在 Case、Stage、Debug `inputs` 或 Load workload `inputs` mapping 中引用。完整 `@{id}` 會保留 record 的原生 map/list/scalar 型別；`@{id.path}` 可讀取巢狀值，也支援數字 list index。內嵌參照（例如 `"ORD-${EXEC.INPUT.region}-@{accounts[0].id}"`）會產生文字，因此引用值必須是 scalar。Mapping 中的 `${...}` 讀取已初始化的 bootstrap Context；建立 `EXEC.INPUT` 時不能再讀取它本身。`#{...}`、`&{...}` 和 `%{...}` 都不是 input-mapping expression。
+可用 `att-testdata/v1.0` descriptor 儲存可重用 records；只在 Case、Stage、Debug `inputs` 或 Load workload `inputs` mapping 中引用。完整 `@{id}` 會保留 record 的原生 map/list/scalar 型別；`@{id.path}` 可讀取巢狀值，也支援數字 list index。內嵌參照（例如 `"ORD-@{accounts.id}"`）會產生文字，因此所選 record 的欄位必須是 scalar。Mapping 中的 `${...}` 讀取已初始化的 bootstrap Context；建立 `EXEC.INPUT` 時不能再讀取它本身。`#{...}`、`&{...}` 和 `%{...}` 都不是 input-mapping expression。
 
 ~~~yaml
 schemaVersion: att-testdata/v1.0
