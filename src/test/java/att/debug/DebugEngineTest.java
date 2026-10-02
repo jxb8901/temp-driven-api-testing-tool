@@ -229,6 +229,35 @@ class DebugEngineTest {
         assertTrue(log.contains("after=21"), log);
     }
 
+    @Test void testdataInputsAreResolvedBeforeDebugBootstrapVariables() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Files.createDirectories(project.resolve("templates/TESTDATA"));
+        Files.write(project.resolve("templates/TESTDATA/template.yaml"), (
+                "schemaVersion: att-template/v3.6\nname: TESTDATA\ndescription: mapped bootstrap input\nactions:\n"
+                        + "  show: {type: log, message: 'copied=${EXEC.VARS.copied}|input=${EXEC.INPUT.accountId}'}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Path descriptor = project.resolve("config/testdata/accounts.yaml");
+        Files.createDirectories(descriptor.getParent());
+        Files.write(descriptor, ("schemaVersion: att-testdata/v1.0\nid: accounts\n"
+                + "records: [{id: 42}]\n").getBytes(StandardCharsets.UTF_8));
+        Path input = project.resolve("templates/TESTDATA/debug.yaml");
+        Files.write(input, ("schemaVersion: att-debug/v1.1\ninputs: {accountId: '@{accounts.id}'}\n"
+                + "vars: {copied: '${EXEC.INPUT.accountId}'}\n").getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig base = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 10000, Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        FrameworkConfig config = withTestdata(base, descriptor);
+
+        DebugEngine.Result result = run(project, config, "template", "TESTDATA", "--input", input.toString());
+
+        assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().format());
+        String log = new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8);
+        assertTrue(log.contains("copied=42|input=42"), log);
+        String caseYaml = new String(Files.readAllBytes(result.outputDirectory().resolve("artifacts/case.yaml")),
+                StandardCharsets.UTF_8);
+        assertTrue(caseYaml.contains("accountId: 42"), caseYaml);
+        assertTrue(caseYaml.contains("copied: 42"), caseYaml);
+    }
+
     @Test void historicalDebugSchemaReportsMigrationToV11() throws Exception {
         Path project = fixtureWithoutSidecars();
         Path input = temp.resolve("historical-debug.yaml");
@@ -418,6 +447,14 @@ class DebugEngineTest {
         args[0] = "debug"; args[1] = type; args[2] = id;
         System.arraycopy(extra, 0, args, 3, extra.length);
         return new DebugEngine(project, config).run(ExecutionOptions.parse(args));
+    }
+
+    private FrameworkConfig withTestdata(FrameworkConfig base, Path descriptor) {
+        return new FrameworkConfig(base.outputDirectory(), base.reportDirectory(), base.logDirectory(), base.environment(),
+                base.timeoutMs(), base.templatesRoot(), base.testcasesRoot(), base.tools(), base.dbHelpers(), base.mqHelpers(),
+                base.sshHelpers(), base.httpHelpers(), base.report(), base.run(), base.sheetGroups(), base.caseIdColumn(),
+                base.tagsColumn(), base.dataColumns(), base.stages(), base.headerRows(), base.xmlNamespaceMode(),
+                base.workbookId(), base.caseLogYamlAnchors(), base.processOutput(), Collections.singletonList(descriptor));
     }
 
     private Path fixture() throws Exception {

@@ -1,6 +1,7 @@
 package att.testdata;
 
 import att.Version;
+import att.config.SchemaSupport;
 import att.config.YamlSupport;
 import att.validation.JsonSchemaVerifier;
 import att.validation.SchemaFiles;
@@ -50,15 +51,15 @@ public final class TestdataDescriptorLoader {
         String format = null;
         Object recordTemplate = null;
         if (rawRecords instanceof Map) {
-            Map<?, ?> records = (Map<?, ?>) rawRecords;
+            Map<?, ?> records = withoutDisabledKeys((Map<?, ?>) rawRecords);
             if (!records.containsKey("generate"))
                 throw new IllegalArgumentException("testdata.records object must use the generated-record form");
             if (records.containsKey("record") == false || records.size() != 2)
                 throw new IllegalArgumentException("testdata.records generated form requires only generate and record");
-            Map<?, ?> generate = object(records.get("generate"), "testdata.records.generate");
+            Map<?, ?> generate = withoutDisabledKeys(object(records.get("generate"), "testdata.records.generate"));
             if (generate.size() != 1 || !generate.containsKey("seq"))
                 throw new IllegalArgumentException("testdata.records.generate must declare exactly one seq integer range");
-            Map<?, ?> sequence = object(generate.get("seq"), "testdata.records.generate.seq");
+            Map<?, ?> sequence = withoutDisabledKeys(object(generate.get("seq"), "testdata.records.generate.seq"));
             long start = integer(sequence.get("from"), "testdata.records.generate.seq.from");
             long end = integer(sequence.get("to"), "testdata.records.generate.seq.to");
             if (start > end) throw new IllegalArgumentException("testdata.records.generate.seq.from must be <= to");
@@ -116,6 +117,13 @@ public final class TestdataDescriptorLoader {
     private static Map<?, ?> object(Object value, String field) {
         if (!(value instanceof Map)) throw new IllegalArgumentException(field + " must be an object");
         return (Map<?, ?>) value;
+    }
+
+    private static Map<?, ?> withoutDisabledKeys(Map<?, ?> value) {
+        Map<Object, Object> result = new LinkedHashMap<Object, Object>();
+        for (Map.Entry<?, ?> entry : value.entrySet())
+            if (!SchemaSupport.isDisabledKey(entry.getKey())) result.put(entry.getKey(), entry.getValue());
+        return result;
     }
 
     private static long integer(Object value, String field) {

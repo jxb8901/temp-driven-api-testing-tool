@@ -61,16 +61,25 @@
     },
     "workloadTestdata": {
       "type": "object",
-      "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "scope": { "enum": ["workload", "user", "iteration"] },
-          "selection": { "$ref": "#/$defs/selection" }
+      "propertyNames": {
+        "anyOf": [
+          { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          { "pattern": "^x-" }
+        ]
+      },
+      "patternProperties": {
+        "^(?!x-)[A-Za-z][A-Za-z0-9_-]*$": {
+          "type": "object",
+          "properties": {
+            "scope": { "enum": ["workload", "user", "iteration"] },
+            "selection": { "$ref": "#/$defs/selection" }
+          },
+          "patternProperties": { "^x-": {} },
+          "additionalProperties": false
         },
-        "patternProperties": { "^x-": {} },
-        "additionalProperties": false
-      }
+        "^x-": {}
+      },
+      "additionalProperties": false
     },
     "selection": {
       "type": "object",

@@ -172,6 +172,42 @@ class LoadCrossModeTest {
         assertPortableResult(load.context(), load.validations());
     }
 
+    @Test void testdataInputsFeedLoadBootstrapVarsAndExecutionIdFormat() throws Exception {
+        Path project = fixture();
+        write(project, "templates/BOOTSTRAP/template.yaml", "schemaVersion: att-template/v3.6\n"
+                + "name: BOOTSTRAP\ndescription: testdata bootstrap input\nactions:\n"
+                + "  show: {type: log, message: 'copied=${EXEC.VARS.copied}|input=${EXEC.INPUT.accountId}'}\n");
+        write(project, "data/accounts.yaml", "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: 42}]\n");
+        Path source = write(project, "load/testdata-bootstrap.yaml", "schemaVersion: att-load/v1.5\n"
+                + "testdata: [data/accounts.yaml]\nworkloads:\n  - id: bootstrap\n"
+                + "    target: {type: template, id: BOOTSTRAP}\n"
+                + "    inputs: {accountId: '@{accounts.id}'}\n"
+                + "    vars: {copied: '${EXEC.INPUT.accountId}'}\n"
+                + "    load: {users: 1, duration: 1s}\n"
+                + "execution: {execIdFormat: '${EXEC.RUN_ID}-${EXEC.INPUT.accountId}'}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget target = new LoadTargetResolver(project, config()).resolve(scenario);
+        new LoadTargetValidator(project, config()).validate(scenario, target);
+        LoadWorkload workload = scenario.workload();
+        att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
+                new att.testdata.TestdataRegistry(project, Collections.<Path>emptyList(), scenario.testdataDescriptors()),
+                workload.testdata(), workload.id(), workload.model().wireName(), scenario.seed(), workload.users());
+
+        try (LoadRunResources resources = new LoadRunResources(project, config())) {
+            IterationExecutor executor = new IterationExecutor(project, config(), target, resources,
+                    temp.resolve("testdata-bootstrap-load"), testdata);
+            IterationResult result = executor.execute(IterationRequest.closed("testdata-bootstrap", "testdata-bootstrap-1", 1,
+                    "STEADY", Instant.now(), "VU-1", scenario.inputs()).withWorkloadId(workload.id()));
+
+            assertEquals(ResultStatus.PASS, result.status());
+            assertEquals(42L, ((Number) result.context().require("EXEC.INPUT.accountId")).longValue());
+            assertEquals(42L, ((Number) result.context().require("EXEC.VARS.copied")).longValue());
+            assertEquals("testdata-bootstrap-42", result.context().require("EXEC.ID"));
+            assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.show.output.result"))
+                    .contains("copied=42|input=42"));
+        }
+    }
+
     @Test void loadDebugPromotionEvaluatesOverridesPerExecutionWithoutSharingValues() throws Exception {
         Path project = fixture();
         FrameworkConfig config = config();

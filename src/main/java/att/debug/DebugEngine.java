@@ -186,13 +186,13 @@ public final class DebugEngine {
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
             context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
-            if ("template".equals(targetType) || "flow".equals(targetType))
-                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
-                        att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             context.put("CASE.environment", config.environment());
             att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
                     new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), Collections.<Path>emptyList()));
             context.replaceInputValues(testdata.resolve(testCase.caseData(), context, null, null));
+            if ("template".equals(targetType) || "flow".equals(targetType))
+                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
+                        att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             Map<String, Object> resolvedStageValues = testdata.resolve(stage.values(), context, null, null);
             if (!testdata.selectionEvidence().isEmpty())
                 context.put("CASE.testdataSelections", testdata.selectionEvidence());

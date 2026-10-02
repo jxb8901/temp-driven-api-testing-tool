@@ -28,6 +28,7 @@ public final class TestdataInputResolver {
     private final String executionScope;
     private final String model;
     private final Long defaultSeed;
+    private final Long fallbackRandomSeed;
     private final int stableUserCount;
     private final ConcurrentHashMap<String, Selection> selections;
     private final ConcurrentHashMap<String, AtomicLong> counters;
@@ -57,14 +58,15 @@ public final class TestdataInputResolver {
                                   boolean load, String workloadId, String executionScope,
                                   String model, Long defaultSeed, int stableUserCount) {
         this(registry, workloadPolicies, load, workloadId, executionScope, model, defaultSeed,
-                stableUserCount, new ConcurrentHashMap<String, Selection>(), new ConcurrentHashMap<String, AtomicLong>());
+                stableUserCount, new ConcurrentHashMap<String, Selection>(), new ConcurrentHashMap<String, AtomicLong>(),
+                defaultSeed == null ? Long.valueOf(System.nanoTime()) : defaultSeed);
     }
 
     private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                   boolean load, String workloadId, String executionScope,
                                   String model, Long defaultSeed, int stableUserCount,
                                   ConcurrentHashMap<String, Selection> selections,
-                                  ConcurrentHashMap<String, AtomicLong> counters) {
+                                  ConcurrentHashMap<String, AtomicLong> counters, Long fallbackRandomSeed) {
         this.registry = registry;
         this.workloadPolicies = workloadPolicies == null ? Collections.<String, Object>emptyMap() : workloadPolicies;
         this.load = load;
@@ -72,6 +74,7 @@ public final class TestdataInputResolver {
         this.executionScope = executionScope == null ? "" : executionScope;
         this.model = model == null ? "" : model;
         this.defaultSeed = defaultSeed;
+        this.fallbackRandomSeed = fallbackRandomSeed;
         if (stableUserCount < 0) throw new IllegalArgumentException("Load testdata stable user count must not be negative");
         this.stableUserCount = stableUserCount;
         this.selections = selections;
@@ -84,7 +87,7 @@ public final class TestdataInputResolver {
         if (scope == null || scope.trim().isEmpty()) throw new IllegalArgumentException("Testdata execution scope must not be blank");
         return new TestdataInputResolver(registry, workloadPolicies, false, workloadId, scope, model, defaultSeed,
                 stableUserCount,
-                selections, counters);
+                selections, counters, fallbackRandomSeed);
     }
 
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
@@ -258,8 +261,8 @@ public final class TestdataInputResolver {
         long index;
         Long effectiveSeed = policy == null ? defaultSeed : policy.seed() == null ? defaultSeed : policy.seed();
         if ("random".equals(strategy)) {
-            long seed = effectiveSeed == null ? System.nanoTime() : effectiveSeed.longValue();
-            effectiveSeed = Long.valueOf(seed);
+            if (effectiveSeed == null) effectiveSeed = fallbackRandomSeed;
+            long seed = effectiveSeed.longValue();
             long randomOrdinal = ordinal;
             if (ordinal >= count) {
                 if ("error".equals(exhaustion)) throw exhausted(id, count, exhaustion);

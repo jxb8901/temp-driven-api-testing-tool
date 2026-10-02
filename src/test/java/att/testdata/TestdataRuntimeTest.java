@@ -86,6 +86,30 @@ class TestdataRuntimeTest {
         assertEquals(firstRun, secondRun);
     }
 
+    @Test void unseededRandomUsesOneRecordedSeedUntilEveryRecordIsConsumed() throws Exception {
+        Path descriptor = write("data/unseeded-random.yaml", "schemaVersion: att-testdata/v1.0\n"
+                + "id: randomRows\nrecords: [zero, one, two, three]\n"
+                + "selection: {strategy: random, exhaustion: error}\n");
+        TestdataInputResolver resolver = new TestdataInputResolver(new TestdataRegistry(root,
+                Collections.<Path>emptyList(), Arrays.asList(descriptor)),
+                Collections.<String, Object>emptyMap(), "work", "closed", null, 1);
+        Map<String, Object> mapping = Collections.<String, Object>singletonMap("value", "@{randomRows}");
+        List<Object> selected = new ArrayList<Object>();
+        Long effectiveSeed = null;
+        for (int iteration = 1; iteration <= 4; iteration++) {
+            selected.add(resolver.resolve(mapping, null, "VU-1", "run-VU-1-" + iteration).get("value"));
+            Object selection = resolver.selectionEvidence().get("randomRows");
+            assertTrue(selection instanceof Map);
+            Object seed = ((Map<?, ?>) selection).get("seed");
+            assertTrue(seed instanceof Number);
+            if (effectiveSeed == null) effectiveSeed = Long.valueOf(((Number) seed).longValue());
+            else assertEquals(effectiveSeed, Long.valueOf(((Number) seed).longValue()));
+        }
+        assertEquals(4, new HashSet<Object>(selected).size());
+        assertThrows(IllegalStateException.class,
+                () -> resolver.resolve(mapping, null, "VU-1", "run-VU-1-5"));
+    }
+
     @Test void loadScopesCachePerLifetimeAndStopSignalsSchedulerOnExhaustion() throws Exception {
         Path descriptor = write("data/scoped.yaml", "schemaVersion: att-testdata/v1.0\n"
                 + "id: scoped\nrecords: [first, second]\n"
@@ -208,6 +232,29 @@ class TestdataRuntimeTest {
                 + "records: {generate: {seq: {from: 0, to: 1000000}}, record: '%{seq}'}\n");
         assertThrows(IllegalArgumentException.class, () -> new TestdataRegistry(root,
                 Collections.<Path>emptyList(), Arrays.asList(oversized)).resolve("oversized"));
+    }
+
+    @Test void disabledLoadPoliciesAndGeneratorSettingsAreIgnoredButRecordExtensionsSurvive() throws Exception {
+        Path descriptor = write("data/disabled-generator-settings.yaml", "schemaVersion: att-testdata/v1.0\n"
+                + "id: generatedWithExtensions\nrecords:\n"
+                + "  x-records-setting: ignored\n"
+                + "  generate:\n    x-generator-setting: ignored\n"
+                + "    seq: {from: 7, to: 7, x-sequence-setting: ignored}\n"
+                + "  record: {id: 'row-%{seq}', x-business-field: preserved}\n");
+        TestdataDescriptor generated = new TestdataRegistry(root, Collections.<Path>emptyList(),
+                Arrays.asList(descriptor)).resolve("generatedWithExtensions");
+        Map<?, ?> record = (Map<?, ?>) generated.record(0);
+        assertEquals("row-7", record.get("id"));
+        assertEquals("preserved", record.get("x-business-field"));
+        assertEquals(1L, generated.count());
+
+        Path scenario = write("load/disabled-testdata-policy.yaml", "schemaVersion: att-load/v1.5\n"
+                + "workloads:\n  - id: disabled-policy\n"
+                + "    target: {type: template, id: target}\n"
+                + "    testdata:\n      x-customer: {scope: unsupported, ignored: true}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario loaded = new LoadScenarioLoader(root).load(scenario);
+        assertTrue(loaded.workload().testdata().isEmpty());
     }
 
     @Test void localDescriptorReplacesWholeEnvironmentDescriptorAndV14Migrates() throws Exception {

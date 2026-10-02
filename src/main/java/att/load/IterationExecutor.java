@@ -87,6 +87,9 @@ public final class IterationExecutor implements LoadIterationRunner {
             UnifiedTemplateEngine identityEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new DefaultBuiltInProvider(resources.sequences()));
             try {
+                if (testdataResolver != null)
+                    context.replaceInputValues(testdataResolver.resolve(request.inputs(), context,
+                            request.userId(), request.iterationId()));
                 executionId = target.execIdFormat().isEmpty()
                         ? resources.nextDefaultExecutionId(request.runId())
                         : LoadExecutionIdPattern.evaluate(target.execIdFormat(),
@@ -112,12 +115,8 @@ public final class IterationExecutor implements LoadIterationRunner {
             log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
             att.core.ExecutionBootstrapVariables.evaluate(context.bootstrapVariables(), context, identityEngine,
                     att.core.ExecutionBootstrapVariables.Scope.LOAD);
-            if (testdataResolver != null) {
-                context.replaceInputValues(testdataResolver.resolve(request.inputs(), context,
-                        request.userId(), request.iterationId()));
-                if (!testdataResolver.selectionEvidence().isEmpty())
-                    context.put("CASE.testdataSelections", testdataResolver.selectionEvidence());
-            }
+            if (testdataResolver != null && !testdataResolver.selectionEvidence().isEmpty())
+                context.put("CASE.testdataSelections", testdataResolver.selectionEvidence());
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();

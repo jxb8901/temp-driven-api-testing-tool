@@ -26,13 +26,16 @@
                     "to": { "type": "integer" },
                     "format": { "type": "string", "pattern": "^%d$|^%0[1-9][0-9]?d$" }
                   },
+                  "patternProperties": { "^x-": {} },
                   "additionalProperties": false
                 }
               },
+              "patternProperties": { "^x-": {} },
               "additionalProperties": false
             },
             "record": {}
           },
+          "patternProperties": { "^x-": {} },
           "additionalProperties": false
         }
       ]
